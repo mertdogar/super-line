@@ -10,6 +10,13 @@ import {
 
 type Messages<C extends Contract> = NonNullable<C['messages']>
 type Events<C extends Contract> = NonNullable<C['events']>
+type Topics<C extends Contract> = NonNullable<C['topics']>
+
+export interface Subscription {
+  /** Resolves when the server acknowledges the subscribe; rejects if denied or disconnected. */
+  readonly ready: Promise<void>
+  unsubscribe(): void
+}
 
 export interface CallOptions {
   timeoutMs?: number
@@ -29,6 +36,11 @@ export type Client<C extends Contract> = ClientMethods<C> & {
     event: E,
     handler: (data: InferOut<Events<C>[E]>) => void,
   ): () => void
+  /** Subscribe to a server-published topic. */
+  subscribe<T extends keyof Topics<C>>(
+    topic: T,
+    handler: (data: InferOut<Topics<C>[T]>) => void,
+  ): Subscription
   close(): void
   readonly connected: boolean
 }
@@ -58,6 +70,7 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
   const url = buildUrl(opts.url, opts.params)
   const pending = new Map<number, Pending>()
   const listeners = new Map<string, Set<(data: unknown) => void>>()
+  const topicListeners = new Map<string, Set<(data: unknown) => void>>()
   const outbox: Array<string | Uint8Array> = []
   let ws!: WebSocket
   let nextId = 1
@@ -95,8 +108,10 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
     } else if (frame.t === 'evt') {
       const set = listeners.get(frame.e)
       if (set) for (const cb of set) cb(frame.d)
+    } else if (frame.t === 'pub') {
+      const set = topicListeners.get(frame.c)
+      if (set) for (const cb of set) cb(frame.d)
     }
-    // 'pub' lands with the topics slice
   }
 
   function settle(id: number, run: (p: Pending) => void): void {
@@ -105,6 +120,11 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
     pending.delete(id)
     if (p.timer) clearTimeout(p.timer)
     run(p)
+  }
+
+  function send(encoded: string | Uint8Array): void {
+    if (ws.readyState === WS.OPEN) ws.send(encoded)
+    else outbox.push(encoded)
   }
 
   function call(method: string, input: unknown, callOpts?: CallOptions): Promise<unknown> {
@@ -126,9 +146,59 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
         () => settle(id, (p) => p.reject(new SocketError('BAD_REQUEST', 'Aborted'))),
         { once: true },
       )
-      if (ws.readyState === WS.OPEN) ws.send(frame)
-      else outbox.push(frame)
+      send(frame)
     })
+  }
+
+  function subscribe(topic: string, handler: (data: unknown) => void): Subscription {
+    const id = nextId++
+    let set = topicListeners.get(topic)
+    if (!set) {
+      set = new Set()
+      topicListeners.set(topic, set)
+    }
+    set.add(handler)
+
+    const removeHandler = () => {
+      const current = topicListeners.get(topic)
+      if (!current) return
+      current.delete(handler)
+      if (current.size === 0) topicListeners.delete(topic)
+    }
+
+    const ready = new Promise<void>((resolve, reject) => {
+      const timer =
+        defaultTimeout > 0
+          ? setTimeout(() => {
+              pending.delete(id)
+              removeHandler()
+              reject(new SocketError('TIMEOUT', `subscribe '${topic}' timed out`))
+            }, defaultTimeout)
+          : undefined
+      pending.set(id, {
+        resolve: () => resolve(),
+        reject: (e) => {
+          removeHandler()
+          reject(e)
+        },
+        timer,
+      })
+    })
+    // keep `ready` from surfacing as an unhandled rejection when callers don't await it
+    void ready.catch(() => {})
+
+    send(serializer.encode({ t: 'sub', i: id, c: topic }))
+
+    let active = true
+    return {
+      ready,
+      unsubscribe: () => {
+        if (!active) return
+        active = false
+        removeHandler()
+        if (!topicListeners.has(topic)) send(serializer.encode({ t: 'unsub', c: topic }))
+      },
+    }
   }
 
   connect()
@@ -148,6 +218,7 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
         if (current.size === 0) listeners.delete(event)
       }
     },
+    subscribe,
     close(): void {
       closed = true
       ws.close()

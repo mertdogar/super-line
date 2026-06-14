@@ -19,6 +19,7 @@ export { Conn } from './conn.js'
 type Awaitable<T> = T | Promise<T>
 type Messages<C extends Contract> = NonNullable<C['messages']>
 type Events<C extends Contract> = NonNullable<C['events']>
+type Topics<C extends Contract> = NonNullable<C['topics']>
 
 export type MessageHandlers<C extends Contract, Ctx> = {
   [K in keyof Messages<C>]: (
@@ -42,6 +43,8 @@ export interface ServerOptions<Ctx> {
   path?: string
   /** Runs at the HTTP upgrade. Return ctx, or throw to reject with 401. */
   authenticate?: (req: IncomingMessage) => Awaitable<Ctx>
+  /** Runs on each client subscribe. Return false or throw to deny. */
+  authorizeSubscribe?: (topic: string, ctx: Ctx, conn: Conn<Ctx>) => Awaitable<boolean | void>
   onConnection?: (conn: Conn<Ctx>, ctx: Ctx) => void
   onDisconnect?: (conn: Conn<Ctx>, ctx: Ctx, code: number) => void
 }
@@ -50,6 +53,8 @@ export interface SocketServer<C extends Contract, Ctx> {
   implement(handlers: MessageHandlers<C, Ctx>): SocketServer<C, Ctx>
   /** Server-controlled connection group; broadcast() sends a contract event to members. */
   room(name: string): Room<C, Ctx>
+  /** Publish a message to all clients subscribed to this topic (server-only publish). */
+  publish<T extends keyof Topics<C>>(topic: T, data: InferIn<Topics<C>[T]>): void
   close(): Promise<void>
 }
 
@@ -61,6 +66,7 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
   const wss = new WebSocketServer({ noServer: true })
   const conns = new Set<Conn<Ctx>>()
   const rooms = new Map<string, Set<Conn<Ctx>>>()
+  const topicSubs = new Map<string, Set<Conn<Ctx>>>()
   let handlers: Partial<Record<string, (input: unknown, ctx: Ctx, conn: Conn<Ctx>) => unknown>> = {}
 
   if (opts.server) {
@@ -94,6 +100,14 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
         conns.delete(conn)
         for (const name of conn.rooms) rooms.get(name)?.delete(conn)
         conn.rooms.clear()
+        for (const topic of conn.subscriptions) {
+          const set = topicSubs.get(topic)
+          if (set) {
+            set.delete(conn)
+            if (set.size === 0) topicSubs.delete(topic)
+          }
+        }
+        conn.subscriptions.clear()
         opts.onDisconnect?.(conn, ctx, code)
       })
       opts.onConnection?.(conn, ctx)
@@ -108,7 +122,39 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
       return
     }
     if (frame.t === 'req') await handleReq(conn, frame)
-    // 'sub' / 'unsub' land with the topics slice
+    else if (frame.t === 'sub') await handleSub(conn, frame)
+    else if (frame.t === 'unsub') handleUnsub(conn, frame)
+  }
+
+  async function handleSub(conn: Conn<Ctx>, frame: { i: number; c: string }): Promise<void> {
+    const topic = frame.c
+    try {
+      if (opts.authorizeSubscribe) {
+        const ok = await opts.authorizeSubscribe(topic, conn.ctx, conn)
+        if (ok === false) throw new SocketError('FORBIDDEN', `Subscribe denied: ${topic}`)
+      }
+    } catch (err) {
+      const e = err instanceof SocketError ? err : new SocketError('FORBIDDEN', 'Subscribe denied')
+      conn.send({ t: 'err', i: frame.i, code: e.code, m: e.message, d: e.data })
+      return
+    }
+    let set = topicSubs.get(topic)
+    if (!set) {
+      set = new Set()
+      topicSubs.set(topic, set)
+    }
+    set.add(conn)
+    conn.subscriptions.add(topic)
+    conn.send({ t: 'res', i: frame.i, d: null })
+  }
+
+  function handleUnsub(conn: Conn<Ctx>, frame: { c: string }): void {
+    const set = topicSubs.get(frame.c)
+    if (set) {
+      set.delete(conn)
+      if (set.size === 0) topicSubs.delete(frame.c)
+    }
+    conn.subscriptions.delete(frame.c)
   }
 
   async function handleReq(conn: Conn<Ctx>, frame: ReqFrame): Promise<void> {
@@ -158,12 +204,21 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
     }
   }
 
+  function publish<T extends keyof Topics<C>>(topic: T, data: InferIn<Topics<C>[T]>): void {
+    const name = String(topic)
+    const set = topicSubs.get(name)
+    if (!set) return
+    const frame = { t: 'pub' as const, c: name, d: data }
+    for (const conn of set) conn.send(frame)
+  }
+
   const api: SocketServer<C, Ctx> = {
     implement(h) {
       handlers = h as never
       return api
     },
     room,
+    publish,
     close() {
       for (const conn of conns) conn.close()
       return new Promise<void>((resolve) => {

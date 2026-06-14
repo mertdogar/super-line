@@ -10,6 +10,7 @@
     "declaration": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
+    "jsx": "react-jsx",
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true,
     "paths": {

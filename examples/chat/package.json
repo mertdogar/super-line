@@ -1,0 +1,11 @@
+{
+  "name": "@super-line/example-chat",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@super-line/client": "workspace:*",
+    "@super-line/core": "workspace:*",
+    "@super-line/server": "workspace:*"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@super-line/adapter-redis",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "dependencies": {
+    "@super-line/core": "workspace:*",
+    "ioredis": "^5.4.2"
+  }
+}

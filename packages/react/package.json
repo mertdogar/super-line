@@ -1,0 +1,16 @@
+{
+  "name": "@super-line/react",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "dependencies": {
+    "@super-line/client": "workspace:*",
+    "@super-line/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  }
+}

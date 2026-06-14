@@ -136,7 +136,8 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
   return new Proxy(base, {
     get(target, prop, receiver) {
       if (prop in target) return Reflect.get(target, prop, receiver)
-      if (typeof prop !== 'string') return undefined
+      // never expose `then` as a method, or the client becomes an accidental thenable
+      if (typeof prop !== 'string' || prop === 'then') return undefined
       return (input: unknown, callOpts?: CallOptions) => call(prop, input, callOpts)
     },
   }) as unknown as Client<C>

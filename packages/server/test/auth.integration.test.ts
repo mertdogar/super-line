@@ -1,0 +1,46 @@
+import { afterEach, describe, expect, it } from 'vitest'
+import { z } from 'zod'
+import { defineContract } from '@super-line/core'
+import { createHarness } from './harness.js'
+
+const contract = defineContract({
+  messages: {
+    ping: { input: z.object({}), output: z.object({ ok: z.boolean() }) },
+  },
+  events: {},
+  topics: {},
+})
+
+function authenticate(req: { url?: string }): { token: string } {
+  const token = new URL(req.url ?? '', 'http://localhost').searchParams.get('token')
+  if (token !== 'good') throw new Error('bad token')
+  return { token }
+}
+
+const h = createHarness()
+afterEach(() => h.dispose())
+
+describe('auth at upgrade', () => {
+  it('accepts a valid token and serves requests', async () => {
+    const { srv, url } = await h.server<{ token: string }>({ authenticate })
+    srv.implement(contract, { ping: async () => ({ ok: true }) })
+
+    const client = h.client(contract, { url, params: { token: 'good' } })
+    expect(await client.ping({})).toEqual({ ok: true })
+  })
+
+  it('rejects a bad token at the upgrade without consuming a socket', async () => {
+    let connections = 0
+    const { srv, url } = await h.server<{ token: string }>({
+      authenticate,
+      onConnection: () => {
+        connections++
+      },
+    })
+    srv.implement(contract, { ping: async () => ({ ok: true }) })
+
+    const client = h.client(contract, { url, params: { token: 'bad' }, timeoutMs: 2000 })
+    await expect(client.ping({})).rejects.toMatchObject({ code: 'DISCONNECTED' })
+    expect(connections).toBe(0)
+  })
+})

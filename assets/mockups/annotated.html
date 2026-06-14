@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>super-line — annotated</title>
+<style>
+  :root { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0f1115; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+  .wrap { display: flex; align-items: center; gap: 30px; padding: 40px; }
+
+  .chat { display: flex; flex-direction: column; width: 440px; height: 560px; background: #1a1d24; border-radius: 14px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.45); }
+  .chat header { display: flex; justify-content: space-between; align-items: baseline; padding: 16px 18px; border-bottom: 1px solid #2c313a; color: #e6e6e6; }
+  .chat header strong { font-size: 15px; }
+  .chat header span { font-size: 12px; color: #9aa0aa; }
+  .messages { flex: 1; list-style: none; margin: 0; padding: 14px 18px; display: flex; flex-direction: column; gap: 9px; }
+  .messages li { display: flex; flex-direction: column; gap: 3px; max-width: 80%; padding: 7px 11px; border-radius: 11px; background: #232831; align-self: flex-start; color: #e6e6e6; }
+  .messages li.mine { align-self: flex-end; background: #0e3a44; }
+  .messages .from { font-size: 11px; color: #9aa0aa; }
+  .messages .text { font-size: 14px; line-height: 1.35; }
+  .composer { display: flex; gap: 9px; padding: 14px 18px; border-top: 1px solid #2c313a; }
+  .composer input { flex: 1; padding: 9px 11px; border: 1px solid #2c313a; border-radius: 9px; background: #11141a; color: #e6e6e6; font-size: 14px; }
+  .composer .send { display: inline-flex; align-items: center; gap: 7px; padding: 9px 16px; border: 0; border-radius: 9px; background: #22d3ee; color: #0f1115; font-size: 14px; font-weight: 600; }
+
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; }
+  .dot.evt { background: #22d3ee; } .dot.topic { background: #34d399; } .dot.req { background: #a78bfa; }
+  .ring { outline: 2px solid; outline-offset: 2px; border-radius: 11px; }
+  .ring.evt { outline-color: #22d3ee; } .ring.topic { outline-color: #34d399; } .ring.req { outline-color: #a78bfa; }
+
+  .legend { width: 300px; color: #e6e6e6; }
+  .legend h2 { margin: 0 0 4px; font-size: 18px; }
+  .legend p.sub { margin: 0 0 20px; font-size: 12px; color: #9aa0aa; }
+  .legend .item { display: flex; gap: 11px; margin-bottom: 17px; }
+  .legend .item .dot { margin-top: 5px; flex: 0 0 auto; }
+  .legend .item b { font-size: 14px; }
+  .legend .item code { font-size: 12px; color: #9aa0aa; }
+  .legend .item .d { font-size: 12.5px; color: #b6bcc6; line-height: 1.45; margin-top: 2px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="chat">
+      <header>
+        <strong>#lobby</strong>
+        <span><span class="dot topic"></span> 3 online · you are <b style="color:#e6e6e6">ada</b></span>
+      </header>
+      <ul class="messages">
+        <li class="ring evt"><span class="from">grace</span><span class="text">hey! anyone here?</span></li>
+        <li class="mine"><span class="from">ada</span><span class="text">yes — one contract, zero codegen</span></li>
+        <li><span class="from">jun</span><span class="text">👋 just joined from another tab</span></li>
+      </ul>
+      <div class="composer"><input value="type a message…" /><button class="send ring req">Send</button></div>
+    </div>
+
+    <div class="legend">
+      <h2>One contract, three patterns</h2>
+      <p class="sub">Every element below is fully typed, end to end.</p>
+      <div class="item"><span class="dot evt"></span><div><b>event</b> &nbsp;<code>room broadcast</code><div class="d">Server pushes <code>message</code> to room members → <code>client.on('message')</code>.</div></div></div>
+      <div class="item"><span class="dot topic"></span><div><b>topic</b> &nbsp;<code>presence</code><div class="d">Client subscribes; server publishes the online count → <code>client.subscribe('presence')</code>.</div></div></div>
+      <div class="item"><span class="dot req"></span><div><b>req/res</b> &nbsp;<code>send</code><div class="d">Unary request returning a typed result → <code>await client.send(...)</code>.</div></div></div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>super-line chat</title>
+<style>
+  :root { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0f1115; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+  .chat { display: flex; flex-direction: column; width: 460px; height: 600px; background: #1a1d24; border-radius: 14px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.45); }
+  .chat header { display: flex; justify-content: space-between; align-items: baseline; padding: 16px 18px; border-bottom: 1px solid #2c313a; color: #e6e6e6; }
+  .chat header strong { font-size: 15px; }
+  .chat header span { font-size: 12px; color: #9aa0aa; }
+  .online::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #22d3ee; margin-right: 6px; vertical-align: middle; }
+  .messages { flex: 1; list-style: none; margin: 0; padding: 14px 18px; display: flex; flex-direction: column; gap: 9px; }
+  .messages li { display: flex; flex-direction: column; gap: 3px; max-width: 78%; padding: 7px 11px; border-radius: 11px; background: #232831; align-self: flex-start; color: #e6e6e6; }
+  .messages li.mine { align-self: flex-end; background: #0e3a44; }
+  .messages .from { font-size: 11px; color: #9aa0aa; }
+  .messages .text { font-size: 14px; line-height: 1.35; }
+  .composer { display: flex; gap: 9px; padding: 14px 18px; border-top: 1px solid #2c313a; }
+  .composer input { flex: 1; padding: 9px 11px; border: 1px solid #2c313a; border-radius: 9px; background: #11141a; color: #e6e6e6; font-size: 14px; }
+  .composer .send { padding: 9px 16px; border: 0; border-radius: 9px; background: #22d3ee; color: #0f1115; font-size: 14px; font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="chat">
+    <header><strong>#lobby</strong><span class="online">3 online · you are <b style="color:#e6e6e6">ada</b></span></header>
+    <ul class="messages">
+      <li><span class="from">grace</span><span class="text">hey! anyone here?</span></li>
+      <li class="mine"><span class="from">ada</span><span class="text">yes — kicking the tires on super-line</span></li>
+      <li><span class="from">grace</span><span class="text">the types are end-to-end? client and server?</span></li>
+      <li class="mine"><span class="from">ada</span><span class="text">yep — one contract, zero codegen 🙂</span></li>
+      <li><span class="from">jun</span><span class="text">👋 just joined from another tab</span></li>
+      <li><span class="from">grace</span><span class="text">nice, presence counter ticked up instantly</span></li>
+    </ul>
+    <div class="composer"><input value="reconnects on its own too" /><button class="send">Send</button></div>
+  </div>
+</body>
+</html>

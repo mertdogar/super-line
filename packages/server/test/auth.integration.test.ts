@@ -39,7 +39,9 @@ describe('auth at upgrade', () => {
     })
     srv.implement({ ping: async () => ({ ok: true }) })
 
-    const client = h.client(contract, { url, params: { token: 'bad' }, timeoutMs: 2000 })
+    // reconnect off: a 401 is indistinguishable from a drop over the WS API, so with
+    // reconnect on the client would retry forever; off, the failure surfaces immediately.
+    const client = h.client(contract, { url, params: { token: 'bad' }, reconnect: false })
     await expect(client.ping({})).rejects.toMatchObject({ code: 'DISCONNECTED' })
     expect(connections).toBe(0)
   })

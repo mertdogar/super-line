@@ -36,3 +36,13 @@ export function createHarness() {
 
   return { server, client, dispose }
 }
+
+export const tick = (ms = 10): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+export async function waitFor(pred: () => boolean, timeout = 2000): Promise<void> {
+  const start = Date.now()
+  while (!pred()) {
+    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
+    await tick(5)
+  }
+}

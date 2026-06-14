@@ -7,20 +7,24 @@ import {
   type InferIn,
   type InferOut,
 } from '@super-line/core'
+import { backoffDelay } from './backoff.js'
+
+export { backoffDelay } from './backoff.js'
+export type { BackoffOptions } from './backoff.js'
 
 type Messages<C extends Contract> = NonNullable<C['messages']>
 type Events<C extends Contract> = NonNullable<C['events']>
 type Topics<C extends Contract> = NonNullable<C['topics']>
 
-export interface Subscription {
-  /** Resolves when the server acknowledges the subscribe; rejects if denied or disconnected. */
-  readonly ready: Promise<void>
-  unsubscribe(): void
-}
-
 export interface CallOptions {
   timeoutMs?: number
   signal?: AbortSignal
+}
+
+export interface Subscription {
+  /** Resolves when the server acknowledges the subscribe; rejects if denied. */
+  readonly ready: Promise<void>
+  unsubscribe(): void
 }
 
 export type ClientMethods<C extends Contract> = {
@@ -31,12 +35,10 @@ export type ClientMethods<C extends Contract> = {
 }
 
 export type Client<C extends Contract> = ClientMethods<C> & {
-  /** Listen for a server-pushed event (also how room broadcasts arrive). Returns an unsubscribe fn. */
   on<E extends keyof Events<C>>(
     event: E,
     handler: (data: InferOut<Events<C>[E]>) => void,
   ): () => void
-  /** Subscribe to a server-published topic. */
   subscribe<T extends keyof Topics<C>>(
     topic: T,
     handler: (data: InferOut<Topics<C>[T]>) => void,
@@ -50,48 +52,105 @@ export interface ClientOptions {
   params?: Record<string, string>
   serializer?: Serializer
   timeoutMs?: number
+  reconnect?: boolean
+  reconnectBaseMs?: number
+  reconnectMaxMs?: number
+  reconnectFactor?: number
   /** Override the WebSocket implementation (defaults to globalThis.WebSocket). */
   WebSocket?: typeof WebSocket
 }
 
-interface Pending {
+interface Request {
+  frame: string | Uint8Array
   resolve: (value: unknown) => void
   reject: (error: unknown) => void
   timer?: ReturnType<typeof setTimeout>
+  sent: boolean
+}
+
+interface Deferred {
+  promise: Promise<void>
+  resolve: () => void
+  reject: (error: unknown) => void
+}
+
+function deferred(): Deferred {
+  let resolve!: () => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  void promise.catch(() => {}) // avoid unhandled rejection when callers don't await
+  return { promise, resolve, reject }
 }
 
 export function createClient<C extends Contract>(_contract: C, opts: ClientOptions): Client<C> {
   const serializer = opts.serializer ?? jsonSerializer
   const defaultTimeout = opts.timeoutMs ?? 30_000
+  const reconnectEnabled = opts.reconnect ?? true
+  const backoff = {
+    baseMs: opts.reconnectBaseMs ?? 500,
+    maxMs: opts.reconnectMaxMs ?? 30_000,
+    factor: opts.reconnectFactor ?? 2,
+  }
   const resolved = opts.WebSocket ?? (globalThis.WebSocket as typeof WebSocket | undefined)
   if (!resolved) throw new Error('No WebSocket implementation found; pass opts.WebSocket')
   const WS: typeof WebSocket = resolved
 
   const url = buildUrl(opts.url, opts.params)
-  const pending = new Map<number, Pending>()
+  const requests = new Map<number, Request>()
   const listeners = new Map<string, Set<(data: unknown) => void>>()
   const topicListeners = new Map<string, Set<(data: unknown) => void>>()
-  const outbox: Array<string | Uint8Array> = []
+  const readyByTopic = new Map<string, Deferred>() // topics awaiting their first ack
+  const subAckById = new Map<number, string>() // outstanding sub frame id -> topic
+
   let ws!: WebSocket
   let nextId = 1
   let closed = false
+  let attempt = 0
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 
   function connect(): void {
     ws = new WS(url)
     ws.binaryType = 'arraybuffer'
-    ws.onopen = () => {
-      for (const frame of outbox.splice(0)) ws.send(frame)
-    }
+    ws.onopen = onOpen
     ws.onmessage = (event: MessageEvent) => {
       onMessage(event.data as string | ArrayBuffer)
     }
-    ws.onclose = () => {
-      for (const [, p] of pending) {
-        if (p.timer) clearTimeout(p.timer)
-        p.reject(new SocketError('DISCONNECTED', 'Connection closed'))
+    ws.onclose = onClose
+  }
+
+  function onOpen(): void {
+    attempt = 0
+    for (const op of requests.values()) {
+      if (!op.sent) {
+        ws.send(op.frame)
+        op.sent = true
       }
-      pending.clear()
     }
+    for (const topic of topicListeners.keys()) sendSub(topic)
+  }
+
+  function onClose(): void {
+    for (const [id, op] of requests) {
+      if (op.sent) {
+        if (op.timer) clearTimeout(op.timer)
+        op.reject(new SocketError('DISCONNECTED', 'Connection closed'))
+        requests.delete(id)
+      }
+    }
+    subAckById.clear() // acks won't arrive; reconnect re-subscribes
+
+    if (closed || !reconnectEnabled) {
+      for (const [id, op] of requests) {
+        if (op.timer) clearTimeout(op.timer)
+        op.reject(new SocketError('DISCONNECTED', 'Connection closed'))
+        requests.delete(id)
+      }
+      return
+    }
+    reconnectTimer = setTimeout(connect, backoffDelay(attempt++, backoff))
   }
 
   function onMessage(data: string | ArrayBuffer): void {
@@ -102,9 +161,30 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
       return
     }
     if (frame.t === 'res') {
-      settle(frame.i, (p) => p.resolve(frame.d))
+      const topic = subAckById.get(frame.i)
+      if (topic !== undefined) {
+        subAckById.delete(frame.i)
+        const r = readyByTopic.get(topic)
+        if (r) {
+          readyByTopic.delete(topic)
+          r.resolve()
+        }
+        return
+      }
+      settleRequest(frame.i, (op) => op.resolve(frame.d))
     } else if (frame.t === 'err' && frame.i !== undefined) {
-      settle(frame.i, (p) => p.reject(new SocketError(frame.code, frame.m, frame.d)))
+      const topic = subAckById.get(frame.i)
+      if (topic !== undefined) {
+        subAckById.delete(frame.i)
+        const r = readyByTopic.get(topic)
+        if (r) {
+          readyByTopic.delete(topic)
+          r.reject(new SocketError(frame.code, frame.m, frame.d))
+        }
+        topicListeners.delete(topic) // denied -> drop local listeners
+        return
+      }
+      settleRequest(frame.i, (op) => op.reject(new SocketError(frame.code, frame.m, frame.d)))
     } else if (frame.t === 'evt') {
       const set = listeners.get(frame.e)
       if (set) for (const cb of set) cb(frame.d)
@@ -114,17 +194,12 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
     }
   }
 
-  function settle(id: number, run: (p: Pending) => void): void {
-    const p = pending.get(id)
-    if (!p) return
-    pending.delete(id)
-    if (p.timer) clearTimeout(p.timer)
-    run(p)
-  }
-
-  function send(encoded: string | Uint8Array): void {
-    if (ws.readyState === WS.OPEN) ws.send(encoded)
-    else outbox.push(encoded)
+  function settleRequest(id: number, run: (op: Request) => void): void {
+    const op = requests.get(id)
+    if (!op) return
+    requests.delete(id)
+    if (op.timer) clearTimeout(op.timer)
+    run(op)
   }
 
   function call(method: string, input: unknown, callOpts?: CallOptions): Promise<unknown> {
@@ -136,58 +211,57 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
       const timer =
         ms > 0
           ? setTimeout(() => {
-              pending.delete(id)
+              requests.delete(id)
               reject(new SocketError('TIMEOUT', `Request '${method}' timed out`))
             }, ms)
           : undefined
-      pending.set(id, { resolve, reject, timer })
+      const op: Request = { frame, resolve, reject, timer, sent: false }
+      requests.set(id, op)
       callOpts?.signal?.addEventListener(
         'abort',
-        () => settle(id, (p) => p.reject(new SocketError('BAD_REQUEST', 'Aborted'))),
+        () => {
+          if (requests.delete(id)) {
+            if (timer) clearTimeout(timer)
+            reject(new SocketError('BAD_REQUEST', 'Aborted'))
+          }
+        },
         { once: true },
       )
-      send(frame)
+      if (ws.readyState === WS.OPEN) {
+        ws.send(frame)
+        op.sent = true
+      }
     })
   }
 
-  function subscribe(topic: string, handler: (data: unknown) => void): Subscription {
+  function sendSub(topic: string): void {
     const id = nextId++
+    subAckById.set(id, topic)
+    ws.send(serializer.encode({ t: 'sub', i: id, c: topic }))
+  }
+
+  function topicSet(topic: string): Set<(data: unknown) => void> {
     let set = topicListeners.get(topic)
     if (!set) {
       set = new Set()
       topicListeners.set(topic, set)
     }
-    set.add(handler)
+    return set
+  }
 
-    const removeHandler = () => {
-      const current = topicListeners.get(topic)
-      if (!current) return
-      current.delete(handler)
-      if (current.size === 0) topicListeners.delete(topic)
+  function subscribe(topic: string, handler: (data: unknown) => void): Subscription {
+    const isNew = !topicListeners.has(topic)
+    topicSet(topic).add(handler)
+
+    let ready: Promise<void>
+    if (isNew) {
+      const d = deferred()
+      readyByTopic.set(topic, d)
+      ready = d.promise
+      if (ws.readyState === WS.OPEN) sendSub(topic) // else onOpen re-subscribes
+    } else {
+      ready = readyByTopic.get(topic)?.promise ?? Promise.resolve()
     }
-
-    const ready = new Promise<void>((resolve, reject) => {
-      const timer =
-        defaultTimeout > 0
-          ? setTimeout(() => {
-              pending.delete(id)
-              removeHandler()
-              reject(new SocketError('TIMEOUT', `subscribe '${topic}' timed out`))
-            }, defaultTimeout)
-          : undefined
-      pending.set(id, {
-        resolve: () => resolve(),
-        reject: (e) => {
-          removeHandler()
-          reject(e)
-        },
-        timer,
-      })
-    })
-    // keep `ready` from surfacing as an unhandled rejection when callers don't await it
-    void ready.catch(() => {})
-
-    send(serializer.encode({ t: 'sub', i: id, c: topic }))
 
     let active = true
     return {
@@ -195,8 +269,14 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
       unsubscribe: () => {
         if (!active) return
         active = false
-        removeHandler()
-        if (!topicListeners.has(topic)) send(serializer.encode({ t: 'unsub', c: topic }))
+        const set = topicListeners.get(topic)
+        if (!set) return
+        set.delete(handler)
+        if (set.size === 0) {
+          topicListeners.delete(topic)
+          readyByTopic.delete(topic)
+          if (ws.readyState === WS.OPEN) ws.send(serializer.encode({ t: 'unsub', c: topic }))
+        }
       },
     }
   }
@@ -221,6 +301,7 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
     subscribe,
     close(): void {
       closed = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
       ws.close()
     },
     get connected(): boolean {
@@ -231,7 +312,6 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
   return new Proxy(base, {
     get(target, prop, receiver) {
       if (prop in target) return Reflect.get(target, prop, receiver)
-      // never expose `then` as a method, or the client becomes an accidental thenable
       if (typeof prop !== 'string' || prop === 'then') return undefined
       return (input: unknown, callOpts?: CallOptions) => call(prop, input, callOpts)
     },

@@ -53,8 +53,9 @@ button {
   padding: 8px 14px;
   border: 0;
   border-radius: 8px;
-  background: #4f7cff;
-  color: white;
+  background: #22d3ee;
+  color: #0f1115;
+  font-weight: 600;
   font-size: 14px;
   cursor: pointer;
 }
@@ -111,7 +112,7 @@ button:disabled {
 
 .messages li.mine {
   align-self: flex-end;
-  background: #2b3a6b;
+  background: #0e3a44;
 }
 
 .messages .from {

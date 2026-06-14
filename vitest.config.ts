@@ -9,6 +9,7 @@ export default defineConfig({
       '@super-line/core': src('packages/core/src/index.ts'),
       '@super-line/server': src('packages/server/src/index.ts'),
       '@super-line/client': src('packages/client/src/index.ts'),
+      '@super-line/adapter-redis': src('packages/adapter-redis/src/index.ts'),
     },
   },
   test: {

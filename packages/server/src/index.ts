@@ -101,15 +101,15 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
     for (const conn of set) conn.sendRaw(payload)
   })
 
-  function joinChannel(conn: Conn<Ctx>, channel: string): void {
-    let set = members.get(channel)
-    if (!set) {
-      set = new Set()
-      members.set(channel, set)
-      void adapter.subscribe(channel) // first local member -> start receiving the channel
-    }
-    set.add(conn)
+  function joinChannel(conn: Conn<Ctx>, channel: string): void | Promise<void> {
     conn.channels.add(channel)
+    const set = members.get(channel)
+    if (set) {
+      set.add(conn)
+      return
+    }
+    members.set(channel, new Set([conn]))
+    return adapter.subscribe(channel) // first local member -> start receiving the channel
   }
 
   function leaveChannel(conn: Conn<Ctx>, channel: string): void {
@@ -225,7 +225,7 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
         const ok = await opts.authorizeSubscribe(frame.c, conn.ctx, conn)
         if (ok === false) throw new SocketError('FORBIDDEN', `Subscribe denied: ${frame.c}`)
       }
-      joinChannel(conn, TOPIC + frame.c)
+      await joinChannel(conn, TOPIC + frame.c) // await adapter.subscribe so ready == active
       conn.send({ t: 'res', i: frame.i, d: null })
     })
   }
@@ -234,7 +234,7 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
     const channel = ROOM + name
     return {
       add(conn) {
-        joinChannel(conn, channel)
+        void joinChannel(conn, channel)
       },
       remove(conn) {
         leaveChannel(conn, channel)

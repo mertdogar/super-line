@@ -15,7 +15,8 @@
     "paths": {
       "@super-line/core": ["./packages/core/src/index.ts"],
       "@super-line/server": ["./packages/server/src/index.ts"],
-      "@super-line/client": ["./packages/client/src/index.ts"]
+      "@super-line/client": ["./packages/client/src/index.ts"],
+      "@super-line/adapter-redis": ["./packages/adapter-redis/src/index.ts"]
     }
   }
 }

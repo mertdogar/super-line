@@ -20,7 +20,10 @@ export function createHarness() {
     const srv = createSocketServer<C, Ctx>(contract, { ...opts, server: httpServer })
     await new Promise<void>((resolve) => httpServer.listen(0, resolve))
     const { port } = httpServer.address() as AddressInfo
-    cleanups.push(() => new Promise<void>((resolve) => httpServer.close(() => resolve())))
+    cleanups.push(async () => {
+      await srv.close() // closes conns, wss, and the adapter (e.g. redis connections)
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()))
+    })
     return { srv, http: httpServer, url: `ws://127.0.0.1:${port}` }
   }
 

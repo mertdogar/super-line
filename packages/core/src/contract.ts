@@ -34,3 +34,18 @@ export async function validate<S extends Schema>(
   }
   return result.value
 }
+
+// Synchronous validation for hot paths (e.g. client inbound dispatch). Throws on async schemas.
+export function validateSync<S extends Schema>(
+  schema: S,
+  value: unknown,
+): StandardSchemaV1.InferOutput<S> {
+  const result = schema['~standard'].validate(value)
+  if (result instanceof Promise) {
+    throw new SocketError('INTERNAL', 'Async schema not supported for synchronous validation')
+  }
+  if (result.issues) {
+    throw new SocketError('VALIDATION', 'Validation failed', result.issues)
+  }
+  return result.value
+}

@@ -1,6 +1,8 @@
 import {
   jsonSerializer,
+  validateSync,
   SocketError,
+  type Schema,
   type Serializer,
   type Contract,
   type ServerFrame,
@@ -47,11 +49,19 @@ export type Client<C extends Contract> = ClientMethods<C> & {
   readonly connected: boolean
 }
 
+export interface ValidationErrorInfo {
+  kind: 'response' | 'event' | 'topic'
+  name: string
+}
+
 export interface ClientOptions {
   url: string
   params?: Record<string, string>
   serializer?: Serializer
   timeoutMs?: number
+  /** 'inbound' re-validates server->client payloads against the contract (catches drift). Default 'off'. */
+  validate?: 'off' | 'inbound'
+  onValidationError?: (error: unknown, info: ValidationErrorInfo) => void
   reconnect?: boolean
   reconnectBaseMs?: number
   reconnectMaxMs?: number
@@ -61,6 +71,7 @@ export interface ClientOptions {
 }
 
 interface Request {
+  method: string
   frame: string | Uint8Array
   resolve: (value: unknown) => void
   reject: (error: unknown) => void
@@ -85,9 +96,10 @@ function deferred(): Deferred {
   return { promise, resolve, reject }
 }
 
-export function createClient<C extends Contract>(_contract: C, opts: ClientOptions): Client<C> {
+export function createClient<C extends Contract>(contract: C, opts: ClientOptions): Client<C> {
   const serializer = opts.serializer ?? jsonSerializer
   const defaultTimeout = opts.timeoutMs ?? 30_000
+  const validateInbound = (opts.validate ?? 'off') === 'inbound'
   const reconnectEnabled = opts.reconnect ?? true
   const backoff = {
     baseMs: opts.reconnectBaseMs ?? 500,
@@ -171,7 +183,20 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
         }
         return
       }
-      settleRequest(frame.i, (op) => op.resolve(frame.d))
+      settleRequest(frame.i, (op) => {
+        if (validateInbound) {
+          const def = contract.messages?.[op.method]
+          if (def) {
+            try {
+              validateSync(def.output, frame.d)
+            } catch (e) {
+              op.reject(e)
+              return
+            }
+          }
+        }
+        op.resolve(frame.d)
+      })
     } else if (frame.t === 'err' && frame.i !== undefined) {
       const topic = subAckById.get(frame.i)
       if (topic !== undefined) {
@@ -186,11 +211,25 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
       }
       settleRequest(frame.i, (op) => op.reject(new SocketError(frame.code, frame.m, frame.d)))
     } else if (frame.t === 'evt') {
+      if (!checkInbound(contract.events?.[frame.e], frame.d, { kind: 'event', name: frame.e })) return
       const set = listeners.get(frame.e)
       if (set) for (const cb of set) cb(frame.d)
     } else if (frame.t === 'pub') {
+      if (!checkInbound(contract.topics?.[frame.c], frame.d, { kind: 'topic', name: frame.c })) return
       const set = topicListeners.get(frame.c)
       if (set) for (const cb of set) cb(frame.d)
+    }
+  }
+
+  function checkInbound(schema: Schema | undefined, data: unknown, info: ValidationErrorInfo): boolean {
+    if (!validateInbound || !schema) return true
+    try {
+      validateSync(schema, data)
+      return true
+    } catch (e) {
+      if (opts.onValidationError) opts.onValidationError(e, info)
+      else console.error(`[super-line] inbound validation failed for ${info.kind} '${info.name}'`, e)
+      return false
     }
   }
 
@@ -215,7 +254,7 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
               reject(new SocketError('TIMEOUT', `Request '${method}' timed out`))
             }, ms)
           : undefined
-      const op: Request = { frame, resolve, reject, timer, sent: false }
+      const op: Request = { method, frame, resolve, reject, timer, sent: false }
       requests.set(id, op)
       callOpts?.signal?.addEventListener(
         'abort',

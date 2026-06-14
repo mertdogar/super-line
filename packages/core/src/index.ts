@@ -6,7 +6,7 @@ export type { Serializer } from './serializer.js'
 
 export type { Adapter } from './adapter.js'
 
-export { defineContract, validate } from './contract.js'
+export { defineContract, validate, validateSync } from './contract.js'
 export type { Contract, MessageDef, Schema, InferIn, InferOut } from './contract.js'
 
 export { PROTOCOL } from './wire.js'

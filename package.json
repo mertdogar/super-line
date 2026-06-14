@@ -7,6 +7,9 @@
   "license": "MIT",
   "author": "Mert",
   "keywords": ["websocket", "typesafe", "realtime", "rooms", "pubsub", "rpc", "typescript"],
+  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git" },
+  "homepage": "https://github.com/mertdogar/super-line#readme",
+  "bugs": "https://github.com/mertdogar/super-line/issues",
   "packageManager": "pnpm@11.5.1",
   "scripts": {
     "build": "pnpm -r build",

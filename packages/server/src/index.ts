@@ -35,6 +35,19 @@ export type MessageHandlers<C extends Contract, Ctx> = {
   ) => Awaitable<InferOut<Messages<C>[K]['output']>>
 }
 
+export interface MiddlewareInfo<Ctx> {
+  kind: 'request' | 'subscribe'
+  name: string
+  conn: Conn<Ctx>
+}
+
+// Flat middleware: call next() to proceed, throw to short-circuit (reject). Does not morph ctx.
+export type Middleware<Ctx> = (
+  ctx: Ctx,
+  info: MiddlewareInfo<Ctx>,
+  next: () => Promise<void>,
+) => Awaitable<void>
+
 export interface Room<C extends Contract, Ctx> {
   add(conn: Conn<Ctx>): void
   remove(conn: Conn<Ctx>): void
@@ -53,8 +66,11 @@ export interface ServerOptions<Ctx> {
   authenticate?: (req: IncomingMessage) => Awaitable<Ctx>
   /** Runs on each client subscribe. Return false or throw to deny. */
   authorizeSubscribe?: (topic: string, ctx: Ctx, conn: Conn<Ctx>) => Awaitable<boolean | void>
+  /** Middleware chain run before req/subscribe handlers (rate-limit, authz, logging, metrics). */
+  use?: Middleware<Ctx>[]
   onConnection?: (conn: Conn<Ctx>, ctx: Ctx) => void
   onDisconnect?: (conn: Conn<Ctx>, ctx: Ctx, code: number) => void
+  onError?: (error: unknown, info: MiddlewareInfo<Ctx>) => void
 }
 
 export interface SocketServer<C extends Contract, Ctx> {
@@ -155,6 +171,40 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
     else if (frame.t === 'unsub') leaveChannel(conn, TOPIC + frame.c)
   }
 
+  function runMiddleware(info: MiddlewareInfo<Ctx>, terminal: () => Promise<void>): Promise<void> {
+    const chain = opts.use ?? []
+    let last = -1
+    const dispatch = (idx: number): Promise<void> => {
+      if (idx <= last) return Promise.reject(new Error('next() called multiple times'))
+      last = idx
+      const mw = chain[idx]
+      if (!mw) return terminal()
+      return Promise.resolve(mw(info.conn.ctx, info, () => dispatch(idx + 1)))
+    }
+    return dispatch(0)
+  }
+
+  async function dispatchOp(
+    conn: Conn<Ctx>,
+    id: number,
+    info: MiddlewareInfo<Ctx>,
+    terminal: () => Promise<void>,
+  ): Promise<void> {
+    let responded = false
+    try {
+      await runMiddleware(info, async () => {
+        await terminal()
+        responded = true
+      })
+    } catch (err) {
+      opts.onError?.(err, info)
+      if (!responded) {
+        const e = err instanceof SocketError ? err : new SocketError('INTERNAL', 'Internal server error')
+        conn.send({ t: 'err', i: id, code: e.code, m: e.message, d: e.data })
+      }
+    }
+  }
+
   async function handleReq(conn: Conn<Ctx>, frame: ReqFrame): Promise<void> {
     const def = contract.messages?.[frame.m]
     const handler = handlers[frame.m]
@@ -162,29 +212,22 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
       conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: `Unknown message: ${frame.m}` })
       return
     }
-    try {
+    await dispatchOp(conn, frame.i, { kind: 'request', name: frame.m, conn }, async () => {
       const input = await validate(def.input, frame.d)
       const output = await handler(input, conn.ctx, conn)
       conn.send({ t: 'res', i: frame.i, d: output })
-    } catch (err) {
-      const e = err instanceof SocketError ? err : new SocketError('INTERNAL', 'Internal server error')
-      conn.send({ t: 'err', i: frame.i, code: e.code, m: e.message, d: e.data })
-    }
+    })
   }
 
   async function handleSub(conn: Conn<Ctx>, frame: { i: number; c: string }): Promise<void> {
-    try {
+    await dispatchOp(conn, frame.i, { kind: 'subscribe', name: frame.c, conn }, async () => {
       if (opts.authorizeSubscribe) {
         const ok = await opts.authorizeSubscribe(frame.c, conn.ctx, conn)
         if (ok === false) throw new SocketError('FORBIDDEN', `Subscribe denied: ${frame.c}`)
       }
-    } catch (err) {
-      const e = err instanceof SocketError ? err : new SocketError('FORBIDDEN', 'Subscribe denied')
-      conn.send({ t: 'err', i: frame.i, code: e.code, m: e.message, d: e.data })
-      return
-    }
-    joinChannel(conn, TOPIC + frame.c)
-    conn.send({ t: 'res', i: frame.i, d: null })
+      joinChannel(conn, TOPIC + frame.c)
+      conn.send({ t: 'res', i: frame.i, d: null })
+    })
   }
 
   function room(name: string): Room<C, Ctx> {

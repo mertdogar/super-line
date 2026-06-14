@@ -5,6 +5,7 @@ import {
   jsonSerializer,
   validate,
   SocketError,
+  type Adapter,
   type Serializer,
   type Contract,
   type ClientFrame,
@@ -13,13 +14,18 @@ import {
   type InferOut,
 } from '@super-line/core'
 import { Conn } from './conn.js'
+import { createInMemoryAdapter } from './memory-adapter.js'
 
 export { Conn } from './conn.js'
+export { MemoryBus, createInMemoryAdapter } from './memory-adapter.js'
 
 type Awaitable<T> = T | Promise<T>
 type Messages<C extends Contract> = NonNullable<C['messages']>
 type Events<C extends Contract> = NonNullable<C['events']>
 type Topics<C extends Contract> = NonNullable<C['topics']>
+
+const ROOM = 'r:'
+const TOPIC = 't:'
 
 export type MessageHandlers<C extends Contract, Ctx> = {
   [K in keyof Messages<C>]: (
@@ -39,6 +45,8 @@ export interface Room<C extends Contract, Ctx> {
 export interface ServerOptions<Ctx> {
   server?: HttpServer
   serializer?: Serializer
+  /** Cross-node fan-out adapter. Defaults to a per-server in-memory adapter. */
+  adapter?: Adapter
   /** Only handle upgrades for this pathname; others are left untouched. */
   path?: string
   /** Runs at the HTTP upgrade. Return ctx, or throw to reject with 401. */
@@ -63,11 +71,41 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
   opts: ServerOptions<Ctx> = {},
 ): SocketServer<C, Ctx> {
   const serializer = opts.serializer ?? jsonSerializer
+  const adapter = opts.adapter ?? createInMemoryAdapter()
   const wss = new WebSocketServer({ noServer: true })
   const conns = new Set<Conn<Ctx>>()
-  const rooms = new Map<string, Set<Conn<Ctx>>>()
-  const topicSubs = new Map<string, Set<Conn<Ctx>>>()
+  // local members per namespaced channel (rooms + topics share this registry)
+  const members = new Map<string, Set<Conn<Ctx>>>()
   let handlers: Partial<Record<string, (input: unknown, ctx: Ctx, conn: Conn<Ctx>) => unknown>> = {}
+
+  // a frame arriving on a channel (from this node or another) is forwarded raw to local members
+  adapter.onMessage((channel, payload) => {
+    const set = members.get(channel)
+    if (!set) return
+    for (const conn of set) conn.sendRaw(payload)
+  })
+
+  function joinChannel(conn: Conn<Ctx>, channel: string): void {
+    let set = members.get(channel)
+    if (!set) {
+      set = new Set()
+      members.set(channel, set)
+      void adapter.subscribe(channel) // first local member -> start receiving the channel
+    }
+    set.add(conn)
+    conn.channels.add(channel)
+  }
+
+  function leaveChannel(conn: Conn<Ctx>, channel: string): void {
+    const set = members.get(channel)
+    if (!set) return
+    set.delete(conn)
+    conn.channels.delete(channel)
+    if (set.size === 0) {
+      members.delete(channel)
+      void adapter.unsubscribe(channel) // last local member -> stop receiving
+    }
+  }
 
   if (opts.server) {
     opts.server.on('upgrade', (req, socket, head) => {
@@ -98,16 +136,7 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
       })
       ws.on('close', (code) => {
         conns.delete(conn)
-        for (const name of conn.rooms) rooms.get(name)?.delete(conn)
-        conn.rooms.clear()
-        for (const topic of conn.subscriptions) {
-          const set = topicSubs.get(topic)
-          if (set) {
-            set.delete(conn)
-            if (set.size === 0) topicSubs.delete(topic)
-          }
-        }
-        conn.subscriptions.clear()
+        for (const channel of conn.channels) leaveChannel(conn, channel)
         opts.onDisconnect?.(conn, ctx, code)
       })
       opts.onConnection?.(conn, ctx)
@@ -123,38 +152,7 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
     }
     if (frame.t === 'req') await handleReq(conn, frame)
     else if (frame.t === 'sub') await handleSub(conn, frame)
-    else if (frame.t === 'unsub') handleUnsub(conn, frame)
-  }
-
-  async function handleSub(conn: Conn<Ctx>, frame: { i: number; c: string }): Promise<void> {
-    const topic = frame.c
-    try {
-      if (opts.authorizeSubscribe) {
-        const ok = await opts.authorizeSubscribe(topic, conn.ctx, conn)
-        if (ok === false) throw new SocketError('FORBIDDEN', `Subscribe denied: ${topic}`)
-      }
-    } catch (err) {
-      const e = err instanceof SocketError ? err : new SocketError('FORBIDDEN', 'Subscribe denied')
-      conn.send({ t: 'err', i: frame.i, code: e.code, m: e.message, d: e.data })
-      return
-    }
-    let set = topicSubs.get(topic)
-    if (!set) {
-      set = new Set()
-      topicSubs.set(topic, set)
-    }
-    set.add(conn)
-    conn.subscriptions.add(topic)
-    conn.send({ t: 'res', i: frame.i, d: null })
-  }
-
-  function handleUnsub(conn: Conn<Ctx>, frame: { c: string }): void {
-    const set = topicSubs.get(frame.c)
-    if (set) {
-      set.delete(conn)
-      if (set.size === 0) topicSubs.delete(frame.c)
-    }
-    conn.subscriptions.delete(frame.c)
+    else if (frame.t === 'unsub') leaveChannel(conn, TOPIC + frame.c)
   }
 
   async function handleReq(conn: Conn<Ctx>, frame: ReqFrame): Promise<void> {
@@ -174,42 +172,42 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
     }
   }
 
+  async function handleSub(conn: Conn<Ctx>, frame: { i: number; c: string }): Promise<void> {
+    try {
+      if (opts.authorizeSubscribe) {
+        const ok = await opts.authorizeSubscribe(frame.c, conn.ctx, conn)
+        if (ok === false) throw new SocketError('FORBIDDEN', `Subscribe denied: ${frame.c}`)
+      }
+    } catch (err) {
+      const e = err instanceof SocketError ? err : new SocketError('FORBIDDEN', 'Subscribe denied')
+      conn.send({ t: 'err', i: frame.i, code: e.code, m: e.message, d: e.data })
+      return
+    }
+    joinChannel(conn, TOPIC + frame.c)
+    conn.send({ t: 'res', i: frame.i, d: null })
+  }
+
   function room(name: string): Room<C, Ctx> {
+    const channel = ROOM + name
     return {
       add(conn) {
-        let set = rooms.get(name)
-        if (!set) {
-          set = new Set()
-          rooms.set(name, set)
-        }
-        set.add(conn)
-        conn.rooms.add(name)
+        joinChannel(conn, channel)
       },
       remove(conn) {
-        const set = rooms.get(name)
-        if (!set) return
-        set.delete(conn)
-        conn.rooms.delete(name)
-        if (set.size === 0) rooms.delete(name)
+        leaveChannel(conn, channel)
       },
       broadcast(event, data) {
-        const set = rooms.get(name)
-        if (!set) return
-        const frame = { t: 'evt' as const, e: String(event), d: data }
-        for (const conn of set) conn.send(frame)
+        void adapter.publish(channel, serializer.encode({ t: 'evt', e: String(event), d: data }))
       },
       get size() {
-        return rooms.get(name)?.size ?? 0
+        return members.get(channel)?.size ?? 0
       },
     }
   }
 
   function publish<T extends keyof Topics<C>>(topic: T, data: InferIn<Topics<C>[T]>): void {
     const name = String(topic)
-    const set = topicSubs.get(name)
-    if (!set) return
-    const frame = { t: 'pub' as const, c: name, d: data }
-    for (const conn of set) conn.send(frame)
+    void adapter.publish(TOPIC + name, serializer.encode({ t: 'pub', c: name, d: data }))
   }
 
   const api: SocketServer<C, Ctx> = {
@@ -219,9 +217,10 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
     },
     room,
     publish,
-    close() {
+    async close() {
       for (const conn of conns) conn.close()
-      return new Promise<void>((resolve) => {
+      await adapter.close?.()
+      await new Promise<void>((resolve) => {
         wss.close(() => resolve())
       })
     },

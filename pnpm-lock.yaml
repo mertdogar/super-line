@@ -24,6 +24,25 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.21)(jsdom@25.0.1)
 
+  examples/auth:
+    dependencies:
+      '@super-line/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@super-line/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@super-line/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
+
   examples/chat:
     dependencies:
       '@super-line/client':
@@ -85,6 +104,31 @@ importers:
       vite:
         specifier: ^5.4.11
         version: 5.4.21(@types/node@22.19.21)
+
+  examples/scaling:
+    dependencies:
+      '@super-line/adapter-redis':
+        specifier: workspace:*
+        version: link:../../packages/adapter-redis
+      '@super-line/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@super-line/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@super-line/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      ioredis:
+        specifier: ^5.4.2
+        version: 5.11.1
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
 
   packages/adapter-redis:
     dependencies:

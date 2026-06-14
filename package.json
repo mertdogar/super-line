@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "description": "End-to-end typesafe WebSockets for TypeScript — req/res, rooms & topics from one contract.",
+  "license": "MIT",
+  "author": "Mert",
+  "keywords": ["websocket", "typesafe", "realtime", "rooms", "pubsub", "rpc", "typescript"],
   "packageManager": "pnpm@11.5.1",
   "scripts": {
     "build": "pnpm -r build",

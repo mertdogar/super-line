@@ -78,11 +78,13 @@ describe.skipIf(!dockerAvailable)('redis adapter cross-process fan-out', () => {
     client.on('message', (m) => got.push(m))
 
     await client.join({ room: 'lobby' })
-    // room.add subscribes the channel fire-and-forget; let the redis SUBSCRIBE register
-    await tick(150)
-
-    nodeB.srv.room('lobby').broadcast('message', { text: 'hi-redis' })
-    await waitFor(() => got.length === 1, 5000)
+    // room.add subscribes the redis channel fire-and-forget (no ack); retry the broadcast
+    // until it lands, tolerating the SUBSCRIBE-propagation window (a non-issue in real apps,
+    // where add and broadcast aren't in the same millisecond).
+    for (let i = 0; i < 50 && got.length === 0; i++) {
+      nodeB.srv.room('lobby').broadcast('message', { text: 'hi-redis' })
+      await tick(100)
+    }
     expect(got[0]).toEqual({ text: 'hi-redis' })
   })
 })

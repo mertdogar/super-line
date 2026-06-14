@@ -5,6 +5,7 @@ import type { Serializer, ServerFrame } from '@super-line/core'
 // accepted the upgrade. Cross-node delivery goes through the Adapter, not conns.
 export class Conn<Ctx = unknown> {
   readonly subscriptions = new Set<string>()
+  readonly rooms = new Set<string>()
 
   constructor(
     readonly ws: WebSocket,

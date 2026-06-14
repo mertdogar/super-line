@@ -22,10 +22,10 @@ const h = createHarness()
 afterEach(() => h.dispose())
 
 async function boot() {
-  const { srv, url } = await h.server<{ user: { id: string } }>({
+  const { srv, url } = await h.server(contract, {
     authenticate: () => ({ user: { id: 'u1' } }),
   })
-  srv.implement(contract, {
+  srv.implement({
     echo: async ({ text }, ctx) => ({ text: `${text}:${ctx.user.id}`, at: 42 }),
     boom: async () => {
       throw new SocketError('FORBIDDEN', 'nope')

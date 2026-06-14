@@ -9,6 +9,7 @@ import {
 } from '@super-line/core'
 
 type Messages<C extends Contract> = NonNullable<C['messages']>
+type Events<C extends Contract> = NonNullable<C['events']>
 
 export interface CallOptions {
   timeoutMs?: number
@@ -23,6 +24,11 @@ export type ClientMethods<C extends Contract> = {
 }
 
 export type Client<C extends Contract> = ClientMethods<C> & {
+  /** Listen for a server-pushed event (also how room broadcasts arrive). Returns an unsubscribe fn. */
+  on<E extends keyof Events<C>>(
+    event: E,
+    handler: (data: InferOut<Events<C>[E]>) => void,
+  ): () => void
   close(): void
   readonly connected: boolean
 }
@@ -51,6 +57,7 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
 
   const url = buildUrl(opts.url, opts.params)
   const pending = new Map<number, Pending>()
+  const listeners = new Map<string, Set<(data: unknown) => void>>()
   const outbox: Array<string | Uint8Array> = []
   let ws!: WebSocket
   let nextId = 1
@@ -85,8 +92,11 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
       settle(frame.i, (p) => p.resolve(frame.d))
     } else if (frame.t === 'err' && frame.i !== undefined) {
       settle(frame.i, (p) => p.reject(new SocketError(frame.code, frame.m, frame.d)))
+    } else if (frame.t === 'evt') {
+      const set = listeners.get(frame.e)
+      if (set) for (const cb of set) cb(frame.d)
     }
-    // 'evt' / 'pub' land with the events/topics slices
+    // 'pub' lands with the topics slice
   }
 
   function settle(id: number, run: (p: Pending) => void): void {
@@ -124,6 +134,20 @@ export function createClient<C extends Contract>(_contract: C, opts: ClientOptio
   connect()
 
   const base = {
+    on(event: string, handler: (data: unknown) => void): () => void {
+      let set = listeners.get(event)
+      if (!set) {
+        set = new Set()
+        listeners.set(event, set)
+      }
+      set.add(handler)
+      return () => {
+        const current = listeners.get(event)
+        if (!current) return
+        current.delete(handler)
+        if (current.size === 0) listeners.delete(event)
+      }
+    },
     close(): void {
       closed = true
       ws.close()

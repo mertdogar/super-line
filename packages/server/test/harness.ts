@@ -8,13 +8,16 @@ import { createClient, type Client, type ClientOptions } from '@super-line/clien
 export function createHarness() {
   const cleanups: Array<() => Promise<void> | void> = []
 
-  async function server<Ctx>(opts: Omit<ServerOptions<Ctx>, 'server'> = {}): Promise<{
-    srv: SocketServer<Ctx>
+  async function server<C extends Contract, Ctx = undefined>(
+    contract: C,
+    opts: Omit<ServerOptions<Ctx>, 'server'> = {},
+  ): Promise<{
+    srv: SocketServer<C, Ctx>
     http: http.Server
     url: string
   }> {
     const httpServer = http.createServer()
-    const srv = createSocketServer<Ctx>({ ...opts, server: httpServer })
+    const srv = createSocketServer<C, Ctx>(contract, { ...opts, server: httpServer })
     await new Promise<void>((resolve) => httpServer.listen(0, resolve))
     const { port } = httpServer.address() as AddressInfo
     cleanups.push(() => new Promise<void>((resolve) => httpServer.close(() => resolve())))

@@ -22,8 +22,8 @@ afterEach(() => h.dispose())
 
 describe('auth at upgrade', () => {
   it('accepts a valid token and serves requests', async () => {
-    const { srv, url } = await h.server<{ token: string }>({ authenticate })
-    srv.implement(contract, { ping: async () => ({ ok: true }) })
+    const { srv, url } = await h.server(contract, { authenticate })
+    srv.implement({ ping: async () => ({ ok: true }) })
 
     const client = h.client(contract, { url, params: { token: 'good' } })
     expect(await client.ping({})).toEqual({ ok: true })
@@ -31,13 +31,13 @@ describe('auth at upgrade', () => {
 
   it('rejects a bad token at the upgrade without consuming a socket', async () => {
     let connections = 0
-    const { srv, url } = await h.server<{ token: string }>({
+    const { srv, url } = await h.server(contract, {
       authenticate,
       onConnection: () => {
         connections++
       },
     })
-    srv.implement(contract, { ping: async () => ({ ok: true }) })
+    srv.implement({ ping: async () => ({ ok: true }) })
 
     const client = h.client(contract, { url, params: { token: 'bad' }, timeoutMs: 2000 })
     await expect(client.ping({})).rejects.toMatchObject({ code: 'DISCONNECTED' })

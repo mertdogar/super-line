@@ -2,13 +2,21 @@ import { z } from 'zod'
 import { defineContract } from '@super-line/core'
 
 export const sync = defineContract({
-  messages: {
-    join: { input: z.object({ room: z.string() }), output: z.object({ ok: z.boolean() }) },
+  shared: {
+    serverToClient: { message: { payload: z.object({ room: z.string(), text: z.string() }) } },
   },
-  events: {
-    message: z.object({ room: z.string(), text: z.string() }),
+  roles: {
+    user: {
+      clientToServer: {
+        join: { input: z.object({ room: z.string() }), output: z.object({ ok: z.boolean() }) },
+      },
+      serverToClient: {
+        feed: { payload: z.object({ seq: z.number() }), subscribe: true },
+      },
+    },
   },
-  topics: {
-    feed: z.object({ seq: z.number() }),
+  // node <-> node: coordination across the cluster, fanned out by the same adapter
+  serverToServer: {
+    stats: z.object({ node: z.string(), conns: z.number() }),
   },
 })

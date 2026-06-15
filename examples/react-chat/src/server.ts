@@ -6,7 +6,7 @@ const PORT = Number(process.env.PORT ?? 8787)
 
 const server = http.createServer()
 const counts = new Map<string, number>()
-const roomOf = new Map<Conn<{ name: string }>, string>()
+const roomOf = new Map<Conn, string>()
 let seq = 0
 
 const adjust = (room: string, delta: number) => {
@@ -20,29 +20,31 @@ const srv = createSocketServer(chat, {
   authenticate: (req) => {
     const name = new URL(req.url ?? '', 'http://localhost').searchParams.get('name')?.trim()
     if (!name) throw new Error('name is required')
-    return { name }
+    return { role: 'user' as const, ctx: { name } }
   },
   onDisconnect: (conn) => {
     const room = roomOf.get(conn)
     if (!room) return
     roomOf.delete(conn)
-    srv.publish('presence', { room, count: adjust(room, -1) })
+    srv.forRole('user').publish('presence', { room, count: adjust(room, -1) })
   },
 })
 
 srv.implement({
-  join: async ({ room }, _ctx, conn) => {
-    srv.room(room).add(conn)
-    roomOf.set(conn, room)
-    const count = adjust(room, 1)
-    srv.publish('presence', { room, count })
-    return { ok: true, count }
-  },
-  send: async ({ room, text }, ctx) => {
-    seq += 1
-    const id = `m_${seq}`
-    srv.room(room).broadcast('message', { room, id, text, from: ctx.name, at: Date.now() })
-    return { id }
+  user: {
+    join: async ({ room }, _ctx, conn) => {
+      srv.room(room).add(conn)
+      roomOf.set(conn, room)
+      const count = adjust(room, 1)
+      srv.forRole('user').publish('presence', { room, count })
+      return { ok: true, count }
+    },
+    send: async ({ room, text }, ctx) => {
+      seq += 1
+      const id = `m_${seq}`
+      srv.room(room).broadcast('message', { room, id, text, from: ctx.name, at: Date.now() })
+      return { id }
+    },
   },
 })
 

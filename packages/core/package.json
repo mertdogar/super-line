@@ -1,14 +1,15 @@
 {
   "name": "@super-line/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "description": "Shared contract, validation, wire protocol and errors for super-line.",
   "license": "MIT",
   "author": "Mert",
   "keywords": ["websocket", "typesafe", "contract", "standard-schema", "typescript"],
   "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/core" },
-  "homepage": "https://github.com/mertdogar/super-line#readme",
+  "homepage": "https://mertdogar.github.io/super-line/",
   "bugs": "https://github.com/mertdogar/super-line/issues",
+  "sideEffects": false,
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -20,6 +21,7 @@
     }
   },
   "files": ["dist"],
+  "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup"
   },

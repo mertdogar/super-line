@@ -1,23 +1,32 @@
 {
   "name": "@super-line/adapter-redis",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "description": "Redis Pub/Sub adapter for super-line — multi-node room/topic fan-out.",
   "license": "MIT",
   "author": "Mert",
   "keywords": ["websocket", "redis", "pubsub", "adapter", "scaling", "super-line"],
   "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/adapter-redis" },
-  "homepage": "https://github.com/mertdogar/super-line#readme",
+  "homepage": "https://mertdogar.github.io/super-line/",
   "bugs": "https://github.com/mertdogar/super-line/issues",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
   "files": ["dist"],
+  "sideEffects": false,
+  "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup"
   },
   "dependencies": {
-    "@super-line/core": "workspace:*",
+    "@super-line/core": "workspace:^",
     "ioredis": "^5.4.2"
   }
 }

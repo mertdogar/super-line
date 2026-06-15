@@ -1,13 +1,13 @@
 {
   "name": "@super-line/react",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "description": "React hooks for super-line — useRequest, useEvent, useSubscription.",
   "license": "MIT",
   "author": "Mert",
   "keywords": ["websocket", "react", "hooks", "typesafe", "realtime", "super-line"],
   "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/react" },
-  "homepage": "https://github.com/mertdogar/super-line#readme",
+  "homepage": "https://mertdogar.github.io/super-line/",
   "bugs": "https://github.com/mertdogar/super-line/issues",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -20,12 +20,14 @@
     }
   },
   "files": ["dist"],
+  "sideEffects": false,
+  "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup"
   },
   "dependencies": {
-    "@super-line/client": "workspace:*",
-    "@super-line/core": "workspace:*"
+    "@super-line/client": "workspace:^",
+    "@super-line/core": "workspace:^"
   },
   "peerDependencies": {
     "react": ">=18"

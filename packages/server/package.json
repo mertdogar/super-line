@@ -1,13 +1,13 @@
 {
   "name": "@super-line/server",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "description": "Typesafe WebSocket server for super-line — rooms, topics, middleware, pluggable adapters.",
   "license": "MIT",
   "author": "Mert",
   "keywords": ["websocket", "server", "typesafe", "realtime", "rooms", "pubsub", "ws"],
   "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/server" },
-  "homepage": "https://github.com/mertdogar/super-line#readme",
+  "homepage": "https://mertdogar.github.io/super-line/",
   "bugs": "https://github.com/mertdogar/super-line/issues",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -20,11 +20,13 @@
     }
   },
   "files": ["dist"],
+  "sideEffects": false,
+  "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup"
   },
   "dependencies": {
-    "@super-line/core": "workspace:*",
+    "@super-line/core": "workspace:^",
     "ws": "^8.18.0"
   },
   "devDependencies": {

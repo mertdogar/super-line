@@ -1,13 +1,13 @@
 {
   "name": "@super-line/client",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "description": "Typesafe WebSocket client for super-line — typed calls, events, topics, auto-reconnect.",
   "license": "MIT",
   "author": "Mert",
   "keywords": ["websocket", "client", "typesafe", "realtime", "reconnect", "browser"],
   "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/client" },
-  "homepage": "https://github.com/mertdogar/super-line#readme",
+  "homepage": "https://mertdogar.github.io/super-line/",
   "bugs": "https://github.com/mertdogar/super-line/issues",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -20,10 +20,12 @@
     }
   },
   "files": ["dist"],
+  "sideEffects": false,
+  "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup"
   },
   "dependencies": {
-    "@super-line/core": "workspace:*"
+    "@super-line/core": "workspace:^"
   }
 }

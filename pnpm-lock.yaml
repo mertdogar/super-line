@@ -148,7 +148,7 @@ importers:
   packages/adapter-redis:
     dependencies:
       '@super-line/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
       ioredis:
         specifier: ^5.4.2
@@ -157,7 +157,7 @@ importers:
   packages/client:
     dependencies:
       '@super-line/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
 
   packages/core:
@@ -173,10 +173,10 @@ importers:
   packages/react:
     dependencies:
       '@super-line/client':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../client
       '@super-line/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
     devDependencies:
       '@super-line/server':
@@ -207,7 +207,7 @@ importers:
   packages/server:
     dependencies:
       '@super-line/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
       ws:
         specifier: ^8.18.0

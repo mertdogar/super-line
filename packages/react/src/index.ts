@@ -8,12 +8,17 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { Contract, InferIn, InferOut } from '@super-line/core'
+import type {
+  Contract,
+  RoleOf,
+  Requests,
+  Events,
+  Topics,
+  ClientInput,
+  Output,
+  EventData,
+} from '@super-line/core'
 import type { Client } from '@super-line/client'
-
-type Messages<C extends Contract> = NonNullable<C['messages']>
-type Events<C extends Contract> = NonNullable<C['events']>
-type Topics<C extends Contract> = NonNullable<C['topics']>
 
 export interface RequestState<T> {
   data?: T
@@ -21,23 +26,23 @@ export interface RequestState<T> {
   isLoading: boolean
 }
 
-// Bind a set of typed React hooks to a contract. Pass a connected client via <Provider>.
-export function createSocketReact<C extends Contract>() {
-  const Context = createContext<Client<C> | null>(null)
+// Bind typed React hooks to a contract + role. Pass a connected client via <Provider>.
+export function createSocketReact<C extends Contract, R extends RoleOf<C>>() {
+  const Context = createContext<Client<C, R> | null>(null)
 
-  function Provider(props: { client: Client<C>; children?: ReactNode }): ReactNode {
+  function Provider(props: { client: Client<C, R>; children?: ReactNode }): ReactNode {
     return createElement(Context.Provider, { value: props.client }, props.children)
   }
 
-  function useClient(): Client<C> {
+  function useClient(): Client<C, R> {
     const client = useContext(Context)
     if (!client) throw new Error('useClient must be used within a <Provider>')
     return client
   }
 
-  function useEvent<E extends keyof Events<C>>(
+  function useEvent<E extends keyof Events<C, R>>(
     event: E,
-    handler: (data: InferOut<Events<C>[E]>) => void,
+    handler: (data: EventData<Events<C, R>[E]>) => void,
   ): void {
     const client = useClient()
     const ref = useRef(handler)
@@ -45,11 +50,11 @@ export function createSocketReact<C extends Contract>() {
     useEffect(() => client.on(event, (data) => ref.current(data)), [client, event])
   }
 
-  function useSubscription<T extends keyof Topics<C>>(
+  function useSubscription<T extends keyof Topics<C, R>>(
     topic: T,
-  ): InferOut<Topics<C>[T]> | undefined {
+  ): EventData<Topics<C, R>[T]> | undefined {
     const client = useClient()
-    const [data, setData] = useState<InferOut<Topics<C>[T]>>()
+    const [data, setData] = useState<EventData<Topics<C, R>[T]>>()
     useEffect(() => {
       const sub = client.subscribe(topic, setData)
       return () => sub.unsubscribe()
@@ -57,22 +62,22 @@ export function createSocketReact<C extends Contract>() {
     return data
   }
 
-  function useRequest<M extends keyof Messages<C>>(
+  function useRequest<M extends keyof Requests<C, R>>(
     method: M,
-  ): RequestState<InferOut<Messages<C>[M]['output']>> & {
-    call: (input: InferIn<Messages<C>[M]['input']>) => Promise<InferOut<Messages<C>[M]['output']>>
+  ): RequestState<Output<Requests<C, R>[M]>> & {
+    call: (input: ClientInput<Requests<C, R>[M]>) => Promise<Output<Requests<C, R>[M]>>
   } {
     const client = useClient()
-    const [state, setState] = useState<RequestState<InferOut<Messages<C>[M]['output']>>>({
+    const [state, setState] = useState<RequestState<Output<Requests<C, R>[M]>>>({
       isLoading: false,
     })
     const call = useCallback(
-      async (input: InferIn<Messages<C>[M]['input']>) => {
+      async (input: ClientInput<Requests<C, R>[M]>) => {
         setState({ isLoading: true })
         try {
           const fn = client[method] as (
-            i: InferIn<Messages<C>[M]['input']>,
-          ) => Promise<InferOut<Messages<C>[M]['output']>>
+            i: ClientInput<Requests<C, R>[M]>,
+          ) => Promise<Output<Requests<C, R>[M]>>
           const data = await fn(input)
           setState({ data, isLoading: false })
           return data

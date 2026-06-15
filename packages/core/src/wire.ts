@@ -22,7 +22,20 @@ export interface UnsubFrame {
   t: 'unsub'
   c: string
 }
-export type ClientFrame = ReqFrame | SubFrame | UnsubFrame
+// reply to a server→client request (server initiates, client answers)
+export interface SResFrame {
+  t: 'sres'
+  i: number // correlation id from the SReqFrame
+  d: unknown // output
+}
+export interface SErrFrame {
+  t: 'serr'
+  i: number
+  code: string
+  m: string
+  d?: unknown
+}
+export type ClientFrame = ReqFrame | SubFrame | UnsubFrame | SResFrame | SErrFrame
 
 // Server -> Client
 export interface ResFrame {
@@ -47,6 +60,13 @@ export interface PubFrame {
   c: string // channel
   d: unknown
 }
-export type ServerFrame = ResFrame | ErrFrame | EvtFrame | PubFrame
+// a server→client request the client must answer (with SResFrame/SErrFrame)
+export interface SReqFrame {
+  t: 'sreq'
+  i: number // correlation id
+  m: string // request name
+  d: unknown // input
+}
+export type ServerFrame = ResFrame | ErrFrame | EvtFrame | PubFrame | SReqFrame
 
 export type Frame = ClientFrame | ServerFrame

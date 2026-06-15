@@ -12,6 +12,10 @@ export type {
   Directional,
   RequestDef,
   ServerMessageDef,
+  ServerRequestDef,
+  ServerEntry,
+  ServerRequests,
+  SharedServerRequests,
   Schema,
   InferIn,
   InferOut,
@@ -47,4 +51,7 @@ export type {
   ErrFrame,
   EvtFrame,
   PubFrame,
+  SReqFrame,
+  SResFrame,
+  SErrFrame,
 } from './wire.js'

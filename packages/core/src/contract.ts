@@ -27,12 +27,27 @@ export interface ServerMessageDef {
   subscribe?: boolean
 }
 
+/**
+ * A server→client request (request/response). The server sends `input`; the
+ * client's `implement` handler returns `output`. Lives in `serverToClient`
+ * alongside events and topics, distinguished by having `input`.
+ */
+export interface ServerRequestDef {
+  /** Schema for the request payload the server sends. */
+  input: Schema
+  /** Schema for the reply the client returns. */
+  output: Schema
+}
+
+/** A `serverToClient` entry: a push event, a subscribable topic, or a server→client request. */
+export type ServerEntry = ServerMessageDef | ServerRequestDef
+
 /** The two directions within a `shared` or role block. */
 export interface Directional {
   /** Requests this side may call (client→server). */
   clientToServer?: Record<string, RequestDef>
-  /** Events/topics this side may receive (server→client). */
-  serverToClient?: Record<string, ServerMessageDef>
+  /** Events, topics, and server→client requests this side may receive. */
+  serverToClient?: Record<string, ServerEntry>
 }
 
 /**
@@ -79,13 +94,14 @@ export function defineContract<const C extends Contract>(contract: C): C {
 export type RoleOf<C extends Contract> = keyof C['roles'] & string
 
 type CtsOf<D> = D extends { clientToServer: infer M extends Record<string, RequestDef> } ? M : {}
-type StcOf<D> = D extends { serverToClient: infer M extends Record<string, ServerMessageDef> }
-  ? M
-  : {}
+type StcOf<D> = D extends { serverToClient: infer M extends Record<string, ServerEntry> } ? M : {}
 
-// serverToClient split: no `subscribe` => push event; `subscribe: true` => topic.
-type EventsOf<M> = { [K in keyof M as M[K] extends { subscribe: true } ? never : K]: M[K] }
+// serverToClient split: has `input` => request; `subscribe: true` => topic; otherwise => push event.
+type EventsOf<M> = {
+  [K in keyof M as M[K] extends { input: Schema } ? never : M[K] extends { subscribe: true } ? never : K]: M[K]
+}
 type TopicsOf<M> = { [K in keyof M as M[K] extends { subscribe: true } ? K : never]: M[K] }
+type ServerReqOf<M> = { [K in keyof M as M[K] extends { input: Schema } ? K : never]: M[K] }
 
 /** A role's effective request map: `shared` ∪ `roles[R]` client→server requests. */
 export type Requests<C extends Contract, R extends RoleOf<C>> = CtsOf<C['shared']> &
@@ -108,6 +124,11 @@ export type SharedEvents<C extends Contract> = EventsOf<StcOf<C['shared']>>
 export type SharedTopics<C extends Contract> = TopicsOf<StcOf<C['shared']>>
 /** Subscribable topics in one role's block (published via `srv.forRole(r).publish`). */
 export type RoleTopics<C extends Contract, R extends RoleOf<C>> = TopicsOf<StcOf<C['roles'][R]>>
+
+/** A role's effective server→client requests (`shared` ∪ `roles[R]`), answered by `client.implement`. */
+export type ServerRequests<C extends Contract, R extends RoleOf<C>> = ServerReqOf<ServerMessages<C, R>>
+/** Server→client requests in the `shared` block (the surface `srv.toConn(id).request` can call). */
+export type SharedServerRequests<C extends Contract> = ServerReqOf<StcOf<C['shared']>>
 
 /** The `serverToServer` map, or `{}` if the contract has none. */
 export type ServerEvents<C extends Contract> = C['serverToServer'] extends Record<string, Schema>

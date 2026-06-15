@@ -21,6 +21,7 @@ import {
   type RoleTopics,
   type ServerEvents,
   type ServerInput,
+  type ClientInput,
   type Output,
   type EmitData,
   type ServerEmit,
@@ -28,6 +29,7 @@ import {
   type ConnDescriptor,
   type NodeStat,
   type PresenceStore,
+  type SharedServerRequests,
 } from '@super-line/core'
 import { Conn } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
@@ -52,10 +54,18 @@ const ROOM = 'r:'
 const TOPIC = 't:'
 const CONN = 'c:' // personal channel per connection (targeted cross-node send)
 const USER = 'u:' // personal channel per user key (cross-node fan-out)
+const REPLY = 'reply:' // per-node channel carrying server→client request replies back to the origin
 const S2S = 's2s' // reserved channel for inter-server messaging
 
 // Envelope carried on personal (c:/u:) channels — distinct from the raw frame fan-out of rooms/topics.
-type PersonalEnvelope = { p: 'emit'; f: EvtFrame } | { p: 'close' }
+type PersonalEnvelope =
+  | { p: 'emit'; f: EvtFrame }
+  | { p: 'close' }
+  | { p: 'req'; o: string; i: number; m: string; d: unknown } // server→client request from origin node `o`
+// Reply to a server→client request, routed back to the origin node on its REPLY channel.
+type ReplyEnvelope =
+  | { i: number; ok: true; d: unknown }
+  | { i: number; ok: false; code: string; m: string; d?: unknown }
 
 // Handlers for one role's clientToServer requests. ctx + conn are narrowed to that role.
 type RoleHandlers<C extends Contract, A, R extends RoleOf<C>> = {
@@ -154,6 +164,16 @@ export interface ClusterView {
 export interface ConnTarget<C extends Contract> {
   /** Push a shared event to this connection (cross-node). */
   emit<E extends keyof SharedEvents<C>>(event: E, data: EmitData<SharedEvents<C>[E]>): void
+  /**
+   * Send a shared server→client request and await the client's typed reply
+   * (cross-node). Rejects with a `TIMEOUT` `SocketError` if no live node owns
+   * the connection or the client doesn't answer in time.
+   */
+  request<M extends keyof SharedServerRequests<C>>(
+    name: M,
+    input: ClientInput<SharedServerRequests<C>[M]>,
+    opts?: { timeout?: number; signal?: AbortSignal },
+  ): Promise<Output<SharedServerRequests<C>[M]>>
   /** Close this connection (cross-node kick). */
   close(): void
 }
@@ -277,8 +297,15 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   const members = new Map<string, Set<Conn>>()
   const serverListeners = new Map<string, Set<(data: unknown) => void>>()
   const instanceId = randomUUID() // identifies this node; lets emitServer exclude itself
+  const replyChannel = REPLY + instanceId
   let impl: Impl = {}
   let closing = false // close() is idempotent
+
+  // server→client request bookkeeping (one counter, two roles a node can play)
+  let nextSReq = 1
+  type Waiter = { resolve: (v: unknown) => void; reject: (e: unknown) => void; timer?: ReturnType<typeof setTimeout> }
+  const originWaiters = new Map<number, Waiter>() // requests THIS node originated, awaiting a reply
+  const ownerRouting = new Map<number, { origin: string; corrId: number; name: string }>() // sreq sent to a local client on behalf of `origin`
 
   function buildDescriptor(conn: Conn): ConnDescriptor {
     const userId = opts.identify?.(conn)
@@ -306,6 +333,10 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       handleServerMessage(payload)
       return
     }
+    if (channel === replyChannel) {
+      handleReply(payload)
+      return
+    }
     if (channel.startsWith(CONN) || channel.startsWith(USER)) {
       handlePersonal(channel, payload)
       return
@@ -314,6 +345,9 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     if (!set) return
     for (const conn of set) conn.sendRaw(payload)
   })
+
+  // the server→client request feature subscribes its reply channel up front (one per node)
+  void adapter.subscribe(replyChannel)
 
   // personal (c:/u:) channels carry a control envelope, not a raw frame to forward verbatim
   function handlePersonal(channel: string, payload: string | Uint8Array): void {
@@ -329,8 +363,56 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       for (const conn of set) conn.close()
       return
     }
+    if (env.p === 'req') {
+      // owner side: forward to the local client under a fresh local id, remember where to reply
+      const localId = nextSReq++
+      ownerRouting.set(localId, { origin: env.o, corrId: env.i, name: env.m })
+      for (const conn of set) conn.send({ t: 'sreq', i: localId, m: env.m, d: env.d })
+      return
+    }
     const frame = serializer.encode(env.f)
     for (const conn of set) conn.sendRaw(frame)
+  }
+
+  // a request reply arrived for something THIS node originated -> settle the waiter
+  function handleReply(payload: string | Uint8Array): void {
+    let env: ReplyEnvelope
+    try {
+      env = serializer.decode(payload) as ReplyEnvelope
+    } catch {
+      return
+    }
+    const w = originWaiters.get(env.i)
+    if (!w) return
+    originWaiters.delete(env.i)
+    if (w.timer) clearTimeout(w.timer)
+    if (env.ok) w.resolve(env.d)
+    else w.reject(new SocketError(env.code, env.m, env.d))
+  }
+
+  // owner side: the local client answered an sreq -> route the reply back to the origin node
+  async function handleClientReply(
+    conn: Conn,
+    localId: number,
+    result: { ok: true; d: unknown } | { ok: false; code: string; m: string; d?: unknown },
+  ): Promise<void> {
+    const r = ownerRouting.get(localId)
+    if (!r) return
+    ownerRouting.delete(localId)
+    let env: ReplyEnvelope
+    if (result.ok) {
+      try {
+        const def = c.roles[conn.role]?.serverToClient?.[r.name] ?? c.shared?.serverToClient?.[r.name]
+        const out = def && 'output' in def ? await validate(def.output, result.d) : result.d
+        env = { i: r.corrId, ok: true, d: out }
+      } catch (err) {
+        const e = err instanceof SocketError ? err : new SocketError('INTERNAL', 'Internal server error')
+        env = { i: r.corrId, ok: false, code: e.code, m: e.message, d: e.data }
+      }
+    } else {
+      env = { i: r.corrId, ok: false, code: result.code, m: result.m, d: result.d }
+    }
+    void adapter.publish(REPLY + r.origin, serializer.encode(env))
   }
 
   // inter-server messaging rides the adapter on a reserved channel; subscribe if used
@@ -393,9 +475,13 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   }
 
   // Where a topic lives for this conn: its role channel, the shared channel, or nowhere.
+  function isTopic(name: string, block: { serverToClient?: Record<string, unknown> } | undefined): boolean {
+    const def = block?.serverToClient?.[name]
+    return !!def && typeof def === 'object' && 'subscribe' in def && def.subscribe === true
+  }
   function topicNamespace(role: string, name: string): string | undefined {
-    if (c.roles[role]?.serverToClient?.[name]?.subscribe) return role
-    if (c.shared?.serverToClient?.[name]?.subscribe) return 'shared'
+    if (isTopic(name, c.roles[role])) return role
+    if (isTopic(name, c.shared)) return 'shared'
     return undefined
   }
 
@@ -456,6 +542,10 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     else if (frame.t === 'unsub') {
       const ns = topicNamespace(conn.role, frame.c)
       if (ns) leaveChannel(conn, TOPIC + ns + ':' + frame.c)
+    } else if (frame.t === 'sres') {
+      await handleClientReply(conn, frame.i, { ok: true, d: frame.d })
+    } else if (frame.t === 'serr') {
+      await handleClientReply(conn, frame.i, { ok: false, code: frame.code, m: frame.m, d: frame.d })
     }
   }
 
@@ -550,7 +640,10 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   }
 
   // emit/close to a personal (c:/u:) channel; the owning node delivers via handlePersonal
-  function personalTarget(channel: string): { emit: (event: string, data: unknown) => void; close: () => void } {
+  function personalTarget(channel: string): {
+    emit: (event: string, data: unknown) => void
+    close: () => void
+  } {
     return {
       emit(event, data) {
         const env: PersonalEnvelope = { p: 'emit', f: { t: 'evt', e: event, d: data } }
@@ -560,6 +653,39 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
         void adapter.publish(channel, serializer.encode({ p: 'close' } satisfies PersonalEnvelope))
       },
     }
+  }
+
+  // server→client request: publish a req envelope to the conn's personal channel and await the reply
+  function requestConn(
+    id: string,
+    name: string,
+    input: unknown,
+    opts?: { timeout?: number; signal?: AbortSignal },
+  ): Promise<unknown> {
+    const reqId = nextSReq++
+    return new Promise<unknown>((resolve, reject) => {
+      const ms = opts?.timeout ?? 30_000
+      const timer =
+        ms > 0
+          ? setTimeout(() => {
+              originWaiters.delete(reqId)
+              reject(new SocketError('TIMEOUT', `Request '${name}' timed out`))
+            }, ms)
+          : undefined
+      originWaiters.set(reqId, { resolve, reject, timer })
+      opts?.signal?.addEventListener(
+        'abort',
+        () => {
+          if (originWaiters.delete(reqId)) {
+            if (timer) clearTimeout(timer)
+            reject(new SocketError('BAD_REQUEST', 'Aborted'))
+          }
+        },
+        { once: true },
+      )
+      const env: PersonalEnvelope = { p: 'req', o: instanceId, i: reqId, m: name, d: input }
+      void adapter.publish(CONN + id, serializer.encode(env))
+    })
   }
 
   const api: SocketServer<C, A> = {
@@ -603,7 +729,12 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       return (await presenceOrThrow().byUser(userId)).length > 0
     },
     toConn(id) {
-      return personalTarget(CONN + id)
+      const t = personalTarget(CONN + id)
+      return {
+        emit: t.emit,
+        close: t.close,
+        request: (name, input, opts) => requestConn(id, String(name), input, opts),
+      } as ConnTarget<C>
     },
     toUser(userId) {
       const t = personalTarget(USER + userId)

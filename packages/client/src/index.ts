@@ -11,10 +11,13 @@ import {
   type Events,
   type Topics,
   type RequestDef,
-  type ServerMessageDef,
+  type ServerEntry,
+  type ServerRequests,
   type ClientInput,
+  type ServerInput,
   type Output,
   type EventData,
+  type SReqFrame,
 } from '@super-line/core'
 import { backoffDelay } from './backoff.js'
 
@@ -35,6 +38,15 @@ export interface Subscription {
   readonly ready: Promise<void>
   /** Stop receiving the topic and tell the server to unsubscribe. */
   unsubscribe(): void
+}
+
+type Awaitable<T> = T | Promise<T>
+
+/** Handlers answering server→client requests for the role's surface (`shared` ∪ role). */
+export type ServerHandlers<C extends Contract, R extends RoleOf<C>> = {
+  [K in keyof ServerRequests<C, R>]?: (
+    input: ServerInput<ServerRequests<C, R>[K]>,
+  ) => Awaitable<Output<ServerRequests<C, R>[K]>>
 }
 
 /** The request-calling half of {@link Client} (one method per request in the role's surface). */
@@ -60,6 +72,8 @@ export type Client<C extends Contract, R extends RoleOf<C>> = ClientMethods<C, R
     topic: T,
     handler: (data: EventData<Topics<C, R>[T]>) => void,
   ): Subscription
+  /** Register handlers answering server→client requests. Throw a `SocketError` for a typed failure. */
+  implement(handlers: ServerHandlers<C, R>): void
   /** Close the connection and stop reconnecting. */
   close(): void
   /** Whether the socket is currently open. */
@@ -170,13 +184,18 @@ export function createClient<C extends Contract, R extends RoleOf<C>>(
   const topicListeners = new Map<string, Set<(data: unknown) => void>>()
   const readyByTopic = new Map<string, Deferred>() // topics awaiting their first ack
   const subAckById = new Map<number, string>() // outstanding sub frame id -> topic
+  const serverHandlers = new Map<string, (input: unknown) => unknown>() // answer server→client requests
 
   // resolve contract defs from this role's effective surface (shared ∪ role)
   function reqDef(method: string): RequestDef | undefined {
     return c.roles[role]?.clientToServer?.[method] ?? c.shared?.clientToServer?.[method]
   }
-  function serverMessageDef(name: string): ServerMessageDef | undefined {
+  function serverEntry(name: string): ServerEntry | undefined {
     return c.roles[role]?.serverToClient?.[name] ?? c.shared?.serverToClient?.[name]
+  }
+  function payloadOf(name: string): Schema | undefined {
+    const def = serverEntry(name)
+    return def && 'payload' in def ? def.payload : undefined
   }
 
   let ws!: WebSocket
@@ -273,15 +292,45 @@ export function createClient<C extends Contract, R extends RoleOf<C>>(
       }
       settleRequest(frame.i, (op) => op.reject(new SocketError(frame.code, frame.m, frame.d)))
     } else if (frame.t === 'evt') {
-      if (!checkInbound(serverMessageDef(frame.e)?.payload, frame.d, { kind: 'event', name: frame.e }))
+      if (!checkInbound(payloadOf(frame.e), frame.d, { kind: 'event', name: frame.e }))
         return
       const set = listeners.get(frame.e)
       if (set) for (const cb of set) cb(frame.d)
     } else if (frame.t === 'pub') {
-      if (!checkInbound(serverMessageDef(frame.c)?.payload, frame.d, { kind: 'topic', name: frame.c }))
+      if (!checkInbound(payloadOf(frame.c), frame.d, { kind: 'topic', name: frame.c }))
         return
       const set = topicListeners.get(frame.c)
       if (set) for (const cb of set) cb(frame.d)
+    } else if (frame.t === 'sreq') {
+      void handleServerRequest(frame)
+    }
+  }
+
+  async function handleServerRequest(frame: SReqFrame): Promise<void> {
+    const send = (f: object) => {
+      if (ws.readyState === WS.OPEN) ws.send(serializer.encode(f))
+    }
+    const handler = serverHandlers.get(frame.m)
+    if (!handler) {
+      send({ t: 'serr', i: frame.i, code: 'NOT_FOUND', m: `No handler for ${frame.m}` })
+      return
+    }
+    let input = frame.d
+    const def = serverEntry(frame.m)
+    if (validateInbound && def && 'input' in def) {
+      try {
+        input = validateSync(def.input as Schema, frame.d)
+      } catch {
+        send({ t: 'serr', i: frame.i, code: 'VALIDATION', m: 'Validation failed' })
+        return
+      }
+    }
+    try {
+      const output = await handler(input)
+      send({ t: 'sres', i: frame.i, d: output })
+    } catch (e) {
+      const se = e instanceof SocketError ? e : new SocketError('INTERNAL', 'Internal client error')
+      send({ t: 'serr', i: frame.i, code: se.code, m: se.message, d: se.data })
     }
   }
 
@@ -403,6 +452,11 @@ export function createClient<C extends Contract, R extends RoleOf<C>>(
       }
     },
     subscribe,
+    implement(handlers: Record<string, (input: unknown) => unknown>): void {
+      for (const [name, handler] of Object.entries(handlers)) {
+        if (handler) serverHandlers.set(name, handler)
+      }
+    },
     close(): void {
       closed = true
       if (reconnectTimer) clearTimeout(reconnectTimer)

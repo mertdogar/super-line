@@ -7,6 +7,8 @@ description: Use when building realtime features with super-line — TypeScript/
 
 Typesafe WebSockets for TypeScript. **One contract is the single source of truth** — the server implements it, the client calls it, types flow end to end with no codegen.
 
+Human-facing docs (guides + full generated API reference): <https://mertdogar.github.io/super-line/>. This skill is the condensed, prescriptive version for agents.
+
 ## Mental model — read this first
 
 There is exactly **one contract**, defined once and imported by **both** sides. It is split by **direction** and scoped by **role**:

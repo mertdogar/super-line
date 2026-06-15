@@ -1,6 +1,14 @@
 import type { WebSocket } from 'ws'
 import type { Serializer, ServerFrame, ServerMessageDef, EmitData } from '@super-line/core'
 
+/** Backpressure policy: what to do when a connection's send buffer grows too large. */
+export interface Backpressure {
+  /** Buffer size (bytes) above which {@link Backpressure.onExceed} kicks in. */
+  maxBufferedBytes: number
+  /** `'close'` (default) drops the connection with code 1013; `'drop'` skips the frame. */
+  onExceed?: 'close' | 'drop'
+}
+
 /**
  * A single client connection, passed to handlers as the third argument.
  *
@@ -36,17 +44,30 @@ export class Conn<
     /** The context `authenticate` returned for this connection. */
     readonly ctx: Ctx,
     private readonly serializer: Serializer,
+    private readonly backpressure?: Backpressure,
   ) {}
+
+  // true => the frame was handled by the backpressure policy and must not be sent
+  private overBackpressure(): boolean {
+    const bp = this.backpressure
+    if (!bp || this.ws.bufferedAmount <= bp.maxBufferedBytes) return false
+    if (bp.onExceed === 'drop') {
+      console.warn(`[super-line] dropping frame: conn ${this.id} over backpressure limit`)
+      return true
+    }
+    this.ws.close(1013) // 'close' (default): too much backlog
+    return true
+  }
 
   /** Encode and send a frame (unicast, e.g. req/res). */
   send(frame: ServerFrame): void {
-    if (this.ws.readyState !== this.ws.OPEN) return
+    if (this.ws.readyState !== this.ws.OPEN || this.overBackpressure()) return
     this.ws.send(this.serializer.encode(frame))
   }
 
   /** Forward an already-encoded frame (fan-out path; encoded once at the source). */
   sendRaw(payload: string | Uint8Array): void {
-    if (this.ws.readyState !== this.ws.OPEN) return
+    if (this.ws.readyState !== this.ws.OPEN || this.overBackpressure()) return
     this.ws.send(payload)
   }
 

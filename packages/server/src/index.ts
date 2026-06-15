@@ -31,10 +31,10 @@ import {
   type PresenceStore,
   type SharedServerRequests,
 } from '@super-line/core'
-import { Conn } from './conn.js'
+import { Conn, type Backpressure } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
 
-export { Conn } from './conn.js'
+export { Conn, type Backpressure } from './conn.js'
 export { MemoryBus, createInMemoryAdapter } from './memory-adapter.js'
 
 type Awaitable<T> = T | Promise<T>
@@ -219,6 +219,8 @@ export interface ServerOptions<C extends Contract, A extends AuthResult<C>> {
    * Defaults to `{ interval: 30_000 }` (no reaping).
    */
   heartbeat?: { interval?: number; maxMissed?: number } | false
+  /** Guard against slow consumers: when a connection's send buffer exceeds the limit, close or drop. */
+  backpressure?: Backpressure
   /** Called once per accepted connection. */
   onConnection?: (conn: Conn, ctx: CtxUnion<A>) => void
   /** Called when a connection closes, with the WebSocket close `code`. */
@@ -507,7 +509,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     }
 
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const conn = new Conn(ws, randomUUID(), auth.role, auth.ctx, serializer)
+      const conn = new Conn(ws, randomUUID(), auth.role, auth.ctx, serializer, opts.backpressure)
       conns.add(conn)
       void adapter.presence?.set(buildDescriptor(conn))
       void joinChannel(conn, CONN + conn.id) // personal channel for targeted cross-node send

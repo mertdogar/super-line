@@ -3,3 +3,9 @@ dist
 *.tsbuildinfo
 .DS_Store
 coverage
+
+# docs site: vitepress build artifacts + generated API reference
+docs/.vitepress/cache
+docs/.vitepress/dist
+docs/reference/*
+!docs/reference/index.md

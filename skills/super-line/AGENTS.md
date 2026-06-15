@@ -83,6 +83,7 @@ export const api = defineContract({
 - **`conn.emit` / a stored `conn` is node-local.** To reach a user across nodes, use `srv.toUser(uid).emit(...)` / `srv.toConn(id).emit(...)`.
 - **`srv.local.*` is sync/this-node; `srv.cluster.*` is async/cluster-wide** (needs a presence adapter + `identify`). A `ConnDescriptor` is a connect-time snapshot, not a live `Conn`.
 - **`toConn(id).request` is shared-only + single-target** (missing target → `TIMEOUT`); `toUser` has no `request`. The client must `client.implement` the handler or it replies `NOT_FOUND`.
+- **Seed `identify`/`describeConn`/`conn.data` in `onConnection`** — it runs before the presence snapshot; mutating `conn.data` later won't update the already-written cluster descriptor. Prefer sync `srv.local.*` on hot paths (`srv.cluster.*` hits the adapter and is eventually consistent).
 - **`emitServer` excludes the sender** (other nodes only; single-node = no-op).
 - **JSON loses `Date`.** Use `z.coerce.date()` or a `superjson` serializer on **both** ends.
 - **The client is a proxy, not awaitable** — `await client.someRequest(...)`, never `await client`.

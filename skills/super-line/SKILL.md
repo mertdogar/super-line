@@ -1,6 +1,6 @@
 ---
 name: super-line
-description: Use when building realtime features with super-line — TypeScript/JavaScript that imports from @super-line/core, @super-line/server, @super-line/client, @super-line/adapter-redis, or @super-line/react, or when the user mentions super-line. Covers the one contract split by direction (clientToServer/serverToClient) and scoped by role (a shared base plus per-role surfaces), the interaction flavors (req/res requests, server-pushed events, client-subscribed topics, server-controlled rooms, node-to-node serverToServer), upgrade-time auth that returns { role, ctx }, role enforcement (cross-role calls get NOT_FOUND), the typed SocketError model, client reconnect and at-most-once delivery, multi-node scaling via the Redis adapter, testing over a real loopback server, and common pitfalls. Not for socket.io, ws, or tRPC.
+description: Use when building realtime features with super-line — TypeScript/JavaScript that imports from @super-line/core, @super-line/server, @super-line/client, @super-line/adapter-redis, or @super-line/react, or when the user mentions super-line. Covers the one contract split by direction (clientToServer/serverToClient) and scoped by role (a shared base plus per-role surfaces); the interaction flavors (req/res requests, server-pushed events, client-subscribed topics, server-controlled rooms, node-to-node serverToServer, and server→client requests where the server asks a client and awaits a typed reply via toConn.request / client.implement); upgrade-time auth that returns { role, ctx }, role enforcement (cross-role calls get NOT_FOUND), the typed SocketError model; connection introspection and presence (srv.local for this node, srv.cluster for the whole fleet — connection counts, topology, isOnline, byUser); targeted cross-node send and disconnect (srv.toConn(id) / srv.toUser(uid)); heartbeat liveness (lastPongAt) and zombie reaping; typed per-connection state (conn.data); backpressure; client reconnect and at-most-once delivery; multi-node scaling and the presence registry via the Redis adapter; testing over a real loopback server; and common pitfalls. Also reach for this skill when the user asks how to count or list connections, check who's online, broadcast or send to a specific user/connection across servers, push a message to another node, ask a connected client a question, track presence, or shape a typed WebSocket contract — even if they don't name super-line. Not for socket.io, ws, or tRPC.
 ---
 
 # super-line
@@ -93,6 +93,8 @@ Full signatures → **REFERENCE.md**. End-to-end best-practice patterns (roles, 
 - **ALWAYS** treat delivery as **at-most-once**: offline clients miss messages (no replay). Make handlers idempotent; re-run join flows after reconnect; don't assume in-flight requests survive a drop.
 - **ALWAYS** add a real adapter (`@super-line/adapter-redis`) before running more than one server process — otherwise rooms/topics/serverToServer only fan out within one node.
 - **PREFER** `events` (server picks recipients) over `topics` when the server decides who gets it; use `topics` only for client-initiated subscriptions.
+- **PREFER** `srv.local.*` (sync, in-process) for hot-path reads; reach for `srv.cluster.*` only when you genuinely need the whole fleet. Cluster reads hit the adapter (Redis) and are **eventually consistent** — a snapshot, not a transaction. Don't poll them in a tight loop.
+- **ALWAYS** seed cluster-descriptor fields (`identify`/`describeConn` inputs, `conn.data`) in `onConnection` — it runs just *before* the presence snapshot. Mutating `conn.data` later in a handler updates the in-process conn but **not** the already-written descriptor.
 - **NEVER** trust client input — the server validates inbound automatically, but don't bypass it; keep schemas tight.
 
 ## Pitfalls
@@ -105,6 +107,9 @@ Full signatures → **REFERENCE.md**. End-to-end best-practice patterns (roles, 
 - **`srv.local.*` is sync + this-node-only; `srv.cluster.*` is async + cluster-wide.** Cluster reads need an adapter with presence (in-memory/redis have it) and an `identify` hook for `byUser`/`isOnline`/`toUser`. A `ConnDescriptor` is a connect-time snapshot, not a live `Conn` (no `lastPongAt`; seed extra fields in `onConnection`).
 - **`toConn(id).request` is SHARED-only and single-target.** The caller has an id, not a role, so only `shared.serverToClient` requests are callable; `toUser` has **no** `request` (multi-device is ambiguous — pick a conn via `cluster.byUser` first). A missing/dead target rejects with `TIMEOUT`.
 - **A server→client request needs `client.implement`.** Without a handler the client replies `NOT_FOUND`. Throw a `SocketError` in the handler for a typed failure.
+- **Don't `toConn`/`toUser` a client in the *same tick* it connects.** The personal `c:{id}`/`u:{uid}` channel is subscribed fire-and-forget on connect; on Redis that `SUBSCRIBE` takes a moment to propagate, so a send issued in the same millisecond can miss. In real flows any prior `await` (a handler, an introspection call) closes the window — only synthetic "connect then immediately push" code hits it.
+- **`cluster.*` / `isOnline` need a presence-capable adapter AND `identify`.** The in-memory and Redis adapters have presence; a custom pub/sub-only adapter makes `srv.cluster.*` throw. `byUser`/`isOnline`/`toUser` also need the `identify` hook set, or they see no user key.
+- **Heartbeat liveness (`lastPongAt`) is node-local, not in the registry.** Cluster liveness is "node alive + conn present"; for per-socket freshness read `conn.lastPongAt` on the owning node. A crashed node's conns drop from cluster queries only after its alive-TTL expires.
 - **`serverToServer` excludes the sender.** `emitServer` reaches *other* nodes only; on a single node it's a no-op.
 - **JSON serializer loses rich types.** Default JSON turns `Date` into a string; use `z.coerce.date()` or configure `superjson` as the serializer on **both** ends (they must match).
 - **The client is not awaitable.** It's a proxy; don't `await client` (only `await client.someRequest(...)`).
@@ -133,4 +138,11 @@ await client.setPrice({ symbol, price })                   // handler -> srv.for
 return { error: 'nope' }
 // ✅ throw a typed SocketError; the client promise rejects with the code
 throw new SocketError('FORBIDDEN', 'not a member')
+
+// ❌ stashing a conn to reach a user later (node-local; breaks across nodes, leaks on disconnect)
+const conns = new Map(); onConnection: (conn, ctx) => conns.set(ctx.userId, conn)
+later: conns.get(userId)?.emit('dm', msg)
+// ✅ address the user by key — reaches every device on any node
+identify: (conn) => conn.ctx.userId          // in server opts
+later: srv.toUser(userId).emit('dm', msg)    // or srv.toConn(id).request(...) for a reply
 ```

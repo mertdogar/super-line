@@ -195,6 +195,9 @@ pnpm --filter @super-line/example-react-chat dev   # http://localhost:5173
 # Token auth with roles (admin-only `secret`; user gets NOT_FOUND):
 pnpm --filter @super-line/example-auth start
 
+# Presence + targeted send + server→client requests across 2 nodes (no Docker):
+pnpm --filter @super-line/example-presence start
+
 # Multi-node fan-out via Redis + serverToServer (needs Docker/Redis):
 docker run --rm -p 6379:6379 redis:7
 pnpm --filter @super-line/example-scaling start

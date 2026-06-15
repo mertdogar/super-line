@@ -77,6 +77,25 @@ importers:
         specifier: ^4.19.2
         version: 4.22.4
 
+  examples/presence:
+    dependencies:
+      '@super-line/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@super-line/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@super-line/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
+
   examples/react-chat:
     dependencies:
       '@super-line/client':

@@ -30,6 +30,16 @@ pnpm --filter @super-line/example-auth start
 
 Demonstrates: [auth](/guide/roles-auth), [`NOT_FOUND` enforcement](/guide/roles-auth#enforcement-not-found), [errors](/guide/errors).
 
+## presence — introspection, targeted send & server→client requests
+
+Boots **two nodes** sharing one in-memory bus (no Docker needed) and shows the server-side toolkit across nodes: `cluster.count`/`topology`/`isOnline`, a `toUser(...).emit` from the node that *doesn't* hold the socket, and a `toConn(id).request(...)` where one node asks a client a question and awaits the typed reply (the client answers via `client.implement`).
+
+```bash
+pnpm --filter @super-line/example-presence start
+```
+
+Demonstrates: [introspection & presence](/guide/introspection-and-presence).
+
 ## scaling — multi-node fan-out
 
 Boots **two nodes** against one Redis and proves a topic publish, a room broadcast, and a `serverToServer` event from node B all reach a client on node A. Needs Docker/Redis.

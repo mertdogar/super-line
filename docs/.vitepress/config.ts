@@ -40,6 +40,7 @@ export default defineConfig({
             { text: 'Roles & auth', link: '/guide/roles-auth' },
             { text: 'Middleware & lifecycle', link: '/guide/middleware-lifecycle' },
             { text: 'Error handling', link: '/guide/errors' },
+            { text: 'Introspection & presence', link: '/guide/introspection-and-presence' },
           ],
         },
         {

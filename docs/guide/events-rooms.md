@@ -28,7 +28,7 @@ user: {
 }
 ```
 
-`conn.emit` is **node-local** — it only reaches that specific socket on this node. To reach a user wherever they're connected (across nodes), use a per-user room (see [Direct messages](./scaling-adapters#direct-messages)).
+`conn.emit` is **node-local** — it only reaches that specific socket on this node. To reach a connection or user *wherever they're connected* (across nodes), use `srv.toConn(id).emit(...)` / `srv.toUser(uid).emit(...)` — see [Introspection & presence](./introspection-and-presence#targeted-send-across-nodes).
 
 ## Rooms
 

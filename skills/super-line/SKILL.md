@@ -48,6 +48,7 @@ export const api = defineContract({
 | **event** | `serverToClient: { payload }` | server → client (push) | server picks recipients | room broadcasts, notifications, direct push |
 | **topic** | `serverToClient: { payload, subscribe: true }` | server → many clients | **client** subscribes (server authorizes) | live streams: prices, presence, feeds |
 | **room** | server API | server → members | **server** controls (`add`/`remove`) | grouping conns to broadcast a shared event |
+| **server→client request** | `serverToClient: { input, output }` | server → client → server (one reply) | server | asking a client: `confirm`, `sync`, capability probe |
 | **serverToServer** | `serverToServer: { schema }` | node → other nodes | server | cluster coordination: rebalance, cache-invalidate |
 
 Decide: **Need a reply?** request. **Pushing to recipients *you* pick?** event (often via `room.broadcast`). **Clients opting into a stream?** topic. **Coordinating other server processes?** `serverToServer`.
@@ -72,6 +73,14 @@ Decide: **Need a reply?** request. **Pushing to recipients *you* pick?** event (
 | Client subscribe | `const sub = client.subscribe('feed', (d) => …); await sub.ready; sub.unsubscribe()` |
 | Multi-node | pass `adapter: createRedisAdapter('redis://…')` to every server |
 | React | `const { Provider, useRequest, useEvent, useSubscription } = createSocketReact<typeof api, 'user'>()` |
+| Local introspection (sync) | `srv.local.connections` / `.rooms` / `.topics`; `srv.room('x').connections`; `conn.id`/`connectedAt`/`lastPongAt`; filter with plain JS |
+| Cluster introspection (async) | `await srv.cluster.connections()` / `.count()` / `.byUser(uid)` / `.room(n)` / `.topology()`; `await srv.isOnline(uid)` — needs `identify` + presence adapter |
+| Identify a conn for cluster | `identify: (conn) => conn.ctx.userId`, `describeConn: (conn) => ({ plan })` in server opts (ctx never auto-serialized) |
+| Targeted cross-node send | `srv.toConn(id).emit('ev', d)` / `srv.toUser(uid).emit('ev', d)` (shared events); `srv.toConn(id).close()` / `srv.toUser(uid).disconnect()` |
+| Ask a client (server→client req) | server: `await srv.toConn(id).request('confirm', input, { timeout?, signal? })`; client: `client.implement({ confirm: async (input) => output })` |
+| Heartbeat / reaping | `heartbeat: { interval: 30_000, maxMissed: 2 }` (or `false`) in server opts; read `conn.lastPongAt` |
+| Per-conn state | declare `data:` schema in a role block → `conn.data` typed per role, mutable, starts `{}` |
+| Backpressure | `backpressure: { maxBufferedBytes, onExceed: 'close' | 'drop' }` in server opts |
 
 Full signatures → **REFERENCE.md**. End-to-end best-practice patterns (roles, auth, presence, DMs, scaling, serverToServer, testing) → **RECIPES.md**.
 
@@ -92,7 +101,10 @@ Full signatures → **REFERENCE.md**. End-to-end best-practice patterns (roles, 
 - **Rooms are mixed-role; `broadcast` takes SHARED events only.** To push a role-specific event to a group, use a role topic (`forRole(r).publish`) or per-conn `conn.emit`. Put events meant for room broadcast in `shared.serverToClient`.
 - **Clients cannot publish to topics.** `topics` are server-publish only. For client→others, send a request and have the handler validate, then `srv.publish(...)` / `forRole(r).publish(...)` / `room.broadcast(...)`.
 - **Topics are typed by exact contract key only.** Parameterized topics (`'room:{id}'`) are not type-inferred — use a concrete key, or carry the id in the payload and filter client-side.
-- **`conn.emit` / a `conn` reference is node-local.** To reach "user X wherever connected" across nodes, broadcast to a per-user room — not a stored `conn`.
+- **`conn.emit` / a `conn` reference is node-local.** To reach "user X wherever connected" across nodes, use `srv.toUser(uid).emit(...)` or `srv.toConn(id).emit(...)` — not a stored `conn`.
+- **`srv.local.*` is sync + this-node-only; `srv.cluster.*` is async + cluster-wide.** Cluster reads need an adapter with presence (in-memory/redis have it) and an `identify` hook for `byUser`/`isOnline`/`toUser`. A `ConnDescriptor` is a connect-time snapshot, not a live `Conn` (no `lastPongAt`; seed extra fields in `onConnection`).
+- **`toConn(id).request` is SHARED-only and single-target.** The caller has an id, not a role, so only `shared.serverToClient` requests are callable; `toUser` has **no** `request` (multi-device is ambiguous — pick a conn via `cluster.byUser` first). A missing/dead target rejects with `TIMEOUT`.
+- **A server→client request needs `client.implement`.** Without a handler the client replies `NOT_FOUND`. Throw a `SocketError` in the handler for a typed failure.
 - **`serverToServer` excludes the sender.** `emitServer` reaches *other* nodes only; on a single node it's a no-op.
 - **JSON serializer loses rich types.** Default JSON turns `Date` into a string; use `z.coerce.date()` or configure `superjson` as the serializer on **both** ends (they must match).
 - **The client is not awaitable.** It's a proxy; don't `await client` (only `await client.someRequest(...)`).

@@ -48,9 +48,12 @@
 | 📣 **Events & rooms** | Server-pushed events; server-controlled room broadcasts. |
 | 📡 **Topics** | Client-subscribed pub/sub streams, authorized server-side. |
 | 🖧 **Inter-server** | Typed `emitServer` / `onServer` for node-to-node coordination. |
+| 📨 **Server→client req/res** | `await srv.toConn(id).request(...)` — ask a client and await a typed reply, across nodes. |
+| 🛰️ **Presence & introspection** | `srv.local.*` (sync) + `srv.cluster.*` (counts, topology, `isOnline`) backed by a Redis registry. |
+| 🎯 **Targeted send** | `srv.toConn(id)` / `srv.toUser(uid)` emit or kick any connection on any node. |
 | 🔌 **Composable** | Attaches to your `http.Server`; lifecycle hooks + middleware. |
 | 🔁 **Resilient client** | Auto-reconnect, re-subscribe, in-flight reject, queue-and-flush. |
-| 📈 **Scales** | Rooms, topics & inter-server events fan out across nodes via an adapter (Redis included). |
+| 📈 **Scales** | Rooms, topics, inter-server events & presence fan out across nodes via an adapter (Redis included). |
 
 ## Install
 
@@ -153,6 +156,23 @@ sub.unsubscribe()
 client.close()
 ```
 
+### Presence & cross-node reach (optional)
+
+```ts
+// server: identify connections so the cluster view + toUser can find them
+createSocketServer(chat, { server, authenticate, identify: (conn) => conn.ctx.userId })
+
+await srv.cluster.count()                 // total connections cluster-wide
+await srv.isOnline('u42')                 // connected on any node?
+srv.toUser('u42').emit('message', { ... }) // reach every device, any node
+
+// ask a specific client and await its typed reply (across nodes):
+const { ok } = await srv.toConn(connId).request('confirm', { q: 'Deploy now?' })
+// client side: client.implement({ confirm: async ({ q }) => ({ ok: true }) })
+```
+
+See [Introspection & presence](https://mertdogar.github.io/super-line/guide/introspection-and-presence) for the full surface.
+
 ## Documentation
 
 The full docs live at **[mertdogar.github.io/super-line](https://mertdogar.github.io/super-line/)**:
@@ -204,6 +224,8 @@ For **Cursor, GitHub Copilot, and other agents** (one condensed file + where to 
 | Rooms | ✅ | ✅ | ❌ | ❌ |
 | Topics (pub/sub) | ✅ | ⚠️ via rooms | subscriptions | ❌ |
 | Inter-server messaging | ✅ | ✅ | ❌ | ❌ |
+| Server→client req/res | ✅ | ⚠️ ack-less | ❌ | ❌ |
+| Presence / introspection | ✅ cluster-wide | ⚠️ rooms only | ❌ | ❌ |
 | Multi-node | ✅ adapter | ✅ adapter | ❌ | ❌ |
 | Zero codegen | ✅ | ✅ | ✅ | n/a |
 
@@ -228,7 +250,7 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 | Package | Purpose |
 | --- | --- |
 | [`@super-line/core`](packages/core) | `defineContract` (roles + direction), validation, wire protocol, `Serializer` / `Adapter` interfaces, `SocketError` |
-| [`@super-line/server`](packages/server) | `createSocketServer` over `ws`: role-keyed `implement`, rooms, topics, `forRole`, `emitServer`/`onServer`, middleware, in-memory adapter |
+| [`@super-line/server`](packages/server) | `createSocketServer` over `ws`: role-keyed `implement`, rooms, topics, `forRole`, `emitServer`/`onServer`, server→client requests (`toConn`/`toUser`), local + cluster introspection, heartbeat, middleware, in-memory adapter |
 | [`@super-line/client`](packages/client) | `createClient` (role-scoped surface, reconnect, typed calls, `on` / `subscribe`) |
 | [`@super-line/adapter-redis`](packages/adapter-redis) | Redis Pub/Sub adapter for multi-node fan-out |
 | [`@super-line/react`](packages/react) | `createSocketReact<C, Role>` → `useRequest` / `useEvent` / `useSubscription` |

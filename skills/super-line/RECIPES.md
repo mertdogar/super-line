@@ -159,12 +159,64 @@ srv.implement({
 
 ## Direct message to a user — cross-node safe
 
-Don't stash a `conn` to DM someone (it's node-local). Put each user in a per-user room and broadcast a shared event to it:
+Don't stash a `conn` to DM someone (it's node-local). With an `identify` hook set, target the user directly — `toUser` reaches every device on any node:
 
 ```ts
-onConnection: (conn, ctx) => srv.room(`user:${ctx.user.id}`).add(conn),
+createSocketServer(api, { server, authenticate, identify: (conn) => conn.ctx.user.id })
 // later, from anywhere (any node):
-srv.room(`user:${targetId}`).broadcast('dm', { from, text })   // 'dm' is a shared event
+srv.toUser(targetId).emit('dm', { from, text })   // 'dm' is a shared event; all the user's devices
+srv.toConn(connId).emit('dm', { from, text })     // or one specific connection
+```
+
+## Introspection & presence dashboard
+
+```ts
+createSocketServer(api, {
+  server, authenticate,
+  identify: (conn) => conn.ctx.user.id,
+  describeConn: (conn) => ({ plan: conn.ctx.user.plan }),
+})
+
+// node-local (sync): cheap reads of THIS process
+srv.local.connections.length
+srv.local.connections.filter((c) => c.role === 'agent')
+
+// cluster-wide (async): reads the presence registry (in-memory or Redis)
+await srv.cluster.count()                       // total everywhere
+await srv.cluster.topology()                    // [{ nodeId, connections, rooms, alive }]
+await srv.cluster.room('lobby')                 // members across nodes
+await srv.isOnline(userId)                       // show an online dot
+```
+
+## Ask a client a question (server → client request)
+
+```ts
+// contract: shared.serverToClient.confirm = { input: z.object({ q: z.string() }), output: z.object({ ok: z.boolean() }) }
+
+// client answers (throw SocketError for a typed failure):
+client.implement({ confirm: async ({ q }) => ({ ok: await askUser(q) }) })
+
+// server asks a specific connection (cross-node), awaits the typed reply:
+const { ok } = await srv.toConn(connId).request('confirm', { q: 'Deploy now?' }, { timeout: 10_000 })
+// to ask a USER, pick a connection first (request is single-target):
+const [c] = await srv.cluster.byUser(userId)
+if (c) await srv.toConn(c.id).request('confirm', { q: '…' })
+```
+
+## Per-connection state (typed)
+
+```ts
+// contract: roles.user.data = z.object({ lastSeenMsgId: z.number() })
+srv.implement({
+  user: {
+    ack: async ({ id }, _ctx, conn) => {
+      conn.data.lastSeenMsgId = id   // typed, mutable, per-connection
+      return {}
+    },
+  },
+})
+// seed data (and have it land in the cluster descriptor) from onConnection:
+onConnection: (conn) => { conn.data.lastSeenMsgId = 0 }
 ```
 
 ## Presence via a topic

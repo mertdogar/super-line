@@ -40,6 +40,7 @@ export const api = defineContract({
 | **event** | `serverToClient: { payload }` | server picks recipients | notifications, room broadcasts |
 | **topic** | `serverToClient: { payload, subscribe: true }` | client subscribes (server authorizes) | live streams |
 | **room** | server API (`srv.room`) | server controls membership | broadcast a shared event to a group |
+| **server→client request** | `serverToClient: { input, output }` | server (awaits one reply) | asking a client: confirm, sync |
 | **serverToServer** | `serverToServer: { schema }` | a server node | cluster coordination |
 
 ## Quick reference
@@ -55,6 +56,10 @@ export const api = defineContract({
 | Broadcast to a room | `srv.room('room:42').broadcast('event', data)` — **shared events only** |
 | Publish a topic | `srv.forRole('user').publish('feed', data)` (role) / `srv.publish('announce', data)` (shared) — **server only** |
 | Node → other nodes | `srv.emitServer('x', data)` / `srv.onServer('x', cb)` |
+| Introspection | `srv.local.connections/.rooms/.topics` (sync, this node) · `await srv.cluster.count()/.connections()/.byUser(uid)/.topology()` · `await srv.isOnline(uid)` (needs `identify` + presence adapter) |
+| Targeted cross-node send | `srv.toConn(id).emit('ev', d)` / `srv.toUser(uid).emit('ev', d)` · `.close()` / `.disconnect()` to kick |
+| Ask a client | `await srv.toConn(id).request('confirm', input, { timeout? })`; client: `client.implement({ confirm: async (input) => output })` |
+| Heartbeat / per-conn state / backpressure | `heartbeat: { interval, maxMissed }` · `data:` schema in a role → typed `conn.data` · `backpressure: { maxBufferedBytes, onExceed }` |
 | Client call/listen/subscribe | `await client.send(input)` · `client.on('event', cb)` · `client.subscribe('feed', cb)` (await `.ready`) |
 | Multi-node | pass `adapter: createRedisAdapter('redis://…')` to every server |
 | React | `createSocketReact<typeof api, 'user'>()` → `Provider` / `useRequest` / `useEvent` / `useSubscription` |
@@ -75,7 +80,9 @@ export const api = defineContract({
 - **Rooms are mixed-role; `broadcast` takes SHARED events only.** Put room-broadcast events in `shared.serverToClient`; for role-specific fan-out use a topic or `conn.emit`.
 - **Clients cannot publish to topics.** For client→others, send a request and have the handler publish.
 - **Topics are typed by exact key.** Parameterized names (`'room:{id}'`) aren't inferred — use a concrete key + carry the id in the payload.
-- **`conn.emit` / a stored `conn` is node-local.** To reach a user across nodes, broadcast to a per-user room.
+- **`conn.emit` / a stored `conn` is node-local.** To reach a user across nodes, use `srv.toUser(uid).emit(...)` / `srv.toConn(id).emit(...)`.
+- **`srv.local.*` is sync/this-node; `srv.cluster.*` is async/cluster-wide** (needs a presence adapter + `identify`). A `ConnDescriptor` is a connect-time snapshot, not a live `Conn`.
+- **`toConn(id).request` is shared-only + single-target** (missing target → `TIMEOUT`); `toUser` has no `request`. The client must `client.implement` the handler or it replies `NOT_FOUND`.
 - **`emitServer` excludes the sender** (other nodes only; single-node = no-op).
 - **JSON loses `Date`.** Use `z.coerce.date()` or a `superjson` serializer on **both** ends.
 - **The client is a proxy, not awaitable** — `await client.someRequest(...)`, never `await client`.

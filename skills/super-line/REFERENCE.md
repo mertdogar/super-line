@@ -10,16 +10,18 @@ defineContract(<const C>): C                 // identity; preserves literal keys
 {
   shared?: {
     clientToServer?: Record<string, { input: Schema; output: Schema }>   // requests
-    serverToClient?: Record<string, { payload: Schema; subscribe?: boolean }> // event | topic
+    serverToClient?: Record<string, ServerEntry>                          // event | topic | server→client request
   }
   roles: Record<string, {                    // at least one role
+    data?: Schema                            // optional: types this role's mutable conn.data
     clientToServer?: Record<string, { input: Schema; output: Schema }>
-    serverToClient?: Record<string, { payload: Schema; subscribe?: boolean }>
+    serverToClient?: Record<string, ServerEntry>
   }>
   serverToServer?: Record<string, Schema>    // node <-> node payloads (not role-scoped)
 }
+// ServerEntry (serverToClient): { payload } => push event; { payload, subscribe: true } => topic;
+//                               { input, output } => server→client request (client answers via client.implement)
 // A role's effective surface = shared ∪ roles[R].
-// serverToClient entry: { payload } => push event; { payload, subscribe: true } => client-subscribable topic.
 // Schema = any StandardSchemaV1 validator (Zod, Valibot, ArkType…). Zod in examples.
 
 validate(schema, value): Promise<Output>     // async-capable; throws SocketError('VALIDATION')
@@ -39,11 +41,16 @@ interface Adapter {                          // cross-node fan-out seam
   publish(channel, payload: string|Uint8Array): void|Promise<void>
   onMessage(cb: (channel, payload) => void): void
   close?(): void|Promise<void>
+  presence?: PresenceStore                   // optional: powers srv.cluster.* / isOnline (in-memory + redis have it)
 }
+// PresenceStore: set/del/beat/clearNode + addRoom/removeRoom + list/get/byUser/roomMembers/count/topology
+// ConnDescriptor { id, role, nodeId, connectedAt, userId?, rooms, [extra] }; NodeStat { nodeId, connections, rooms, alive }
 
-// contract type: Contract, Directional, RequestDef, ServerMessageDef, Schema
+// contract type: Contract, Directional, RoleBlock, RequestDef, ServerMessageDef, ServerRequestDef, ServerEntry, Schema
 // surface helpers: RoleOf<C>, Requests<C,R>, ServerMessages<C,R>, Events<C,R>, Topics<C,R>,
-//   SharedRequests<C>, RoleRequests<C,R>, SharedEvents<C>, SharedTopics<C>, RoleTopics<C,R>, ServerEvents<C>
+//   SharedRequests<C>, RoleRequests<C,R>, SharedEvents<C>, SharedTopics<C>, RoleTopics<C,R>, ServerEvents<C>,
+//   ServerRequests<C,R>, SharedServerRequests<C>, DataOf<C,R>, AnyData<C>
+// presence: PresenceStore, ConnDescriptor, NodeStat
 // extractors (guarded): ClientInput<T>, ServerInput<T>, Output<T>, EventData<T>, EmitData<T>, ServerEmit<T>, ServerData<T>
 // InferIn<S>, InferOut<S>
 ```
@@ -64,20 +71,56 @@ interface ServerOptions<C, A> {
   authenticate: (req: IncomingMessage) => A | Promise<A>   // REQUIRED. Return { role, ctx }; throw -> 401
   authorizeSubscribe?: (topic, ctx, conn) => boolean | void | Promise<boolean | void> // false/throw -> deny
   use?: Middleware<A>[]                        // run before request/subscribe handlers
-  onConnection?: (conn, ctx) => void
+  onConnection?: (conn, ctx) => void           // runs just BEFORE the presence snapshot (seed conn.data here)
   onDisconnect?: (conn, ctx, code: number) => void
   onError?: (error: unknown, info: MiddlewareInfo) => void
+  identify?: (conn) => string | undefined      // stable user key -> cluster.byUser / isOnline / toUser
+  describeConn?: (conn) => Record<string, unknown>  // extra fields merged into the cluster descriptor (ctx never auto-serialized)
+  heartbeat?: { interval?: number; maxMissed?: number } | false  // default { interval: 30_000 }; maxMissed -> reap
+  backpressure?: { maxBufferedBytes: number; onExceed?: 'close' | 'drop' }  // guard slow consumers ('close' -> 1013)
 }
 
 interface SocketServer<C, A> {
+  readonly nodeId: string                                            // this process's stable id
   implement(handlers: Handlers<C, A>): SocketServer<C, A>             // chainable
   room(name: string): Room<C>                                        // mixed-role group
   publish<T extends keyof SharedTopics<C>>(topic: T, data): void      // SHARED topics
   forRole<R>(role: R): { publish<T extends keyof RoleTopics<C,R>>(topic: T, data): void }  // role topics
   emitServer<E extends keyof ServerEvents<C>>(event: E, data): void   // -> OTHER nodes (excludes self)
   onServer<E extends keyof ServerEvents<C>>(event: E, cb: (data) => void): () => void      // returns unsubscribe
-  close(): Promise<void>                                              // closes conns + adapter + ws
+  // introspection
+  readonly local: LocalView                                          // sync, THIS node
+  readonly cluster: ClusterView                                      // async, registry-backed (needs presence adapter)
+  isOnline(userId: string): Promise<boolean>                          // any live conn for this user key?
+  // targeted cross-node send (no registry lookup on the delivery path)
+  toConn(id: string): ConnTarget<C>                                  // one connection, any node
+  toUser(userId: string): UserTarget<C>                              // all of a user's connections, any node
+  close(): Promise<void>                                              // idempotent; closes conns + cleans registry + adapter + ws
 }
+
+interface LocalView {                                                // synchronous, this node
+  readonly connections: Conn[]
+  readonly rooms: string[]
+  readonly topics: string[]
+}
+interface ClusterView {                                              // async; rejects if the adapter has no presence
+  connections(): Promise<ConnDescriptor[]>
+  count(): Promise<number>
+  byUser(userId: string): Promise<ConnDescriptor[]>
+  room(name: string): Promise<ConnDescriptor[]>
+  topology(): Promise<NodeStat[]>                                    // [{ nodeId, connections, rooms, alive }]
+}
+interface ConnTarget<C> {                                            // single, unambiguous target
+  emit<E extends keyof SharedEvents<C>>(event: E, data): void        // shared events only
+  request<M extends keyof SharedServerRequests<C>>(name: M, input, opts?: { timeout?: number; signal?: AbortSignal }): Promise<output>
+  close(): void                                                      // cross-node kick
+}
+interface UserTarget<C> {                                            // 0..N devices — NO request() (ambiguous)
+  emit<E extends keyof SharedEvents<C>>(event: E, data): void
+  disconnect(): void
+}
+// ConnDescriptor: serializable snapshot (NOT a live Conn). { id, role, nodeId, connectedAt, userId?, rooms, ...describeConn }
+// lastPongAt is node-local and NOT in the registry. Snapshot is taken at connect (seed via onConnection).
 
 // handler map mirrors the contract: { shared?, [role]: {...} }
 // `shared` key is required only if the contract has shared requests; otherwise omit it.
@@ -97,9 +140,14 @@ type Middleware<A> = (ctx, info: MiddlewareInfo, next: () => Promise<void>) => v
 interface MiddlewareInfo { kind: 'request' | 'subscribe'; name: string; conn: Conn }
 // call next() to proceed; throw to short-circuit (reject).
 
-class Conn<Ev, Ctx, Role> {
+class Conn<Ev, Ctx, Role, Data = unknown> {
+  readonly id: string                          // server-assigned unique id (stable for life)
   readonly role: Role                          // this connection's role (typed literal)
   readonly ctx: Ctx
+  readonly connectedAt: number                 // Date.now() at the upgrade
+  lastPongAt?: number                          // last heartbeat pong (liveness) — node-local
+  lastPingAt?: number                          // last heartbeat ping sent
+  data: Data                                   // mutable per-conn state, typed per role (contract `data` schema); starts {}
   readonly channels: Set<string>
   readonly ws: WebSocket                       // underlying 'ws' socket
   send(frame): void                            // internal frame (you rarely call this)
@@ -145,6 +193,7 @@ type Client<C, R> = {
 } & {
   on<E extends keyof Events<C, R>>(event: E, handler: (data) => void): () => void   // returns unsubscribe
   subscribe<T extends keyof Topics<C, R>>(topic: T, handler: (data) => void): Subscription
+  implement(handlers: { [K in keyof ServerRequests<C, R>]?: (input) => Awaitable<output> }): void  // answer server→client requests; throw SocketError for typed failure
   close(): void
   readonly connected: boolean
   readonly role: R
@@ -164,10 +213,11 @@ Client behavior:
 ## @super-line/adapter-redis
 
 ```ts
-createRedisAdapter(options?: { url?: string } | string): Adapter
+createRedisAdapter(options?: { url?: string; presenceTtlMs?: number } | string): Adapter
 // createRedisAdapter('redis://localhost:6379')  — pass to every server's `adapter`
+// presenceTtlMs (default 90_000): node liveness key TTL, refreshed by the heartbeat; must exceed heartbeat interval
 ```
-Redis Pub/Sub (two connections). At-most-once. Run more than one server process? Every server needs an adapter pointing at the same Redis. Carries rooms, topics, AND serverToServer.
+Redis Pub/Sub (two connections) + a presence store. At-most-once. Run more than one server process? Every server needs an adapter pointing at the same Redis. Carries rooms, topics, serverToServer, targeted `toConn`/`toUser` sends, server→client request replies, AND the cluster presence registry.
 
 ## @super-line/react
 

@@ -1,4 +1,9 @@
-// Protocol version, negotiated via the WebSocket subprotocol at upgrade.
+/**
+ * The wire protocol below is an implementation detail — you rarely touch frames
+ * directly. It's exported for adapters, custom transports, and tooling.
+ */
+
+/** Protocol version string, negotiated via the WebSocket subprotocol at upgrade. */
 export const PROTOCOL = 'superline.v1'
 
 // Client -> Server

@@ -1,13 +1,24 @@
 import { Redis } from 'ioredis'
 import type { Adapter } from '@super-line/core'
 
+/** Options for {@link createRedisAdapter}. */
 export interface RedisAdapterOptions {
-  /** redis:// connection URL. */
+  /** `redis://` connection URL (defaults to ioredis's default localhost:6379). */
   url?: string
 }
 
-// Redis Pub/Sub adapter. Uses two connections (a subscriber connection cannot run
-// other commands). At-most-once fan-out, matching the library's delivery model.
+/**
+ * Create a Redis Pub/Sub {@link Adapter} for multi-node fan-out. Pass the same
+ * URL to every server process so rooms, topics, and serverToServer events reach
+ * clients on any node. Uses two connections (a subscriber connection can't run
+ * other commands); at-most-once delivery, matching the library's model.
+ *
+ * @param options - a `redis://` URL string or {@link RedisAdapterOptions}.
+ * @example
+ * ```ts
+ * createSocketServer(api, { server, adapter: createRedisAdapter('redis://localhost:6379') })
+ * ```
+ */
 export function createRedisAdapter(options: RedisAdapterOptions | string = {}): Adapter {
   const url = typeof options === 'string' ? options : options.url
   const pub = url ? new Redis(url) : new Redis()

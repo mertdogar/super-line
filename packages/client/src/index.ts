@@ -21,17 +21,23 @@ import { backoffDelay } from './backoff.js'
 export { backoffDelay } from './backoff.js'
 export type { BackoffOptions } from './backoff.js'
 
+/** Per-call options for a request. */
 export interface CallOptions {
+  /** Override the default request timeout (ms). `0` disables the timeout. */
   timeoutMs?: number
+  /** Abort the request; rejects with a `BAD_REQUEST` `SocketError`. */
   signal?: AbortSignal
 }
 
+/** A topic subscription handle returned by `client.subscribe`. */
 export interface Subscription {
-  /** Resolves when the server acknowledges the subscribe; rejects if denied. */
+  /** Resolves when the server acknowledges the subscribe; rejects if denied or disconnected. */
   readonly ready: Promise<void>
+  /** Stop receiving the topic and tell the server to unsubscribe. */
   unsubscribe(): void
 }
 
+/** The request-calling half of {@link Client} (one method per request in the role's surface). */
 export type ClientMethods<C extends Contract, R extends RoleOf<C>> = {
   [K in keyof Requests<C, R>]: (
     input: ClientInput<Requests<C, R>[K]>,
@@ -39,40 +45,62 @@ export type ClientMethods<C extends Contract, R extends RoleOf<C>> = {
   ) => Promise<Output<Requests<C, R>[K]>>
 }
 
+/**
+ * A typed client proxy, narrowed to role `R`'s effective surface (`shared` ∪ `R`).
+ * Call requests as methods; listen with `on`; subscribe to topics with `subscribe`.
+ */
 export type Client<C extends Contract, R extends RoleOf<C>> = ClientMethods<C, R> & {
+  /** Listen for a server-pushed event. Returns an unsubscribe function. */
   on<E extends keyof Events<C, R>>(
     event: E,
     handler: (data: EventData<Events<C, R>[E]>) => void,
   ): () => void
+  /** Subscribe to a topic (auto re-subscribes on reconnect). Await `.ready` to confirm. */
   subscribe<T extends keyof Topics<C, R>>(
     topic: T,
     handler: (data: EventData<Topics<C, R>[T]>) => void,
   ): Subscription
+  /** Close the connection and stop reconnecting. */
   close(): void
+  /** Whether the socket is currently open. */
   readonly connected: boolean
+  /** This client's role. */
   readonly role: R
 }
 
+/** Describes which inbound payload failed validation, passed to `onValidationError`. */
 export interface ValidationErrorInfo {
+  /** The kind of inbound payload that failed. */
   kind: 'response' | 'event' | 'topic'
+  /** The request/event/topic name. */
   name: string
 }
 
+/** Options for {@link createClient}. */
 export interface ClientOptions<C extends Contract, R extends RoleOf<C>> {
+  /** The server URL, e.g. `ws://localhost:3000`. */
   url: string
   /** This client's role; narrows the surface and is sent to the server to verify. */
   role: R
+  /** Extra query params appended to the URL (read in `authenticate`); `role` is added automatically. */
   params?: Record<string, string>
+  /** Wire serializer; MUST match the server. Defaults to `jsonSerializer`. */
   serializer?: Serializer
+  /** Default request timeout in ms. Defaults to `30000`. */
   timeoutMs?: number
-  /** 'inbound' re-validates server->client payloads against the contract (catches drift). Default 'off'. */
+  /** `'inbound'` re-validates server→client payloads against the contract (catches drift). Default `'off'`. */
   validate?: 'off' | 'inbound'
+  /** Called when an inbound payload fails validation (only with `validate: 'inbound'`). */
   onValidationError?: (error: unknown, info: ValidationErrorInfo) => void
+  /** Auto-reconnect on drop. Defaults to `true`. */
   reconnect?: boolean
+  /** Initial reconnect backoff in ms. Defaults to `500`. */
   reconnectBaseMs?: number
+  /** Maximum reconnect backoff in ms. Defaults to `30000`. */
   reconnectMaxMs?: number
+  /** Backoff growth factor. Defaults to `2`. */
   reconnectFactor?: number
-  /** Override the WebSocket implementation (defaults to globalThis.WebSocket). */
+  /** Override the WebSocket implementation (defaults to `globalThis.WebSocket`). */
   WebSocket?: typeof WebSocket
 }
 
@@ -102,6 +130,20 @@ function deferred(): Deferred {
   return { promise, resolve, reject }
 }
 
+/**
+ * Create a typed client for role `R`. Connects immediately and reconnects on its own.
+ *
+ * @param contract - the shared contract.
+ * @param opts - client options; `url` and `role` are required.
+ * @returns a {@link Client} proxy narrowed to the role's surface.
+ *
+ * @example
+ * ```ts
+ * const client = createClient(api, { url: 'ws://localhost:3000', role: 'user', params: { token } })
+ * client.on('message', (m) => console.log(m.text))
+ * const out = await client.send({ text: 'hi' }) // throws SocketError on failure
+ * ```
+ */
 export function createClient<C extends Contract, R extends RoleOf<C>>(
   contract: C,
   opts: ClientOptions<C, R>,

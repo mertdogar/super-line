@@ -33,7 +33,11 @@ export { MemoryBus, createInMemoryAdapter } from './memory-adapter.js'
 
 type Awaitable<T> = T | Promise<T>
 
-// The discriminated value authenticate returns: a role + its ctx, per role.
+/**
+ * The discriminated value `authenticate` returns: a `role` (one of the contract's
+ * roles) plus its `ctx`. Returning different ctx shapes per role narrows both the
+ * handler surface and `ctx` together.
+ */
 export type AuthResult<C extends Contract> = {
   [R in RoleOf<C>]: { role: R; ctx: unknown }
 }[RoleOf<C>]
@@ -62,41 +66,63 @@ type SharedHandlers<C extends Contract, A> = {
   ) => Awaitable<Output<SharedRequests<C>[K]>>
 }
 
-// `shared` key only required when the contract actually has shared requests.
+/**
+ * The handler map passed to `implement`: one block per role plus an optional
+ * `shared` block. Each handler's `input`/`ctx`/`conn` are narrowed to its role.
+ * The `shared` key is required only when the contract has shared requests.
+ */
 export type Handlers<C extends Contract, A> = ([keyof SharedRequests<C>] extends [never]
   ? {}
   : { shared: SharedHandlers<C, A> }) & {
   [R in RoleOf<C>]: RoleHandlers<C, A, R>
 }
 
+/** Context passed to middleware and lifecycle hooks about the current operation. */
 export interface MiddlewareInfo {
+  /** Whether this is a request or a topic subscribe. */
   kind: 'request' | 'subscribe'
+  /** The request/topic name. */
   name: string
+  /** The connection the operation is on (`conn.role` available). */
   conn: Conn
 }
 
-// Flat middleware: call next() to proceed, throw to short-circuit (reject). Does not morph ctx.
+/**
+ * Flat middleware run before request/subscribe handlers. Call `next()` to proceed,
+ * or `throw` to short-circuit (rejecting the operation). Does not change `ctx`'s type.
+ */
 export type Middleware<A> = (
   ctx: CtxUnion<A>,
   info: MiddlewareInfo,
   next: () => Promise<void>,
 ) => Awaitable<void>
 
-// Mixed-role connection group. broadcast() delivers a SHARED event to all members.
+/**
+ * A mixed-role, server-controlled connection group. `broadcast` delivers a
+ * **shared** event to every member, regardless of their role.
+ */
 export interface Room<C extends Contract> {
+  /** Add a connection to the room (server-controlled membership). */
   add(conn: Conn): void
+  /** Remove a connection from the room. */
   remove(conn: Conn): void
+  /** Broadcast a shared event to all members. */
   broadcast<E extends keyof SharedEvents<C>>(event: E, data: EmitData<SharedEvents<C>[E]>): void
+  /** Member count **on the current node** (membership is node-local). */
   readonly size: number
 }
 
-// Role lens for role-scoped server sends.
+/** Lens for role-scoped server sends, returned by `srv.forRole(role)`. */
 export interface RoleLens<C extends Contract, R extends RoleOf<C>> {
+  /** Publish to a topic in role `R`'s surface (reaches that role's subscribers). */
   publish<T extends keyof RoleTopics<C, R>>(topic: T, data: EmitData<RoleTopics<C, R>[T]>): void
 }
 
+/** Options for {@link createSocketServer}. */
 export interface ServerOptions<C extends Contract, A extends AuthResult<C>> {
+  /** The `http.Server` to attach to (compose with Express/Fastify/Hono). */
   server?: HttpServer
+  /** Wire serializer; MUST match the client. Defaults to `jsonSerializer`. */
   serializer?: Serializer
   /** Cross-node fan-out adapter. Defaults to a per-server in-memory adapter. */
   adapter?: Adapter
@@ -108,12 +134,17 @@ export interface ServerOptions<C extends Contract, A extends AuthResult<C>> {
   authorizeSubscribe?: (topic: string, ctx: CtxUnion<A>, conn: Conn) => Awaitable<boolean | void>
   /** Middleware chain run before req/subscribe handlers (rate-limit, authz, logging, metrics). */
   use?: Middleware<A>[]
+  /** Called once per accepted connection. */
   onConnection?: (conn: Conn, ctx: CtxUnion<A>) => void
+  /** Called when a connection closes, with the WebSocket close `code`. */
   onDisconnect?: (conn: Conn, ctx: CtxUnion<A>, code: number) => void
+  /** Called for any error thrown in middleware/handlers (after the client is replied to). */
   onError?: (error: unknown, info: MiddlewareInfo) => void
 }
 
+/** A running super-line server, returned by {@link createSocketServer}. */
 export interface SocketServer<C extends Contract, A extends AuthResult<C>> {
+  /** Register handlers for shared + per-role requests (chainable). */
   implement(handlers: Handlers<C, A>): SocketServer<C, A>
   /** Mixed-role connection group; broadcast() sends a shared contract event to members. */
   room(name: string): Room<C>
@@ -134,6 +165,28 @@ export interface SocketServer<C extends Contract, A extends AuthResult<C>> {
 type AnyHandler = (input: unknown, ctx: unknown, conn: Conn) => unknown
 type Impl = Record<string, Record<string, AnyHandler>>
 
+/**
+ * Create a server bound to a contract. Attach it to an `http.Server`, then call
+ * {@link SocketServer.implement} with your handlers. `authenticate` resolves each
+ * connection's `{ role, ctx }` at the upgrade.
+ *
+ * @param contract - the shared contract.
+ * @param opts - server options; `authenticate` is required.
+ * @returns the {@link SocketServer}.
+ * @throws nothing directly; handler throws become a typed `SocketError` to the client.
+ *
+ * @example
+ * ```ts
+ * const srv = createSocketServer(api, {
+ *   server,
+ *   authenticate: (req) => ({ role: 'user' as const, ctx: { id: '1' } }),
+ * })
+ * srv.implement({
+ *   shared: { join: async ({ room }, _ctx, conn) => { srv.room(room).add(conn); return { ok: true } } },
+ *   user:   { say:  async ({ text }, ctx)        => ({ id: '...' }) },
+ * })
+ * ```
+ */
 export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   contract: C,
   opts: ServerOptions<C, A>,

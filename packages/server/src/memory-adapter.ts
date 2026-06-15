@@ -1,7 +1,9 @@
 import type { Adapter } from '@super-line/core'
 
-// In-process pub/sub bus. Share one bus across multiple servers to simulate
-// multiple nodes (each server gets its own adapter bound to the shared bus).
+/**
+ * In-process pub/sub bus. Share one bus across multiple servers to simulate
+ * multiple nodes in a test (each server gets its own adapter bound to the bus).
+ */
 export class MemoryBus {
   private readonly channels = new Map<string, Set<MemoryAdapter>>()
 
@@ -50,6 +52,10 @@ class MemoryAdapter implements Adapter {
   }
 }
 
+/**
+ * Create an in-memory {@link Adapter}. The default for a single-node server.
+ * Pass a shared {@link MemoryBus} to two servers to simulate cross-node fan-out.
+ */
 export function createInMemoryAdapter(bus: MemoryBus = new MemoryBus()): Adapter {
   return new MemoryAdapter(bus)
 }

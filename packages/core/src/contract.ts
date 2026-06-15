@@ -1,39 +1,81 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import { SocketError } from './errors.js'
 
+/** Any [Standard Schema](https://standardschema.dev) validator (Zod, Valibot, ArkType…). */
 export type Schema = StandardSchemaV1
 
-// client -> server request (req/res). Fire-and-forget signals are deferred.
+/**
+ * A client→server request (request/response). The client sends `input`; the
+ * server validates it, runs the handler, and replies with `output`.
+ * Fire-and-forget signals (no `output`) are not supported yet.
+ */
 export interface RequestDef {
+  /** Schema for the request payload the client sends. */
   input: Schema
+  /** Schema for the reply the server returns. */
   output: Schema
 }
 
-// server -> client message. `subscribe: true` makes it a client-subscribable
-// topic; otherwise it is a server-pushed event.
+/**
+ * A server→client message. With `subscribe: true` it becomes a client-subscribable
+ * **topic**; otherwise it is a server-pushed **event**.
+ */
 export interface ServerMessageDef {
+  /** Schema for the message body. */
   payload: Schema
+  /** When `true`, clients opt in via `client.subscribe(...)` (a topic). Omit for a push event. */
   subscribe?: boolean
 }
 
+/** The two directions within a `shared` or role block. */
 export interface Directional {
+  /** Requests this side may call (client→server). */
   clientToServer?: Record<string, RequestDef>
+  /** Events/topics this side may receive (server→client). */
   serverToClient?: Record<string, ServerMessageDef>
 }
 
-// One shared contract. Direction is the axis; role is the outer key with a
-// `shared` base every role inherits. serverToServer is node<->node (not a role).
+/**
+ * The single source of truth, imported by both server and client. Split by
+ * **direction** and scoped by **role**: a `shared` base every role inherits,
+ * plus one block per role. `serverToServer` is node↔node (not role-scoped).
+ */
 export interface Contract {
+  /** Surface common to every role (merged into each role's effective surface). */
   shared?: Directional
+  /** Per-role surfaces. A connection's role selects which one (plus `shared`) it sees. */
   roles: Record<string, Directional>
+  /** Typed node-to-node event payloads, for {@link "@super-line/server"!}'s `emitServer`/`onServer`. */
   serverToServer?: Record<string, Schema>
 }
 
-// identity helper; `const` preserves literal keys + `subscribe: true` for inference
+/**
+ * Define a contract. An identity function — `const` preserves literal keys and
+ * `subscribe: true` so the full surface can be inferred on both ends.
+ *
+ * @example
+ * ```ts
+ * import { z } from 'zod'
+ * import { defineContract } from '@super-line/core'
+ *
+ * export const api = defineContract({
+ *   shared: {
+ *     clientToServer: { join: { input: z.object({ room: z.string() }), output: z.object({ ok: z.boolean() }) } },
+ *     serverToClient: { message: { payload: z.object({ text: z.string() }) } },
+ *   },
+ *   roles: {
+ *     user:  { clientToServer: { say:      { input: z.object({ text: z.string() }), output: z.object({ id: z.string() }) } } },
+ *     agent: { clientToServer: { announce: { input: z.object({ text: z.string() }), output: z.object({ id: z.string() }) } } },
+ *   },
+ *   serverToServer: { rebalance: z.object({ shard: z.number() }) },
+ * })
+ * ```
+ */
 export function defineContract<const C extends Contract>(contract: C): C {
   return contract
 }
 
+/** Union of a contract's role names. */
 export type RoleOf<C extends Contract> = keyof C['roles'] & string
 
 type CtsOf<D> = D extends { clientToServer: infer M extends Record<string, RequestDef> } ? M : {}
@@ -45,38 +87,62 @@ type StcOf<D> = D extends { serverToClient: infer M extends Record<string, Serve
 type EventsOf<M> = { [K in keyof M as M[K] extends { subscribe: true } ? never : K]: M[K] }
 type TopicsOf<M> = { [K in keyof M as M[K] extends { subscribe: true } ? K : never]: M[K] }
 
-// Merged surface for a role = shared ∪ roles[R] (keys assumed disjoint). Used client-side.
+/** A role's effective request map: `shared` ∪ `roles[R]` client→server requests. */
 export type Requests<C extends Contract, R extends RoleOf<C>> = CtsOf<C['shared']> &
   CtsOf<C['roles'][R]>
+/** A role's effective server→client map (events and topics combined). */
 export type ServerMessages<C extends Contract, R extends RoleOf<C>> = StcOf<C['shared']> &
   StcOf<C['roles'][R]>
+/** A role's push events (server→client entries without `subscribe`). */
 export type Events<C extends Contract, R extends RoleOf<C>> = EventsOf<ServerMessages<C, R>>
+/** A role's subscribable topics (server→client entries with `subscribe: true`). */
 export type Topics<C extends Contract, R extends RoleOf<C>> = TopicsOf<ServerMessages<C, R>>
 
-// Per-section surfaces. Used server-side (shared block vs role block; role-scoped publish).
+/** Requests in the `shared` block (every role can call these). */
 export type SharedRequests<C extends Contract> = CtsOf<C['shared']>
+/** Requests in one role's block (not including `shared`). */
 export type RoleRequests<C extends Contract, R extends RoleOf<C>> = CtsOf<C['roles'][R]>
+/** Push events in the `shared` block (broadcastable to a mixed-role room). */
 export type SharedEvents<C extends Contract> = EventsOf<StcOf<C['shared']>>
+/** Subscribable topics in the `shared` block (published via `srv.publish`). */
 export type SharedTopics<C extends Contract> = TopicsOf<StcOf<C['shared']>>
+/** Subscribable topics in one role's block (published via `srv.forRole(r).publish`). */
 export type RoleTopics<C extends Contract, R extends RoleOf<C>> = TopicsOf<StcOf<C['roles'][R]>>
 
+/** The `serverToServer` map, or `{}` if the contract has none. */
 export type ServerEvents<C extends Contract> = C['serverToServer'] extends Record<string, Schema>
   ? C['serverToServer']
   : {}
 
 // Guarded extractors: re-assert the def constraint so indexed access stays a Schema.
-export type ClientInput<T> = T extends RequestDef ? InferIn<T['input']> : never // client sends
-export type ServerInput<T> = T extends RequestDef ? InferOut<T['input']> : never // server receives (validated)
-export type Output<T> = T extends RequestDef ? InferOut<T['output']> : never // reply, both ends
-export type EventData<T> = T extends ServerMessageDef ? InferOut<T['payload']> : never // client receives
-export type EmitData<T> = T extends ServerMessageDef ? InferIn<T['payload']> : never // server sends
-export type ServerEmit<T> = T extends Schema ? InferIn<T> : never // serverToServer send
-export type ServerData<T> = T extends Schema ? InferOut<T> : never // serverToServer receive
+/** The input type a client passes for a request (pre-validation). */
+export type ClientInput<T> = T extends RequestDef ? InferIn<T['input']> : never
+/** The input type a server handler receives for a request (post-validation). */
+export type ServerInput<T> = T extends RequestDef ? InferOut<T['input']> : never
+/** The reply type of a request (server returns / client receives). */
+export type Output<T> = T extends RequestDef ? InferOut<T['output']> : never
+/** The data a client receives for an event/topic (post-validation). */
+export type EventData<T> = T extends ServerMessageDef ? InferOut<T['payload']> : never
+/** The data a server sends for an event/topic (pre-validation). */
+export type EmitData<T> = T extends ServerMessageDef ? InferIn<T['payload']> : never
+/** The data a server sends for a serverToServer event. */
+export type ServerEmit<T> = T extends Schema ? InferIn<T> : never
+/** The data a server receives for a serverToServer event. */
+export type ServerData<T> = T extends Schema ? InferOut<T> : never
 
+/** Infer a schema's **input** type (what you pass into the validator). */
 export type InferIn<S extends Schema> = StandardSchemaV1.InferInput<S>
+/** Infer a schema's **output** type (the validated result). */
 export type InferOut<S extends Schema> = StandardSchemaV1.InferOutput<S>
 
-// Runtime validation against a Standard Schema validator. Sync or async.
+/**
+ * Validate a value against a Standard Schema validator (sync or async).
+ *
+ * @param schema - the validator to run.
+ * @param value - the untrusted value to validate.
+ * @returns the parsed, typed value.
+ * @throws {@link SocketError} with code `VALIDATION` if the value doesn't match.
+ */
 export async function validate<S extends Schema>(
   schema: S,
   value: unknown,
@@ -89,7 +155,14 @@ export async function validate<S extends Schema>(
   return result.value
 }
 
-// Synchronous validation for hot paths (e.g. client inbound dispatch). Throws on async schemas.
+/**
+ * Synchronous validation for hot paths (e.g. client inbound dispatch).
+ *
+ * @param schema - the validator to run.
+ * @param value - the untrusted value to validate.
+ * @returns the parsed, typed value.
+ * @throws {@link SocketError} with code `VALIDATION` on mismatch, or `INTERNAL` if the schema is async.
+ */
 export function validateSync<S extends Schema>(
   schema: S,
   value: unknown,

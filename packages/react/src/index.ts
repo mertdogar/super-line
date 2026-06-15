@@ -20,26 +20,46 @@ import type {
 } from '@super-line/core'
 import type { Client } from '@super-line/client'
 
+/** State returned by `useRequest`. */
 export interface RequestState<T> {
+  /** The last successful result, if any. */
   data?: T
+  /** The last error thrown by `call`, if any. */
   error?: unknown
+  /** Whether a `call` is in flight. */
   isLoading: boolean
 }
 
-// Bind typed React hooks to a contract + role. Pass a connected client via <Provider>.
+/**
+ * Bind typed React hooks to a contract + role. Create the client once, wrap your
+ * tree in the returned `<Provider>`, then use the hooks inside.
+ *
+ * @example
+ * ```tsx
+ * const { Provider, useRequest, useEvent, useSubscription } = createSocketReact<typeof api, 'user'>()
+ *
+ * function Root() {
+ *   const [client] = useState(() => createClient(api, { url, role: 'user' }))
+ *   return <Provider client={client}><Room /></Provider>
+ * }
+ * ```
+ */
 export function createSocketReact<C extends Contract, R extends RoleOf<C>>() {
   const Context = createContext<Client<C, R> | null>(null)
 
+  /** Provides a connected client to the hooks below. */
   function Provider(props: { client: Client<C, R>; children?: ReactNode }): ReactNode {
     return createElement(Context.Provider, { value: props.client }, props.children)
   }
 
+  /** Access the client from context (throws outside a `<Provider>`). */
   function useClient(): Client<C, R> {
     const client = useContext(Context)
     if (!client) throw new Error('useClient must be used within a <Provider>')
     return client
   }
 
+  /** Subscribe to a server-pushed event for the component's lifetime. */
   function useEvent<E extends keyof Events<C, R>>(
     event: E,
     handler: (data: EventData<Events<C, R>[E]>) => void,
@@ -50,6 +70,7 @@ export function createSocketReact<C extends Contract, R extends RoleOf<C>>() {
     useEffect(() => client.on(event, (data) => ref.current(data)), [client, event])
   }
 
+  /** Subscribe to a topic and return its latest value (or `undefined` before the first message). */
   function useSubscription<T extends keyof Topics<C, R>>(
     topic: T,
   ): EventData<Topics<C, R>[T]> | undefined {
@@ -62,6 +83,7 @@ export function createSocketReact<C extends Contract, R extends RoleOf<C>>() {
     return data
   }
 
+  /** Wrap a request as `{ data, error, isLoading, call }` for use in components. */
   function useRequest<M extends keyof Requests<C, R>>(
     method: M,
   ): RequestState<Output<Requests<C, R>[M]>> & {

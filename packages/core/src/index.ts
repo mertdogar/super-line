@@ -10,6 +10,9 @@ export { defineContract, validate, validateSync } from './contract.js'
 export type {
   Contract,
   Directional,
+  RoleBlock,
+  DataOf,
+  AnyData,
   RequestDef,
   ServerMessageDef,
   ServerRequestDef,

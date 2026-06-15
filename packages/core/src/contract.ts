@@ -50,6 +50,12 @@ export interface Directional {
   serverToClient?: Record<string, ServerEntry>
 }
 
+/** A role block: its directions plus an optional `data` schema typing `conn.data`. */
+export interface RoleBlock extends Directional {
+  /** Schema for this role's mutable per-connection `conn.data` (server-side scratch state). */
+  data?: Schema
+}
+
 /**
  * The single source of truth, imported by both server and client. Split by
  * **direction** and scoped by **role**: a `shared` base every role inherits,
@@ -59,7 +65,7 @@ export interface Contract {
   /** Surface common to every role (merged into each role's effective surface). */
   shared?: Directional
   /** Per-role surfaces. A connection's role selects which one (plus `shared`) it sees. */
-  roles: Record<string, Directional>
+  roles: Record<string, RoleBlock>
   /** Typed node-to-node event payloads, for {@link "@super-line/server"!}'s `emitServer`/`onServer`. */
   serverToServer?: Record<string, Schema>
 }
@@ -129,6 +135,15 @@ export type RoleTopics<C extends Contract, R extends RoleOf<C>> = TopicsOf<StcOf
 export type ServerRequests<C extends Contract, R extends RoleOf<C>> = ServerReqOf<ServerMessages<C, R>>
 /** Server→client requests in the `shared` block (the surface `srv.toConn(id).request` can call). */
 export type SharedServerRequests<C extends Contract> = ServerReqOf<StcOf<C['shared']>>
+
+/** The typed shape of `conn.data` for role `R` (its `data` schema, or an empty object). */
+export type DataOf<C extends Contract, R extends RoleOf<C>> = C['roles'][R] extends {
+  data: infer S extends Schema
+}
+  ? InferOut<S>
+  : Record<string, never>
+/** Union of every role's `conn.data` shape (used where the role isn't narrowed, e.g. shared handlers). */
+export type AnyData<C extends Contract> = DataOf<C, RoleOf<C>>
 
 /** The `serverToServer` map, or `{}` if the contract has none. */
 export type ServerEvents<C extends Contract> = C['serverToServer'] extends Record<string, Schema>

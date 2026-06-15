@@ -21,9 +21,12 @@ export class Conn<
   Ev = Record<string, ServerMessageDef>,
   Ctx = unknown,
   Role extends string = string,
+  Data = unknown,
 > {
   /** Namespaced channels (rooms + topics) this connection belongs to. */
   readonly channels = new Set<string>()
+  /** Mutable per-connection scratch state, typed per role by the contract's `data` schema. */
+  data: Data = {} as Data
 
   /** When this connection was accepted (`Date.now()` at the upgrade). */
   readonly connectedAt = Date.now()

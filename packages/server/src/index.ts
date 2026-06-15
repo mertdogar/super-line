@@ -30,6 +30,8 @@ import {
   type NodeStat,
   type PresenceStore,
   type SharedServerRequests,
+  type DataOf,
+  type AnyData,
 } from '@super-line/core'
 import { Conn, type Backpressure } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
@@ -72,7 +74,7 @@ type RoleHandlers<C extends Contract, A, R extends RoleOf<C>> = {
   [K in keyof RoleRequests<C, R>]: (
     input: ServerInput<RoleRequests<C, R>[K]>,
     ctx: CtxFor<A, R>,
-    conn: Conn<Events<C, R>, CtxFor<A, R>, R>,
+    conn: Conn<Events<C, R>, CtxFor<A, R>, R, DataOf<C, R>>,
   ) => Awaitable<Output<RoleRequests<C, R>[K]>>
 }
 
@@ -81,7 +83,7 @@ type SharedHandlers<C extends Contract, A> = {
   [K in keyof SharedRequests<C>]: (
     input: ServerInput<SharedRequests<C>[K]>,
     ctx: CtxUnion<A>,
-    conn: Conn<SharedEvents<C>, CtxUnion<A>, RoleOf<C>>,
+    conn: Conn<SharedEvents<C>, CtxUnion<A>, RoleOf<C>, AnyData<C>>,
   ) => Awaitable<Output<SharedRequests<C>[K]>>
 }
 
@@ -511,10 +513,6 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     wss.handleUpgrade(req, socket, head, (ws) => {
       const conn = new Conn(ws, randomUUID(), auth.role, auth.ctx, serializer, opts.backpressure)
       conns.add(conn)
-      void adapter.presence?.set(buildDescriptor(conn))
-      void joinChannel(conn, CONN + conn.id) // personal channel for targeted cross-node send
-      const uid = opts.identify?.(conn)
-      if (uid !== undefined) void joinChannel(conn, USER + uid)
       ws.on('pong', () => {
         conn.lastPongAt = Date.now()
         conn.missedPongs = 0
@@ -528,7 +526,11 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
         void adapter.presence?.del(conn.id)
         opts.onDisconnect?.(conn, auth.ctx as CtxUnion<A>, code)
       })
-      opts.onConnection?.(conn, auth.ctx as CtxUnion<A>)
+      opts.onConnection?.(conn, auth.ctx as CtxUnion<A>) // may seed conn.data before the snapshot
+      void adapter.presence?.set(buildDescriptor(conn)) // descriptor snapshot (reads conn.data)
+      void joinChannel(conn, CONN + conn.id) // personal channel for targeted cross-node send
+      const uid = opts.identify?.(conn)
+      if (uid !== undefined) void joinChannel(conn, USER + uid)
     })
   }
 

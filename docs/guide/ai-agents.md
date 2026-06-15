@@ -7,7 +7,7 @@ It comes in two forms:
 - **Claude Code** gets the full skill — `SKILL.md` (always-loaded trigger) plus `REFERENCE.md` / `RECIPES.md` loaded on demand (progressive disclosure).
 - **Every other agent** gets a single condensed `AGENTS.md` that points to this site for depth.
 
-All of it lives in the public repo under [`skills/super-line/`](https://github.com/mertdogar/super-line/tree/main/skills/super-line), so installing is a `degit` (or copy) away — no extra tooling.
+All of it lives in the public repo under [`skills/super-line/`](https://github.com/mertdogar/super-line/tree/main/skills/super-line) — no extra tooling. Claude's skill is a *folder* (use `degit`); the others are a *single file* (use `curl`).
 
 ## Claude Code
 
@@ -21,33 +21,24 @@ It activates automatically when you import from `@super-line/*` or mention super
 
 ## Cursor
 
-Fetch the condensed guide as a Cursor rule, then add Cursor's frontmatter:
+Cursor reads rules from `.cursor/rules/*.mdc`. Fetch the condensed guide and prepend Cursor's frontmatter in one step:
 
 ```bash
-npx degit mertdogar/super-line/skills/super-line/AGENTS.md .cursor/rules/super-line.mdc
-```
-
-Prepend this to the top of `.cursor/rules/super-line.mdc`:
-
-```md
----
-description: super-line — typesafe WebSocket contracts (roles + direction)
-alwaysApply: true
----
+mkdir -p .cursor/rules
+{ printf -- '---\ndescription: super-line — typesafe WebSocket contracts (roles + direction)\nalwaysApply: true\n---\n\n'
+  curl -fsSL https://raw.githubusercontent.com/mertdogar/super-line/main/skills/super-line/AGENTS.md
+} > .cursor/rules/super-line.mdc
 ```
 
 ## GitHub Copilot
 
+Copilot reads `.github/instructions/*.instructions.md`:
+
 ```bash
-npx degit mertdogar/super-line/skills/super-line/AGENTS.md .github/instructions/super-line.instructions.md
-```
-
-Prepend Copilot's frontmatter:
-
-```md
----
-applyTo: "**"
----
+mkdir -p .github/instructions
+{ printf -- '---\napplyTo: "**"\n---\n\n'
+  curl -fsSL https://raw.githubusercontent.com/mertdogar/super-line/main/skills/super-line/AGENTS.md
+} > .github/instructions/super-line.instructions.md
 ```
 
 ## Any other agent (Windsurf, Cline, Codex, Zed, …)
@@ -55,13 +46,13 @@ applyTo: "**"
 Most newer agents read an `AGENTS.md` at the project root, or can be pointed at any markdown file. Drop the condensed guide in as-is — no frontmatter needed:
 
 ```bash
-npx degit mertdogar/super-line/skills/super-line/AGENTS.md AGENTS.md
+curl -fsSL -o AGENTS.md https://raw.githubusercontent.com/mertdogar/super-line/main/skills/super-line/AGENTS.md
 ```
 
-If your agent uses a different rules path (e.g. `.windsurfrules`, `.clinerules/`), put the same file there instead.
+If your agent uses a different rules path (e.g. `.windsurfrules`, `.clinerules/`), write it there instead (`curl -fsSL -o <path> …`).
 
 ## Keeping it current
 
-The guide tracks the published API. Re-run the `degit` command to refresh after upgrading super-line. The content mirrors these docs, so an agent that can browse the web can also just be pointed at <https://mertdogar.github.io/super-line/>.
+The guide tracks the published API. Re-run the command above to refresh after upgrading super-line. The content mirrors these docs, so an agent that can browse the web can also just be pointed at <https://mertdogar.github.io/super-line/>.
 
-> Prefer plain copy over `degit`? Every file is browsable at [`skills/super-line/`](https://github.com/mertdogar/super-line/tree/main/skills/super-line) — copy its contents into the path your agent expects.
+> Prefer not to use the terminal? Every file is browsable at [`skills/super-line/`](https://github.com/mertdogar/super-line/tree/main/skills/super-line) — copy its contents into the path your agent expects.

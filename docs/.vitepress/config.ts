@@ -24,6 +24,43 @@ export default defineConfig({
             { text: 'The contract', link: '/guide/the-contract' },
           ],
         },
+        {
+          text: 'Interaction flavors',
+          items: [
+            { text: 'Requests', link: '/guide/requests' },
+            { text: 'Events & rooms', link: '/guide/events-rooms' },
+            { text: 'Topics', link: '/guide/topics' },
+          ],
+        },
+        {
+          text: 'Server',
+          items: [
+            { text: 'Roles & auth', link: '/guide/roles-auth' },
+            { text: 'Middleware & lifecycle', link: '/guide/middleware-lifecycle' },
+            { text: 'Error handling', link: '/guide/errors' },
+          ],
+        },
+        {
+          text: 'Client',
+          items: [
+            { text: 'Reconnection & delivery', link: '/guide/reconnection-delivery' },
+            { text: 'Serialization', link: '/guide/serialization' },
+          ],
+        },
+        {
+          text: 'Scaling & integrations',
+          items: [
+            { text: 'Scaling & adapters', link: '/guide/scaling-adapters' },
+            { text: 'React', link: '/guide/react' },
+          ],
+        },
+        {
+          text: 'More',
+          items: [
+            { text: 'Testing', link: '/guide/testing' },
+            { text: 'Comparison & FAQ', link: '/guide/comparison-faq' },
+          ],
+        },
       ],
       '/reference/': [{ text: 'Packages', items: typedocSidebar }],
     },

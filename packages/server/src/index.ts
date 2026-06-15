@@ -252,6 +252,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   const serverListeners = new Map<string, Set<(data: unknown) => void>>()
   const instanceId = randomUUID() // identifies this node; lets emitServer exclude itself
   let impl: Impl = {}
+  let closing = false // close() is idempotent
 
   function buildDescriptor(conn: Conn): ConnDescriptor {
     const userId = opts.identify?.(conn)
@@ -571,8 +572,11 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       }
     },
     async close() {
+      if (closing) return
+      closing = true
       if (hbTimer) clearInterval(hbTimer)
       for (const conn of conns) conn.close()
+      await adapter.presence?.clearNode(instanceId) // remove this node's registry entries before disconnecting
       await adapter.close?.()
       await new Promise<void>((resolve) => {
         wss.close(() => resolve())

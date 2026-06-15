@@ -68,6 +68,8 @@ export interface PresenceStore {
   del(connId: string): void | Promise<void>
   /** Refresh this node's liveness (heartbeat). */
   beat(nodeId: string): void | Promise<void>
+  /** Remove all of a node's connections + liveness (graceful shutdown cleanup). */
+  clearNode(nodeId: string): void | Promise<void>
   /** Add a room to a connection's membership. */
   addRoom(connId: string, room: string): void | Promise<void>
   /** Remove a room from a connection's membership. */

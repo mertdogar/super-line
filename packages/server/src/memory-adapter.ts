@@ -45,6 +45,9 @@ class MemoryPresence implements PresenceStore {
   beat(): void {
     // no-op: in-memory liveness is graceful del, not TTL
   }
+  clearNode(nodeId: string): void {
+    for (const [id, d] of this.bus.descriptors) if (d.nodeId === nodeId) this.bus.descriptors.delete(id)
+  }
   addRoom(connId: string, room: string): void {
     const d = this.bus.descriptors.get(connId)
     if (d && !d.rooms.includes(room)) d.rooms = [...d.rooms, room]

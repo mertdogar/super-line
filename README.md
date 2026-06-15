@@ -31,7 +31,7 @@
 - [Quickstart](#quickstart)
 - [Documentation](#documentation)
 - [Examples](#examples)
-- [Agent skill](#agent-skill)
+- [Use with your AI agent](#use-with-your-ai-agent)
 - [Comparison & FAQ](#comparison--faq)
 - [Development](#development)
 - [Packages](#packages)
@@ -182,20 +182,16 @@ pnpm --filter @super-line/example-scaling start
 
 More on each: [examples on the docs site](https://mertdogar.github.io/super-line/examples/).
 
-## Agent skill
+## Use with your AI agent
 
-This repo ships an **agent skill** that teaches AI coding agents how to use super-line — the role + direction contract model, the interaction flavors, auth, reconnection, scaling, testing, and common pitfalls. It lives in [`skills/super-line`](skills/super-line) (`SKILL.md` + `REFERENCE.md` + `RECIPES.md`).
-
-Since skills aren't delivered via npm, copy it into your agent's skills directory:
+super-line ships an **agent guide** — the role + direction model, the interaction flavors, auth, scaling, testing, and common pitfalls — so your AI coding agent writes correct super-line code instead of guessing. It lives in [`skills/super-line`](skills/super-line): Claude Code gets the full skill (`SKILL.md` + `REFERENCE.md` + `RECIPES.md`, progressive disclosure); other agents get a condensed `AGENTS.md`.
 
 ```bash
-# project-local (this repo or a consumer project)
-mkdir -p .claude/skills && cp -r skills/super-line .claude/skills/
-# or globally, for all your projects
-cp -r skills/super-line ~/.claude/skills/
+# Claude Code (project-local; or ~/.claude/skills for all projects)
+npx degit mertdogar/super-line/skills/super-line .claude/skills/super-line
 ```
 
-It activates when you import from `@super-line/*` or mention super-line.
+For **Cursor, GitHub Copilot, and other agents** (one condensed file + where to put it), see the guide: **[Use with your AI agent](https://mertdogar.github.io/super-line/guide/ai-agents)**.
 
 ## Comparison & FAQ
 

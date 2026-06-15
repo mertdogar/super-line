@@ -8,7 +8,9 @@ export default defineConfig({
   base: '/super-line/',
   cleanUrls: true,
   lastUpdated: true,
+  head: [['link', { rel: 'icon', href: '/super-line/mark.svg' }]],
   themeConfig: {
+    logo: '/mark.svg',
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'Reference', link: '/reference/' },

@@ -4,6 +4,9 @@ hero:
   name: super-line
   text: Typesafe WebSockets for TypeScript
   tagline: One contract, split by direction and scoped by role. Requests, events, topics, rooms & inter-server messaging — with end-to-end types and zero codegen.
+  image:
+    src: /mark.svg
+    alt: super-line
   actions:
     - theme: brand
       text: Get started

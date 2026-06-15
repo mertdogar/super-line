@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitepress'
+import typedocSidebar from '../reference/typedoc-sidebar.json'
 
 export default defineConfig({
   title: 'super-line',
@@ -24,6 +25,7 @@ export default defineConfig({
           ],
         },
       ],
+      '/reference/': [{ text: 'Packages', items: typedocSidebar }],
     },
     search: { provider: 'local' },
     socialLinks: [{ icon: 'github', link: 'https://github.com/mertdogar/super-line' }],

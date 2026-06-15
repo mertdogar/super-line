@@ -1,0 +1,23 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],
+  "entryPointStrategy": "packages",
+  "entryPoints": [
+    "../packages/core",
+    "../packages/server",
+    "../packages/client",
+    "../packages/adapter-redis",
+    "../packages/react"
+  ],
+  "out": "reference",
+  "docsRoot": ".",
+  "readme": "none",
+  "hideGenerator": true,
+  "githubPages": false,
+  "sidebar": {
+    "autoConfiguration": true,
+    "format": "vitepress",
+    "collapsed": true,
+    "pretty": false
+  }
+}

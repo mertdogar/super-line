@@ -5,7 +5,7 @@
   <img alt="super-line" src="assets/logo-light.svg" width="340">
 </picture>
 
-### End-to-end typesafe WebSockets — req/res, rooms & topics from one contract
+### End-to-end typesafe WebSockets — role-scoped contracts, req/res, rooms & topics
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-22d3ee?style=flat-square&labelColor=1a1d24)](LICENSE)
 [![Built with TypeScript](https://img.shields.io/badge/TypeScript-strict-22d3ee?style=flat-square&labelColor=1a1d24)](https://www.typescriptlang.org/)
@@ -20,14 +20,14 @@
 
 <br />
 
-**super-line** is a typesafe WebSocket library for TypeScript. You write **one contract**; the server implements it and the client calls it with full end-to-end type inference — no codegen. Three interaction patterns share a single connection, and rooms/topics fan out across processes through a pluggable adapter (in-memory for one node, Redis for many).
+**super-line** is a typesafe WebSocket library for TypeScript. You write **one contract**; the server implements it and the client calls it with full end-to-end type inference — no codegen. The contract is split by **direction** (`clientToServer` / `serverToClient`) and scoped by **role** — a `user` and an `agent` connect to the same server and each get their own typed surface, with a `shared` base in common. Requests, events, topics, rooms, and node-to-node messaging share one connection, and everything fans out across processes through a pluggable adapter (in-memory for one node, Redis for many).
 
 ## Contents
 
 - [Features](#features)
 - [Install](#install)
 - [Quickstart](#quickstart)
-- [Concepts: the four patterns](#concepts-the-four-patterns)
+- [Concepts: roles, direction & the interaction flavors](#concepts-roles-direction--the-interaction-flavors)
 - [React](#react)
 - [Auth, middleware & validation](#auth-middleware--validation)
 - [Reconnection & delivery](#reconnection--delivery)
@@ -44,13 +44,15 @@
 | | |
 | --- | --- |
 | 🧩 **Contract-first** | One schema is the SSOT; types flow to both ends with zero codegen. |
+| 🎭 **Role-scoped** | One contract, many client roles (`user`, `agent`…) — each gets its own surface + `ctx`; cross-role calls get `NOT_FOUND`. |
 | 🛡️ **Validator-agnostic** | Any [Standard Schema](https://standardschema.dev) validator — Zod, Valibot, ArkType. |
 | ↔️ **Req/res** | Unary `await client.x()` with typed errors, timeout & `AbortSignal`. |
 | 📣 **Events & rooms** | Server-pushed events; server-controlled room broadcasts. |
 | 📡 **Topics** | Client-subscribed pub/sub streams, authorized server-side. |
+| 🖧 **Inter-server** | Typed `emitServer` / `onServer` for node-to-node coordination. |
 | 🔌 **Composable** | Attaches to your `http.Server`; lifecycle hooks + middleware. |
 | 🔁 **Resilient client** | Auto-reconnect, re-subscribe, in-flight reject, queue-and-flush. |
-| 📈 **Scales** | Rooms & topics fan out across nodes via an adapter (Redis included). |
+| 📈 **Scales** | Rooms, topics & inter-server events fan out across nodes via an adapter (Redis included). |
 
 ## Install
 
@@ -72,18 +74,28 @@ import { z } from 'zod'
 import { defineContract } from '@super-line/core'
 
 export const chat = defineContract({
-  messages: {
-    join: { input: z.object({ room: z.string() }), output: z.object({ ok: z.boolean() }) },
-    send: { input: z.object({ room: z.string(), text: z.string() }), output: z.object({ id: z.string() }) },
+  shared: {
+    clientToServer: {
+      join: { input: z.object({ room: z.string() }), output: z.object({ ok: z.boolean() }) },
+    },
+    serverToClient: {
+      // { payload } = push event; add `subscribe: true` to make it a client-subscribable topic
+      message: { payload: z.object({ room: z.string(), text: z.string(), from: z.string() }) },
+      presence: { payload: z.object({ room: z.string(), count: z.number() }), subscribe: true },
+    },
   },
-  events: {
-    message: z.object({ room: z.string(), text: z.string(), from: z.string() }),
-  },
-  topics: {
-    presence: z.object({ room: z.string(), count: z.number() }),
+  roles: {
+    user: {
+      clientToServer: {
+        send: { input: z.object({ room: z.string(), text: z.string() }), output: z.object({ id: z.string() }) },
+      },
+    },
   },
 })
 ```
+
+> One role here (`user`). Add more under `roles` — e.g. an `agent` with its own
+> `clientToServer` verbs — and each client gets only its role's surface.
 
 ### 2. Server
 
@@ -98,19 +110,24 @@ const srv = createSocketServer(chat, {
   authenticate: (req) => {
     const name = new URL(req.url!, 'http://x').searchParams.get('name')
     if (!name) throw new Error('unauthorized') // throw -> 401 at the upgrade, no socket
-    return { name } // becomes ctx in every handler
+    return { role: 'user' as const, ctx: { name } } // role + ctx; ctx in every handler
   },
 })
 
 srv.implement({
-  join: async ({ room }, ctx, conn) => {
-    srv.room(room).add(conn)                                   // server-controlled membership
-    srv.publish('presence', { room, count: srv.room(room).size })
-    return { ok: true }
+  // shared requests (every role); ctx is the role's ctx, conn carries conn.role
+  shared: {
+    join: async ({ room }, _ctx, conn) => {
+      srv.room(room).add(conn)                                          // server-controlled membership
+      srv.forRole('user').publish('presence', { room, count: srv.room(room).size })
+      return { ok: true }
+    },
   },
-  send: async ({ room, text }, ctx) => {
-    srv.room(room).broadcast('message', { room, text, from: ctx.name }) // -> client.on('message')
-    return { id: crypto.randomUUID() }
+  user: {
+    send: async ({ room, text }, ctx) => {
+      srv.room(room).broadcast('message', { room, text, from: ctx.name }) // -> client.on('message')
+      return { id: crypto.randomUUID() }
+    },
   },
 })
 
@@ -125,6 +142,7 @@ import { chat } from './contract'
 
 const client = createClient(chat, {
   url: 'ws://localhost:3000',
+  role: 'user',                 // narrows the surface to shared ∪ user; sent to authenticate to verify
   params: { name: 'ada' },     // -> ?name=ada, read in authenticate
   validate: 'inbound',          // optional: re-validate server->client payloads (great in dev)
 })
@@ -141,20 +159,32 @@ client.close()
 
 <div align="center"><img alt="join screen" src="assets/join.png" width="240"></div>
 
-## Concepts: the four patterns
+## Concepts: roles, direction & the interaction flavors
 
-One contract expresses four ways to move data — all fully typed:
+The contract has two axes. **Role** is the outer key (`shared` + one block per role); a connection's role is fixed at the upgrade and decides which surface and `ctx` it gets. **Direction** is the inner key — `clientToServer` and `serverToClient` — and the shape of each entry picks the flavor:
 
 <div align="center"><img alt="how the UI maps to the patterns" src="assets/annotated.png" width="820"></div>
 
-| Pattern | Section | Direction | Who controls delivery | Use it for |
+| Flavor | Contract entry | Direction | Who controls delivery | Use it for |
 | --- | --- | --- | --- | --- |
-| **req/res** | `messages` | client → server → client | one response per call | actions/queries: `send`, `join`, `getHistory` |
-| **event** | `events` | server → client (push) | server picks recipients | room broadcasts, notifications, direct push |
-| **topic** | `topics` | server → many clients | client subscribes (server authorizes) | live streams: prices, presence, feeds |
-| **room** | (server API) | server → members | server-managed membership | grouping connections to broadcast events |
+| **request** | `clientToServer: { input, output }` | client → server → client | one response per call | actions/queries: `send`, `join`, `getHistory` |
+| **event** | `serverToClient: { payload }` | server → client (push) | server picks recipients | room broadcasts, notifications, direct push |
+| **topic** | `serverToClient: { payload, subscribe: true }` | server → many clients | client subscribes (server authorizes) | live streams: prices, presence, feeds |
+| **room** | (server API) | server → members | server-managed membership | grouping connections to broadcast a shared event |
+| **serverToServer** | `serverToServer: { schema }` | node → other nodes | the emitting server | cluster coordination: rebalance, cache-invalidate |
 
-**Rules of thumb:** need a reply? `messages`. Pushing to clients *you* choose? `events` (often via `room.broadcast`). Clients opting into a stream? `topics`. A "room" is just a server-controlled channel whose `broadcast` delivers a contract `event` to its members.
+**Rules of thumb:** need a reply? a `clientToServer` request. Pushing to clients *you* choose? an event (often via `room.broadcast`). Clients opting into a stream? a `subscribe: true` topic. Coordinating other server processes? `serverToServer`. A "room" is a mixed-role, server-controlled group whose `broadcast` delivers a **shared** event to its members.
+
+**Roles.** Add a block under `roles` per audience. The effective surface for a role is `shared ∪ roles[R]`, and `authenticate` returns `{ role, ctx }` so each role gets its own `ctx` type too. A method that isn't on a connection's surface is rejected with `NOT_FOUND` — the client-side types hide it, and the server enforces it.
+
+```ts
+roles: {
+  user:  { clientToServer: { say:      { input: …, output: … } } },
+  agent: { clientToServer: { announce: { input: …, output: … } } },
+}
+// const agent = createClient(api, { url, role: 'agent' })
+// agent.say(...)   // ❌ compile error — `say` is on the user surface
+```
 
 ## React
 
@@ -164,10 +194,10 @@ import { createClient } from '@super-line/client'
 import { createSocketReact } from '@super-line/react'
 import { chat } from './contract'
 
-const { Provider, useRequest, useEvent, useSubscription } = createSocketReact<typeof chat>()
+const { Provider, useRequest, useEvent, useSubscription } = createSocketReact<typeof chat, 'user'>()
 
 function Root() {
-  const [client] = useState(() => createClient(chat, { url: 'ws://localhost:3000', params: { name: 'ada' } }))
+  const [client] = useState(() => createClient(chat, { url: 'ws://localhost:3000', role: 'user', params: { name: 'ada' } }))
   return <Provider client={client}><Room room="lobby" /></Provider>
 }
 
@@ -185,8 +215,12 @@ function Room({ room }: { room: string }) {
 ```ts
 const srv = createSocketServer(chat, {
   server,
-  // 1. authenticate once at the HTTP upgrade — throw to reject with 401 (no socket opened)
-  authenticate: (req) => ({ user: verify(tokenFrom(req)) }),
+  // 1. authenticate once at the HTTP upgrade — return { role, ctx }, or throw to reject with 401.
+  //    The client's `role` option is a claim sent as a query param — verify it against the credential.
+  authenticate: (req) => {
+    const user = verify(tokenFrom(req))
+    return { role: user.role, ctx: { user } } // role-discriminated; ctx is per-role
+  },
 
   // 2. authorize each topic subscribe — return false or throw to deny
   authorizeSubscribe: (topic, ctx) => ctx.user.canRead(topic),
@@ -234,7 +268,13 @@ import { createRedisAdapter } from '@super-line/adapter-redis'
 const srv = createSocketServer(chat, { server, adapter: createRedisAdapter('redis://localhost:6379') })
 ```
 
-Now `room.broadcast` and `srv.publish` fan out to clients connected to **any** node. Without an adapter, a per-server in-memory adapter is used (single node).
+Now `room.broadcast`, `srv.publish` / `forRole(r).publish`, **and** `srv.emitServer` fan out across **any** node. Without an adapter, a per-server in-memory adapter is used (single node).
+
+```ts
+// node-to-node coordination (contract.serverToServer.rebalance: { shard: number })
+srv.onServer('rebalance', ({ shard }) => moveShard(shard)) // hear from peers (excludes self)
+srv.emitServer('rebalance', { shard: 3 })                  // tell every other node
+```
 
 ## Examples
 
@@ -257,7 +297,7 @@ pnpm --filter @super-line/example-scaling start
 
 ## Agent skill
 
-This repo ships an **agent skill** that teaches AI coding agents how to use super-line — the contract-first model, the four patterns, auth, reconnection, scaling, testing, and common pitfalls. It lives in [`skills/super-line`](skills/super-line) (`SKILL.md` + `REFERENCE.md` + `RECIPES.md`).
+This repo ships an **agent skill** that teaches AI coding agents how to use super-line — the role + direction contract model, the interaction flavors, auth, reconnection, scaling, testing, and common pitfalls. It lives in [`skills/super-line`](skills/super-line) (`SKILL.md` + `REFERENCE.md` + `RECIPES.md`).
 
 Since skills aren't delivered via npm, copy it into your agent's skills directory:
 
@@ -276,13 +316,15 @@ It activates when you import from `@super-line/*` or mention super-line.
 | --- | :---: | :---: | :---: | :---: |
 | Typesafe contract | ✅ | ⚠️ types-only | ✅ | ❌ |
 | Runtime validation | ✅ | ❌ | ✅ | ❌ |
+| Per-role contracts | ✅ | ❌ | ❌ | ❌ |
 | Req/res | ✅ | ack callbacks | ✅ | ❌ |
 | Rooms | ✅ | ✅ | ❌ | ❌ |
 | Topics (pub/sub) | ✅ | ⚠️ via rooms | subscriptions | ❌ |
+| Inter-server messaging | ✅ | ✅ | ❌ | ❌ |
 | Multi-node | ✅ adapter | ✅ adapter | ❌ | ❌ |
 | Zero codegen | ✅ | ✅ | ✅ | n/a |
 
-**Why not Socket.IO?** Socket.IO is battle-tested but its types are bolted on (you maintain event-name interfaces by hand) and it has no runtime validation. super-line makes the contract the source of truth and validates inbound automatically.
+**Why not Socket.IO?** Socket.IO splits its types into `ClientToServerEvents` / `ServerToClientEvents` / `InterServerEvents` interfaces you maintain by hand as **positional generics** (easy to swap), with no runtime validation. super-line keeps the same directional split but in **one shared object** (can't misorder, can't drift), validates inbound automatically, and adds something Socket.IO doesn't have: **per-role contracts** — one server serving `user` and `agent` clients distinct, enforced surfaces.
 
 **Why not tRPC?** tRPC is excellent for request/response (and SSE subscriptions), but doesn't model rooms or client-driven pub/sub topics. super-line is purpose-built for bidirectional realtime.
 
@@ -306,15 +348,15 @@ pnpm build       # tsup, dual ESM + CJS + d.ts
 
 | Package | Purpose |
 | --- | --- |
-| [`@super-line/core`](packages/core) | `defineContract`, validation, wire protocol, `Serializer` / `Adapter` interfaces, `SocketError` |
-| [`@super-line/server`](packages/server) | `createSocketServer` over `ws`, rooms, topics, middleware, in-memory adapter |
-| [`@super-line/client`](packages/client) | `createClient` (reconnect, typed calls, `on` / `subscribe`) |
+| [`@super-line/core`](packages/core) | `defineContract` (roles + direction), validation, wire protocol, `Serializer` / `Adapter` interfaces, `SocketError` |
+| [`@super-line/server`](packages/server) | `createSocketServer` over `ws`: role-keyed `implement`, rooms, topics, `forRole`, `emitServer`/`onServer`, middleware, in-memory adapter |
+| [`@super-line/client`](packages/client) | `createClient` (role-scoped surface, reconnect, typed calls, `on` / `subscribe`) |
 | [`@super-line/adapter-redis`](packages/adapter-redis) | Redis Pub/Sub adapter for multi-node fan-out |
-| [`@super-line/react`](packages/react) | `createSocketReact` → `useRequest` / `useEvent` / `useSubscription` |
+| [`@super-line/react`](packages/react) | `createSocketReact<C, Role>` → `useRequest` / `useEvent` / `useSubscription` |
 
 ## Status
 
-Pre-1.0. **Implemented:** req/res, events, rooms, topics, auth, reconnect, middleware, in-memory + Redis adapters, React hooks. **Not yet:** NATS adapter, wildcard/retained topics, session resume/replay, parameterized-topic type inference (topics are typed by exact contract key for now), backpressure safeguards.
+Pre-1.0. **Implemented:** role-scoped contracts, req/res, events, rooms, topics, inter-server (`emitServer`/`onServer`), auth, reconnect, middleware, in-memory + Redis adapters, React hooks. **Not yet:** fire-and-forget client→server signals (every client→server is req/res today), mutable per-connection state, NATS adapter, wildcard/retained topics, session resume/replay, parameterized-topic type inference (topics are typed by exact contract key for now), backpressure safeguards.
 
 ## License
 

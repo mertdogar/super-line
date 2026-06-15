@@ -7,7 +7,21 @@ export type { Serializer } from './serializer.js'
 export type { Adapter } from './adapter.js'
 
 export { defineContract, validate, validateSync } from './contract.js'
-export type { Contract, MessageDef, Schema, InferIn, InferOut } from './contract.js'
+export type {
+  Contract,
+  Directional,
+  RequestDef,
+  ServerMessageDef,
+  Schema,
+  InferIn,
+  InferOut,
+  RoleOf,
+  Requests,
+  ServerMessages,
+  Events,
+  Topics,
+  ServerEvents,
+} from './contract.js'
 
 export { PROTOCOL } from './wire.js'
 export type {

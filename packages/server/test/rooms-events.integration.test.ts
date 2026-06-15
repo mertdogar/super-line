@@ -4,18 +4,24 @@ import { defineContract } from '@super-line/core'
 import type { Conn } from '@super-line/server'
 import { createHarness } from './harness.js'
 
+// `message` is a SHARED event so a mixed-role room can broadcast it to every member.
 const contract = defineContract({
-  messages: {
-    join: { input: z.object({ room: z.string() }), output: z.object({ ok: z.boolean() }) },
-    say: {
-      input: z.object({ room: z.string(), text: z.string() }),
-      output: z.object({ ok: z.boolean() }),
+  shared: {
+    serverToClient: {
+      message: { payload: z.object({ room: z.string(), text: z.string(), from: z.string() }) },
     },
   },
-  events: {
-    message: z.object({ room: z.string(), text: z.string(), from: z.string() }),
+  roles: {
+    user: {
+      clientToServer: {
+        join: { input: z.object({ room: z.string() }), output: z.object({ ok: z.boolean() }) },
+        say: {
+          input: z.object({ room: z.string(), text: z.string() }),
+          output: z.object({ ok: z.boolean() }),
+        },
+      },
+    },
   },
-  topics: {},
 })
 
 const h = createHarness()
@@ -25,22 +31,31 @@ function next<T>(register: (cb: (data: T) => void) => void): Promise<T> {
   return new Promise<T>((resolve) => register(resolve))
 }
 
+async function boot() {
+  const { srv, url } = await h.server(contract, {
+    authenticate: () => ({ role: 'user' as const, ctx: { id: 'u1' } }),
+  })
+  return { srv, url }
+}
+
 describe('rooms + events', () => {
-  it('broadcasts a contract event to room members and not to outsiders', async () => {
-    const { srv, url } = await h.server(contract, { authenticate: () => ({ id: 'u1' }) })
+  it('broadcasts a shared event to room members and not to outsiders', async () => {
+    const { srv, url } = await boot()
     srv.implement({
-      join: async ({ room }, _ctx, conn: Conn<{ id: string }>) => {
-        srv.room(room).add(conn)
-        return { ok: true }
-      },
-      say: async ({ room, text }, ctx) => {
-        srv.room(room).broadcast('message', { room, text, from: ctx.id })
-        return { ok: true }
+      user: {
+        join: async ({ room }, _ctx, conn) => {
+          srv.room(room).add(conn)
+          return { ok: true }
+        },
+        say: async ({ room, text }, ctx) => {
+          srv.room(room).broadcast('message', { room, text, from: ctx.id })
+          return { ok: true }
+        },
       },
     })
 
-    const member = h.client(contract, { url })
-    const outsider = h.client(contract, { url })
+    const member = h.client(contract, { url, role: 'user' })
+    const outsider = h.client(contract, { url, role: 'user' })
 
     const got = next<{ room: string; text: string; from: string }>((cb) => member.on('message', cb))
     let outsiderGot = false
@@ -56,21 +71,23 @@ describe('rooms + events', () => {
   })
 
   it('stops delivering after remove and tracks size', async () => {
-    let connRef: Conn<{ id: string }> | undefined
-    const { srv, url } = await h.server(contract, { authenticate: () => ({ id: 'u1' }) })
+    const { srv, url } = await boot()
+    let connRef: Conn | undefined
     srv.implement({
-      join: async ({ room }, _ctx, conn: Conn<{ id: string }>) => {
-        connRef = conn
-        srv.room(room).add(conn)
-        return { ok: true }
-      },
-      say: async ({ room, text }, ctx) => {
-        srv.room(room).broadcast('message', { room, text, from: ctx.id })
-        return { ok: true }
+      user: {
+        join: async ({ room }, _ctx, conn) => {
+          connRef = conn
+          srv.room(room).add(conn)
+          return { ok: true }
+        },
+        say: async ({ room, text }, ctx) => {
+          srv.room(room).broadcast('message', { room, text, from: ctx.id })
+          return { ok: true }
+        },
       },
     })
 
-    const client = h.client(contract, { url })
+    const client = h.client(contract, { url, role: 'user' })
     let count = 0
     client.on('message', () => {
       count++
@@ -83,7 +100,6 @@ describe('rooms + events', () => {
     expect(srv.room('lobby').size).toBe(0)
 
     await client.say({ room: 'lobby', text: 'after-remove' })
-    // give any erroneous broadcast a tick to arrive
     await new Promise((r) => setTimeout(r, 30))
     expect(count).toBe(0)
   })

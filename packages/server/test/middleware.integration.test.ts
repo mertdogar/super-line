@@ -4,13 +4,16 @@ import { defineContract, SocketError } from '@super-line/core'
 import { createHarness, waitFor } from './harness.js'
 
 const contract = defineContract({
-  messages: {
-    hello: { input: z.object({}), output: z.object({ ok: z.boolean() }) },
-    blocked: { input: z.object({}), output: z.object({ ok: z.boolean() }) },
-  },
-  events: {},
-  topics: {
-    feed: z.object({ n: z.number() }),
+  roles: {
+    user: {
+      clientToServer: {
+        hello: { input: z.object({}), output: z.object({ ok: z.boolean() }) },
+        blocked: { input: z.object({}), output: z.object({ ok: z.boolean() }) },
+      },
+      serverToClient: {
+        feed: { payload: z.object({ n: z.number() }), subscribe: true },
+      },
+    },
   },
 })
 
@@ -21,7 +24,7 @@ describe('middleware + lifecycle hooks', () => {
   it('runs middleware in order around the handler and can short-circuit', async () => {
     const order: string[] = []
     const { srv, url } = await h.server(contract, {
-      authenticate: () => ({}),
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
       use: [
         async (_ctx, info, next) => {
           order.push(`a:before:${info.name}`)
@@ -36,17 +39,19 @@ describe('middleware + lifecycle hooks', () => {
       ],
     })
     srv.implement({
-      hello: async () => {
-        order.push('handler')
-        return { ok: true }
-      },
-      blocked: async () => {
-        order.push('should-not-run')
-        return { ok: true }
+      user: {
+        hello: async () => {
+          order.push('handler')
+          return { ok: true }
+        },
+        blocked: async () => {
+          order.push('should-not-run')
+          return { ok: true }
+        },
       },
     })
 
-    const client = h.client(contract, { url })
+    const client = h.client(contract, { url, role: 'user' })
     expect(await client.hello({})).toEqual({ ok: true })
     expect(order).toEqual(['a:before:hello', 'b', 'handler', 'a:after'])
 
@@ -57,16 +62,18 @@ describe('middleware + lifecycle hooks', () => {
   it('invokes onConnection and onDisconnect', async () => {
     const events: string[] = []
     const { srv, url } = await h.server(contract, {
-      authenticate: () => ({}),
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
       onConnection: () => events.push('connect'),
       onDisconnect: () => events.push('disconnect'),
     })
     srv.implement({
-      hello: async () => ({ ok: true }),
-      blocked: async () => ({ ok: true }),
+      user: {
+        hello: async () => ({ ok: true }),
+        blocked: async () => ({ ok: true }),
+      },
     })
 
-    const client = h.client(contract, { url, reconnect: false })
+    const client = h.client(contract, { url, role: 'user', reconnect: false })
     await client.hello({})
     expect(events).toContain('connect')
 
@@ -77,7 +84,7 @@ describe('middleware + lifecycle hooks', () => {
   it('applies middleware to subscribe and reports errors via onError', async () => {
     const errors: Array<{ name: string; kind: string }> = []
     const { srv, url } = await h.server(contract, {
-      authenticate: () => ({}),
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
       use: [
         async (_ctx, info, next) => {
           if (info.kind === 'subscribe' && info.name === 'feed') {
@@ -89,11 +96,13 @@ describe('middleware + lifecycle hooks', () => {
       onError: (_err, info) => errors.push({ name: info.name, kind: info.kind }),
     })
     srv.implement({
-      hello: async () => ({ ok: true }),
-      blocked: async () => ({ ok: true }),
+      user: {
+        hello: async () => ({ ok: true }),
+        blocked: async () => ({ ok: true }),
+      },
     })
 
-    const client = h.client(contract, { url })
+    const client = h.client(contract, { url, role: 'user' })
     const sub = client.subscribe('feed', () => {})
     await expect(sub.ready).rejects.toMatchObject({ code: 'FORBIDDEN' })
     expect(errors).toContainEqual({ name: 'feed', kind: 'subscribe' })

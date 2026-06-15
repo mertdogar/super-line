@@ -10,8 +10,16 @@ import {
   type Contract,
   type ClientFrame,
   type ReqFrame,
-  type InferIn,
-  type InferOut,
+  type RoleOf,
+  type Events,
+  type SharedRequests,
+  type RoleRequests,
+  type SharedEvents,
+  type SharedTopics,
+  type RoleTopics,
+  type ServerInput,
+  type Output,
+  type EmitData,
 } from '@super-line/core'
 import { Conn } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
@@ -20,79 +28,112 @@ export { Conn } from './conn.js'
 export { MemoryBus, createInMemoryAdapter } from './memory-adapter.js'
 
 type Awaitable<T> = T | Promise<T>
-type Messages<C extends Contract> = NonNullable<C['messages']>
-type Events<C extends Contract> = NonNullable<C['events']>
-type Topics<C extends Contract> = NonNullable<C['topics']>
+
+// The discriminated value authenticate returns: a role + its ctx, per role.
+export type AuthResult<C extends Contract> = {
+  [R in RoleOf<C>]: { role: R; ctx: unknown }
+}[RoleOf<C>]
+type CtxFor<A, R> = A extends { role: R; ctx: infer X } ? X : never
+type CtxUnion<A> = A extends { ctx: infer X } ? X : never
 
 const ROOM = 'r:'
 const TOPIC = 't:'
 
-export type MessageHandlers<C extends Contract, Ctx> = {
-  [K in keyof Messages<C>]: (
-    input: InferOut<Messages<C>[K]['input']>,
-    ctx: Ctx,
-    conn: Conn<Ctx>,
-  ) => Awaitable<InferOut<Messages<C>[K]['output']>>
+// Handlers for one role's clientToServer requests. ctx + conn are narrowed to that role.
+type RoleHandlers<C extends Contract, A, R extends RoleOf<C>> = {
+  [K in keyof RoleRequests<C, R>]: (
+    input: ServerInput<RoleRequests<C, R>[K]>,
+    ctx: CtxFor<A, R>,
+    conn: Conn<Events<C, R>, CtxFor<A, R>, R>,
+  ) => Awaitable<Output<RoleRequests<C, R>[K]>>
 }
 
-export interface MiddlewareInfo<Ctx> {
+// Handlers for shared requests (any role). ctx is the union; conn may emit only shared events.
+type SharedHandlers<C extends Contract, A> = {
+  [K in keyof SharedRequests<C>]: (
+    input: ServerInput<SharedRequests<C>[K]>,
+    ctx: CtxUnion<A>,
+    conn: Conn<SharedEvents<C>, CtxUnion<A>, RoleOf<C>>,
+  ) => Awaitable<Output<SharedRequests<C>[K]>>
+}
+
+// `shared` key only required when the contract actually has shared requests.
+export type Handlers<C extends Contract, A> = ([keyof SharedRequests<C>] extends [never]
+  ? {}
+  : { shared: SharedHandlers<C, A> }) & {
+  [R in RoleOf<C>]: RoleHandlers<C, A, R>
+}
+
+export interface MiddlewareInfo {
   kind: 'request' | 'subscribe'
   name: string
-  conn: Conn<Ctx>
+  conn: Conn
 }
 
 // Flat middleware: call next() to proceed, throw to short-circuit (reject). Does not morph ctx.
-export type Middleware<Ctx> = (
-  ctx: Ctx,
-  info: MiddlewareInfo<Ctx>,
+export type Middleware<A> = (
+  ctx: CtxUnion<A>,
+  info: MiddlewareInfo,
   next: () => Promise<void>,
 ) => Awaitable<void>
 
-export interface Room<C extends Contract, Ctx> {
-  add(conn: Conn<Ctx>): void
-  remove(conn: Conn<Ctx>): void
-  broadcast<E extends keyof Events<C>>(event: E, data: InferIn<Events<C>[E]>): void
+// Mixed-role connection group. broadcast() delivers a SHARED event to all members.
+export interface Room<C extends Contract> {
+  add(conn: Conn): void
+  remove(conn: Conn): void
+  broadcast<E extends keyof SharedEvents<C>>(event: E, data: EmitData<SharedEvents<C>[E]>): void
   readonly size: number
 }
 
-export interface ServerOptions<Ctx> {
+// Role lens for role-scoped server sends.
+export interface RoleLens<C extends Contract, R extends RoleOf<C>> {
+  publish<T extends keyof RoleTopics<C, R>>(topic: T, data: EmitData<RoleTopics<C, R>[T]>): void
+}
+
+export interface ServerOptions<C extends Contract, A extends AuthResult<C>> {
   server?: HttpServer
   serializer?: Serializer
   /** Cross-node fan-out adapter. Defaults to a per-server in-memory adapter. */
   adapter?: Adapter
   /** Only handle upgrades for this pathname; others are left untouched. */
   path?: string
-  /** Runs at the HTTP upgrade. Return ctx, or throw to reject with 401. */
-  authenticate?: (req: IncomingMessage) => Awaitable<Ctx>
+  /** Runs at the HTTP upgrade. Return { role, ctx }, or throw to reject with 401. */
+  authenticate: (req: IncomingMessage) => Awaitable<A>
   /** Runs on each client subscribe. Return false or throw to deny. */
-  authorizeSubscribe?: (topic: string, ctx: Ctx, conn: Conn<Ctx>) => Awaitable<boolean | void>
+  authorizeSubscribe?: (topic: string, ctx: CtxUnion<A>, conn: Conn) => Awaitable<boolean | void>
   /** Middleware chain run before req/subscribe handlers (rate-limit, authz, logging, metrics). */
-  use?: Middleware<Ctx>[]
-  onConnection?: (conn: Conn<Ctx>, ctx: Ctx) => void
-  onDisconnect?: (conn: Conn<Ctx>, ctx: Ctx, code: number) => void
-  onError?: (error: unknown, info: MiddlewareInfo<Ctx>) => void
+  use?: Middleware<A>[]
+  onConnection?: (conn: Conn, ctx: CtxUnion<A>) => void
+  onDisconnect?: (conn: Conn, ctx: CtxUnion<A>, code: number) => void
+  onError?: (error: unknown, info: MiddlewareInfo) => void
 }
 
-export interface SocketServer<C extends Contract, Ctx> {
-  implement(handlers: MessageHandlers<C, Ctx>): SocketServer<C, Ctx>
-  /** Server-controlled connection group; broadcast() sends a contract event to members. */
-  room(name: string): Room<C, Ctx>
-  /** Publish a message to all clients subscribed to this topic (server-only publish). */
-  publish<T extends keyof Topics<C>>(topic: T, data: InferIn<Topics<C>[T]>): void
+export interface SocketServer<C extends Contract, A extends AuthResult<C>> {
+  implement(handlers: Handlers<C, A>): SocketServer<C, A>
+  /** Mixed-role connection group; broadcast() sends a shared contract event to members. */
+  room(name: string): Room<C>
+  /** Publish a SHARED topic to all subscribers (server-only publish). */
+  publish<T extends keyof SharedTopics<C>>(topic: T, data: EmitData<SharedTopics<C>[T]>): void
+  /** Lens for role-scoped sends, e.g. forRole('user').publish('feed', data). */
+  forRole<R extends RoleOf<C>>(role: R): RoleLens<C, R>
   close(): Promise<void>
 }
 
-export function createSocketServer<C extends Contract, Ctx = undefined>(
+type AnyHandler = (input: unknown, ctx: unknown, conn: Conn) => unknown
+type Impl = Record<string, Record<string, AnyHandler>>
+
+export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   contract: C,
-  opts: ServerOptions<Ctx> = {},
-): SocketServer<C, Ctx> {
+  opts: ServerOptions<C, A>,
+): SocketServer<C, A> {
+  const c: Contract = contract
   const serializer = opts.serializer ?? jsonSerializer
   const adapter = opts.adapter ?? createInMemoryAdapter()
   const wss = new WebSocketServer({ noServer: true })
-  const conns = new Set<Conn<Ctx>>()
+  const conns = new Set<Conn>()
   // local members per namespaced channel (rooms + topics share this registry)
-  const members = new Map<string, Set<Conn<Ctx>>>()
-  let handlers: Partial<Record<string, (input: unknown, ctx: Ctx, conn: Conn<Ctx>) => unknown>> = {}
+  const members = new Map<string, Set<Conn>>()
+  let impl: Impl = {}
 
   // a frame arriving on a channel (from this node or another) is forwarded raw to local members
   adapter.onMessage((channel, payload) => {
@@ -101,7 +142,7 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
     for (const conn of set) conn.sendRaw(payload)
   })
 
-  function joinChannel(conn: Conn<Ctx>, channel: string): void | Promise<void> {
+  function joinChannel(conn: Conn, channel: string): void | Promise<void> {
     conn.channels.add(channel)
     const set = members.get(channel)
     if (set) {
@@ -112,7 +153,7 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
     return adapter.subscribe(channel) // first local member -> start receiving the channel
   }
 
-  function leaveChannel(conn: Conn<Ctx>, channel: string): void {
+  function leaveChannel(conn: Conn, channel: string): void {
     const set = members.get(channel)
     if (!set) return
     set.delete(conn)
@@ -121,6 +162,13 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
       members.delete(channel)
       void adapter.unsubscribe(channel) // last local member -> stop receiving
     }
+  }
+
+  // Where a topic lives for this conn: its role channel, the shared channel, or nowhere.
+  function topicNamespace(role: string, name: string): string | undefined {
+    if (c.roles[role]?.serverToClient?.[name]?.subscribe) return role
+    if (c.shared?.serverToClient?.[name]?.subscribe) return 'shared'
+    return undefined
   }
 
   if (opts.server) {
@@ -135,9 +183,9 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
       if (pathname !== opts.path) return
     }
 
-    let ctx: Ctx
+    let auth: A
     try {
-      ctx = opts.authenticate ? await opts.authenticate(req) : (undefined as Ctx)
+      auth = await opts.authenticate(req)
     } catch {
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
       socket.destroy()
@@ -145,7 +193,7 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
     }
 
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const conn = new Conn<Ctx>(ws, ctx, serializer)
+      const conn = new Conn(ws, auth.role, auth.ctx, serializer)
       conns.add(conn)
       ws.on('message', (data, isBinary) => {
         void onMessage(conn, data, isBinary)
@@ -153,13 +201,13 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
       ws.on('close', (code) => {
         conns.delete(conn)
         for (const channel of conn.channels) leaveChannel(conn, channel)
-        opts.onDisconnect?.(conn, ctx, code)
+        opts.onDisconnect?.(conn, auth.ctx as CtxUnion<A>, code)
       })
-      opts.onConnection?.(conn, ctx)
+      opts.onConnection?.(conn, auth.ctx as CtxUnion<A>)
     })
   }
 
-  async function onMessage(conn: Conn<Ctx>, data: RawData, isBinary: boolean): Promise<void> {
+  async function onMessage(conn: Conn, data: RawData, isBinary: boolean): Promise<void> {
     let frame: ClientFrame
     try {
       frame = serializer.decode(toWire(data, isBinary)) as ClientFrame
@@ -168,10 +216,13 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
     }
     if (frame.t === 'req') await handleReq(conn, frame)
     else if (frame.t === 'sub') await handleSub(conn, frame)
-    else if (frame.t === 'unsub') leaveChannel(conn, TOPIC + frame.c)
+    else if (frame.t === 'unsub') {
+      const ns = topicNamespace(conn.role, frame.c)
+      if (ns) leaveChannel(conn, TOPIC + ns + ':' + frame.c)
+    }
   }
 
-  function runMiddleware(info: MiddlewareInfo<Ctx>, terminal: () => Promise<void>): Promise<void> {
+  function runMiddleware(info: MiddlewareInfo, terminal: () => Promise<void>): Promise<void> {
     const chain = opts.use ?? []
     let last = -1
     const dispatch = (idx: number): Promise<void> => {
@@ -179,15 +230,15 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
       last = idx
       const mw = chain[idx]
       if (!mw) return terminal()
-      return Promise.resolve(mw(info.conn.ctx, info, () => dispatch(idx + 1)))
+      return Promise.resolve(mw(info.conn.ctx as CtxUnion<A>, info, () => dispatch(idx + 1)))
     }
     return dispatch(0)
   }
 
   async function dispatchOp(
-    conn: Conn<Ctx>,
+    conn: Conn,
     id: number,
-    info: MiddlewareInfo<Ctx>,
+    info: MiddlewareInfo,
     terminal: () => Promise<void>,
   ): Promise<void> {
     let responded = false
@@ -205,9 +256,10 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
     }
   }
 
-  async function handleReq(conn: Conn<Ctx>, frame: ReqFrame): Promise<void> {
-    const def = contract.messages?.[frame.m]
-    const handler = handlers[frame.m]
+  async function handleReq(conn: Conn, frame: ReqFrame): Promise<void> {
+    // resolving by role inherently enforces the boundary: a cross-role method is unknown here
+    const def = c.roles[conn.role]?.clientToServer?.[frame.m] ?? c.shared?.clientToServer?.[frame.m]
+    const handler = impl[conn.role]?.[frame.m] ?? impl.shared?.[frame.m]
     if (!def || !handler) {
       conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: `Unknown message: ${frame.m}` })
       return
@@ -219,18 +271,23 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
     })
   }
 
-  async function handleSub(conn: Conn<Ctx>, frame: { i: number; c: string }): Promise<void> {
+  async function handleSub(conn: Conn, frame: { i: number; c: string }): Promise<void> {
+    const ns = topicNamespace(conn.role, frame.c)
+    if (!ns) {
+      conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: `Unknown topic: ${frame.c}` })
+      return
+    }
     await dispatchOp(conn, frame.i, { kind: 'subscribe', name: frame.c, conn }, async () => {
       if (opts.authorizeSubscribe) {
-        const ok = await opts.authorizeSubscribe(frame.c, conn.ctx, conn)
+        const ok = await opts.authorizeSubscribe(frame.c, conn.ctx as CtxUnion<A>, conn)
         if (ok === false) throw new SocketError('FORBIDDEN', `Subscribe denied: ${frame.c}`)
       }
-      await joinChannel(conn, TOPIC + frame.c) // await adapter.subscribe so ready == active
+      await joinChannel(conn, TOPIC + ns + ':' + frame.c) // await adapter.subscribe so ready == active
       conn.send({ t: 'res', i: frame.i, d: null })
     })
   }
 
-  function room(name: string): Room<C, Ctx> {
+  function room(name: string): Room<C> {
     const channel = ROOM + name
     return {
       add(conn) {
@@ -248,18 +305,26 @@ export function createSocketServer<C extends Contract, Ctx = undefined>(
     }
   }
 
-  function publish<T extends keyof Topics<C>>(topic: T, data: InferIn<Topics<C>[T]>): void {
-    const name = String(topic)
-    void adapter.publish(TOPIC + name, serializer.encode({ t: 'pub', c: name, d: data }))
+  function publishTo(ns: string, name: string, data: unknown): void {
+    void adapter.publish(TOPIC + ns + ':' + name, serializer.encode({ t: 'pub', c: name, d: data }))
   }
 
-  const api: SocketServer<C, Ctx> = {
-    implement(h) {
-      handlers = h as never
+  const api: SocketServer<C, A> = {
+    implement(handlers) {
+      impl = handlers as unknown as Impl
       return api
     },
     room,
-    publish,
+    publish(topic, data) {
+      publishTo('shared', String(topic), data)
+    },
+    forRole(role) {
+      return {
+        publish(topic, data) {
+          publishTo(role, String(topic), data)
+        },
+      }
+    },
     async close() {
       for (const conn of conns) conn.close()
       await adapter.close?.()

@@ -5,14 +5,18 @@ import { MemoryBus, createInMemoryAdapter } from '@super-line/server'
 import { createHarness } from './harness.js'
 
 const contract = defineContract({
-  messages: {
-    join: { input: z.object({ room: z.string() }), output: z.object({ ok: z.boolean() }) },
+  shared: {
+    serverToClient: { message: { payload: z.object({ text: z.string() }) } }, // shared event for rooms
   },
-  events: {
-    message: z.object({ text: z.string() }),
-  },
-  topics: {
-    prices: z.object({ symbol: z.string(), price: z.number() }),
+  roles: {
+    user: {
+      clientToServer: {
+        join: { input: z.object({ room: z.string() }), output: z.object({ ok: z.boolean() }) },
+      },
+      serverToClient: {
+        prices: { payload: z.object({ symbol: z.string(), price: z.number() }), subscribe: true },
+      },
+    },
   },
 })
 
@@ -30,13 +34,15 @@ async function waitFor(pred: () => boolean, timeout = 1000) {
 
 async function node(bus: MemoryBus) {
   const n = await h.server(contract, {
-    authenticate: () => ({}),
+    authenticate: () => ({ role: 'user' as const, ctx: {} }),
     adapter: createInMemoryAdapter(bus),
   })
   n.srv.implement({
-    join: async ({ room }, _ctx, conn) => {
-      n.srv.room(room).add(conn)
-      return { ok: true }
+    user: {
+      join: async ({ room }, _ctx, conn) => {
+        n.srv.room(room).add(conn)
+        return { ok: true }
+      },
     },
   })
   return n
@@ -48,12 +54,12 @@ describe('cross-node fan-out (two servers, one bus)', () => {
     const nodeA = await node(bus)
     const nodeB = await node(bus)
 
-    const client = h.client(contract, { url: nodeA.url })
+    const client = h.client(contract, { url: nodeA.url, role: 'user' })
     const received: Array<{ symbol: string; price: number }> = []
     const sub = client.subscribe('prices', (p) => received.push(p))
     await sub.ready
 
-    nodeB.srv.publish('prices', { symbol: 'MSFT', price: 5 })
+    nodeB.srv.forRole('user').publish('prices', { symbol: 'MSFT', price: 5 })
     await waitFor(() => received.length === 1)
     expect(received).toEqual([{ symbol: 'MSFT', price: 5 }])
   })
@@ -63,7 +69,7 @@ describe('cross-node fan-out (two servers, one bus)', () => {
     const nodeA = await node(bus)
     const nodeB = await node(bus)
 
-    const client = h.client(contract, { url: nodeA.url })
+    const client = h.client(contract, { url: nodeA.url, role: 'user' })
     const got: Array<{ text: string }> = []
     client.on('message', (m) => got.push(m))
 

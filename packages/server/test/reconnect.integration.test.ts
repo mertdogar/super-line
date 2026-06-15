@@ -5,12 +5,15 @@ import type { Conn } from '@super-line/server'
 import { createHarness, tick, waitFor } from './harness.js'
 
 const contract = defineContract({
-  messages: {
-    hang: { input: z.object({}), output: z.object({ ok: z.boolean() }) },
-  },
-  events: {},
-  topics: {
-    prices: z.object({ symbol: z.string(), price: z.number() }),
+  roles: {
+    user: {
+      clientToServer: {
+        hang: { input: z.object({}), output: z.object({ ok: z.boolean() }) },
+      },
+      serverToClient: {
+        prices: { payload: z.object({ symbol: z.string(), price: z.number() }), subscribe: true },
+      },
+    },
   },
 })
 
@@ -19,20 +22,20 @@ afterEach(() => h.dispose())
 
 describe('client reconnect', () => {
   it('auto-reconnects and re-subscribes topics after an abrupt drop', async () => {
-    let lastConn: Conn<unknown> | undefined
+    let lastConn: Conn | undefined
     const { srv, url } = await h.server(contract, {
-      authenticate: () => ({}),
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
       onConnection: (c) => {
         lastConn = c
       },
     })
-    srv.implement({ hang: () => new Promise<never>(() => {}) })
+    srv.implement({ user: { hang: () => new Promise<never>(() => {}) } })
 
-    const client = h.client(contract, { url, reconnectBaseMs: 10, reconnectMaxMs: 50 })
+    const client = h.client(contract, { url, role: 'user', reconnectBaseMs: 10, reconnectMaxMs: 50 })
     const received: Array<{ symbol: string; price: number }> = []
     await client.subscribe('prices', (p) => received.push(p)).ready
 
-    srv.publish('prices', { symbol: 'A', price: 1 })
+    srv.forRole('user').publish('prices', { symbol: 'A', price: 1 })
     await waitFor(() => received.length === 1)
 
     const firstConn = lastConn
@@ -40,22 +43,22 @@ describe('client reconnect', () => {
 
     await waitFor(() => lastConn !== firstConn && client.connected, 3000)
 
-    srv.publish('prices', { symbol: 'B', price: 2 })
+    srv.forRole('user').publish('prices', { symbol: 'B', price: 2 })
     await waitFor(() => received.length === 2, 3000)
     expect(received[1]).toEqual({ symbol: 'B', price: 2 })
   })
 
   it('rejects in-flight requests with DISCONNECTED when the connection drops', async () => {
-    let lastConn: Conn<unknown> | undefined
+    let lastConn: Conn | undefined
     const { srv, url } = await h.server(contract, {
-      authenticate: () => ({}),
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
       onConnection: (c) => {
         lastConn = c
       },
     })
-    srv.implement({ hang: () => new Promise<never>(() => {}) })
+    srv.implement({ user: { hang: () => new Promise<never>(() => {}) } })
 
-    const client = h.client(contract, { url, reconnectBaseMs: 10 })
+    const client = h.client(contract, { url, role: 'user', reconnectBaseMs: 10 })
     await waitFor(() => client.connected)
 
     const inflight = client.hang({})

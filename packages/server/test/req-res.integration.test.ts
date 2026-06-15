@@ -4,18 +4,22 @@ import { defineContract, SocketError } from '@super-line/core'
 import { createHarness } from './harness.js'
 
 const contract = defineContract({
-  messages: {
-    echo: {
-      input: z.object({ text: z.string() }),
-      output: z.object({ text: z.string(), at: z.number() }),
-    },
-    boom: {
-      input: z.object({}),
-      output: z.object({ ok: z.boolean() }),
+  shared: {
+    clientToServer: {
+      ping: { input: z.object({}), output: z.object({ pong: z.boolean() }) },
     },
   },
-  events: {},
-  topics: {},
+  roles: {
+    user: {
+      clientToServer: {
+        echo: {
+          input: z.object({ text: z.string() }),
+          output: z.object({ text: z.string(), at: z.number() }),
+        },
+        boom: { input: z.object({}), output: z.object({ ok: z.boolean() }) },
+      },
+    },
+  },
 })
 
 const h = createHarness()
@@ -23,21 +27,29 @@ afterEach(() => h.dispose())
 
 async function boot() {
   const { srv, url } = await h.server(contract, {
-    authenticate: () => ({ user: { id: 'u1' } }),
+    authenticate: () => ({ role: 'user' as const, ctx: { id: 'u1' } }),
   })
   srv.implement({
-    echo: async ({ text }, ctx) => ({ text: `${text}:${ctx.user.id}`, at: 42 }),
-    boom: async () => {
-      throw new SocketError('FORBIDDEN', 'nope')
+    shared: { ping: async () => ({ pong: true }) },
+    user: {
+      echo: async ({ text }, ctx) => ({ text: `${text}:${ctx.id}`, at: 42 }),
+      boom: async () => {
+        throw new SocketError('FORBIDDEN', 'nope')
+      },
     },
   })
-  return h.client(contract, { url })
+  return h.client(contract, { url, role: 'user' })
 }
 
 describe('req/res over loopback', () => {
   it('round-trips a typed request and response', async () => {
     const client = await boot()
     expect(await client.echo({ text: 'hi' })).toEqual({ text: 'hi:u1', at: 42 })
+  })
+
+  it('serves a shared request from any role', async () => {
+    const client = await boot()
+    expect(await client.ping({})).toEqual({ pong: true })
   })
 
   it('rejects with a typed SocketError when the handler throws', async () => {

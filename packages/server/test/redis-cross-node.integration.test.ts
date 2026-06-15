@@ -14,14 +14,18 @@ try {
   dockerAvailable = false
 }
 const contract = defineContract({
-  messages: {
-    join: { input: z.object({ room: z.string() }), output: z.object({ ok: z.boolean() }) },
+  shared: {
+    serverToClient: { message: { payload: z.object({ text: z.string() }) } },
   },
-  events: {
-    message: z.object({ text: z.string() }),
-  },
-  topics: {
-    prices: z.object({ symbol: z.string(), price: z.number() }),
+  roles: {
+    user: {
+      clientToServer: {
+        join: { input: z.object({ room: z.string() }), output: z.object({ ok: z.boolean() }) },
+      },
+      serverToClient: {
+        prices: { payload: z.object({ symbol: z.string(), price: z.number() }), subscribe: true },
+      },
+    },
   },
 })
 
@@ -42,13 +46,15 @@ afterEach(() => h.dispose())
 
 async function node() {
   const n = await h.server(contract, {
-    authenticate: () => ({}),
+    authenticate: () => ({ role: 'user' as const, ctx: {} }),
     adapter: createRedisAdapter(redisUrl),
   })
   n.srv.implement({
-    join: async ({ room }, _ctx, conn) => {
-      n.srv.room(room).add(conn)
-      return { ok: true }
+    user: {
+      join: async ({ room }, _ctx, conn) => {
+        n.srv.room(room).add(conn)
+        return { ok: true }
+      },
     },
   })
   return n
@@ -59,12 +65,12 @@ describe.skipIf(!dockerAvailable)('redis adapter cross-process fan-out', () => {
     const nodeA = await node()
     const nodeB = await node()
 
-    const client = h.client(contract, { url: nodeA.url })
+    const client = h.client(contract, { url: nodeA.url, role: 'user' })
     const received: Array<{ symbol: string; price: number }> = []
     // ready awaits the redis SUBSCRIBE (handleSub awaits adapter.subscribe), so no race
     await client.subscribe('prices', (p) => received.push(p)).ready
 
-    nodeB.srv.publish('prices', { symbol: 'NVDA', price: 9 })
+    nodeB.srv.forRole('user').publish('prices', { symbol: 'NVDA', price: 9 })
     await waitFor(() => received.length === 1, 5000)
     expect(received[0]).toEqual({ symbol: 'NVDA', price: 9 })
   })
@@ -73,7 +79,7 @@ describe.skipIf(!dockerAvailable)('redis adapter cross-process fan-out', () => {
     const nodeA = await node()
     const nodeB = await node()
 
-    const client = h.client(contract, { url: nodeA.url })
+    const client = h.client(contract, { url: nodeA.url, role: 'user' })
     const got: Array<{ text: string }> = []
     client.on('message', (m) => got.push(m))
 

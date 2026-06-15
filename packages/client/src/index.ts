@@ -6,17 +6,20 @@ import {
   type Serializer,
   type Contract,
   type ServerFrame,
-  type InferIn,
-  type InferOut,
+  type RoleOf,
+  type Requests,
+  type Events,
+  type Topics,
+  type RequestDef,
+  type ServerMessageDef,
+  type ClientInput,
+  type Output,
+  type EventData,
 } from '@super-line/core'
 import { backoffDelay } from './backoff.js'
 
 export { backoffDelay } from './backoff.js'
 export type { BackoffOptions } from './backoff.js'
-
-type Messages<C extends Contract> = NonNullable<C['messages']>
-type Events<C extends Contract> = NonNullable<C['events']>
-type Topics<C extends Contract> = NonNullable<C['topics']>
 
 export interface CallOptions {
   timeoutMs?: number
@@ -29,24 +32,25 @@ export interface Subscription {
   unsubscribe(): void
 }
 
-export type ClientMethods<C extends Contract> = {
-  [K in keyof Messages<C>]: (
-    input: InferIn<Messages<C>[K]['input']>,
+export type ClientMethods<C extends Contract, R extends RoleOf<C>> = {
+  [K in keyof Requests<C, R>]: (
+    input: ClientInput<Requests<C, R>[K]>,
     opts?: CallOptions,
-  ) => Promise<InferOut<Messages<C>[K]['output']>>
+  ) => Promise<Output<Requests<C, R>[K]>>
 }
 
-export type Client<C extends Contract> = ClientMethods<C> & {
-  on<E extends keyof Events<C>>(
+export type Client<C extends Contract, R extends RoleOf<C>> = ClientMethods<C, R> & {
+  on<E extends keyof Events<C, R>>(
     event: E,
-    handler: (data: InferOut<Events<C>[E]>) => void,
+    handler: (data: EventData<Events<C, R>[E]>) => void,
   ): () => void
-  subscribe<T extends keyof Topics<C>>(
+  subscribe<T extends keyof Topics<C, R>>(
     topic: T,
-    handler: (data: InferOut<Topics<C>[T]>) => void,
+    handler: (data: EventData<Topics<C, R>[T]>) => void,
   ): Subscription
   close(): void
   readonly connected: boolean
+  readonly role: R
 }
 
 export interface ValidationErrorInfo {
@@ -54,8 +58,10 @@ export interface ValidationErrorInfo {
   name: string
 }
 
-export interface ClientOptions {
+export interface ClientOptions<C extends Contract, R extends RoleOf<C>> {
   url: string
+  /** This client's role; narrows the surface and is sent to the server to verify. */
+  role: R
   params?: Record<string, string>
   serializer?: Serializer
   timeoutMs?: number
@@ -96,7 +102,12 @@ function deferred(): Deferred {
   return { promise, resolve, reject }
 }
 
-export function createClient<C extends Contract>(contract: C, opts: ClientOptions): Client<C> {
+export function createClient<C extends Contract, R extends RoleOf<C>>(
+  contract: C,
+  opts: ClientOptions<C, R>,
+): Client<C, R> {
+  const c: Contract = contract
+  const role = opts.role
   const serializer = opts.serializer ?? jsonSerializer
   const defaultTimeout = opts.timeoutMs ?? 30_000
   const validateInbound = (opts.validate ?? 'off') === 'inbound'
@@ -110,12 +121,21 @@ export function createClient<C extends Contract>(contract: C, opts: ClientOption
   if (!resolved) throw new Error('No WebSocket implementation found; pass opts.WebSocket')
   const WS: typeof WebSocket = resolved
 
-  const url = buildUrl(opts.url, opts.params)
+  // role rides along as a query param so the server's authenticate can verify it
+  const url = buildUrl(opts.url, { ...opts.params, role })
   const requests = new Map<number, Request>()
   const listeners = new Map<string, Set<(data: unknown) => void>>()
   const topicListeners = new Map<string, Set<(data: unknown) => void>>()
   const readyByTopic = new Map<string, Deferred>() // topics awaiting their first ack
   const subAckById = new Map<number, string>() // outstanding sub frame id -> topic
+
+  // resolve contract defs from this role's effective surface (shared ∪ role)
+  function reqDef(method: string): RequestDef | undefined {
+    return c.roles[role]?.clientToServer?.[method] ?? c.shared?.clientToServer?.[method]
+  }
+  function serverMessageDef(name: string): ServerMessageDef | undefined {
+    return c.roles[role]?.serverToClient?.[name] ?? c.shared?.serverToClient?.[name]
+  }
 
   let ws!: WebSocket
   let nextId = 1
@@ -185,7 +205,7 @@ export function createClient<C extends Contract>(contract: C, opts: ClientOption
       }
       settleRequest(frame.i, (op) => {
         if (validateInbound) {
-          const def = contract.messages?.[op.method]
+          const def = reqDef(op.method)
           if (def) {
             try {
               validateSync(def.output, frame.d)
@@ -211,11 +231,13 @@ export function createClient<C extends Contract>(contract: C, opts: ClientOption
       }
       settleRequest(frame.i, (op) => op.reject(new SocketError(frame.code, frame.m, frame.d)))
     } else if (frame.t === 'evt') {
-      if (!checkInbound(contract.events?.[frame.e], frame.d, { kind: 'event', name: frame.e })) return
+      if (!checkInbound(serverMessageDef(frame.e)?.payload, frame.d, { kind: 'event', name: frame.e }))
+        return
       const set = listeners.get(frame.e)
       if (set) for (const cb of set) cb(frame.d)
     } else if (frame.t === 'pub') {
-      if (!checkInbound(contract.topics?.[frame.c], frame.d, { kind: 'topic', name: frame.c })) return
+      if (!checkInbound(serverMessageDef(frame.c)?.payload, frame.d, { kind: 'topic', name: frame.c }))
+        return
       const set = topicListeners.get(frame.c)
       if (set) for (const cb of set) cb(frame.d)
     }
@@ -323,6 +345,7 @@ export function createClient<C extends Contract>(contract: C, opts: ClientOption
   connect()
 
   const base = {
+    role,
     on(event: string, handler: (data: unknown) => void): () => void {
       let set = listeners.get(event)
       if (!set) {
@@ -354,7 +377,7 @@ export function createClient<C extends Contract>(contract: C, opts: ClientOption
       if (typeof prop !== 'string' || prop === 'then') return undefined
       return (input: unknown, callOpts?: CallOptions) => call(prop, input, callOpts)
     },
-  }) as unknown as Client<C>
+  }) as unknown as Client<C, R>
 }
 
 function buildUrl(url: string, params?: Record<string, string>): string {

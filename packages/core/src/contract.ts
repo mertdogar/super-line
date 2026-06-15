@@ -41,29 +41,35 @@ type StcOf<D> = D extends { serverToClient: infer M extends Record<string, Serve
   ? M
   : {}
 
-// Effective surface for a role = shared ∪ roles[R] (keys assumed disjoint).
+// serverToClient split: no `subscribe` => push event; `subscribe: true` => topic.
+type EventsOf<M> = { [K in keyof M as M[K] extends { subscribe: true } ? never : K]: M[K] }
+type TopicsOf<M> = { [K in keyof M as M[K] extends { subscribe: true } ? K : never]: M[K] }
+
+// Merged surface for a role = shared ∪ roles[R] (keys assumed disjoint). Used client-side.
 export type Requests<C extends Contract, R extends RoleOf<C>> = CtsOf<C['shared']> &
   CtsOf<C['roles'][R]>
-
 export type ServerMessages<C extends Contract, R extends RoleOf<C>> = StcOf<C['shared']> &
   StcOf<C['roles'][R]>
+export type Events<C extends Contract, R extends RoleOf<C>> = EventsOf<ServerMessages<C, R>>
+export type Topics<C extends Contract, R extends RoleOf<C>> = TopicsOf<ServerMessages<C, R>>
 
-// serverToClient split: no `subscribe` => push event; `subscribe: true` => topic.
-export type Events<C extends Contract, R extends RoleOf<C>> = {
-  [K in keyof ServerMessages<C, R> as ServerMessages<C, R>[K] extends { subscribe: true }
-    ? never
-    : K]: ServerMessages<C, R>[K]
-}
-
-export type Topics<C extends Contract, R extends RoleOf<C>> = {
-  [K in keyof ServerMessages<C, R> as ServerMessages<C, R>[K] extends { subscribe: true }
-    ? K
-    : never]: ServerMessages<C, R>[K]
-}
+// Per-section surfaces. Used server-side (shared block vs role block; role-scoped publish).
+export type SharedRequests<C extends Contract> = CtsOf<C['shared']>
+export type RoleRequests<C extends Contract, R extends RoleOf<C>> = CtsOf<C['roles'][R]>
+export type SharedEvents<C extends Contract> = EventsOf<StcOf<C['shared']>>
+export type SharedTopics<C extends Contract> = TopicsOf<StcOf<C['shared']>>
+export type RoleTopics<C extends Contract, R extends RoleOf<C>> = TopicsOf<StcOf<C['roles'][R]>>
 
 export type ServerEvents<C extends Contract> = C['serverToServer'] extends Record<string, Schema>
   ? C['serverToServer']
   : {}
+
+// Guarded extractors: re-assert the def constraint so indexed access stays a Schema.
+export type ClientInput<T> = T extends RequestDef ? InferIn<T['input']> : never // client sends
+export type ServerInput<T> = T extends RequestDef ? InferOut<T['input']> : never // server receives (validated)
+export type Output<T> = T extends RequestDef ? InferOut<T['output']> : never // reply, both ends
+export type EventData<T> = T extends ServerMessageDef ? InferOut<T['payload']> : never // client receives
+export type EmitData<T> = T extends ServerMessageDef ? InferIn<T['payload']> : never // server sends
 
 export type InferIn<S extends Schema> = StandardSchemaV1.InferInput<S>
 export type InferOut<S extends Schema> = StandardSchemaV1.InferOutput<S>

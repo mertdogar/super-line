@@ -20,7 +20,17 @@ export type {
   ServerMessages,
   Events,
   Topics,
+  SharedRequests,
+  RoleRequests,
+  SharedEvents,
+  SharedTopics,
+  RoleTopics,
   ServerEvents,
+  ClientInput,
+  ServerInput,
+  Output,
+  EventData,
+  EmitData,
 } from './contract.js'
 
 export { PROTOCOL } from './wire.js'

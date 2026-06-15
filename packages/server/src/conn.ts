@@ -1,14 +1,20 @@
 import type { WebSocket } from 'ws'
-import type { Serializer, ServerFrame } from '@super-line/core'
+import type { Serializer, ServerFrame, ServerMessageDef, EmitData } from '@super-line/core'
 
 // A single client connection. Node-local: `conn` objects live on the node that
 // accepted the upgrade. Cross-node delivery goes through the Adapter, not conns.
-export class Conn<Ctx = unknown> {
+// Generic over the events it may emit (scoped by role), its ctx, and its role.
+export class Conn<
+  Ev = Record<string, ServerMessageDef>,
+  Ctx = unknown,
+  Role extends string = string,
+> {
   // namespaced channels (rooms + topics) this connection belongs to, for cleanup
   readonly channels = new Set<string>()
 
   constructor(
     readonly ws: WebSocket,
+    readonly role: Role,
     readonly ctx: Ctx,
     private readonly serializer: Serializer,
   ) {}
@@ -25,8 +31,9 @@ export class Conn<Ctx = unknown> {
     this.ws.send(payload)
   }
 
-  emit(event: string, data: unknown): void {
-    this.send({ t: 'evt', e: event, d: data })
+  /** Push an event to THIS connection (node-local). Scoped to the role's events. */
+  emit<E extends keyof Ev>(event: E, data: EmitData<Ev[E]>): void {
+    this.send({ t: 'evt', e: String(event), d: data })
   }
 
   close(): void {

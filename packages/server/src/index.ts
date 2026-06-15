@@ -11,6 +11,7 @@ import {
   type Contract,
   type ClientFrame,
   type ReqFrame,
+  type EvtFrame,
   type RoleOf,
   type Events,
   type SharedRequests,
@@ -49,7 +50,12 @@ type CtxUnion<A> = A extends { ctx: infer X } ? X : never
 
 const ROOM = 'r:'
 const TOPIC = 't:'
+const CONN = 'c:' // personal channel per connection (targeted cross-node send)
+const USER = 'u:' // personal channel per user key (cross-node fan-out)
 const S2S = 's2s' // reserved channel for inter-server messaging
+
+// Envelope carried on personal (c:/u:) channels — distinct from the raw frame fan-out of rooms/topics.
+type PersonalEnvelope = { p: 'emit'; f: EvtFrame } | { p: 'close' }
 
 // Handlers for one role's clientToServer requests. ctx + conn are narrowed to that role.
 type RoleHandlers<C extends Contract, A, R extends RoleOf<C>> = {
@@ -144,6 +150,22 @@ export interface ClusterView {
   topology(): Promise<NodeStat[]>
 }
 
+/** A single targeted connection, reachable on whatever node holds it. */
+export interface ConnTarget<C extends Contract> {
+  /** Push a shared event to this connection (cross-node). */
+  emit<E extends keyof SharedEvents<C>>(event: E, data: EmitData<SharedEvents<C>[E]>): void
+  /** Close this connection (cross-node kick). */
+  close(): void
+}
+
+/** All of a user's connections (0..N devices), reachable across nodes. */
+export interface UserTarget<C extends Contract> {
+  /** Push a shared event to every one of the user's connections (cross-node). */
+  emit<E extends keyof SharedEvents<C>>(event: E, data: EmitData<SharedEvents<C>[E]>): void
+  /** Disconnect every one of the user's connections (cross-node). */
+  disconnect(): void
+}
+
 /** Lens for role-scoped server sends, returned by `srv.forRole(role)`. */
 export interface RoleLens<C extends Contract, R extends RoleOf<C>> {
   /** Publish to a topic in role `R`'s surface (reaches that role's subscribers). */
@@ -195,6 +217,10 @@ export interface SocketServer<C extends Contract, A extends AuthResult<C>> {
   readonly cluster: ClusterView
   /** Whether a user (by `identify` key) has at least one live connection anywhere. */
   isOnline(userId: string): Promise<boolean>
+  /** Target a single connection by id, on whatever node holds it (cross-node emit/close). */
+  toConn(id: string): ConnTarget<C>
+  /** Target all of a user's connections (by `identify` key) across nodes (emit/disconnect). */
+  toUser(userId: string): UserTarget<C>
   /** Register handlers for shared + per-role requests (chainable). */
   implement(handlers: Handlers<C, A>): SocketServer<C, A>
   /** Mixed-role connection group; broadcast() sends a shared contract event to members. */
@@ -280,10 +306,32 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       handleServerMessage(payload)
       return
     }
+    if (channel.startsWith(CONN) || channel.startsWith(USER)) {
+      handlePersonal(channel, payload)
+      return
+    }
     const set = members.get(channel)
     if (!set) return
     for (const conn of set) conn.sendRaw(payload)
   })
+
+  // personal (c:/u:) channels carry a control envelope, not a raw frame to forward verbatim
+  function handlePersonal(channel: string, payload: string | Uint8Array): void {
+    const set = members.get(channel)
+    if (!set) return
+    let env: PersonalEnvelope
+    try {
+      env = serializer.decode(payload) as PersonalEnvelope
+    } catch {
+      return
+    }
+    if (env.p === 'close') {
+      for (const conn of set) conn.close()
+      return
+    }
+    const frame = serializer.encode(env.f)
+    for (const conn of set) conn.sendRaw(frame)
+  }
 
   // inter-server messaging rides the adapter on a reserved channel; subscribe if used
   if (c.serverToServer) void adapter.subscribe(S2S)
@@ -376,6 +424,9 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       const conn = new Conn(ws, randomUUID(), auth.role, auth.ctx, serializer)
       conns.add(conn)
       void adapter.presence?.set(buildDescriptor(conn))
+      void joinChannel(conn, CONN + conn.id) // personal channel for targeted cross-node send
+      const uid = opts.identify?.(conn)
+      if (uid !== undefined) void joinChannel(conn, USER + uid)
       ws.on('pong', () => {
         conn.lastPongAt = Date.now()
         conn.missedPongs = 0
@@ -498,6 +549,19 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     void adapter.publish(TOPIC + ns + ':' + name, serializer.encode({ t: 'pub', c: name, d: data }))
   }
 
+  // emit/close to a personal (c:/u:) channel; the owning node delivers via handlePersonal
+  function personalTarget(channel: string): { emit: (event: string, data: unknown) => void; close: () => void } {
+    return {
+      emit(event, data) {
+        const env: PersonalEnvelope = { p: 'emit', f: { t: 'evt', e: event, d: data } }
+        void adapter.publish(channel, serializer.encode(env))
+      },
+      close() {
+        void adapter.publish(channel, serializer.encode({ p: 'close' } satisfies PersonalEnvelope))
+      },
+    }
+  }
+
   const api: SocketServer<C, A> = {
     nodeId: instanceId,
     get local(): LocalView {
@@ -537,6 +601,13 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     },
     async isOnline(userId) {
       return (await presenceOrThrow().byUser(userId)).length > 0
+    },
+    toConn(id) {
+      return personalTarget(CONN + id)
+    },
+    toUser(userId) {
+      const t = personalTarget(USER + userId)
+      return { emit: t.emit, disconnect: t.close }
     },
     implement(handlers) {
       impl = handlers as unknown as Impl

@@ -17,9 +17,14 @@ export class Conn<
   /** Namespaced channels (rooms + topics) this connection belongs to. */
   readonly channels = new Set<string>()
 
+  /** When this connection was accepted (`Date.now()` at the upgrade). */
+  readonly connectedAt = Date.now()
+
   constructor(
     /** The underlying `ws` socket. `conn.ws.terminate()` simulates a drop in tests. */
     readonly ws: WebSocket,
+    /** Server-assigned unique id for this connection (stable for its lifetime). */
+    readonly id: string,
     /** This connection's role (the literal resolved by `authenticate`). */
     readonly role: Role,
     /** The context `authenticate` returned for this connection. */

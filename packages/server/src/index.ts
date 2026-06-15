@@ -110,6 +110,18 @@ export interface Room<C extends Contract> {
   broadcast<E extends keyof SharedEvents<C>>(event: E, data: EmitData<SharedEvents<C>[E]>): void
   /** Member count **on the current node** (membership is node-local). */
   readonly size: number
+  /** Snapshot of this room's members **on the current node**. */
+  readonly connections: Conn[]
+}
+
+/** Synchronous, node-local introspection of the current server process. */
+export interface LocalView {
+  /** Snapshot of all connections accepted on this node. */
+  readonly connections: Conn[]
+  /** Names of rooms with at least one member on this node. */
+  readonly rooms: string[]
+  /** Names of topics with at least one subscriber on this node. */
+  readonly topics: string[]
 }
 
 /** Lens for role-scoped server sends, returned by `srv.forRole(role)`. */
@@ -144,6 +156,10 @@ export interface ServerOptions<C extends Contract, A extends AuthResult<C>> {
 
 /** A running super-line server, returned by {@link createSocketServer}. */
 export interface SocketServer<C extends Contract, A extends AuthResult<C>> {
+  /** This node's stable id (unique per server process). */
+  readonly nodeId: string
+  /** Synchronous, node-local introspection (connections, rooms, topics on this process). */
+  readonly local: LocalView
   /** Register handlers for shared + per-role requests (chainable). */
   implement(handlers: Handlers<C, A>): SocketServer<C, A>
   /** Mixed-role connection group; broadcast() sends a shared contract event to members. */
@@ -279,7 +295,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     }
 
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const conn = new Conn(ws, auth.role, auth.ctx, serializer)
+      const conn = new Conn(ws, randomUUID(), auth.role, auth.ctx, serializer)
       conns.add(conn)
       ws.on('message', (data, isBinary) => {
         void onMessage(conn, data, isBinary)
@@ -388,6 +404,9 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       get size() {
         return members.get(channel)?.size ?? 0
       },
+      get connections() {
+        return [...(members.get(channel) ?? [])]
+      },
     }
   }
 
@@ -396,6 +415,25 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   }
 
   const api: SocketServer<C, A> = {
+    nodeId: instanceId,
+    get local(): LocalView {
+      return {
+        connections: [...conns],
+        get rooms() {
+          const out: string[] = []
+          for (const channel of members.keys()) if (channel.startsWith(ROOM)) out.push(channel.slice(ROOM.length))
+          return out
+        },
+        get topics() {
+          const out: string[] = []
+          for (const channel of members.keys()) {
+            if (!channel.startsWith(TOPIC)) continue
+            out.push(channel.slice(channel.indexOf(':', TOPIC.length) + 1)) // strip "t:{ns}:"
+          }
+          return out
+        },
+      }
+    },
     implement(handlers) {
       impl = handlers as unknown as Impl
       return api

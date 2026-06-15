@@ -10,14 +10,16 @@ import { z } from 'zod'
 import { defineContract } from '@super-line/core'
 
 export const api = defineContract({
-  messages: {
-    send: { input: z.object({ room: z.string(), text: z.string() }), output: z.object({ id: z.string() }) },
-  },
-  events: {
-    message: z.object({ room: z.string(), text: z.string(), from: z.string() }),
-  },
-  topics: {
-    presence: z.object({ room: z.string(), count: z.number() }),
+  roles: {
+    user: {
+      clientToServer: {
+        send: { input: z.object({ room: z.string(), text: z.string() }), output: z.object({ id: z.string() }) },
+      },
+      serverToClient: {
+        message: { payload: z.object({ room: z.string(), text: z.string(), from: z.string() }) }, // push event
+        presence: { payload: z.object({ room: z.string(), count: z.number() }), subscribe: true }, // topic
+      },
+    },
   },
 })
 ```
@@ -33,15 +35,17 @@ const srv = createSocketServer(api, {
   server,
   authenticate: (req) => {
     const name = new URL(req.url ?? '', 'http://localhost').searchParams.get('name')
-    if (!name) throw new Error('unauthorized') // -> 401 at the upgrade
-    return { name }
+    if (!name) throw new Error('unauthorized')         // -> 401 at the upgrade
+    return { role: 'user' as const, ctx: { name } }    // role + ctx; ctx.name in every user handler
   },
 })
 
 srv.implement({
-  send: async ({ room, text }, ctx) => {
-    srv.room(room).broadcast('message', { room, text, from: ctx.name })
-    return { id: crypto.randomUUID() }
+  user: {
+    send: async ({ room, text }, ctx, conn) => {
+      conn.emit('message', { room, text, from: ctx.name }) // or srv.room(room).broadcast(...)
+      return { id: crypto.randomUUID() }
+    },
   },
 })
 
@@ -53,23 +57,59 @@ server.listen(3000)
 import { createClient } from '@super-line/client'
 import { api } from './contract.js'
 
-const client = createClient(api, { url: 'ws://localhost:3000', params: { name: 'ada' } })
+const client = createClient(api, { url: 'ws://localhost:3000', role: 'user', params: { name: 'ada' } })
 client.on('message', (m) => console.log(`${m.from}: ${m.text}`))
 await client.send({ room: 'lobby', text: 'hi' })
 ```
 
-## Auth at the upgrade (token → ctx)
+## Multiple roles (user + agent)
+
+A `user` and an `agent` connect to the same server with different surfaces. A `shared` block is common to both; role enforcement is automatic (a cross-role call gets `NOT_FOUND`).
+
+```ts
+export const api = defineContract({
+  shared: {
+    clientToServer: { join: { input: z.object({ room: z.string() }), output: z.object({ ok: z.boolean() }) } },
+    serverToClient: { message: { payload: z.object({ room: z.string(), text: z.string(), from: z.string() }) } },
+  },
+  roles: {
+    user:  { clientToServer: { say:      { input: z.object({ room: z.string(), text: z.string() }), output: z.object({ id: z.string() }) } } },
+    agent: { clientToServer: { announce: { input: z.object({ room: z.string(), text: z.string() }), output: z.object({ id: z.string() }) } } },
+  },
+})
+
+srv.implement({
+  shared: { join: async ({ room }, _ctx, conn) => { srv.room(room).add(conn); return { ok: true } } },
+  user:  { say:      async ({ room, text }, ctx) => { srv.room(room).broadcast('message', { room, text, from: ctx.name }); return { id: nano() } } },
+  agent: { announce: async ({ room, text }, ctx) => { srv.room(room).broadcast('message', { room, text, from: `🤖 ${ctx.name}` }); return { id: nano() } } },
+})
+
+const user  = createClient(api, { url, role: 'user',  params: { name: 'ada' } })
+const agent = createClient(api, { url, role: 'agent', params: { name: 'helper' } })
+await user.say({ room: 'lobby', text: 'hi' })          // ✓
+await agent.announce({ room: 'lobby', text: 'on it' }) // ✓
+// user.announce(...) is a COMPILE error (not on the user surface); forced at runtime -> NOT_FOUND
+```
+
+In a `user` handler, `ctx` is the user's ctx; in `agent`, the agent's. In a `shared` handler, `ctx` is the union (use common fields, or branch on `conn.role`).
+
+## Auth at the upgrade (token → { role, ctx })
+
+The client's `role` option is a **claim** sent as a query param; resolve the real role from the credential and verify the claim.
 
 ```ts
 const srv = createSocketServer(api, {
   server,
   authenticate: async (req) => {
-    const token = new URL(req.url ?? '', 'http://localhost').searchParams.get('token')
-    const user = await verifyJwt(token)        // throw to reject with 401 (no socket opened)
-    return { user }                            // ctx.user available in every handler
+    const u = new URL(req.url ?? '', 'http://localhost')
+    const user = await verifyJwt(u.searchParams.get('token'))   // throw to reject with 401 (no socket opened)
+    if (user.role !== u.searchParams.get('role')) throw new SocketError('FORBIDDEN', 'role not granted')
+    return user.role === 'admin'
+      ? { role: 'admin' as const, ctx: { user } }
+      : { role: 'user' as const, ctx: { user } }
   },
 })
-// client: createClient(api, { url, params: { token } })
+// client: createClient(api, { url, role: 'admin', params: { token } })
 ```
 
 ## Authorize topic subscriptions (private streams)
@@ -90,7 +130,7 @@ const srv = createSocketServer(api, {
 const srv = createSocketServer(api, {
   server, authenticate,
   use: [
-    async (ctx, info, next) => { rateLimit(ctx.user, info.name); await next() },        // throw to reject
+    async (ctx, info, next) => { rateLimit(info.conn.role, info.name); await next() },   // throw to reject
     async (_ctx, info, next) => { const t = Date.now(); await next(); metric(info.name, Date.now() - t) },
   ],
 })
@@ -99,16 +139,18 @@ const srv = createSocketServer(api, {
 
 ## Rooms: join + broadcast (the canonical pattern)
 
+Rooms are **mixed-role**; `broadcast` delivers a **shared** event. Put room-broadcast events in `shared.serverToClient`.
+
 ```ts
-// contract.messages.join: { input: { room }, output: { ok: boolean } }
 srv.implement({
-  join: async ({ room }, _ctx, conn) => {
-    srv.room(room).add(conn)                   // server-controlled membership
-    return { ok: true }
+  shared: {
+    join: async ({ room }, _ctx, conn) => { srv.room(room).add(conn); return { ok: true } },  // server-controlled membership
   },
-  send: async ({ room, text }, ctx) => {
-    srv.room(room).broadcast('message', { room, text, from: ctx.user.id })  // -> client.on('message')
-    return { id: nano() }
+  user: {
+    send: async ({ room, text }, ctx) => {
+      srv.room(room).broadcast('message', { room, text, from: ctx.user.id })  // -> client.on('message')
+      return { id: nano() }
+    },
   },
 })
 // client: await client.join({ room }); client.on('message', render)
@@ -117,29 +159,31 @@ srv.implement({
 
 ## Direct message to a user — cross-node safe
 
-Don't stash a `conn` to DM someone (it's node-local). Put each user in a per-user room and broadcast to it:
+Don't stash a `conn` to DM someone (it's node-local). Put each user in a per-user room and broadcast a shared event to it:
 
 ```ts
 onConnection: (conn, ctx) => srv.room(`user:${ctx.user.id}`).add(conn),
 // later, from anywhere (any node):
-srv.room(`user:${targetId}`).broadcast('dm', { from, text })
+srv.room(`user:${targetId}`).broadcast('dm', { from, text })   // 'dm' is a shared event
 ```
 
 ## Presence via a topic
 
 ```ts
-// topics.presence: { room, count }
+// roles.user.serverToClient.presence: { payload: { room, count }, subscribe: true }
 const counts = new Map<string, number>()
 const bump = (room: string, d: number) => { const n = Math.max(0, (counts.get(room) ?? 0) + d); counts.set(room, n); return n }
 
 srv.implement({
-  join: async ({ room }, _ctx, conn) => {
-    srv.room(room).add(conn)
-    srv.publish('presence', { room, count: bump(room, +1) })   // server-only publish
-    return { ok: true }
+  user: {
+    join: async ({ room }, _ctx, conn) => {
+      srv.room(room).add(conn)
+      srv.forRole('user').publish('presence', { room, count: bump(room, +1) })   // role topic, server-only
+      return { ok: true }
+    },
   },
 })
-onDisconnect: (conn, _ctx) => { /* look up the conn's room, publish presence with bump(room, -1) */ }
+// onDisconnect: (conn) => { /* look up the conn's room, forRole('user').publish('presence', bump(room, -1)) */ }
 // client: const sub = client.subscribe('presence', p => setOnline(p.count)); await sub.ready
 ```
 
@@ -147,14 +191,30 @@ onDisconnect: (conn, _ctx) => { /* look up the conn's room, publish presence wit
 
 ```ts
 // ❌ clients cannot publish to topics
-// ✅ send a message; the server validates/authorizes, then fans out
+// ✅ send a request; the server validates/authorizes, then fans out
 srv.implement({
-  setPrice: async ({ symbol, price }, ctx) => {
-    if (!ctx.user.canTrade) throw new SocketError('FORBIDDEN')
-    srv.publish('prices', { symbol, price })
-    return { ok: true }
+  user: {
+    setPrice: async ({ symbol, price }, ctx) => {
+      if (!ctx.user.canTrade) throw new SocketError('FORBIDDEN')
+      srv.forRole('user').publish('prices', { symbol, price })   // role topic
+      return { ok: true }
+    },
   },
 })
+```
+
+## serverToServer (cluster coordination)
+
+Top-level, not role-scoped. `emitServer` reaches **other** nodes only (excludes self); rides the same adapter.
+
+```ts
+export const api = defineContract({
+  roles: { user: {…} },
+  serverToServer: { rebalance: z.object({ shard: z.number() }) },
+})
+
+srv.onServer('rebalance', ({ shard }) => moveShard(shard))   // returns an unsubscribe fn
+srv.emitServer('rebalance', { shard: 3 })                    // -> every OTHER node
 ```
 
 ## Multi-node (Redis) — same code, scaled
@@ -162,7 +222,7 @@ srv.implement({
 ```ts
 import { createRedisAdapter } from '@super-line/adapter-redis'
 const srv = createSocketServer(api, { server, authenticate, adapter: createRedisAdapter('redis://localhost:6379') })
-// every server process gets an adapter pointing at the same Redis; room broadcasts + publishes now fan out across nodes.
+// every server process gets an adapter pointing at the same Redis; rooms, topics, AND serverToServer fan out across nodes.
 ```
 
 ## Typed error handling
@@ -203,24 +263,24 @@ These snippets are distilled from super-line's own (passing) suite. They use [Vi
 // test/harness.ts
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
-import type { Contract } from '@super-line/core'
-import { createSocketServer, type ServerOptions, type SocketServer } from '@super-line/server'
+import type { Contract, RoleOf } from '@super-line/core'
+import { createSocketServer, type AuthResult, type ServerOptions, type SocketServer } from '@super-line/server'
 import { createClient, type Client, type ClientOptions } from '@super-line/client'
 
 export function createHarness() {
   const cleanups: Array<() => Promise<void> | void> = []
 
-  async function server<C extends Contract, Ctx = undefined>(
-    contract: C, opts: Omit<ServerOptions<Ctx>, 'server'> = {},
-  ): Promise<{ srv: SocketServer<C, Ctx>; url: string }> {
+  async function server<C extends Contract, A extends AuthResult<C>>(
+    contract: C, opts: Omit<ServerOptions<C, A>, 'server'>,
+  ): Promise<{ srv: SocketServer<C, A>; url: string }> {
     const httpServer = http.createServer()
-    const srv = createSocketServer<C, Ctx>(contract, { ...opts, server: httpServer })
+    const srv = createSocketServer<C, A>(contract, { ...opts, server: httpServer })
     await new Promise<void>((r) => httpServer.listen(0, r))
     const url = `ws://127.0.0.1:${(httpServer.address() as AddressInfo).port}`
     cleanups.push(async () => { await srv.close(); await new Promise<void>((r) => httpServer.close(() => r())) })
     return { srv, url }
   }
-  function client<C extends Contract>(contract: C, opts: ClientOptions): Client<C> {
+  function client<C extends Contract, R extends RoleOf<C>>(contract: C, opts: ClientOptions<C, R>): Client<C, R> {
     const c = createClient(contract, opts)
     cleanups.unshift(() => c.close())          // clients close BEFORE the servers they connect to
     return c
@@ -242,12 +302,19 @@ A shared contract for the examples below:
 import { z } from 'zod'
 import { defineContract } from '@super-line/core'
 export const api = defineContract({
-  messages: {
-    echo: { input: z.object({ text: z.string() }), output: z.object({ text: z.string() }) },
-    boom: { input: z.object({}), output: z.object({ ok: z.boolean() }) },
+  shared: { serverToClient: { ping: { payload: z.object({ n: z.number() }) } } },
+  roles: {
+    user: {
+      clientToServer: {
+        echo: { input: z.object({ text: z.string() }), output: z.object({ text: z.string() }) },
+        boom: { input: z.object({}), output: z.object({ ok: z.boolean() }) },
+      },
+      serverToClient: {
+        feed: { payload: z.object({ n: z.number() }), subscribe: true },
+        secret: { payload: z.object({ x: z.string() }), subscribe: true },
+      },
+    },
   },
-  events: { ping: z.object({ n: z.number() }) },
-  topics: { feed: z.object({ n: z.number() }), secret: z.object({ x: z.string() }) },
 })
 ```
 
@@ -263,14 +330,30 @@ const h = createHarness()
 afterEach(() => h.dispose())
 
 it('round-trips and surfaces typed errors', async () => {
-  const { srv, url } = await h.server(api, { authenticate: () => ({}) })
+  const { srv, url } = await h.server(api, { authenticate: () => ({ role: 'user' as const, ctx: {} }) })
   srv.implement({
-    echo: async ({ text }) => ({ text }),
-    boom: async () => { throw new SocketError('FORBIDDEN', 'nope') },
+    user: {
+      echo: async ({ text }) => ({ text }),
+      boom: async () => { throw new SocketError('FORBIDDEN', 'nope') },
+    },
   })
-  const client = h.client(api, { url })
+  const client = h.client(api, { url, role: 'user' })
   expect(await client.echo({ text: 'hi' })).toEqual({ text: 'hi' })
   await expect(client.boom({})).rejects.toMatchObject({ code: 'FORBIDDEN' })
+})
+```
+
+### Role enforcement (cross-role → NOT_FOUND)
+
+```ts
+it('rejects a cross-role call with NOT_FOUND', async () => {
+  const { srv, url } = await h.server(twoRoleApi, { authenticate: (req) => resolveRole(req) })
+  srv.implement({ user: { sendMessage: async () => ({ id: '1' }) }, agent: { reportResult: async () => ({ ok: true }) } })
+
+  const user = h.client(twoRoleApi, { url, role: 'user' })
+  // bypass the typed surface to prove the runtime boundary
+  const call = (user as unknown as { reportResult: (i: unknown) => Promise<unknown> }).reportResult({ taskId: 't1' })
+  await expect(call).rejects.toMatchObject({ code: 'NOT_FOUND' })
 })
 ```
 
@@ -281,19 +364,19 @@ import type { Conn } from '@super-line/server'
 
 it('observes connect / disconnect / errors via hooks', async () => {
   const events: string[] = []
-  let captured: Conn<{ id: string }> | undefined
+  let captured: Conn | undefined
   const { srv, url } = await h.server(api, {
-    authenticate: () => ({ id: 'u1' }),
+    authenticate: () => ({ role: 'user' as const, ctx: { id: 'u1' } }),
     onConnection: (conn) => { captured = conn; events.push('connect') },
     onDisconnect: () => events.push('disconnect'),
     onError: (err) => events.push(`error:${(err as SocketError).code}`),
   })
-  srv.implement({ echo: async ({ text }) => ({ text }), boom: async () => { throw new SocketError('FORBIDDEN') } })
+  srv.implement({ user: { echo: async ({ text }) => ({ text }), boom: async () => { throw new SocketError('FORBIDDEN') } } })
 
-  const client = h.client(api, { url, reconnect: false })
+  const client = h.client(api, { url, role: 'user', reconnect: false })
   await client.echo({ text: 'x' })
   expect(events).toContain('connect')
-  expect(captured?.ctx.id).toBe('u1')          // the captured server-side conn carries ctx
+  expect(captured?.role).toBe('user')          // the captured server-side conn carries role + ctx
 
   await expect(client.boom({})).rejects.toMatchObject({ code: 'FORBIDDEN' })
   expect(events).toContain('error:FORBIDDEN')  // onError saw the thrown SocketError
@@ -312,14 +395,14 @@ it('rejects a bad token and never opens a socket', async () => {
     authenticate: (req) => {
       const token = new URL(req.url ?? '', 'http://x').searchParams.get('token')
       if (token !== 'good') throw new Error('unauthorized')
-      return {}
+      return { role: 'user' as const, ctx: {} }
     },
     onConnection: () => { connects++ },
   })
-  srv.implement({ echo: async ({ text }) => ({ text }), boom: async () => ({ ok: true }) })
+  srv.implement({ user: { echo: async ({ text }) => ({ text }), boom: async () => ({ ok: true }) } })
 
   // reconnect:false so the failure surfaces immediately (a 401 looks like any drop over the WS API)
-  const client = h.client(api, { url, params: { token: 'bad' }, reconnect: false })
+  const client = h.client(api, { url, role: 'user', params: { token: 'bad' }, reconnect: false })
   await expect(client.echo({ text: 'x' })).rejects.toMatchObject({ code: 'DISCONNECTED' })
   expect(connects).toBe(0)
 })
@@ -330,17 +413,17 @@ it('rejects a bad token and never opens a socket', async () => {
 ```ts
 it('denies an unauthorized subscribe and delivers an authorized one', async () => {
   const { srv, url } = await h.server(api, {
-    authenticate: () => ({}),
+    authenticate: () => ({ role: 'user' as const, ctx: {} }),
     authorizeSubscribe: (topic) => topic !== 'secret',
   })
-  srv.implement({ echo: async ({ text }) => ({ text }), boom: async () => ({ ok: true }) })
-  const client = h.client(api, { url })
+  srv.implement({ user: { echo: async ({ text }) => ({ text }), boom: async () => ({ ok: true }) } })
+  const client = h.client(api, { url, role: 'user' })
 
   await expect(client.subscribe('secret', () => {}).ready).rejects.toMatchObject({ code: 'FORBIDDEN' })
 
   const got: number[] = []
   await client.subscribe('feed', (p) => got.push(p.n)).ready
-  srv.publish('feed', { n: 1 })
+  srv.forRole('user').publish('feed', { n: 1 })
   await waitFor(() => got.length === 1)
 })
 ```
@@ -351,10 +434,10 @@ it('denies an unauthorized subscribe and delivers an authorized one', async () =
 import type { Conn } from '@super-line/server'
 
 it('auto-reconnects, re-subscribes, and rejects in-flight on drop', async () => {
-  let last: Conn<unknown> | undefined
-  const { srv, url } = await h.server(api, { authenticate: () => ({}), onConnection: (c) => { last = c } })
-  srv.implement({ echo: async ({ text }) => ({ text }), boom: () => new Promise<never>(() => {}) /* hangs */ })
-  const client = h.client(api, { url, reconnectBaseMs: 10, reconnectMaxMs: 50 })
+  let last: Conn | undefined
+  const { srv, url } = await h.server(api, { authenticate: () => ({ role: 'user' as const, ctx: {} }), onConnection: (c) => { last = c } })
+  srv.implement({ user: { echo: async ({ text }) => ({ text }), boom: () => new Promise<never>(() => {}) /* hangs */ } })
+  const client = h.client(api, { url, role: 'user', reconnectBaseMs: 10, reconnectMaxMs: 50 })
 
   const got: number[] = []
   await client.subscribe('feed', (p) => got.push(p.n)).ready
@@ -366,7 +449,7 @@ it('auto-reconnects, re-subscribes, and rejects in-flight on drop', async () => 
 
   await expect(inflight).rejects.toMatchObject({ code: 'DISCONNECTED' })   // in-flight rejects
   await waitFor(() => last !== first && client.connected, 3000)            // reconnected (new conn)
-  srv.publish('feed', { n: 1 })
+  srv.forRole('user').publish('feed', { n: 1 })
   await waitFor(() => got.length === 1, 3000)                              // topic auto-re-subscribed
 })
 ```
@@ -378,15 +461,34 @@ import { MemoryBus, createInMemoryAdapter } from '@super-line/server'
 
 it('fans out across two nodes sharing one bus', async () => {
   const bus = new MemoryBus()
-  const a = await h.server(api, { authenticate: () => ({}), adapter: createInMemoryAdapter(bus) })
-  const b = await h.server(api, { authenticate: () => ({}), adapter: createInMemoryAdapter(bus) })
-  for (const n of [a, b]) n.srv.implement({ echo: async ({ text }) => ({ text }), boom: async () => ({ ok: true }) })
+  const a = await h.server(api, { authenticate: () => ({ role: 'user' as const, ctx: {} }), adapter: createInMemoryAdapter(bus) })
+  const b = await h.server(api, { authenticate: () => ({ role: 'user' as const, ctx: {} }), adapter: createInMemoryAdapter(bus) })
+  for (const n of [a, b]) n.srv.implement({ user: { echo: async ({ text }) => ({ text }), boom: async () => ({ ok: true }) } })
 
-  const client = h.client(api, { url: a.url })  // connected to node A only
+  const client = h.client(api, { url: a.url, role: 'user' })  // connected to node A only
   const got: number[] = []
   await client.subscribe('feed', (p) => got.push(p.n)).ready
-  b.srv.publish('feed', { n: 7 })               // published on node B
-  await waitFor(() => got.length === 1)         // received on node A
+  b.srv.forRole('user').publish('feed', { n: 7 })             // published on node B
+  await waitFor(() => got.length === 1)                       // received on node A
+})
+```
+
+### serverToServer across nodes
+
+```ts
+it('emitServer reaches other nodes and excludes the sender', async () => {
+  const bus = new MemoryBus()
+  const a = await h.server(s2sApi, { authenticate: () => ({ role: 'user' as const, ctx: {} }), adapter: createInMemoryAdapter(bus) })
+  const b = await h.server(s2sApi, { authenticate: () => ({ role: 'user' as const, ctx: {} }), adapter: createInMemoryAdapter(bus) })
+
+  const bGot: unknown[] = [], aGot: unknown[] = []
+  b.srv.onServer('rebalance', (d) => bGot.push(d))
+  a.srv.onServer('rebalance', (d) => aGot.push(d))
+  a.srv.emitServer('rebalance', { shard: 3 })
+
+  await waitFor(() => bGot.length === 1)
+  await tick(30)
+  expect(aGot).toEqual([])                         // sender excluded
 })
 ```
 
@@ -401,14 +503,14 @@ import { createSocketReact } from '@super-line/react'
 import { createHarness } from './harness'
 import { api } from './api'
 
-const { Provider, useRequest } = createSocketReact<typeof api>()
+const { Provider, useRequest } = createSocketReact<typeof api, 'user'>()
 const h = createHarness()
 afterEach(() => { cleanup(); return h.dispose() })
 
 it('useRequest performs a typed call and exposes state', async () => {
-  const { srv, url } = await h.server(api, { authenticate: () => ({}) })
-  srv.implement({ echo: async ({ text }) => ({ text }), boom: async () => ({ ok: true }) })
-  const client = h.client(api, { url })
+  const { srv, url } = await h.server(api, { authenticate: () => ({ role: 'user' as const, ctx: {} }) })
+  srv.implement({ user: { echo: async ({ text }) => ({ text }), boom: async () => ({ ok: true }) } })
+  const client = h.client(api, { url, role: 'user' })
 
   const wrapper = ({ children }: { children: ReactNode }) => createElement(Provider, { client, children })
   const { result } = renderHook(() => useRequest('echo'), { wrapper })
@@ -422,6 +524,8 @@ it('useRequest performs a typed call and exposes state', async () => {
 ### Tips
 
 - **Close the client before the server** — an open connection blocks `server.close()` (the harness handles this via `unshift`).
+- **Return `role` as a literal** from `authenticate` (`role: 'user' as const`) so it's inferred as the role key, not widened to `string`.
 - `backoffDelay` is a **pure function** — unit-test it directly (no timers or sockets): `expect(backoffDelay(0, opts)).toBeLessThanOrEqual(opts.maxMs)`.
 - Prefer a small `reconnectBaseMs` + `waitFor` over fake timers — `vi.useFakeTimers()` is brittle alongside real sockets (real I/O isn't faked).
 - For **real cross-process** tests, use `testcontainers` + `createRedisAdapter(url)`, and skip cleanly when Docker is absent (`describe.skipIf`). For a cross-node **room** broadcast, `room.add → adapter.subscribe` is fire-and-forget, so poll the broadcast until it lands (the SUBSCRIBE-propagation window is a non-issue in real apps).
+```

@@ -24,6 +24,9 @@ import {
   type EmitData,
   type ServerEmit,
   type ServerData,
+  type ConnDescriptor,
+  type NodeStat,
+  type PresenceStore,
 } from '@super-line/core'
 import { Conn } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
@@ -124,6 +127,23 @@ export interface LocalView {
   readonly topics: string[]
 }
 
+/**
+ * Asynchronous, cluster-wide introspection backed by the adapter's presence
+ * directory. Methods reject if the configured adapter has no presence support.
+ */
+export interface ClusterView {
+  /** Every live connection across the cluster. */
+  connections(): Promise<ConnDescriptor[]>
+  /** Total live connection count across the cluster. */
+  count(): Promise<number>
+  /** Connections for a given user key (the `identify` hook). */
+  byUser(userId: string): Promise<ConnDescriptor[]>
+  /** Connections that are members of `room`, across nodes. */
+  room(name: string): Promise<ConnDescriptor[]>
+  /** Per-node aggregates (the other nodes and their counts). */
+  topology(): Promise<NodeStat[]>
+}
+
 /** Lens for role-scoped server sends, returned by `srv.forRole(role)`. */
 export interface RoleLens<C extends Contract, R extends RoleOf<C>> {
   /** Publish to a topic in role `R`'s surface (reaches that role's subscribers). */
@@ -142,6 +162,10 @@ export interface ServerOptions<C extends Contract, A extends AuthResult<C>> {
   path?: string
   /** Runs at the HTTP upgrade. Return { role, ctx }, or throw to reject with 401. */
   authenticate: (req: IncomingMessage) => Awaitable<A>
+  /** Stable user key for a connection (powers `cluster.byUser`, `isOnline`, and `toUser`). */
+  identify?: (conn: Conn) => string | undefined
+  /** Extra fields merged into the connection's cluster descriptor (e.g. `{ plan }`). `ctx` is never auto-serialized. */
+  describeConn?: (conn: Conn) => Record<string, unknown>
   /** Runs on each client subscribe. Return false or throw to deny. */
   authorizeSubscribe?: (topic: string, ctx: CtxUnion<A>, conn: Conn) => Awaitable<boolean | void>
   /** Middleware chain run before req/subscribe handlers (rate-limit, authz, logging, metrics). */
@@ -167,6 +191,10 @@ export interface SocketServer<C extends Contract, A extends AuthResult<C>> {
   readonly nodeId: string
   /** Synchronous, node-local introspection (connections, rooms, topics on this process). */
   readonly local: LocalView
+  /** Asynchronous, cluster-wide introspection backed by the adapter's presence directory. */
+  readonly cluster: ClusterView
+  /** Whether a user (by `identify` key) has at least one live connection anywhere. */
+  isOnline(userId: string): Promise<boolean>
   /** Register handlers for shared + per-role requests (chainable). */
   implement(handlers: Handlers<C, A>): SocketServer<C, A>
   /** Mixed-role connection group; broadcast() sends a shared contract event to members. */
@@ -225,6 +253,26 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   const instanceId = randomUUID() // identifies this node; lets emitServer exclude itself
   let impl: Impl = {}
 
+  function buildDescriptor(conn: Conn): ConnDescriptor {
+    const userId = opts.identify?.(conn)
+    const rooms: string[] = []
+    for (const ch of conn.channels) if (ch.startsWith(ROOM)) rooms.push(ch.slice(ROOM.length))
+    return {
+      id: conn.id,
+      role: conn.role,
+      nodeId: instanceId,
+      connectedAt: conn.connectedAt,
+      ...(userId !== undefined ? { userId } : {}),
+      rooms,
+      ...opts.describeConn?.(conn),
+    }
+  }
+
+  function presenceOrThrow(): PresenceStore {
+    if (!adapter.presence) throw new Error('cluster queries require an adapter with presence support')
+    return adapter.presence
+  }
+
   // a frame arriving on a channel (from this node or another) is forwarded raw to local members
   adapter.onMessage((channel, payload) => {
     if (channel === S2S) {
@@ -245,6 +293,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   if (hb) {
     hbTimer = setInterval(() => {
       const now = Date.now()
+      void adapter.presence?.beat(instanceId)
       for (const conn of conns) {
         if (hb.maxMissed != null && conn.missedPongs >= hb.maxMissed) {
           conn.ws.terminate()
@@ -272,6 +321,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
 
   function joinChannel(conn: Conn, channel: string): void | Promise<void> {
     conn.channels.add(channel)
+    if (channel.startsWith(ROOM)) void adapter.presence?.addRoom(conn.id, channel.slice(ROOM.length))
     const set = members.get(channel)
     if (set) {
       set.add(conn)
@@ -286,6 +336,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     if (!set) return
     set.delete(conn)
     conn.channels.delete(channel)
+    if (channel.startsWith(ROOM)) void adapter.presence?.removeRoom(conn.id, channel.slice(ROOM.length))
     if (set.size === 0) {
       members.delete(channel)
       void adapter.unsubscribe(channel) // last local member -> stop receiving
@@ -323,6 +374,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     wss.handleUpgrade(req, socket, head, (ws) => {
       const conn = new Conn(ws, randomUUID(), auth.role, auth.ctx, serializer)
       conns.add(conn)
+      void adapter.presence?.set(buildDescriptor(conn))
       ws.on('pong', () => {
         conn.lastPongAt = Date.now()
         conn.missedPongs = 0
@@ -333,6 +385,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       ws.on('close', (code) => {
         conns.delete(conn)
         for (const channel of conn.channels) leaveChannel(conn, channel)
+        void adapter.presence?.del(conn.id)
         opts.onDisconnect?.(conn, auth.ctx as CtxUnion<A>, code)
       })
       opts.onConnection?.(conn, auth.ctx as CtxUnion<A>)
@@ -463,6 +516,26 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
           return out
         },
       }
+    },
+    cluster: {
+      async connections() {
+        return presenceOrThrow().list()
+      },
+      async count() {
+        return presenceOrThrow().count()
+      },
+      async byUser(userId) {
+        return presenceOrThrow().byUser(userId)
+      },
+      async room(name) {
+        return presenceOrThrow().roomMembers(name)
+      },
+      async topology() {
+        return presenceOrThrow().topology()
+      },
+    },
+    async isOnline(userId) {
+      return (await presenceOrThrow().byUser(userId)).length > 0
     },
     implement(handlers) {
       impl = handlers as unknown as Impl

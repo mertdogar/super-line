@@ -4,7 +4,7 @@ export type { SocketErrorCode, ErrorCode } from './errors.js'
 export { jsonSerializer } from './serializer.js'
 export type { Serializer } from './serializer.js'
 
-export type { Adapter } from './adapter.js'
+export type { Adapter, PresenceStore, ConnDescriptor, NodeStat } from './adapter.js'
 
 export { defineContract, validate, validateSync } from './contract.js'
 export type {

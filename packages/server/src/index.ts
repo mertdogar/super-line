@@ -1,5 +1,6 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http'
 import type { Duplex } from 'node:stream'
+import { randomUUID } from 'node:crypto'
 import { WebSocketServer, type RawData } from 'ws'
 import {
   jsonSerializer,
@@ -17,9 +18,12 @@ import {
   type SharedEvents,
   type SharedTopics,
   type RoleTopics,
+  type ServerEvents,
   type ServerInput,
   type Output,
   type EmitData,
+  type ServerEmit,
+  type ServerData,
 } from '@super-line/core'
 import { Conn } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
@@ -38,6 +42,7 @@ type CtxUnion<A> = A extends { ctx: infer X } ? X : never
 
 const ROOM = 'r:'
 const TOPIC = 't:'
+const S2S = 's2s' // reserved channel for inter-server messaging
 
 // Handlers for one role's clientToServer requests. ctx + conn are narrowed to that role.
 type RoleHandlers<C extends Contract, A, R extends RoleOf<C>> = {
@@ -116,6 +121,13 @@ export interface SocketServer<C extends Contract, A extends AuthResult<C>> {
   publish<T extends keyof SharedTopics<C>>(topic: T, data: EmitData<SharedTopics<C>[T]>): void
   /** Lens for role-scoped sends, e.g. forRole('user').publish('feed', data). */
   forRole<R extends RoleOf<C>>(role: R): RoleLens<C, R>
+  /** Broadcast a typed event to all OTHER server nodes (at-most-once, excludes self). */
+  emitServer<E extends keyof ServerEvents<C>>(event: E, data: ServerEmit<ServerEvents<C>[E]>): void
+  /** Listen for inter-server events from other nodes. Returns an unsubscribe fn. */
+  onServer<E extends keyof ServerEvents<C>>(
+    event: E,
+    handler: (data: ServerData<ServerEvents<C>[E]>) => void,
+  ): () => void
   close(): Promise<void>
 }
 
@@ -133,14 +145,35 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   const conns = new Set<Conn>()
   // local members per namespaced channel (rooms + topics share this registry)
   const members = new Map<string, Set<Conn>>()
+  const serverListeners = new Map<string, Set<(data: unknown) => void>>()
+  const instanceId = randomUUID() // identifies this node; lets emitServer exclude itself
   let impl: Impl = {}
 
   // a frame arriving on a channel (from this node or another) is forwarded raw to local members
   adapter.onMessage((channel, payload) => {
+    if (channel === S2S) {
+      handleServerMessage(payload)
+      return
+    }
     const set = members.get(channel)
     if (!set) return
     for (const conn of set) conn.sendRaw(payload)
   })
+
+  // inter-server messaging rides the adapter on a reserved channel; subscribe if used
+  if (c.serverToServer) void adapter.subscribe(S2S)
+
+  function handleServerMessage(payload: string | Uint8Array): void {
+    let msg: { from: string; e: string; d: unknown }
+    try {
+      msg = serializer.decode(payload) as { from: string; e: string; d: unknown }
+    } catch {
+      return
+    }
+    if (msg.from === instanceId) return // exclude self
+    const set = serverListeners.get(msg.e)
+    if (set) for (const cb of set) cb(msg.d)
+  }
 
   function joinChannel(conn: Conn, channel: string): void | Promise<void> {
     conn.channels.add(channel)
@@ -323,6 +356,24 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
         publish(topic, data) {
           publishTo(role, String(topic), data)
         },
+      }
+    },
+    emitServer(event, data) {
+      void adapter.publish(S2S, serializer.encode({ from: instanceId, e: String(event), d: data }))
+    },
+    onServer(event, handler) {
+      const name = String(event)
+      let set = serverListeners.get(name)
+      if (!set) {
+        set = new Set()
+        serverListeners.set(name, set)
+      }
+      set.add(handler as (data: unknown) => void)
+      return () => {
+        const current = serverListeners.get(name)
+        if (!current) return
+        current.delete(handler as (data: unknown) => void)
+        if (current.size === 0) serverListeners.delete(name)
       }
     },
     async close() {

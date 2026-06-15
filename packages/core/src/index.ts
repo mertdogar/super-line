@@ -31,6 +31,8 @@ export type {
   Output,
   EventData,
   EmitData,
+  ServerEmit,
+  ServerData,
 } from './contract.js'
 
 export { PROTOCOL } from './wire.js'

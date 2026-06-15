@@ -70,6 +70,8 @@ export type ServerInput<T> = T extends RequestDef ? InferOut<T['input']> : never
 export type Output<T> = T extends RequestDef ? InferOut<T['output']> : never // reply, both ends
 export type EventData<T> = T extends ServerMessageDef ? InferOut<T['payload']> : never // client receives
 export type EmitData<T> = T extends ServerMessageDef ? InferIn<T['payload']> : never // server sends
+export type ServerEmit<T> = T extends Schema ? InferIn<T> : never // serverToServer send
+export type ServerData<T> = T extends Schema ? InferOut<T> : never // serverToServer receive
 
 export type InferIn<S extends Schema> = StandardSchemaV1.InferInput<S>
 export type InferOut<S extends Schema> = StandardSchemaV1.InferOutput<S>

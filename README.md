@@ -33,6 +33,7 @@
 - [Reconnection & delivery](#reconnection--delivery)
 - [Multi-node (Redis)](#multi-node-redis)
 - [Examples](#examples)
+- [Agent skill](#agent-skill)
 - [Comparison & FAQ](#comparison--faq)
 - [Development](#development)
 - [Packages](#packages)
@@ -253,6 +254,21 @@ pnpm --filter @super-line/example-auth start
 docker run --rm -p 6379:6379 redis:7
 pnpm --filter @super-line/example-scaling start
 ```
+
+## Agent skill
+
+This repo ships an **agent skill** that teaches AI coding agents how to use super-line — the contract-first model, the four patterns, auth, reconnection, scaling, testing, and common pitfalls. It lives in [`skills/super-line`](skills/super-line) (`SKILL.md` + `REFERENCE.md` + `RECIPES.md`).
+
+Since skills aren't delivered via npm, copy it into your agent's skills directory:
+
+```bash
+# project-local (this repo or a consumer project)
+mkdir -p .claude/skills && cp -r skills/super-line .claude/skills/
+# or globally, for all your projects
+cp -r skills/super-line ~/.claude/skills/
+```
+
+It activates when you import from `@super-line/*` or mention super-line.
 
 ## Comparison & FAQ
 

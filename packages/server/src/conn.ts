@@ -19,6 +19,12 @@ export class Conn<
 
   /** When this connection was accepted (`Date.now()` at the upgrade). */
   readonly connectedAt = Date.now()
+  /** When the server last sent a heartbeat ping to this connection (managed by the server). */
+  lastPingAt?: number
+  /** When a heartbeat pong was last received — liveness signal (managed by the server). */
+  lastPongAt?: number
+  /** Pings sent since the last pong; drives reaping (managed by the server). */
+  missedPongs = 0
 
   constructor(
     /** The underlying `ws` socket. `conn.ws.terminate()` simulates a drop in tests. */

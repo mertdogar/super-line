@@ -146,6 +146,13 @@ export interface ServerOptions<C extends Contract, A extends AuthResult<C>> {
   authorizeSubscribe?: (topic: string, ctx: CtxUnion<A>, conn: Conn) => Awaitable<boolean | void>
   /** Middleware chain run before req/subscribe handlers (rate-limit, authz, logging, metrics). */
   use?: Middleware<A>[]
+  /**
+   * Heartbeat: one timer pings every connection each `interval` ms (updating
+   * `conn.lastPingAt`/`lastPongAt`). Set `maxMissed` to terminate a connection
+   * that misses that many consecutive pongs. `false` disables it.
+   * Defaults to `{ interval: 30_000 }` (no reaping).
+   */
+  heartbeat?: { interval?: number; maxMissed?: number } | false
   /** Called once per accepted connection. */
   onConnection?: (conn: Conn, ctx: CtxUnion<A>) => void
   /** Called when a connection closes, with the WebSocket close `code`. */
@@ -232,6 +239,25 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   // inter-server messaging rides the adapter on a reserved channel; subscribe if used
   if (c.serverToServer) void adapter.subscribe(S2S)
 
+  // one heartbeat timer: ping every conn (for lastPongAt liveness) + optional reaping
+  const hb = opts.heartbeat === false ? null : opts.heartbeat ?? {}
+  let hbTimer: ReturnType<typeof setInterval> | undefined
+  if (hb) {
+    hbTimer = setInterval(() => {
+      const now = Date.now()
+      for (const conn of conns) {
+        if (hb.maxMissed != null && conn.missedPongs >= hb.maxMissed) {
+          conn.ws.terminate()
+          continue
+        }
+        conn.missedPongs++
+        conn.lastPingAt = now
+        conn.ws.ping()
+      }
+    }, hb.interval ?? 30_000)
+    hbTimer.unref?.()
+  }
+
   function handleServerMessage(payload: string | Uint8Array): void {
     let msg: { from: string; e: string; d: unknown }
     try {
@@ -297,6 +323,10 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     wss.handleUpgrade(req, socket, head, (ws) => {
       const conn = new Conn(ws, randomUUID(), auth.role, auth.ctx, serializer)
       conns.add(conn)
+      ws.on('pong', () => {
+        conn.lastPongAt = Date.now()
+        conn.missedPongs = 0
+      })
       ws.on('message', (data, isBinary) => {
         void onMessage(conn, data, isBinary)
       })
@@ -468,6 +498,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       }
     },
     async close() {
+      if (hbTimer) clearInterval(hbTimer)
       for (const conn of conns) conn.close()
       await adapter.close?.()
       await new Promise<void>((resolve) => {

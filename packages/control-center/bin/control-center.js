@@ -35,7 +35,14 @@ if (!existsSync(join(root, 'index.html'))) {
 }
 
 const server = createServer(async (req, res) => {
-  const path = decodeURIComponent((req.url ?? '/').split('?')[0])
+  const reqUrl = new URL(req.url ?? '/', 'http://localhost')
+  // bare root with no ?url → redirect to the configured endpoint so opening the app "just works"
+  if (reqUrl.pathname === '/' && !reqUrl.searchParams.has('url')) {
+    res.writeHead(302, { location: `/?url=${encodeURIComponent(target)}` })
+    res.end()
+    return
+  }
+  const path = decodeURIComponent(reqUrl.pathname)
   let file = normalize(join(root, path === '/' ? 'index.html' : path))
   if (!file.startsWith(root)) {
     res.writeHead(403).end('forbidden')

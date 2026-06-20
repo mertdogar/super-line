@@ -1,7 +1,46 @@
 import * as React from 'react'
+import { ChevronRight } from 'lucide-react'
 import type { ConnDescriptor, InspectorEvent } from '@super-line/core'
-import { eventColor, summarizeEvent, type FeedResolver } from '@/lib/events'
+import { eventColor, eventPayload, summarizeEvent, type FeedResolver } from '@/lib/events'
+import { Json } from '@/components/json-view'
 import { cn } from '@/lib/utils'
+
+function FeedRow({ event, resolver }: { event: InspectorEvent; resolver: FeedResolver }): React.JSX.Element {
+  const [open, setOpen] = React.useState(false)
+  const payload = eventPayload(event)
+  const hasPayload = payload !== undefined
+
+  return (
+    <li className="rounded-md border">
+      <button
+        type="button"
+        disabled={!hasPayload}
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          'flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm',
+          hasPayload && 'cursor-pointer hover:bg-accent/40',
+        )}
+      >
+        <span className={cn('h-2 w-2 shrink-0 rounded-full', eventColor(event.type))} />
+        <span className="w-28 shrink-0 font-mono text-xs text-muted-foreground">{event.type}</span>
+        <span className="truncate font-mono text-xs">{summarizeEvent(event, resolver)}</span>
+        {hasPayload ? (
+          <ChevronRight
+            className={cn(
+              'ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
+              open && 'rotate-90',
+            )}
+          />
+        ) : null}
+      </button>
+      {open && hasPayload ? (
+        <div className="px-2.5 pb-2">
+          <Json data={payload} className="max-h-60" />
+        </div>
+      ) : null}
+    </li>
+  )
+}
 
 export function LiveFeed({
   events,
@@ -25,11 +64,7 @@ export function LiveFeed({
   return (
     <ul className="flex flex-col gap-1">
       {events.map((event, i) => (
-        <li key={i} className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
-          <span className={cn('h-2 w-2 shrink-0 rounded-full', eventColor(event.type))} />
-          <span className="w-28 shrink-0 font-mono text-xs text-muted-foreground">{event.type}</span>
-          <span className="truncate font-mono text-xs">{summarizeEvent(event, resolver)}</span>
-        </li>
+        <FeedRow key={i} event={event} resolver={resolver} />
       ))}
     </ul>
   )

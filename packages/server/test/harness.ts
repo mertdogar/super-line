@@ -55,6 +55,14 @@ export interface InspectorEventLike {
   connId?: string
   room?: string
   topic?: string
+  // message events (msg.*)
+  target?: string
+  name?: string
+  input?: unknown
+  output?: unknown
+  data?: unknown
+  ok?: boolean
+  error?: { code: string; message: string }
 }
 
 export interface Inspector {

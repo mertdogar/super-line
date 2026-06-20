@@ -32,6 +32,38 @@ export function summarizeEvent(event: InspectorEvent, r?: FeedResolver): string 
     case 'topic.sub':
     case 'topic.unsub':
       return `${who(event.connId, r)} · ${event.topic}`
+    case 'msg.request':
+      return `${who(event.connId, r)} → ${event.name}`
+    case 'msg.response':
+      return `${who(event.connId, r)} ← ${event.name} · ${event.ok ? 'ok' : event.error?.code ?? 'error'}`
+    case 'msg.event':
+      return `→ ${who(event.target, r)} · ${event.name}`
+    case 'msg.broadcast':
+      return `${event.room} ⇒ ${event.name}`
+    case 'msg.publish':
+      return event.topic
+    case 'msg.serverRequest':
+      return `→ ${who(event.target, r)} · ${event.name}`
+    case 'msg.serverReply':
+      return `← ${who(event.target, r)} · ${event.name} · ${event.ok ? 'ok' : event.error?.code ?? 'error'}`
+  }
+}
+
+/** The inspectable payload of a message event (input/output/data), or undefined for lifecycle events. */
+export function eventPayload(event: InspectorEvent): unknown {
+  switch (event.type) {
+    case 'msg.request':
+    case 'msg.serverRequest':
+      return event.input
+    case 'msg.response':
+    case 'msg.serverReply':
+      return event.ok ? event.output : event.error
+    case 'msg.event':
+    case 'msg.broadcast':
+    case 'msg.publish':
+      return event.data
+    default:
+      return undefined
   }
 }
 
@@ -40,6 +72,10 @@ export function eventColor(type: InspectorEvent['type']): string {
   if (type === 'connect') return 'bg-primary'
   if (type === 'disconnect') return 'bg-destructive'
   if (type.startsWith('room')) return 'bg-violet-400'
+  if (type.startsWith('topic')) return 'bg-amber-400'
+  if (type === 'msg.request' || type === 'msg.serverRequest') return 'bg-cyan-400'
+  if (type === 'msg.response' || type === 'msg.serverReply') return 'bg-emerald-400'
+  if (type === 'msg.event' || type === 'msg.broadcast' || type === 'msg.publish') return 'bg-sky-400'
   return 'bg-amber-400'
 }
 

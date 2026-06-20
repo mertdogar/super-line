@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ConnDescriptor } from '@super-line/core'
-import { eventColor, flavorColor, formatDuration, summarizeEvent } from '../src/lib/events.js'
+import { eventColor, eventPayload, flavorColor, formatDuration, summarizeEvent } from '../src/lib/events.js'
 
 const descriptor: ConnDescriptor = {
   id: 'abcdef1234',
@@ -43,10 +43,30 @@ describe('event helpers', () => {
     expect(formatDuration(now + 5_000, now)).toBe('0s') // clamps future to 0
   })
 
+  it('summarizes message events and exposes their payloads', () => {
+    const resolver = {
+      conn: (id: string) => (id === descriptor.id ? descriptor : undefined),
+      nodeName: () => 'node-1',
+    }
+    const req = { type: 'msg.request', connId: descriptor.id, role: 'user', name: 'send', input: { text: 'hi' } } as const
+    expect(summarizeEvent(req, resolver)).toBe('ada (user) → send')
+    expect(eventPayload(req)).toEqual({ text: 'hi' })
+
+    const res = { type: 'msg.response', connId: descriptor.id, name: 'send', ok: false, error: { code: 'BOOM', message: 'x' } } as const
+    expect(summarizeEvent(res, resolver)).toContain('BOOM')
+    expect(eventPayload(res)).toEqual({ code: 'BOOM', message: 'x' })
+
+    expect(summarizeEvent({ type: 'msg.broadcast', room: 'lobby', name: 'message', data: {} })).toBe('lobby ⇒ message')
+    expect(summarizeEvent({ type: 'msg.publish', topic: 'presence', data: {} })).toBe('presence')
+    expect(eventPayload({ type: 'connect', descriptor })).toBeUndefined() // lifecycle: nothing to expand
+  })
+
   it('maps event types and flavors to colors', () => {
     expect(eventColor('connect')).toBe('bg-primary')
     expect(eventColor('disconnect')).toBe('bg-destructive')
     expect(eventColor('room.add')).toContain('violet')
+    expect(eventColor('msg.request')).toContain('cyan')
+    expect(eventColor('msg.broadcast')).toContain('sky')
     expect(flavorColor('topic')).toMatch(/^#/)
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ConnDescriptor } from '@super-line/core'
-import { eventColor, flavorColor, summarizeEvent } from '../src/lib/events.js'
+import { eventColor, flavorColor, formatDuration, summarizeEvent } from '../src/lib/events.js'
 
 const descriptor: ConnDescriptor = {
   id: 'abcdef1234',
@@ -33,6 +33,14 @@ describe('event helpers', () => {
     expect(
       summarizeEvent({ type: 'disconnect', connId: 'gone', nodeId: 'node1234', userId: 'grace' }, resolver),
     ).toBe('grace on node-1')
+  })
+
+  it('formats elapsed durations compactly', () => {
+    const now = 1_000_000_000
+    expect(formatDuration(now - 5_000, now)).toBe('5s')
+    expect(formatDuration(now - 14 * 60_000, now)).toBe('14m')
+    expect(formatDuration(now - (2 * 3600_000 + 3 * 60_000), now)).toBe('2h 3m')
+    expect(formatDuration(now + 5_000, now)).toBe('0s') // clamps future to 0
   })
 
   it('maps event types and flavors to colors', () => {

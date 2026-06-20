@@ -1,5 +1,6 @@
 import * as React from 'react'
 import type { ConnDescriptor } from '@super-line/core'
+import { formatDuration, formatTime } from '@/lib/events'
 import { roleColor } from '@/lib/topology'
 import { cn } from '@/lib/utils'
 
@@ -51,7 +52,7 @@ export function ConnectionsTable({
                 {c.rooms.length ? c.rooms.join(', ') : '—'}
               </td>
               <td className="px-3 py-2 text-xs text-muted-foreground">
-                {new Date(c.connectedAt).toLocaleTimeString()}
+                {formatTime(c.connectedAt)} <span className="opacity-60">· {formatDuration(c.connectedAt)}</span>
               </td>
             </tr>
           ))}

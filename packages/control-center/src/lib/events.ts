@@ -53,3 +53,20 @@ const FLAVOR_COLORS: Record<MessageFlavor, string> = {
 export function flavorColor(flavor: MessageFlavor): string {
   return FLAVOR_COLORS[flavor]
 }
+
+/** Clock time of an epoch-ms instant, e.g. "9:58:42 PM". */
+export function formatTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString()
+}
+
+/** Compact elapsed time since an epoch-ms instant, e.g. "14m", "2h 3m". */
+export function formatDuration(ms: number, now: number = Date.now()): string {
+  const s = Math.max(0, Math.floor((now - ms) / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ${m % 60}m`
+  const d = Math.floor(h / 24)
+  return `${d}d ${h % 24}h`
+}

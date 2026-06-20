@@ -41,6 +41,7 @@ export default defineConfig({
             { text: 'Middleware & lifecycle', link: '/guide/middleware-lifecycle' },
             { text: 'Error handling', link: '/guide/errors' },
             { text: 'Introspection & presence', link: '/guide/introspection-and-presence' },
+            { text: 'Control Center', link: '/guide/control-center' },
           ],
         },
         {

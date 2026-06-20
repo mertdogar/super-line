@@ -50,6 +50,7 @@
 | 🖧 **Inter-server** | Typed `emitServer` / `onServer` for node-to-node coordination. |
 | 📨 **Server→client req/res** | `await srv.toConn(id).request(...)` — ask a client and await a typed reply, across nodes. |
 | 🛰️ **Presence & introspection** | `srv.local.*` (sync) + `srv.cluster.*` (counts, topology, `isOnline`) backed by a Redis registry. |
+| 🩺 **Control Center** | `inspector: true` + `npx @super-line/control-center` — a shadcn webapp for live topology, contract, roles & ctx. |
 | 🎯 **Targeted send** | `srv.toConn(id)` / `srv.toUser(uid)` emit or kick any connection on any node. |
 | 🔌 **Composable** | Attaches to your `http.Server`; lifecycle hooks + middleware. |
 | 🔁 **Resilient client** | Auto-reconnect, re-subscribe, in-flight reject, queue-and-flush. |
@@ -257,6 +258,7 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 | [`@super-line/client`](packages/client) | `createClient` (role-scoped surface, reconnect, typed calls, `on` / `subscribe`) |
 | [`@super-line/adapter-redis`](packages/adapter-redis) | Redis Pub/Sub adapter for multi-node fan-out |
 | [`@super-line/react`](packages/react) | `createSocketReact<C, Role>` → `useRequest` / `useEvent` / `useSubscription` |
+| [`@super-line/control-center`](packages/control-center) | Debugging webapp (`npx`): live topology, contract, roles & per-conn ctx/state |
 
 ## Status
 

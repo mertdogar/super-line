@@ -46,7 +46,7 @@ export function ConnectionsTable({
               </td>
               <td className="px-3 py-2 font-mono text-xs">{c.id.slice(0, 8)}</td>
               <td className="px-3 py-2">{c.userId ?? '—'}</td>
-              <td className="px-3 py-2 font-mono text-xs">{c.nodeId.slice(0, 8)}</td>
+              <td className="px-3 py-2 text-xs">{c.nodeName}</td>
               <td className="px-3 py-2 text-muted-foreground">
                 {c.rooms.length ? c.rooms.join(', ') : '—'}
               </td>

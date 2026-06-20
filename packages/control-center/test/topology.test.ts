@@ -6,18 +6,20 @@ const conn = (id: string, nodeId: string, role: string, rooms: string[] = []): C
   id,
   role,
   nodeId,
+  nodeName: nodeId,
   connectedAt: 0,
   rooms,
 })
 
 describe('buildGraph', () => {
-  it('single node: no bus, conns hang off the node', () => {
-    const topo: NodeStat[] = [{ nodeId: 'nodeA', connections: 2, rooms: 1, alive: true }]
+  it('single node: no bus, conns hang off the node, labelled by nodeName', () => {
+    const topo: NodeStat[] = [{ nodeId: 'nodeA', nodeName: 'node-1', connections: 2, rooms: 1, alive: true }]
     const conns = [conn('c1', 'nodeA', 'user', ['lobby']), conn('c2', 'nodeA', 'agent')]
     const g = buildGraph(topo, conns, null)
 
     expect(g.nodes.find((n) => n.kind === 'bus')).toBeUndefined()
     expect(g.nodes.filter((n) => n.kind === 'server')).toHaveLength(1)
+    expect(g.nodes.find((n) => n.kind === 'server')?.label).toBe('node-1') // friendly name, not the id
     expect(g.nodes.filter((n) => n.kind === 'conn')).toHaveLength(2)
     // every conn has an edge to its node; no bus edges
     expect(g.edges.filter((e) => e.kind === 'conn')).toHaveLength(2)
@@ -26,8 +28,8 @@ describe('buildGraph', () => {
 
   it('multi node: bus hub with node→bus edges', () => {
     const topo: NodeStat[] = [
-      { nodeId: 'nodeA', connections: 1, rooms: 0, alive: true },
-      { nodeId: 'nodeB', connections: 1, rooms: 0, alive: true },
+      { nodeId: 'nodeA', nodeName: 'nodeA', connections: 1, rooms: 0, alive: true },
+      { nodeId: 'nodeB', nodeName: 'nodeB', connections: 1, rooms: 0, alive: true },
     ]
     const conns = [conn('c1', 'nodeA', 'user'), conn('c2', 'nodeB', 'user')]
     const g = buildGraph(topo, conns, null)
@@ -39,14 +41,14 @@ describe('buildGraph', () => {
   })
 
   it('includes the connected node even when it has no connections', () => {
-    const node: NodeView = { nodeId: 'idle', rooms: [], topics: [] }
+    const node: NodeView = { nodeId: 'idle', nodeName: 'idle', rooms: [], topics: [] }
     const g = buildGraph([], [], node)
     expect(g.nodes.filter((n) => n.kind === 'server').map((n) => n.id)).toEqual(['idle'])
   })
 
   it('caps connections and reports the overflow', () => {
     const conns = Array.from({ length: 510 }, (_, i) => conn(`c${i}`, 'nodeA', 'user'))
-    const g = buildGraph([{ nodeId: 'nodeA', connections: 510, rooms: 0, alive: true }], conns, null)
+    const g = buildGraph([{ nodeId: 'nodeA', nodeName: 'nodeA', connections: 510, rooms: 0, alive: true }], conns, null)
     expect(g.nodes.filter((n) => n.kind === 'conn')).toHaveLength(500)
     expect(g.truncated).toBe(10)
   })

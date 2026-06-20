@@ -86,12 +86,13 @@ export function buildGraph(
     const sx = showBus ? Math.cos(angle) * R_SERVER : 0
     const sy = showBus ? Math.sin(angle) * R_SERVER : 0
     const stat = statByNode.get(sid)
+    const nodeName = stat?.nodeName ?? (node?.nodeId === sid ? node.nodeName : undefined) ?? sid.slice(0, 8)
     nodes.push({
       id: sid,
       kind: 'server',
       x: sx,
       y: sy,
-      label: sid.slice(0, 8),
+      label: nodeName,
       alive: stat?.alive ?? true,
       connCount: stat?.connections ?? connsByNode.get(sid)?.length ?? 0,
     })

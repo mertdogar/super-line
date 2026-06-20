@@ -17,6 +17,7 @@ let seq = 0
 const srv = createSocketServer(chat, {
   server,
   adapter: createRedisAdapter(REDIS_URL),
+  nodeName: NODE, // surface node-1 / node-2 in the Control Center topology
   inspector: true, // read-only Control Center channel (dev/trusted-network only)
   identify: (conn) => (conn.ctx as { name: string }).name, // surface the chat name cluster-wide
   authenticate: (req) => {

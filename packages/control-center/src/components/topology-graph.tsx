@@ -9,7 +9,7 @@ function labelFor(n: GraphNode): React.ReactNode {
   if (n.kind === 'server') {
     return (
       <div className="text-center leading-tight">
-        <div className="font-semibold">node {n.label}</div>
+        <div className="font-semibold">{n.label}</div>
         <div className="text-[10px] opacity-70">
           {n.connCount} conns{n.alive ? '' : ' · dead'}
         </div>

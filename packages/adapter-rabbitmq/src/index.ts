@@ -53,7 +53,7 @@ function assertKeyLen(channel: string): void {
  * @example
  * ```ts
  * const adapter = await createRabbitmqAdapter('amqp://localhost:5672')
- * createSocketServer(api, { server, adapter })
+ * createSuperLineServer(api, { server, adapter })
  * ```
  */
 export async function createRabbitmqAdapter(

@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { createSocketServer, type Conn } from '@super-line/server'
+import { createSuperLineServer, type Conn } from '@super-line/server'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
 import { chat } from './contract.js'
 
@@ -15,7 +15,7 @@ const server = http.createServer()
 const roomOf = new Map<Conn, string>()
 let seq = 0
 
-const srv = createSocketServer(chat, {
+const srv = createSuperLineServer(chat, {
   server,
   // createRabbitmqAdapter is async (it connects + declares its topology before returning).
   adapter: await createRabbitmqAdapter(RABBITMQ_URL),

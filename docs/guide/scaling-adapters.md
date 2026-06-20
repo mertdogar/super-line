@@ -46,7 +46,7 @@ Already run RabbitMQ, or want the broker to do **selective routing**? [`@super-l
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
 
 const adapter = await createRabbitmqAdapter('amqp://localhost:5672')
-const srv = createSocketServer(api, { server, authenticate, adapter })
+const srv = createSuperLineServer(api, { server, authenticate, adapter })
 ```
 
 The factory is **async** (it connects and declares its topology before returning a ready adapter). It's built on [`rabbitmq-client`](https://www.npmjs.com/package/rabbitmq-client), so a dropped connection auto-reconnects and the node's bindings are replayed. RabbitMQ has no shared key-value store, so — like libp2p — presence is **gossip-replicated** over the same exchange (eventually consistent; a crashed node's connections clear after a liveness TTL, ~30s by default, vs Redis's broker-enforced key expiry; graceful shutdown clears promptly). Delivery is at-most-once (transient messages, no acks, no persistence). One caveat Redis doesn't have: AMQP routing keys cap at **255 bytes**, so a channel name (embedding room / user / topic) longer than that is rejected with a clear error.

@@ -7,11 +7,11 @@ pnpm add @super-line/adapter-rabbitmq
 ```
 
 ```ts
-import { createSocketServer } from '@super-line/server'
+import { createSuperLineServer } from '@super-line/server'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
 import { api } from './contract'
 
-const srv = createSocketServer(api, {
+const srv = createSuperLineServer(api, {
   server,
   authenticate,
   adapter: await createRabbitmqAdapter('amqp://localhost:5672'),

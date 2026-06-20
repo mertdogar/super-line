@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers'
-import { defineContract, SocketError } from '@super-line/core'
+import { defineContract, SuperLineError } from '@super-line/core'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
 import { createHarness, waitFor } from './harness.js'
 
@@ -102,7 +102,7 @@ describe.skipIf(!dockerAvailable)('rabbitmq targeted send + server→client requ
     const b = await node()
     await expect(
       b.srv.toConn('ghost').request('confirm', { q: 'x' }, { timeout: 800 }),
-    ).rejects.toBeInstanceOf(SocketError)
+    ).rejects.toBeInstanceOf(SuperLineError)
   })
 
   it('toConn(id).close() disconnects a client on another process', async () => {

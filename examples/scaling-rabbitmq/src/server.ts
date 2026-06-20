@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { createSocketServer } from '@super-line/server'
+import { createSuperLineServer } from '@super-line/server'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
 import { sync } from './contract.js'
 
@@ -16,7 +16,7 @@ let conns = 0
 // createRabbitmqAdapter is async (it connects + declares its topology before returning a ready adapter).
 const adapter = await createRabbitmqAdapter(RABBITMQ_URL)
 
-const srv = createSocketServer(sync, {
+const srv = createSuperLineServer(sync, {
   server,
   authenticate: () => ({ role: 'user' as const, ctx: {} }),
   adapter,

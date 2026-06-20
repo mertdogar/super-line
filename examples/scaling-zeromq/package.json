@@ -1,0 +1,20 @@
+{
+  "name": "@super-line/example-scaling-zeromq",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "server": "tsx src/server.ts",
+    "client": "tsx src/client.ts"
+  },
+  "dependencies": {
+    "@super-line/adapter-zeromq": "workspace:*",
+    "@super-line/client": "workspace:*",
+    "@super-line/core": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

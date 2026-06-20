@@ -81,6 +81,39 @@ Inbound events from **other nodes** are validated against the topic's payload sc
 The bus is **opt-in pub/sub** on a shared topic, with cross-node server-side subscribe. Events (`conn.emit` / `room.broadcast` / `toConn(id).emit` / `toUser(id).emit`) are server-**chosen** pushes — no client opt-in, no server-side subscribe. Both still exist; reach for the bus when you want subscription/membership, events when the server decides who gets pushed.
 :::
 
+## Brokerless mesh: ZeroMQ (no broker)
+
+Don't want to run a broker, and don't need the full libp2p stack? [`@super-line/adapter-zeromq`](https://www.npmjs.com/package/@super-line/adapter-zeromq) implements the same `Adapter` contract over plain [ZeroMQ](https://zeromq.org) sockets — the nodes peer directly. Server code is unchanged; only the adapter line differs:
+
+```ts
+import { createZeroMqAdapter } from '@super-line/adapter-zeromq'
+
+// mesh: bind a PUB, connect a SUB to every peer (discovery is just addresses, no registry)
+const adapter = await createZeroMqAdapter({
+  bind: 'tcp://0.0.0.0:9101',
+  peers: ['tcp://node-2:9101', 'tcp://node-3:9101'],
+})
+const srv = createSocketServer(api, { server, authenticate, adapter })
+```
+
+It fans out rooms, topics, and the bus the same way, with a gossip-replicated directory backing `srv.cluster.*` / `srv.isOnline` (eventually-consistent, like libp2p — there's no central store). At-most-once delivery, matching the rest of the library. ZeroMQ's `connect` is lazy and auto-reconnecting, so nodes can start in any order. It's **ESM-only** and a **native addon** (Node-only).
+
+For a larger or dynamic fleet, swap mesh for a central **forwarder** — one `npx super-line-zeromq-proxy` process — and point nodes at it:
+
+```ts
+const adapter = await createZeroMqAdapter({
+  mode: 'proxy',
+  frontendUrl: 'tcp://proxy:5557', // node PUBs connect here
+  backendUrl: 'tcp://proxy:5558', // node SUBs connect here
+})
+```
+
+::: tip Which adapter?
+**Redis** is the pragmatic default for a backend cluster — simple, central, strong presence. **ZeroMQ mesh** is the lightest way to go broker-less: no extra service, gorgeous at a handful of nodes, but O(N²) connections with a static peer list (use proxy mode, or Redis, for large/dynamic fleets). **libp2p** is the heavyweight decentralized option (NAT traversal, encrypted transports, discovery) for self-hosted / edge deployments.
+:::
+
+The [`react-chat-cluster-zeromq` example](https://github.com/mertdogar/super-line/tree/main/examples/react-chat-cluster-zeromq) is the Redis chat cluster with the broker **deleted** — same app, one fewer service.
+
 ## Direct messages
 
 Don't stash a `conn` to DM a user — it's node-local. Put each connection in a **per-user room** and broadcast a shared event to it, which works across nodes:

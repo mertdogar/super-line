@@ -1,0 +1,47 @@
+name: react-chat-cluster-zeromq
+
+# The react-chat-cluster example with Redis DELETED. Same app, same Control Center — but there
+# is NO broker service. The three chat nodes (same image, differ only by env) peer directly over
+# a ZeroMQ mesh on :9101, discovering each other by plain DNS name. ZeroMQ's connect is lazy +
+# auto-reconnecting, so no startup ordering / healthcheck is needed.
+x-node: &node
+  build:
+    context: ../..
+    dockerfile: examples/react-chat-cluster-zeromq/Dockerfile
+  image: super-line-react-chat-cluster-zeromq:dev
+
+services:
+  node-1:
+    <<: *node
+    environment:
+      { PORT: '8787', NODE_NAME: node-1, ZMQ_BIND: 'tcp://0.0.0.0:9101', ZMQ_PEERS: 'tcp://node-2:9101,tcp://node-3:9101' }
+
+  node-2:
+    <<: *node
+    environment:
+      { PORT: '8787', NODE_NAME: node-2, ZMQ_BIND: 'tcp://0.0.0.0:9101', ZMQ_PEERS: 'tcp://node-1:9101,tcp://node-3:9101' }
+
+  node-3:
+    <<: *node
+    environment:
+      { PORT: '8787', NODE_NAME: node-3, ZMQ_BIND: 'tcp://0.0.0.0:9101', ZMQ_PEERS: 'tcp://node-1:9101,tcp://node-2:9101' }
+
+  # Serves the built SPA and load-balances WebSockets across the three nodes.
+  web:
+    build:
+      context: ../..
+      dockerfile: examples/react-chat-cluster-zeromq/Dockerfile.web
+    image: super-line-react-chat-cluster-zeromq-web:dev
+    ports: ['8080:8080']
+    volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']
+    depends_on: [node-1, node-2, node-3]
+
+  # The Control Center webapp, served on :8081. The browser connects it back to the cluster's
+  # inspector channel at ws://localhost:8080/inspect (Caddy → node-1). Open http://localhost:8081.
+  control-center:
+    build:
+      context: ../..
+      dockerfile: examples/react-chat-cluster-zeromq/Dockerfile.control-center
+    image: super-line-react-chat-cluster-zeromq-cc:dev
+    ports: ['8081:8081']
+    depends_on: [web]

@@ -1,0 +1,27 @@
+import { z } from 'zod'
+import { defineContract } from '@super-line/core'
+
+// One contract, three fan-out flavors that all cross process boundaries via the shared
+// ZeroMQ adapter — no broker, the nodes peer directly over a mesh:
+//   1. message  — a room broadcast a client triggers via `say` (server -> all clients, any node)
+//   2. announce — a topic one node publishes on a timer (server -> subscribed clients, any node)
+//   3. stats    — a shared topic used as the cluster event bus: any node publishes, every node's
+//                 server code subscribes to gossip connection counts (server -> server)
+export const sync = defineContract({
+  shared: {
+    serverToClient: {
+      message: { payload: z.object({ from: z.string(), text: z.string() }) },
+      stats: { payload: z.object({ node: z.string(), conns: z.number() }), subscribe: true },
+    },
+  },
+  roles: {
+    user: {
+      clientToServer: {
+        say: { input: z.object({ from: z.string(), text: z.string() }), output: z.object({ ok: z.boolean() }) },
+      },
+      serverToClient: {
+        announce: { payload: z.object({ from: z.string(), text: z.string() }), subscribe: true },
+      },
+    },
+  },
+})

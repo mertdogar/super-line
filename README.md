@@ -61,8 +61,9 @@
 ```bash
 pnpm add @super-line/core @super-line/server @super-line/client zod
 # optional
-pnpm add @super-line/adapter-redis   # multi-node fan-out (Redis broker)
-pnpm add @super-line/adapter-libp2p  # multi-node fan-out (decentralized, broker-less)
+pnpm add @super-line/adapter-redis   # multi-node fan-out (central broker)
+pnpm add @super-line/adapter-zeromq  # multi-node fan-out (brokerless mesh / forwarder)
+pnpm add @super-line/adapter-libp2p  # multi-node fan-out (decentralized gossip, broker-less)
 pnpm add @super-line/react           # React hooks
 ```
 
@@ -209,6 +210,12 @@ cd examples/scaling && docker compose up
 # Same cluster, decentralized: 3 nodes peer over libp2p — NO broker (needs Docker):
 cd examples/scaling-libp2p && docker compose up
 
+# Brokerless cluster: 3 nodes peer over a ZeroMQ mesh, NO broker (needs Docker):
+cd examples/scaling-zeromq && docker compose up
+
+# "Delete your broker": the react-chat-cluster with Redis removed, on a ZeroMQ mesh (needs Docker):
+cd examples/react-chat-cluster-zeromq && docker compose up --build
+
 # Bus across a cluster: Redis + Caddy + 3 nodes converge a shared tally over the event bus (needs Docker):
 cd examples/bus-cluster && docker compose up
 ```
@@ -265,7 +272,8 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 | [`@super-line/core`](packages/core) | `defineContract` (roles + direction), validation, wire protocol, `Serializer` / `Adapter` interfaces, `SocketError` |
 | [`@super-line/server`](packages/server) | `createSocketServer` over `ws`: role-keyed `implement`, rooms, topics, `forRole`, the cluster event bus (`publish`/`subscribe`), server→client requests (`toConn`/`toUser`), local + cluster introspection, heartbeat, middleware, in-memory adapter |
 | [`@super-line/client`](packages/client) | `createClient` (role-scoped surface, reconnect, typed calls, `on` / `subscribe`) |
-| [`@super-line/adapter-redis`](packages/adapter-redis) | Redis Pub/Sub adapter for multi-node fan-out |
+| [`@super-line/adapter-redis`](packages/adapter-redis) | Redis Pub/Sub adapter for multi-node fan-out (central broker) |
+| [`@super-line/adapter-zeromq`](packages/adapter-zeromq) | ZeroMQ adapter for multi-node fan-out — brokerless mesh or a lightweight forwarder, with gossip presence |
 | [`@super-line/adapter-libp2p`](packages/adapter-libp2p) | Decentralized, broker-less libp2p (gossipsub) adapter — fan-out + presence, no broker |
 | [`@super-line/react`](packages/react) | `createSocketReact<C, Role>` → `useRequest` / `useEvent` / `useSubscription` |
 | [`@super-line/control-center`](packages/control-center) | Debugging webapp (`npx`): live topology, contract, roles & per-conn ctx/state |

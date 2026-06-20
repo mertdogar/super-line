@@ -8,6 +8,7 @@
     "../packages/client",
     "../packages/adapter-redis",
     "../packages/adapter-libp2p",
+    "../packages/adapter-zeromq",
     "../packages/react"
   ],
   "out": "reference",

@@ -1,0 +1,41 @@
+name: scaling-zeromq
+
+# Every app container is the same image (built once); they differ only by command + env.
+# No broker service: the three nodes peer directly over a ZeroMQ mesh (ZMQ_PORT), discovering
+# each other by plain DNS name on the compose network. Caddy load-balances client WebSockets.
+x-app: &app
+  build:
+    context: ../..
+    dockerfile: examples/scaling-zeromq/Dockerfile
+  image: super-line-scaling-zeromq:dev
+
+services:
+  node-1:
+    <<: *app
+    command: pnpm --filter @super-line/example-scaling-zeromq server
+    environment: { PORT: '8801', ZMQ_PORT: '9101', NODE_NAME: node-1 }
+
+  node-2:
+    <<: *app
+    command: pnpm --filter @super-line/example-scaling-zeromq server
+    environment: { PORT: '8801', ZMQ_PORT: '9101', NODE_NAME: node-2 }
+
+  node-3:
+    <<: *app
+    command: pnpm --filter @super-line/example-scaling-zeromq server
+    environment: { PORT: '8801', ZMQ_PORT: '9101', NODE_NAME: node-3 }
+
+  caddy:
+    image: caddy:2
+    ports: ['8085:8085']
+    volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']
+    depends_on: [node-1, node-2, node-3]
+
+  # Six fungible clients, each a real process with one WebSocket through Caddy.
+  client:
+    <<: *app
+    command: pnpm --filter @super-line/example-scaling-zeromq client
+    environment: { GATEWAY_URL: ws://caddy:8085 }
+    depends_on: [caddy]
+    deploy:
+      replicas: 6

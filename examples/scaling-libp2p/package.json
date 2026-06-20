@@ -1,0 +1,22 @@
+{
+  "name": "@super-line/example-scaling-libp2p",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "server": "tsx src/server.ts",
+    "client": "tsx src/client.ts"
+  },
+  "dependencies": {
+    "@libp2p/crypto": "^5.1.20",
+    "@libp2p/peer-id": "^6.0.11",
+    "@super-line/adapter-libp2p": "workspace:*",
+    "@super-line/client": "workspace:*",
+    "@super-line/core": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

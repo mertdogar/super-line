@@ -61,7 +61,8 @@
 ```bash
 pnpm add @super-line/core @super-line/server @super-line/client zod
 # optional
-pnpm add @super-line/adapter-redis   # multi-node fan-out
+pnpm add @super-line/adapter-redis   # multi-node fan-out (Redis broker)
+pnpm add @super-line/adapter-libp2p  # multi-node fan-out (decentralized, broker-less)
 pnpm add @super-line/react           # React hooks
 ```
 
@@ -205,6 +206,9 @@ pnpm --filter @super-line/example-event-bus start
 # Real cluster: Redis + Caddy LB + 3 nodes + 6 clients, fan-out across processes (needs Docker):
 cd examples/scaling && docker compose up
 
+# Same cluster, decentralized: 3 nodes peer over libp2p — NO broker (needs Docker):
+cd examples/scaling-libp2p && docker compose up
+
 # Bus across a cluster: Redis + Caddy + 3 nodes converge a shared tally over the event bus (needs Docker):
 cd examples/bus-cluster && docker compose up
 ```
@@ -262,6 +266,7 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 | [`@super-line/server`](packages/server) | `createSocketServer` over `ws`: role-keyed `implement`, rooms, topics, `forRole`, the cluster event bus (`publish`/`subscribe`), server→client requests (`toConn`/`toUser`), local + cluster introspection, heartbeat, middleware, in-memory adapter |
 | [`@super-line/client`](packages/client) | `createClient` (role-scoped surface, reconnect, typed calls, `on` / `subscribe`) |
 | [`@super-line/adapter-redis`](packages/adapter-redis) | Redis Pub/Sub adapter for multi-node fan-out |
+| [`@super-line/adapter-libp2p`](packages/adapter-libp2p) | Decentralized, broker-less libp2p (gossipsub) adapter — fan-out + presence, no broker |
 | [`@super-line/react`](packages/react) | `createSocketReact<C, Role>` → `useRequest` / `useEvent` / `useSubscription` |
 | [`@super-line/control-center`](packages/control-center) | Debugging webapp (`npx`): live topology, contract, roles & per-conn ctx/state |
 

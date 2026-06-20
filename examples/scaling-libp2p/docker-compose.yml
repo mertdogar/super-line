@@ -1,0 +1,42 @@
+name: scaling-libp2p
+
+# Every app container is the same image (built once); they differ only by command + env.
+# No broker service: the three nodes peer directly over libp2p gossipsub (P2P_PORT),
+# discovering each other via a bootstrap list of deterministic peer IDs. Caddy still
+# load-balances client WebSockets across the nodes.
+x-app: &app
+  build:
+    context: ../..
+    dockerfile: examples/scaling-libp2p/Dockerfile
+  image: super-line-scaling-libp2p:dev
+
+services:
+  node-1:
+    <<: *app
+    command: pnpm --filter @super-line/example-scaling-libp2p server
+    environment: { PORT: '8801', P2P_PORT: '9001', NODE_NAME: node-1 }
+
+  node-2:
+    <<: *app
+    command: pnpm --filter @super-line/example-scaling-libp2p server
+    environment: { PORT: '8801', P2P_PORT: '9001', NODE_NAME: node-2 }
+
+  node-3:
+    <<: *app
+    command: pnpm --filter @super-line/example-scaling-libp2p server
+    environment: { PORT: '8801', P2P_PORT: '9001', NODE_NAME: node-3 }
+
+  caddy:
+    image: caddy:2
+    ports: ['8085:8085']
+    volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']
+    depends_on: [node-1, node-2, node-3]
+
+  # Six fungible clients, each a real process with one WebSocket through Caddy.
+  client:
+    <<: *app
+    command: pnpm --filter @super-line/example-scaling-libp2p client
+    environment: { GATEWAY_URL: ws://caddy:8085 }
+    depends_on: [caddy]
+    deploy:
+      replicas: 6

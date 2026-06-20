@@ -254,6 +254,34 @@ importers:
         specifier: ^4.19.2
         version: 4.22.4
 
+  examples/scaling-libp2p:
+    dependencies:
+      '@libp2p/crypto':
+        specifier: ^5.1.20
+        version: 5.1.20
+      '@libp2p/peer-id':
+        specifier: ^6.0.11
+        version: 6.0.11
+      '@super-line/adapter-libp2p':
+        specifier: workspace:*
+        version: link:../../packages/adapter-libp2p
+      '@super-line/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@super-line/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@super-line/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
+
   packages/adapter-libp2p:
     dependencies:
       '@chainsafe/libp2p-noise':

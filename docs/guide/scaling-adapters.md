@@ -21,6 +21,27 @@ Point every server process at the same Redis. Now `room.broadcast`, `srv.publish
 You don't need an adapter for one process — the default in-memory adapter handles it. Add Redis only when you scale out.
 :::
 
+## Decentralized: libp2p (no broker)
+
+Don't want to run a broker at all? [`@super-line/adapter-libp2p`](https://www.npmjs.com/package/@super-line/adapter-libp2p) implements the same `Adapter` contract over a [libp2p](https://libp2p.io) gossipsub mesh — the nodes peer directly, with no Redis. Server code is unchanged; only the adapter line differs:
+
+```ts
+import { createLibp2pAdapter } from '@super-line/adapter-libp2p'
+
+const adapter = await createLibp2pAdapter({
+  listen: ['/ip4/0.0.0.0/tcp/9001'],
+  bootstrap: ['/dns4/seed-1/tcp/9001/p2p/12D3Koo…'], // seed multiaddrs
+  identity: { path: '/var/lib/app/p2p' }, // stable peer ID across restarts
+})
+const srv = createSocketServer(api, { server, authenticate, adapter })
+```
+
+It fans out rooms, topics, and the bus the same way, and a gossip-replicated directory backs `srv.cluster.*` / `srv.isOnline`. The trade-off vs. Redis: broker-less and decentralized, at the cost of eventually-consistent presence and best-effort delivery (no central store). It's **ESM-only** (libp2p is ESM-only). Run ≥2 stable seed nodes and persist their identity so bootstrap lists stay valid.
+
+::: tip Which adapter?
+Redis is the pragmatic default for a backend cluster (simple, central, strong presence). Reach for libp2p when you specifically want **no shared infrastructure** — self-hosted, on-prem, or edge deployments where running a broker is undesirable.
+:::
+
 ## The cluster event bus
 
 A bus channel is just a **shared topic**. One declaration types all three subscribers at once — server-side listeners, client-side subscribers, and the publish itself:
@@ -76,6 +97,12 @@ The [`scaling` example](https://github.com/mertdogar/super-line/tree/main/exampl
 
 ```bash
 cd examples/scaling && docker compose up
+```
+
+The [`scaling-libp2p` example](https://github.com/mertdogar/super-line/tree/main/examples/scaling-libp2p) is the same cluster with **no broker** — the three nodes peer over libp2p instead of Redis:
+
+```bash
+cd examples/scaling-libp2p && docker compose up
 ```
 
 For a bus-focused cluster, [`bus-cluster`](https://github.com/mertdogar/super-line/tree/main/examples/bus-cluster) has every node bump a counter and `server.subscribe` to every node's bumps, converging a shared tally — own bumps land in-process via local echo, peers' arrive over Redis.

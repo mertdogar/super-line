@@ -307,3 +307,67 @@ describe('inspector events topic (slice 5)', () => {
     insp.close()
   })
 })
+
+const msgContract = defineContract({
+  shared: { serverToClient: { ping: { payload: z.object({ n: z.number() }) } } },
+  roles: {
+    user: {
+      clientToServer: {
+        echo: {
+          input: z.object({ text: z.string(), secret: z.string() }),
+          output: z.object({ ok: z.boolean() }),
+        },
+        boom: { input: z.void(), output: z.void() },
+      },
+      serverToClient: { feed: { payload: z.object({ n: z.number() }), subscribe: true } },
+    },
+  },
+})
+
+describe('inspector message events (T3.2)', () => {
+  it('mirrors request/response/event/broadcast/publish, redacting payload fields', async () => {
+    const { srv, url } = await h.server(msgContract, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      inspector: { redact: ['secret'] },
+    })
+    srv.implement({
+      user: {
+        echo: async (_in, _ctx, conn) => {
+          conn.emit('ping', { n: 3 })
+          srv.room('r').add(conn)
+          srv.room('r').broadcast('ping', { n: 1 })
+          srv.forRole('user').publish('feed', { n: 2 })
+          return { ok: true }
+        },
+        boom: async () => {
+          throw new Error('nope')
+        },
+      },
+    })
+
+    const insp = await connectInspector(url)
+    await insp.subscribeEvents()
+    const u = h.client(msgContract, { url, role: 'user' })
+    await u.echo({ text: 'hi', secret: 's3cr3t' })
+
+    await waitFor(() => insp.events.some((e) => e.type === 'msg.request'))
+    const req = insp.events.find((e) => e.type === 'msg.request')
+    expect(req?.name).toBe('echo')
+    const input = req?.input as { text: string; secret: string }
+    expect(input.text).toBe('hi')
+    expect(input.secret).toBe('[Redacted]') // redacted by field name before crossing the bus
+
+    const res = insp.events.find((e) => e.type === 'msg.response')
+    expect(res?.ok).toBe(true)
+    expect(insp.events.find((e) => e.type === 'msg.event')?.name).toBe('ping') // conn.emit
+    expect(insp.events.find((e) => e.type === 'msg.broadcast')?.room).toBe('r')
+    expect(insp.events.find((e) => e.type === 'msg.publish')?.topic).toBe('feed')
+
+    // a thrown handler still emits a failed response
+    await u.boom().catch(() => {})
+    await waitFor(() => insp.events.some((e) => e.type === 'msg.response' && e.ok === false))
+    const errRes = insp.events.find((e) => e.type === 'msg.response' && e.ok === false)
+    expect(errRes?.name).toBe('boom')
+    insp.close()
+  })
+})

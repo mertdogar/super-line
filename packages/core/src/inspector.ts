@@ -57,7 +57,18 @@ export interface ConnView {
   ctxAvailable: boolean
 }
 
-/** A live topology event pushed on the `events` topic, fanned out cluster-wide. */
+/** A failed response/reply, carried on `msg.response` / `msg.serverReply`. */
+export interface MessageError {
+  code: string
+  message: string
+}
+
+/**
+ * A live event pushed on the `events` topic, fanned out cluster-wide. Lifecycle events
+ * (connect/disconnect/room/topic) are always emitted when inspector is on; `msg.*` events
+ * carry actual message traffic and are only emitted when inspector is on. Message payloads are
+ * safe-serialized and field-redacted (via the `inspector.redact` list) before they cross the bus.
+ */
 export type InspectorEvent =
   | { type: 'connect'; descriptor: ConnDescriptor }
   | { type: 'disconnect'; connId: string; nodeId: string; userId?: string }
@@ -65,6 +76,17 @@ export type InspectorEvent =
   | { type: 'room.remove'; connId: string; room: string }
   | { type: 'topic.sub'; connId: string; topic: string }
   | { type: 'topic.unsub'; connId: string; topic: string }
+  // client→server request and its response (input/output redacted)
+  | { type: 'msg.request'; connId: string; role: string; name: string; input: unknown }
+  | { type: 'msg.response'; connId: string; name: string; ok: boolean; output?: unknown; error?: MessageError }
+  // server→client event to a single connection (conn.emit / toConn().emit)
+  | { type: 'msg.event'; target: string; name: string; data: unknown }
+  // room.broadcast and topic publish
+  | { type: 'msg.broadcast'; room: string; name: string; data: unknown }
+  | { type: 'msg.publish'; topic: string; data: unknown }
+  // server→client request and the client's reply
+  | { type: 'msg.serverRequest'; target: string; name: string; input: unknown }
+  | { type: 'msg.serverReply'; target: string; name: string; ok: boolean; output?: unknown; error?: MessageError }
 
 // Passthrough Standard Schema: carries TS types for inference, no-op at runtime. The inspector
 // channel is library-owned and trusted, so validation is intentionally a no-op.

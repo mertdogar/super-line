@@ -454,6 +454,18 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     } else {
       env = { i: r.corrId, ok: false, code: result.code, m: result.m, d: result.d }
     }
+    if (inspectorEnabled)
+      emitInspectorEvent(
+        env.ok
+          ? { type: 'msg.serverReply', target: conn.id, name: r.name, ok: true, output: safeSnapshot(env.d) }
+          : {
+              type: 'msg.serverReply',
+              target: conn.id,
+              name: r.name,
+              ok: false,
+              error: { code: env.code, message: env.m },
+            },
+      )
     void adapter.publish(REPLY + r.origin, serializer.encode(env))
   }
 
@@ -695,7 +707,19 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     }
 
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const conn = new Conn(ws, randomUUID(), role, ctx, serializer, opts.backpressure)
+      const connId = randomUUID()
+      const conn = new Conn(
+        ws,
+        connId,
+        role,
+        ctx,
+        serializer,
+        opts.backpressure,
+        inspectorEnabled
+          ? (event, data) =>
+              emitInspectorEvent({ type: 'msg.event', target: connId, name: event, data: safeSnapshot(data) })
+          : undefined,
+      )
       ws.on('message', (data, isBinary) => {
         void onMessage(conn, data, isBinary)
       })
@@ -789,10 +813,16 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       })
     } catch (err) {
       opts.onError?.(err, info)
-      if (!responded) {
-        const e = err instanceof SocketError ? err : new SocketError('INTERNAL', 'Internal server error')
-        conn.send({ t: 'err', i: id, code: e.code, m: e.message, d: e.data })
-      }
+      const e = err instanceof SocketError ? err : new SocketError('INTERNAL', 'Internal server error')
+      if (!responded) conn.send({ t: 'err', i: id, code: e.code, m: e.message, d: e.data })
+      if (inspectorEnabled && info.kind === 'request')
+        emitInspectorEvent({
+          type: 'msg.response',
+          connId: conn.id,
+          name: info.name,
+          ok: false,
+          error: { code: e.code, message: e.message },
+        })
     }
   }
 
@@ -806,7 +836,23 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     }
     await dispatchOp(conn, frame.i, { kind: 'request', name: frame.m, conn }, async () => {
       const input = await validate(def.input, frame.d)
+      if (inspectorEnabled)
+        emitInspectorEvent({
+          type: 'msg.request',
+          connId: conn.id,
+          role: conn.role,
+          name: frame.m,
+          input: safeSnapshot(input),
+        })
       const output = await handler(input, conn.ctx, conn)
+      if (inspectorEnabled)
+        emitInspectorEvent({
+          type: 'msg.response',
+          connId: conn.id,
+          name: frame.m,
+          ok: true,
+          output: safeSnapshot(output),
+        })
       conn.send({ t: 'res', i: frame.i, d: output })
     })
   }
@@ -837,6 +883,8 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
         leaveChannel(conn, channel)
       },
       broadcast(event, data) {
+        if (inspectorEnabled)
+          emitInspectorEvent({ type: 'msg.broadcast', room: name, name: String(event), data: safeSnapshot(data) })
         void adapter.publish(channel, serializer.encode({ t: 'evt', e: String(event), d: data }))
       },
       get size() {
@@ -850,6 +898,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
 
   function publishTo(ns: string, name: string, data: unknown): void {
     const channel = TOPIC + ns + ':' + name
+    if (inspectorEnabled) emitInspectorEvent({ type: 'msg.publish', topic: name, data: safeSnapshot(data) })
     // local echo: fire same-node bus subscribers in-process (no adapter round-trip), trusted (not re-validated)
     const busSet = busListeners.get(channel)
     if (busSet) for (const cb of busSet) callBus(cb, data, instanceId, name)
@@ -903,6 +952,13 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   } {
     return {
       emit(event, data) {
+        if (inspectorEnabled)
+          emitInspectorEvent({
+            type: 'msg.event',
+            target: channel.slice(channel.indexOf(':') + 1),
+            name: event,
+            data: safeSnapshot(data),
+          })
         const env: PersonalEnvelope = { p: 'emit', f: { t: 'evt', e: event, d: data } }
         void adapter.publish(channel, serializer.encode(env))
       },
@@ -940,6 +996,8 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
         },
         { once: true },
       )
+      if (inspectorEnabled)
+        emitInspectorEvent({ type: 'msg.serverRequest', target: id, name, input: safeSnapshot(input) })
       const env: PersonalEnvelope = { p: 'req', o: instanceId, i: reqId, m: name, d: input }
       void adapter.publish(CONN + id, serializer.encode(env))
     })

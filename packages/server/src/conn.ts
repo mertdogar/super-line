@@ -48,6 +48,8 @@ export class Conn<
     readonly ctx: Ctx,
     private readonly serializer: Serializer,
     private readonly backpressure?: Backpressure,
+    /** Optional inspector tap: called with each `emit` so the server can mirror it to inspectors. */
+    private readonly onEmit?: (event: string, data: unknown) => void,
   ) {}
 
   // true => the frame was handled by the backpressure policy and must not be sent
@@ -76,6 +78,7 @@ export class Conn<
 
   /** Push an event to THIS connection (node-local). Scoped to the role's events. */
   emit<E extends keyof Ev>(event: E, data: EmitData<Ev[E]>): void {
+    this.onEmit?.(String(event), data)
     this.send({ t: 'evt', e: String(event), d: data })
   }
 

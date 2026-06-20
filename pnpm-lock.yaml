@@ -525,6 +525,9 @@ importers:
       '@super-line/adapter-redis':
         specifier: workspace:*
         version: link:../adapter-redis
+      '@super-line/adapter-zeromq':
+        specifier: workspace:*
+        version: link:../adapter-zeromq
       '@super-line/client':
         specifier: workspace:*
         version: link:../client
@@ -540,6 +543,9 @@ importers:
       testcontainers:
         specifier: ^10.13.2
         version: 10.28.0
+      zeromq:
+        specifier: ^6.0.0
+        version: 6.5.0
       zod:
         specifier: ^3.24.1
         version: 3.25.76

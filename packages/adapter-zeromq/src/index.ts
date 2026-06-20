@@ -153,7 +153,7 @@ function wireAdapter(pub: Publisher, sub: Subscriber, ownsSockets: boolean, pres
  * @example
  * ```ts
  * const adapter = await createZeroMqAdapter({ bind: 'tcp://0.0.0.0:5555', peers: ['tcp://node-b:5555'] })
- * createSocketServer(api, { server, adapter })
+ * createSuperLineServer(api, { server, adapter })
  * ```
  */
 export function createZeroMqAdapter(options: ZeroMqMeshOptions): Promise<ZeroMqAdapter>

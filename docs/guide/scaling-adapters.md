@@ -104,7 +104,7 @@ const adapter = await createZeroMqAdapter({
   bind: 'tcp://0.0.0.0:9101',
   peers: ['tcp://node-2:9101', 'tcp://node-3:9101'],
 })
-const srv = createSocketServer(api, { server, authenticate, adapter })
+const srv = createSuperLineServer(api, { server, authenticate, adapter })
 ```
 
 It fans out rooms, topics, and the bus the same way, with a gossip-replicated directory backing `srv.cluster.*` / `srv.isOnline` (eventually-consistent, like libp2p — there's no central store). At-most-once delivery, matching the rest of the library. ZeroMQ's `connect` is lazy and auto-reconnecting, so nodes can start in any order. It's **ESM-only** and a **native addon** (Node-only).

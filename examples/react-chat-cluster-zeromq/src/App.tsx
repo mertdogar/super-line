@@ -1,13 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { createClient } from '@super-line/client'
-import { createSocketReact } from '@super-line/react'
+import { createSuperLineClient } from '@super-line/client'
+import { createSuperLineHooks } from '@super-line/react'
 import { chat } from './contract.js'
 
 // Same-origin: Caddy serves this SPA and reverse-proxies /ws round-robin to the nodes, so the
 // WebSocket URL is derived from the page's own host — no hardcoded port, works behind the LB.
 const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
 
-const { Provider, useRequest, useEvent, useSubscription } = createSocketReact<typeof chat, 'user'>()
+const { Provider, useRequest, useEvent, useSubscription } = createSuperLineHooks<typeof chat, 'user'>()
 
 interface Message {
   id: string
@@ -51,7 +51,7 @@ function JoinForm({ onJoin }: { onJoin: (creds: { name: string; room: string }) 
 
 function ChatApp({ name, room }: { name: string; room: string }) {
   // create the client once; it connects immediately and reconnects on its own
-  const [client] = useState(() => createClient(chat, { url: WS_URL, role: 'user', params: { name } }))
+  const [client] = useState(() => createSuperLineClient(chat, { url: WS_URL, role: 'user', params: { name } }))
   useEffect(() => () => client.close(), [client])
 
   return (

@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { createSocketServer, type Conn } from '@super-line/server'
+import { createSuperLineServer, type Conn } from '@super-line/server'
 import { createZeroMqAdapter } from '@super-line/adapter-zeromq'
 import { chat } from './contract.js'
 
@@ -19,7 +19,7 @@ let seq = 0
 // async: the ZeroMQ adapter binds its PUB before the server starts.
 const adapter = await createZeroMqAdapter({ bind: ZMQ_BIND, peers: ZMQ_PEERS })
 
-const srv = createSocketServer(chat, {
+const srv = createSuperLineServer(chat, {
   server,
   adapter,
   nodeName: NODE, // surface node-1 / node-2 / node-3 in the Control Center topology

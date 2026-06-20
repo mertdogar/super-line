@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { createSocketServer } from '@super-line/server'
+import { createSuperLineServer } from '@super-line/server'
 import { createZeroMqAdapter } from '@super-line/adapter-zeromq'
 import { sync } from './contract.js'
 
@@ -18,7 +18,7 @@ const peers = NODES.filter((n) => n !== NODE).map((n) => `tcp://${n}:${ZMQ_PORT}
 const server = http.createServer()
 let conns = 0
 
-const srv = createSocketServer(sync, {
+const srv = createSuperLineServer(sync, {
   server,
   authenticate: () => ({ role: 'user' as const, ctx: {} }),
   nodeName: NODE, // surface node-1/2/3 in the Control Center topology

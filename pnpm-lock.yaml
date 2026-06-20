@@ -435,6 +435,15 @@ importers:
         specifier: ^3.3.4
         version: 3.3.4
 
+  packages/adapter-rabbitmq:
+    dependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+      rabbitmq-client:
+        specifier: ^5.0.0
+        version: 5.0.8
+
   packages/adapter-redis:
     dependencies:
       '@super-line/core':
@@ -596,6 +605,9 @@ importers:
       '@super-line/adapter-libp2p':
         specifier: workspace:*
         version: link:../adapter-libp2p
+      '@super-line/adapter-rabbitmq':
+        specifier: workspace:*
+        version: link:../adapter-rabbitmq
       '@super-line/adapter-redis':
         specifier: workspace:*
         version: link:../adapter-redis
@@ -614,6 +626,9 @@ importers:
       libp2p:
         specifier: ^3.3.4
         version: 3.3.4
+      rabbitmq-client:
+        specifier: ^5.0.0
+        version: 5.0.8
       testcontainers:
         specifier: ^10.13.2
         version: 10.28.0
@@ -3526,6 +3541,10 @@ packages:
 
   queue-microtask@1.2.3:
     resolution: {integrity: sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A==}
+
+  rabbitmq-client@5.0.8:
+    resolution: {integrity: sha512-nNto/okuVq+d/OamRYX4HIiCkHdOE0RICIDRjS4YQUo2DI/l3R9RlsFaEEYSjIc+LT6DV+1wUub3nD1HwrM4SQ==}
+    engines: {node: '>=16'}
 
   race-event@1.6.1:
     resolution: {integrity: sha512-vi7WH5g5KoTFpu2mme/HqZiWH14XSOtg5rfp6raBskBHl7wnmy3F/biAIyY5MsK+BHWhoPhxtZ1Y2R7OHHaWyQ==}
@@ -7152,6 +7171,8 @@ snapshots:
     optional: true
 
   queue-microtask@1.2.3: {}
+
+  rabbitmq-client@5.0.8: {}
 
   race-event@1.6.1:
     dependencies:

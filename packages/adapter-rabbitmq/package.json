@@ -1,0 +1,32 @@
+{
+  "name": "@super-line/adapter-rabbitmq",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "RabbitMQ adapter for super-line — broker-routed multi-node room/topic fan-out + presence.",
+  "license": "MIT",
+  "author": "Mert",
+  "keywords": ["websocket", "rabbitmq", "amqp", "pubsub", "adapter", "scaling", "super-line"],
+  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/adapter-rabbitmq" },
+  "homepage": "https://mertdogar.github.io/super-line/",
+  "bugs": "https://github.com/mertdogar/super-line/issues",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "engines": { "node": ">=18" },
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsup"
+  },
+  "dependencies": {
+    "@super-line/core": "workspace:^",
+    "rabbitmq-client": "^5.0.0"
+  }
+}

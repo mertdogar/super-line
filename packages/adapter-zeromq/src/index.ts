@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { Proxy, Publisher, Subscriber, XPublisher, XSubscriber } from 'zeromq'
 import type { Adapter } from '@super-line/core'
+import { GossipPresence, type PresenceMsg } from './presence.js'
+
+/**
+ * Cluster presence directory (powers `srv.cluster.*` / `srv.isOnline`). On by default;
+ * set `false` to disable (cluster queries then throw). Pass an object to tune timings.
+ */
+export type ZeroMqPresenceOption = false | { snapshotIntervalMs?: number; livenessTtlMs?: number }
 
 /** Brokerless full-mesh: this node binds a PUB and connects a SUB to every peer's PUB. */
 export interface ZeroMqMeshOptions {
@@ -11,6 +18,8 @@ export interface ZeroMqMeshOptions {
   peers?: string[]
   /** PUB/SUB high-water-mark (messages buffered per peer before silent drops). Defaults to `100_000`. */
   sendHighWaterMark?: number
+  /** Cluster presence directory. On by default. */
+  presence?: ZeroMqPresenceOption
 }
 
 /** Central forwarder: this node connects its PUB to the proxy frontend and its SUB to the backend. */
@@ -22,6 +31,8 @@ export interface ZeroMqProxyModeOptions {
   backendUrl: string
   /** PUB/SUB high-water-mark. Defaults to `100_000`. */
   sendHighWaterMark?: number
+  /** Cluster presence directory. On by default. */
+  presence?: ZeroMqPresenceOption
 }
 
 /** Bring your own pre-wired sockets — the adapter uses them as-is and does NOT own their lifecycle. */
@@ -30,6 +41,8 @@ export interface ZeroMqByoOptions {
   pub: Publisher
   /** A SUB socket you've already connected (the adapter calls `subscribe`/`unsubscribe` on it). */
   sub: Subscriber
+  /** Cluster presence directory. On by default. */
+  presence?: ZeroMqPresenceOption
 }
 
 /** Options for {@link createZeroMqAdapter}. */
@@ -39,6 +52,8 @@ export type ZeroMqAdapterOptions = ZeroMqMeshOptions | ZeroMqProxyModeOptions | 
 export type ZeroMqAdapter = Adapter & { endpoint: string }
 
 const DEFAULT_HWM = 100_000
+// reserved internal channel for presence gossip; can't collide with r:/t:/c:/u:/reply:/s2s
+const PRESENCE_CHANNEL = '\x00sl:presence'
 const toFrame = (payload: string | Uint8Array): string | Buffer =>
   typeof payload === 'string' ? payload : Buffer.from(payload)
 
@@ -48,12 +63,30 @@ const toFrame = (payload: string | Uint8Array): string | Buffer =>
  * echo (the proxy forwarder bounces a publish back to its sender), so local
  * delivery is always the explicit in-process loopback — one code path for mesh
  * and proxy alike. Payloads ride as raw bytes (Buffer), matching the Redis adapter.
+ * Presence rides the reserved {@link PRESENCE_CHANNEL} as gossip (no central store).
  */
-function wireAdapter(pub: Publisher, sub: Subscriber, ownsSockets: boolean): Adapter {
+function wireAdapter(pub: Publisher, sub: Subscriber, ownsSockets: boolean, presenceOpt: ZeroMqPresenceOption | undefined): Adapter {
   const selfId = randomUUID()
   const subscribed = new Set<string>()
   let handler: ((channel: string, payload: string | Uint8Array) => void) | undefined
   let closed = false
+
+  const send = async (channel: string, payload: string | Uint8Array): Promise<void> => {
+    if (closed) return
+    if (subscribed.has(channel)) handler?.(channel, payload) // explicit local loopback
+    try {
+      await pub.send([channel, selfId, toFrame(payload)])
+    } catch {
+      // at-most-once: a publish lost during a blip is acceptable
+    }
+  }
+
+  const presence =
+    presenceOpt === false
+      ? undefined
+      : new GossipPresence((m) => void send(PRESENCE_CHANNEL, JSON.stringify(m)), typeof presenceOpt === 'object' ? presenceOpt : {})
+
+  sub.subscribe(PRESENCE_CHANNEL) // always receive peers' presence gossip
 
   void (async () => {
     try {
@@ -62,7 +95,12 @@ function wireAdapter(pub: Publisher, sub: Subscriber, ownsSockets: boolean): Ada
         const [chBuf, sidBuf, payloadBuf] = frames
         if (!chBuf) continue
         if (sidBuf?.toString() === selfId) continue // our own echo (proxy bounce) — already looped back
-        handler?.(chBuf.toString(), payloadBuf ?? Buffer.alloc(0))
+        const channel = chBuf.toString()
+        if (channel === PRESENCE_CHANNEL) {
+          presence?.receive(JSON.parse((payloadBuf ?? Buffer.alloc(0)).toString()) as PresenceMsg)
+          continue
+        }
+        handler?.(channel, payloadBuf ?? Buffer.alloc(0))
       }
     } catch {
       // socket closed during shutdown — fine
@@ -78,21 +116,15 @@ function wireAdapter(pub: Publisher, sub: Subscriber, ownsSockets: boolean): Ada
       subscribed.delete(channel)
       sub.unsubscribe(channel)
     },
-    async publish(channel, payload) {
-      if (closed) return
-      if (subscribed.has(channel)) handler?.(channel, payload) // explicit local loopback
-      try {
-        await pub.send([channel, selfId, toFrame(payload)])
-      } catch {
-        // at-most-once: a publish lost during a blip is acceptable
-      }
-    },
+    publish: send,
     onMessage(h: (channel: string, payload: string | Uint8Array) => void) {
       handler = h
     },
+    presence,
     async close() {
       if (closed) return
       closed = true
+      presence?.stop()
       if (ownsSockets) {
         pub.close()
         sub.close()
@@ -121,7 +153,7 @@ function wireAdapter(pub: Publisher, sub: Subscriber, ownsSockets: boolean): Ada
 export function createZeroMqAdapter(options: ZeroMqMeshOptions): Promise<ZeroMqAdapter>
 export function createZeroMqAdapter(options: ZeroMqProxyModeOptions | ZeroMqByoOptions): Promise<Adapter>
 export async function createZeroMqAdapter(options: ZeroMqAdapterOptions): Promise<Adapter> {
-  if ('pub' in options) return wireAdapter(options.pub, options.sub, false)
+  if ('pub' in options) return wireAdapter(options.pub, options.sub, false, options.presence)
 
   const hwm = options.sendHighWaterMark ?? DEFAULT_HWM
   const pub = new Publisher({ sendHighWaterMark: hwm })
@@ -130,12 +162,12 @@ export async function createZeroMqAdapter(options: ZeroMqAdapterOptions): Promis
   if (options.mode === 'proxy') {
     pub.connect(options.frontendUrl)
     sub.connect(options.backendUrl)
-    return wireAdapter(pub, sub, true)
+    return wireAdapter(pub, sub, true, options.presence)
   }
 
   await pub.bind(options.bind)
   for (const peer of options.peers ?? []) sub.connect(peer)
-  const mesh: ZeroMqAdapter = { ...wireAdapter(pub, sub, true), endpoint: pub.lastEndpoint ?? options.bind }
+  const mesh: ZeroMqAdapter = { ...wireAdapter(pub, sub, true, options.presence), endpoint: pub.lastEndpoint ?? options.bind }
   return mesh
 }
 

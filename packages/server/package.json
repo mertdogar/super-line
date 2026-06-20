@@ -54,10 +54,18 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@chainsafe/libp2p-noise": "^17.0.0",
+    "@chainsafe/libp2p-yamux": "^8.0.1",
+    "@libp2p/gossipsub": "^16.0.3",
+    "@libp2p/identify": "^4.1.8",
+    "@libp2p/interface": "^3.2.4",
+    "@libp2p/tcp": "^11.0.22",
+    "@super-line/adapter-libp2p": "workspace:*",
     "@super-line/adapter-redis": "workspace:*",
     "@super-line/client": "workspace:*",
     "@types/ws": "^8.5.13",
     "ioredis": "^5.4.2",
+    "libp2p": "^3.3.4",
     "testcontainers": "^10.13.2",
     "zod": "^3.24.1",
     "zod-to-json-schema": "^3.25.2"

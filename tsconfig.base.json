@@ -18,6 +18,7 @@
       "@super-line/server": ["./packages/server/src/index.ts"],
       "@super-line/client": ["./packages/client/src/index.ts"],
       "@super-line/adapter-redis": ["./packages/adapter-redis/src/index.ts"],
+      "@super-line/adapter-libp2p": ["./packages/adapter-libp2p/src/index.ts"],
       "@super-line/react": ["./packages/react/src/index.ts"]
     }
   }

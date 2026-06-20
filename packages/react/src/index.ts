@@ -18,7 +18,7 @@ import type {
   Output,
   EventData,
 } from '@super-line/core'
-import type { Client } from '@super-line/client'
+import type { SuperLineClient } from '@super-line/client'
 
 /** State returned by `useRequest`. */
 export interface RequestState<T> {
@@ -36,24 +36,24 @@ export interface RequestState<T> {
  *
  * @example
  * ```tsx
- * const { Provider, useRequest, useEvent, useSubscription } = createSocketReact<typeof api, 'user'>()
+ * const { Provider, useRequest, useEvent, useSubscription } = createSuperLineHooks<typeof api, 'user'>()
  *
  * function Root() {
- *   const [client] = useState(() => createClient(api, { url, role: 'user' }))
+ *   const [client] = useState(() => createSuperLineClient(api, { url, role: 'user' }))
  *   return <Provider client={client}><Room /></Provider>
  * }
  * ```
  */
-export function createSocketReact<C extends Contract, R extends RoleOf<C>>() {
-  const Context = createContext<Client<C, R> | null>(null)
+export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() {
+  const Context = createContext<SuperLineClient<C, R> | null>(null)
 
   /** Provides a connected client to the hooks below. */
-  function Provider(props: { client: Client<C, R>; children?: ReactNode }): ReactNode {
+  function Provider(props: { client: SuperLineClient<C, R>; children?: ReactNode }): ReactNode {
     return createElement(Context.Provider, { value: props.client }, props.children)
   }
 
   /** Access the client from context (throws outside a `<Provider>`). */
-  function useClient(): Client<C, R> {
+  function useClient(): SuperLineClient<C, R> {
     const client = useContext(Context)
     if (!client) throw new Error('useClient must be used within a <Provider>')
     return client

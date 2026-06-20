@@ -31,10 +31,10 @@ scaling-client-5 | scaling-client-5 ← announce "announce #2"                  
 Caddy is exposed on `ws://localhost:8080`. Point your own client at it and watch your messages reach the containerized clients:
 
 ```ts
-import { createClient } from '@super-line/client'
+import { createSuperLineClient } from '@super-line/client'
 import { sync } from './src/contract.js'
 
-const c = createClient(sync, { url: 'ws://localhost:8080', role: 'user' })
+const c = createSuperLineClient(sync, { url: 'ws://localhost:8080', role: 'user' })
 c.on('message', (m) => console.log('got', m))
 await c.say({ from: 'me', text: 'hello cluster' })
 ```

@@ -1,7 +1,7 @@
 import http from 'node:http'
 import { generateKeyPairFromSeed } from '@libp2p/crypto/keys'
 import { peerIdFromPrivateKey } from '@libp2p/peer-id'
-import { createSocketServer, type Conn } from '@super-line/server'
+import { createSuperLineServer, type Conn } from '@super-line/server'
 import { createLibp2pAdapter } from '@super-line/adapter-libp2p'
 import { chat } from './contract.js'
 
@@ -34,7 +34,7 @@ const server = http.createServer()
 const roomOf = new Map<Conn, string>()
 let seq = 0
 
-const srv = createSocketServer(chat, {
+const srv = createSuperLineServer(chat, {
   server,
   // no broker: every node joins one shared gossipsub mesh
   adapter: await createLibp2pAdapter({

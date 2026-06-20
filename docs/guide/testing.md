@@ -9,24 +9,24 @@ The most reliable way to test super-line is over a **real loopback server** — 
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { Contract, RoleOf } from '@super-line/core'
-import { createSocketServer, type AuthResult, type ServerOptions, type SocketServer } from '@super-line/server'
-import { createClient, type Client, type ClientOptions } from '@super-line/client'
+import { createSuperLineServer, type AuthResult, type SuperLineServerOptions, type SuperLineServer } from '@super-line/server'
+import { createSuperLineClient, type SuperLineClient, type SuperLineClientOptions } from '@super-line/client'
 
 export function createHarness() {
   const cleanups: Array<() => Promise<void> | void> = []
 
   async function server<C extends Contract, A extends AuthResult<C>>(
-    contract: C, opts: Omit<ServerOptions<C, A>, 'server'>,
-  ): Promise<{ srv: SocketServer<C, A>; url: string }> {
+    contract: C, opts: Omit<SuperLineServerOptions<C, A>, 'server'>,
+  ): Promise<{ srv: SuperLineServer<C, A>; url: string }> {
     const httpServer = http.createServer()
-    const srv = createSocketServer<C, A>(contract, { ...opts, server: httpServer })
+    const srv = createSuperLineServer<C, A>(contract, { ...opts, server: httpServer })
     await new Promise<void>((r) => httpServer.listen(0, r))
     const url = `ws://127.0.0.1:${(httpServer.address() as AddressInfo).port}`
     cleanups.push(async () => { await srv.close(); await new Promise<void>((r) => httpServer.close(() => r())) })
     return { srv, url }
   }
-  function client<C extends Contract, R extends RoleOf<C>>(contract: C, opts: ClientOptions<C, R>): Client<C, R> {
-    const c = createClient(contract, opts)
+  function client<C extends Contract, R extends RoleOf<C>>(contract: C, opts: SuperLineClientOptions<C, R>): SuperLineClient<C, R> {
+    const c = createSuperLineClient(contract, opts)
     cleanups.unshift(() => c.close()) // clients close BEFORE the servers they connect to
     return c
   }
@@ -49,7 +49,7 @@ it('round-trips and surfaces typed errors', async () => {
   srv.implement({
     user: {
       echo: async ({ text }) => ({ text }),
-      boom: async () => { throw new SocketError('FORBIDDEN', 'nope') },
+      boom: async () => { throw new SuperLineError('FORBIDDEN', 'nope') },
     },
   })
   const client = h.client(api, { url, role: 'user' })
@@ -108,7 +108,7 @@ For **real cross-process** tests use `testcontainers` + `createRedisAdapter(url)
 Render hooks against a real client with `renderHook` (jsdom):
 
 ```ts
-const { Provider, useRequest } = createSocketReact<typeof api, 'user'>()
+const { Provider, useRequest } = createSuperLineHooks<typeof api, 'user'>()
 const wrapper = ({ children }) => createElement(Provider, { client, children })
 const { result } = renderHook(() => useRequest('echo'), { wrapper })
 await act(async () => { await result.current.call({ text: 'hi' }) })

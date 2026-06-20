@@ -1,7 +1,7 @@
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { createSocketServer, MemoryBus, createInMemoryAdapter } from '@super-line/server'
-import { createClient } from '@super-line/client'
+import { createSuperLineServer, MemoryBus, createInMemoryAdapter } from '@super-line/server'
+import { createSuperLineClient } from '@super-line/client'
 import { ops } from './contract.js'
 
 // One-command demo, NO external services. It boots TWO nodes that share one
@@ -21,7 +21,7 @@ const identify = (conn: { ctx: unknown }) => (conn.ctx as { userId: string }).us
 
 async function node(bus: MemoryBus) {
   const server = http.createServer()
-  const srv = createSocketServer(ops, {
+  const srv = createSuperLineServer(ops, {
     server,
     authenticate,
     identify,
@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   console.log(`node B: ${b.url}  (id ${b.srv.nodeId.slice(0, 8)})\n`)
 
   // alice connects to node A, bob to node B. alice answers server→client `confirm` requests.
-  const alice = createClient(ops, { url: a.url, role: 'user', params: { uid: 'alice' } })
+  const alice = createSuperLineClient(ops, { url: a.url, role: 'user', params: { uid: 'alice' } })
   const notices: string[] = []
   alice.on('notice', (n) => {
     notices.push(n.text)
@@ -58,7 +58,7 @@ async function main(): Promise<void> {
       return { approved: true }
     },
   })
-  const bob = createClient(ops, { url: b.url, role: 'user', params: { uid: 'bob' } })
+  const bob = createSuperLineClient(ops, { url: b.url, role: 'user', params: { uid: 'bob' } })
   await Promise.all([alice.hello({}), bob.hello({})])
   await tick(50) // let both presence registrations settle
 

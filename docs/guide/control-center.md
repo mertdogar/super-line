@@ -11,9 +11,9 @@ It ships as `@super-line/control-center` and runs with `npx` — no install.
 The Control Center connects over a reserved WebSocket subprotocol (`superline.inspector.v1`). Turn it on per node with one option (it is **off by default**):
 
 ```ts
-import { createSocketServer } from '@super-line/server'
+import { createSuperLineServer } from '@super-line/server'
 
-const srv = createSocketServer(contract, {
+const srv = createSuperLineServer(contract, {
   server,
   authenticate,
   inspector: true,

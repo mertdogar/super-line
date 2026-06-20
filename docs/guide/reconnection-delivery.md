@@ -10,7 +10,7 @@ The client is resilient by default — but the delivery model is **at-most-once*
 - **Calls made *while* reconnecting are queued** and flushed once the connection is back.
 
 ```ts
-const client = createClient(api, {
+const client = createSuperLineClient(api, {
   url, role: 'user',
   reconnect: true, reconnectBaseMs: 500, reconnectMaxMs: 30_000, reconnectFactor: 2,
 })
@@ -33,7 +33,7 @@ Session resume/replay is not built yet — see the project status in the README.
 Over the WebSocket API, a rejected upgrade (e.g. bad credentials) is indistinguishable from any other drop. So a client with bad credentials and `reconnect: true` will **retry forever**. When you want an auth failure to surface immediately (tests, login flows), set `reconnect: false`:
 
 ```ts
-const client = createClient(api, { url, role: 'user', params: { token: 'bad' }, reconnect: false })
+const client = createSuperLineClient(api, { url, role: 'user', params: { token: 'bad' }, reconnect: false })
 await client.whoami({}) // rejects DISCONNECTED right away instead of retrying
 ```
 

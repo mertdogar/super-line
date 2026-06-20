@@ -105,11 +105,11 @@ export const chat = defineContract({
 
 ```ts
 import http from 'node:http'
-import { createSocketServer } from '@super-line/server'
+import { createSuperLineServer } from '@super-line/server'
 import { chat } from './contract'
 
 const server = http.createServer() // or pass your Express/Fastify http.Server
-const srv = createSocketServer(chat, {
+const srv = createSuperLineServer(chat, {
   server,
   authenticate: (req) => {
     const name = new URL(req.url!, 'http://x').searchParams.get('name')
@@ -140,10 +140,10 @@ server.listen(3000)
 ### 3. Client
 
 ```ts
-import { createClient } from '@super-line/client'
+import { createSuperLineClient } from '@super-line/client'
 import { chat } from './contract'
 
-const client = createClient(chat, {
+const client = createSuperLineClient(chat, {
   url: 'ws://localhost:3000',
   role: 'user',                 // narrows the surface to shared ∪ user; sent to authenticate to verify
   params: { name: 'ada' },     // -> ?name=ada, read in authenticate
@@ -153,7 +153,7 @@ client.on('message', (m) => console.log(`${m.from}: ${m.text}`)) // typed
 const sub = client.subscribe('presence', (p) => console.log(`${p.count} online`))
 
 await client.join({ room: 'lobby' })
-await client.send({ room: 'lobby', text: 'hi' }) // typed input/output; throws typed SocketError on failure
+await client.send({ room: 'lobby', text: 'hi' }) // typed input/output; throws typed SuperLineError on failure
 
 sub.unsubscribe()
 client.close()
@@ -163,7 +163,7 @@ client.close()
 
 ```ts
 // server: identify connections so the cluster view + toUser can find them
-createSocketServer(chat, { server, authenticate, identify: (conn) => conn.ctx.userId })
+createSuperLineServer(chat, { server, authenticate, identify: (conn) => conn.ctx.userId })
 
 await srv.cluster.count()                 // total connections cluster-wide
 await srv.isOnline('u42')                 // connected on any node?
@@ -269,13 +269,13 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 
 | Package | Purpose |
 | --- | --- |
-| [`@super-line/core`](packages/core) | `defineContract` (roles + direction), validation, wire protocol, `Serializer` / `Adapter` interfaces, `SocketError` |
-| [`@super-line/server`](packages/server) | `createSocketServer` over `ws`: role-keyed `implement`, rooms, topics, `forRole`, the cluster event bus (`publish`/`subscribe`), server→client requests (`toConn`/`toUser`), local + cluster introspection, heartbeat, middleware, in-memory adapter |
-| [`@super-line/client`](packages/client) | `createClient` (role-scoped surface, reconnect, typed calls, `on` / `subscribe`) |
+| [`@super-line/core`](packages/core) | `defineContract` (roles + direction), validation, wire protocol, `Serializer` / `Adapter` interfaces, `SuperLineError` |
+| [`@super-line/server`](packages/server) | `createSuperLineServer` over `ws`: role-keyed `implement`, rooms, topics, `forRole`, the cluster event bus (`publish`/`subscribe`), server→client requests (`toConn`/`toUser`), local + cluster introspection, heartbeat, middleware, in-memory adapter |
+| [`@super-line/client`](packages/client) | `createSuperLineClient` (role-scoped surface, reconnect, typed calls, `on` / `subscribe`) |
 | [`@super-line/adapter-redis`](packages/adapter-redis) | Redis Pub/Sub adapter for multi-node fan-out (central broker) |
 | [`@super-line/adapter-zeromq`](packages/adapter-zeromq) | ZeroMQ adapter for multi-node fan-out — brokerless mesh or a lightweight forwarder, with gossip presence |
 | [`@super-line/adapter-libp2p`](packages/adapter-libp2p) | Decentralized, broker-less libp2p (gossipsub) adapter — fan-out + presence, no broker |
-| [`@super-line/react`](packages/react) | `createSocketReact<C, Role>` → `useRequest` / `useEvent` / `useSubscription` |
+| [`@super-line/react`](packages/react) | `createSuperLineHooks<C, Role>` → `useRequest` / `useEvent` / `useSubscription` |
 | [`@super-line/control-center`](packages/control-center) | Debugging webapp (`npx`): live topology, contract, roles & per-conn ctx/state |
 
 ## Status

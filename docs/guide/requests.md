@@ -51,13 +51,13 @@ A timed-out call rejects with `TIMEOUT`; an aborted call rejects with `BAD_REQUE
 
 ## Errors
 
-Throw a typed [`SocketError`](./errors) from a handler and the client's promise rejects with the same `code`:
+Throw a typed [`SuperLineError`](./errors) from a handler and the client's promise rejects with the same `code`:
 
 ```ts
-import { SocketError } from '@super-line/core'
+import { SuperLineError } from '@super-line/core'
 
 send: async ({ room }, ctx) => {
-  if (!ctx.canPost(room)) throw new SocketError('FORBIDDEN', 'not a member')
+  if (!ctx.canPost(room)) throw new SuperLineError('FORBIDDEN', 'not a member')
   // ...
 }
 ```

@@ -128,7 +128,7 @@ async function buildNode(opts: Libp2pAdapterOptions): Promise<PubSubLibp2p> {
  * @example
  * ```ts
  * const adapter = await createLibp2pAdapter({ bootstrap: ['/ip4/10.0.0.1/tcp/9001/p2p/12D3Koo...'] })
- * createSocketServer(api, { server, adapter })
+ * createSuperLineServer(api, { server, adapter })
  * ```
  */
 export async function createLibp2pAdapter(

@@ -12,7 +12,7 @@ pnpm add @super-line/adapter-libp2p
 > **ESM-only** — libp2p is ESM-only, so this package ships ESM only (Node 18+, `"type": "module"`).
 
 ```ts
-import { createSocketServer } from '@super-line/server'
+import { createSuperLineServer } from '@super-line/server'
 import { createLibp2pAdapter } from '@super-line/adapter-libp2p'
 import { api } from './contract'
 
@@ -23,7 +23,7 @@ const adapter = await createLibp2pAdapter({
   identity: { path: '/var/lib/app/p2p' },
 })
 
-const srv = createSocketServer(api, { server, authenticate, adapter })
+const srv = createSuperLineServer(api, { server, authenticate, adapter })
 console.log('p2p:', adapter.node.getMultiaddrs().map(String)) // share a seed's address for bootstrap lists
 ```
 

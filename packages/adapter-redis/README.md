@@ -7,11 +7,11 @@ pnpm add @super-line/adapter-redis
 ```
 
 ```ts
-import { createSocketServer } from '@super-line/server'
+import { createSuperLineServer } from '@super-line/server'
 import { createRedisAdapter } from '@super-line/adapter-redis'
 import { api } from './contract'
 
-const srv = createSocketServer(api, {
+const srv = createSuperLineServer(api, {
   server,
   authenticate,
   adapter: createRedisAdapter('redis://localhost:6379'),

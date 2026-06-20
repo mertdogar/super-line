@@ -7,7 +7,7 @@ A connection's **role** is resolved once, at the HTTP upgrade, and fixed for its
 `authenticate` runs at the upgrade. Return `{ role, ctx }`, or `throw` to reject with 401 (no socket is opened):
 
 ```ts
-const srv = createSocketServer(api, {
+const srv = createSuperLineServer(api, {
   server,
   authenticate: async (req) => {
     const token = new URL(req.url ?? '', 'http://x').searchParams.get('token')
@@ -41,13 +41,13 @@ In a `shared` handler, `ctx` is the union of all roles' ctx — use common field
 
 ## The role is a claim — verify it
 
-The client passes its `role` to `createClient`; it's sent as a query param so `authenticate` can read it. **It's a claim, not a fact** — always verify it against the credential:
+The client passes its `role` to `createSuperLineClient`; it's sent as a query param so `authenticate` can read it. **It's a claim, not a fact** — always verify it against the credential:
 
 ```ts
 authenticate: (req) => {
   const u = verify(tokenFrom(req))
   const claimed = new URL(req.url ?? '', 'http://x').searchParams.get('role')
-  if (u.role !== claimed) throw new SocketError('FORBIDDEN', 'role not granted')
+  if (u.role !== claimed) throw new SuperLineError('FORBIDDEN', 'role not granted')
   return { role: u.role, ctx: { user: u } }
 }
 ```

@@ -1,13 +1,13 @@
 # Error handling
 
-super-line carries errors end-to-end as a typed `SocketError`. Throw one from a handler and the client's promise rejects with the **same code**.
+super-line carries errors end-to-end as a typed `SuperLineError`. Throw one from a handler and the client's promise rejects with the **same code**.
 
 ```ts
-import { SocketError } from '@super-line/core'
+import { SuperLineError } from '@super-line/core'
 
 // server
 send: async ({ room }, ctx) => {
-  if (!ctx.canPost(room)) throw new SocketError('FORBIDDEN', 'not a member', { room })
+  if (!ctx.canPost(room)) throw new SuperLineError('FORBIDDEN', 'not a member', { room })
   // ...
 }
 
@@ -15,11 +15,11 @@ send: async ({ room }, ctx) => {
 try {
   await client.send({ room, text })
 } catch (e) {
-  if (e instanceof SocketError && e.code === 'UNAUTHORIZED') relogin()
+  if (e instanceof SuperLineError && e.code === 'UNAUTHORIZED') relogin()
 }
 ```
 
-A `SocketError` has a `code`, an optional human-readable `message`, and optional structured `data` (delivered to the client).
+A `SuperLineError` has a `code`, an optional human-readable `message`, and optional structured `data` (delivered to the client).
 
 ## Codes
 
@@ -37,13 +37,13 @@ A `SocketError` has a `code`, an optional human-readable `message`, and optional
 You can also use **custom string codes** — autocomplete keeps the built-in set while allowing your own:
 
 ```ts
-throw new SocketError('RATE_LIMITED', 'slow down', { retryAfter: 5 })
+throw new SuperLineError('RATE_LIMITED', 'slow down', { retryAfter: 5 })
 ```
 
 ## What the client sees
 
-- **Expected failures** — `throw new SocketError(code, ...)` from a handler; the client gets that exact `code` (and `data`).
-- **Unexpected throws** — any non-`SocketError` thrown becomes `INTERNAL`, so server internals (stack traces, messages) are never leaked. Use [`onError`](./middleware-lifecycle#lifecycle-hooks) to log the real error server-side.
+- **Expected failures** — `throw new SuperLineError(code, ...)` from a handler; the client gets that exact `code` (and `data`).
+- **Unexpected throws** — any non-`SuperLineError` thrown becomes `INTERNAL`, so server internals (stack traces, messages) are never leaked. Use [`onError`](./middleware-lifecycle#lifecycle-hooks) to log the real error server-side.
 - **Validation** — bad inbound input rejects with `VALIDATION` before your handler runs.
 
 ## Don't return error sentinels
@@ -52,7 +52,7 @@ Return values are for success; failures are thrown. This keeps the client's `awa
 
 ```ts
 // ❌ return { error: 'nope' }
-// ✅ throw new SocketError('FORBIDDEN', 'nope')
+// ✅ throw new SuperLineError('FORBIDDEN', 'nope')
 ```
 
 Next: [Reconnection & delivery](./reconnection-delivery).

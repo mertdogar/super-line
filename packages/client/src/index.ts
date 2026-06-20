@@ -1,7 +1,7 @@
 import {
   jsonSerializer,
   validateSync,
-  SocketError,
+  SuperLineError,
   type Schema,
   type Serializer,
   type Contract,
@@ -28,7 +28,7 @@ export type { BackoffOptions } from './backoff.js'
 export interface CallOptions {
   /** Override the default request timeout (ms). `0` disables the timeout. */
   timeoutMs?: number
-  /** Abort the request; rejects with a `BAD_REQUEST` `SocketError`. */
+  /** Abort the request; rejects with a `BAD_REQUEST` `SuperLineError`. */
   signal?: AbortSignal
 }
 
@@ -49,7 +49,7 @@ export type ServerHandlers<C extends Contract, R extends RoleOf<C>> = {
   ) => Awaitable<Output<ServerRequests<C, R>[K]>>
 }
 
-/** The request-calling half of {@link Client} (one method per request in the role's surface). */
+/** The request-calling half of {@link SuperLineClient} (one method per request in the role's surface). */
 export type ClientMethods<C extends Contract, R extends RoleOf<C>> = {
   [K in keyof Requests<C, R>]: (
     input: ClientInput<Requests<C, R>[K]>,
@@ -61,7 +61,7 @@ export type ClientMethods<C extends Contract, R extends RoleOf<C>> = {
  * A typed client proxy, narrowed to role `R`'s effective surface (`shared` ∪ `R`).
  * Call requests as methods; listen with `on`; subscribe to topics with `subscribe`.
  */
-export type Client<C extends Contract, R extends RoleOf<C>> = ClientMethods<C, R> & {
+export type SuperLineClient<C extends Contract, R extends RoleOf<C>> = ClientMethods<C, R> & {
   /** Listen for a server-pushed event. Returns an unsubscribe function. */
   on<E extends keyof Events<C, R>>(
     event: E,
@@ -72,7 +72,7 @@ export type Client<C extends Contract, R extends RoleOf<C>> = ClientMethods<C, R
     topic: T,
     handler: (data: EventData<Topics<C, R>[T]>) => void,
   ): Subscription
-  /** Register handlers answering server→client requests. Throw a `SocketError` for a typed failure. */
+  /** Register handlers answering server→client requests. Throw a `SuperLineError` for a typed failure. */
   implement(handlers: ServerHandlers<C, R>): void
   /** Close the connection and stop reconnecting. */
   close(): void
@@ -90,8 +90,8 @@ export interface ValidationErrorInfo {
   name: string
 }
 
-/** Options for {@link createClient}. */
-export interface ClientOptions<C extends Contract, R extends RoleOf<C>> {
+/** Options for {@link createSuperLineClient}. */
+export interface SuperLineClientOptions<C extends Contract, R extends RoleOf<C>> {
   /** The server URL, e.g. `ws://localhost:3000`. */
   url: string
   /** This client's role; narrows the surface and is sent to the server to verify. */
@@ -149,19 +149,19 @@ function deferred(): Deferred {
  *
  * @param contract - the shared contract.
  * @param opts - client options; `url` and `role` are required.
- * @returns a {@link Client} proxy narrowed to the role's surface.
+ * @returns a {@link SuperLineClient} proxy narrowed to the role's surface.
  *
  * @example
  * ```ts
- * const client = createClient(api, { url: 'ws://localhost:3000', role: 'user', params: { token } })
+ * const client = createSuperLineClient(api, { url: 'ws://localhost:3000', role: 'user', params: { token } })
  * client.on('message', (m) => console.log(m.text))
- * const out = await client.send({ text: 'hi' }) // throws SocketError on failure
+ * const out = await client.send({ text: 'hi' }) // throws SuperLineError on failure
  * ```
  */
-export function createClient<C extends Contract, R extends RoleOf<C>>(
+export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   contract: C,
-  opts: ClientOptions<C, R>,
-): Client<C, R> {
+  opts: SuperLineClientOptions<C, R>,
+): SuperLineClient<C, R> {
   const c: Contract = contract
   const role = opts.role
   const serializer = opts.serializer ?? jsonSerializer
@@ -229,7 +229,7 @@ export function createClient<C extends Contract, R extends RoleOf<C>>(
     for (const [id, op] of requests) {
       if (op.sent) {
         if (op.timer) clearTimeout(op.timer)
-        op.reject(new SocketError('DISCONNECTED', 'Connection closed'))
+        op.reject(new SuperLineError('DISCONNECTED', 'Connection closed'))
         requests.delete(id)
       }
     }
@@ -238,7 +238,7 @@ export function createClient<C extends Contract, R extends RoleOf<C>>(
     if (closed || !reconnectEnabled) {
       for (const [id, op] of requests) {
         if (op.timer) clearTimeout(op.timer)
-        op.reject(new SocketError('DISCONNECTED', 'Connection closed'))
+        op.reject(new SuperLineError('DISCONNECTED', 'Connection closed'))
         requests.delete(id)
       }
       return
@@ -285,12 +285,12 @@ export function createClient<C extends Contract, R extends RoleOf<C>>(
         const r = readyByTopic.get(topic)
         if (r) {
           readyByTopic.delete(topic)
-          r.reject(new SocketError(frame.code, frame.m, frame.d))
+          r.reject(new SuperLineError(frame.code, frame.m, frame.d))
         }
         topicListeners.delete(topic) // denied -> drop local listeners
         return
       }
-      settleRequest(frame.i, (op) => op.reject(new SocketError(frame.code, frame.m, frame.d)))
+      settleRequest(frame.i, (op) => op.reject(new SuperLineError(frame.code, frame.m, frame.d)))
     } else if (frame.t === 'evt') {
       if (!checkInbound(payloadOf(frame.e), frame.d, { kind: 'event', name: frame.e }))
         return
@@ -329,7 +329,7 @@ export function createClient<C extends Contract, R extends RoleOf<C>>(
       const output = await handler(input)
       send({ t: 'sres', i: frame.i, d: output })
     } catch (e) {
-      const se = e instanceof SocketError ? e : new SocketError('INTERNAL', 'Internal client error')
+      const se = e instanceof SuperLineError ? e : new SuperLineError('INTERNAL', 'Internal client error')
       send({ t: 'serr', i: frame.i, code: se.code, m: se.message, d: se.data })
     }
   }
@@ -355,7 +355,7 @@ export function createClient<C extends Contract, R extends RoleOf<C>>(
   }
 
   function call(method: string, input: unknown, callOpts?: CallOptions): Promise<unknown> {
-    if (closed) return Promise.reject(new SocketError('DISCONNECTED', 'Client closed'))
+    if (closed) return Promise.reject(new SuperLineError('DISCONNECTED', 'Client closed'))
     const id = nextId++
     const frame = serializer.encode({ t: 'req', i: id, m: method, d: input })
     return new Promise<unknown>((resolve, reject) => {
@@ -364,7 +364,7 @@ export function createClient<C extends Contract, R extends RoleOf<C>>(
         ms > 0
           ? setTimeout(() => {
               requests.delete(id)
-              reject(new SocketError('TIMEOUT', `Request '${method}' timed out`))
+              reject(new SuperLineError('TIMEOUT', `Request '${method}' timed out`))
             }, ms)
           : undefined
       const op: Request = { method, frame, resolve, reject, timer, sent: false }
@@ -374,7 +374,7 @@ export function createClient<C extends Contract, R extends RoleOf<C>>(
         () => {
           if (requests.delete(id)) {
             if (timer) clearTimeout(timer)
-            reject(new SocketError('BAD_REQUEST', 'Aborted'))
+            reject(new SuperLineError('BAD_REQUEST', 'Aborted'))
           }
         },
         { once: true },
@@ -473,7 +473,7 @@ export function createClient<C extends Contract, R extends RoleOf<C>>(
       if (typeof prop !== 'string' || prop === 'then') return undefined
       return (input: unknown, callOpts?: CallOptions) => call(prop, input, callOpts)
     },
-  }) as unknown as Client<C, R>
+  }) as unknown as SuperLineClient<C, R>
 }
 
 function buildUrl(url: string, params?: Record<string, string>): string {

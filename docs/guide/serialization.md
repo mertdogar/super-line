@@ -34,8 +34,8 @@ const serializer: Serializer = {
   decode: (d) => superjson.parse(typeof d === 'string' ? d : new TextDecoder().decode(d)),
 }
 
-createSocketServer(api, { server, authenticate, serializer })
-createClient(api, { url, role: 'user', serializer })   // MUST match
+createSuperLineServer(api, { server, authenticate, serializer })
+createSuperLineClient(api, { url, role: 'user', serializer })   // MUST match
 ```
 
 ## Custom serializers

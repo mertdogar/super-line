@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { createSocketServer, type Conn } from '@super-line/server'
+import { createSuperLineServer, type Conn } from '@super-line/server'
 import { chat } from './contract.js'
 
 const PORT = Number(process.env.PORT ?? 8787)
@@ -15,7 +15,7 @@ const adjust = (room: string, delta: number) => {
   return next
 }
 
-const srv = createSocketServer(chat, {
+const srv = createSuperLineServer(chat, {
   server,
   authenticate: (req) => {
     const name = new URL(req.url ?? '', 'http://localhost').searchParams.get('name')?.trim()

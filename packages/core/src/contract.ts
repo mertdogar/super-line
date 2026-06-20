@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import { SocketError } from './errors.js'
+import { SuperLineError } from './errors.js'
 
 /** Any [Standard Schema](https://standardschema.dev) validator (Zod, Valibot, ArkType…). */
 export type Schema = StandardSchemaV1
@@ -165,7 +165,7 @@ export type InferOut<S extends Schema> = StandardSchemaV1.InferOutput<S>
  * @param schema - the validator to run.
  * @param value - the untrusted value to validate.
  * @returns the parsed, typed value.
- * @throws {@link SocketError} with code `VALIDATION` if the value doesn't match.
+ * @throws {@link SuperLineError} with code `VALIDATION` if the value doesn't match.
  */
 export async function validate<S extends Schema>(
   schema: S,
@@ -174,7 +174,7 @@ export async function validate<S extends Schema>(
   let result = schema['~standard'].validate(value)
   if (result instanceof Promise) result = await result
   if (result.issues) {
-    throw new SocketError('VALIDATION', 'Validation failed', result.issues)
+    throw new SuperLineError('VALIDATION', 'Validation failed', result.issues)
   }
   return result.value
 }
@@ -185,7 +185,7 @@ export async function validate<S extends Schema>(
  * @param schema - the validator to run.
  * @param value - the untrusted value to validate.
  * @returns the parsed, typed value.
- * @throws {@link SocketError} with code `VALIDATION` on mismatch, or `INTERNAL` if the schema is async.
+ * @throws {@link SuperLineError} with code `VALIDATION` on mismatch, or `INTERNAL` if the schema is async.
  */
 export function validateSync<S extends Schema>(
   schema: S,
@@ -193,10 +193,10 @@ export function validateSync<S extends Schema>(
 ): StandardSchemaV1.InferOutput<S> {
   const result = schema['~standard'].validate(value)
   if (result instanceof Promise) {
-    throw new SocketError('INTERNAL', 'Async schema not supported for synchronous validation')
+    throw new SuperLineError('INTERNAL', 'Async schema not supported for synchronous validation')
   }
   if (result.issues) {
-    throw new SocketError('VALIDATION', 'Validation failed', result.issues)
+    throw new SuperLineError('VALIDATION', 'Validation failed', result.issues)
   }
   return result.value
 }

@@ -26,13 +26,13 @@ defineContract(<const C>): C                 // identity; preserves literal keys
 // A role's effective surface = shared ∪ roles[R].
 // Schema = any StandardSchemaV1 validator (Zod, Valibot, ArkType…). Zod in examples.
 
-validate(schema, value): Promise<Output>     // async-capable; throws SocketError('VALIDATION')
+validate(schema, value): Promise<Output>     // async-capable; throws SuperLineError('VALIDATION')
 validateSync(schema, value): Output          // sync; throws on async schemas
 
-class SocketError<Data> extends Error { code: ErrorCode; data?: Data
+class SuperLineError<Data> extends Error { code: ErrorCode; data?: Data
   constructor(code, message?, data?) }
-// SocketErrorCode: BAD_REQUEST | UNAUTHORIZED | FORBIDDEN | NOT_FOUND | TIMEOUT | VALIDATION | DISCONNECTED | INTERNAL
-// ErrorCode = SocketErrorCode | (string & {})  -> custom codes allowed
+// SuperLineErrorCode: BAD_REQUEST | UNAUTHORIZED | FORBIDDEN | NOT_FOUND | TIMEOUT | VALIDATION | DISCONNECTED | INTERNAL
+// ErrorCode = SuperLineErrorCode | (string & {})  -> custom codes allowed
 
 jsonSerializer: Serializer                   // default
 interface Serializer { encode(v): string|Uint8Array; decode(d: string|Uint8Array): unknown }
@@ -60,12 +60,12 @@ interface Adapter {                          // cross-node fan-out seam
 ## @super-line/server
 
 ```ts
-createSocketServer<C, A extends AuthResult<C>>(contract: C, opts: ServerOptions<C, A>): SocketServer<C, A>
+createSuperLineServer<C, A extends AuthResult<C>>(contract: C, opts: SuperLineServerOptions<C, A>): SuperLineServer<C, A>
 // A is inferred from authenticate's return — the discriminated { role, ctx } union.
 
 type AuthResult<C> = { [R in keyof C['roles']]: { role: R; ctx: unknown } }[keyof C['roles']]
 
-interface ServerOptions<C, A> {
+interface SuperLineServerOptions<C, A> {
   server?: http.Server                       // attach to your server (compose w/ Express/Fastify/Hono)
   serializer?: Serializer                     // default jsonSerializer; MUST match the client
   adapter?: Adapter                           // default: per-server in-memory; use redis for multi-node
@@ -82,9 +82,9 @@ interface ServerOptions<C, A> {
   backpressure?: { maxBufferedBytes: number; onExceed?: 'close' | 'drop' }  // guard slow consumers ('close' -> 1013)
 }
 
-interface SocketServer<C, A> {
+interface SuperLineServer<C, A> {
   readonly nodeId: string                                            // this process's stable id
-  implement(handlers: Handlers<C, A>): SocketServer<C, A>             // chainable
+  implement(handlers: Handlers<C, A>): SuperLineServer<C, A>             // chainable
   room(name: string): Room<C>                                        // mixed-role group
   publish<T extends keyof SharedTopics<C>>(topic: T, data): void      // SHARED topics — cluster event bus: fans out to server.subscribe (this + other nodes) AND subscribed clients
   forRole<R>(role: R): { publish<T extends keyof RoleTopics<C,R>>(topic: T, data): void }  // role topics
@@ -174,9 +174,9 @@ Notes:
 ## @super-line/client
 
 ```ts
-createClient<C, R extends keyof C['roles']>(contract: C, opts: ClientOptions<C, R>): Client<C, R>
+createSuperLineClient<C, R extends keyof C['roles']>(contract: C, opts: SuperLineClientOptions<C, R>): SuperLineClient<C, R>
 
-interface ClientOptions<C, R> {
+interface SuperLineClientOptions<C, R> {
   url: string
   role: R                                      // REQUIRED: narrows the surface AND is sent to the server to verify
   params?: Record<string, string>             // appended as query string (read in authenticate); `role` is added automatically
@@ -191,13 +191,13 @@ interface ClientOptions<C, R> {
   WebSocket?: typeof WebSocket                  // default globalThis.WebSocket (browsers, Node 22+)
 }
 
-// Client<C, R> is a typed proxy narrowed to role R's effective surface (shared ∪ R):
-type Client<C, R> = {
-  [K in keyof Requests<C, R>]: (input, opts?: CallOptions) => Promise<output>  // throws SocketError
+// SuperLineClient<C, R> is a typed proxy narrowed to role R's effective surface (shared ∪ R):
+type SuperLineClient<C, R> = {
+  [K in keyof Requests<C, R>]: (input, opts?: CallOptions) => Promise<output>  // throws SuperLineError
 } & {
   on<E extends keyof Events<C, R>>(event: E, handler: (data) => void): () => void   // returns unsubscribe
   subscribe<T extends keyof Topics<C, R>>(topic: T, handler: (data) => void): Subscription
-  implement(handlers: { [K in keyof ServerRequests<C, R>]?: (input) => Awaitable<output> }): void  // answer server→client requests; throw SocketError for typed failure
+  implement(handlers: { [K in keyof ServerRequests<C, R>]?: (input) => Awaitable<output> }): void  // answer server→client requests; throw SuperLineError for typed failure
   close(): void
   readonly connected: boolean
   readonly role: R
@@ -226,9 +226,9 @@ Redis Pub/Sub (two connections) + a presence store. At-most-once. Run more than 
 ## @super-line/react
 
 ```ts
-createSocketReact<C, R extends keyof C['roles']>(): {
-  Provider: ({ client: Client<C, R>; children }) => ReactNode
-  useClient(): Client<C, R>
+createSuperLineHooks<C, R extends keyof C['roles']>(): {
+  Provider: ({ client: SuperLineClient<C, R>; children }) => ReactNode
+  useClient(): SuperLineClient<C, R>
   useEvent<E extends keyof Events<C, R>>(event: E, handler: (data) => void): void
   useSubscription<T extends keyof Topics<C, R>>(topic: T): data | undefined  // latest value
   useRequest<M extends keyof Requests<C, R>>(method: M): {
@@ -237,4 +237,4 @@ createSocketReact<C, R extends keyof C['roles']>(): {
   }
 }
 ```
-Create the client once (e.g. `useState(() => createClient(api, { url, role: 'user' }))`), wrap with `<Provider client={client}>`, then use the hooks inside.
+Create the client once (e.g. `useState(() => createSuperLineClient(api, { url, role: 'user' }))`), wrap with `<Provider client={client}>`, then use the hooks inside.

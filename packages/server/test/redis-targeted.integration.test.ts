@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { GenericContainer, type StartedTestContainer } from 'testcontainers'
-import { defineContract, SocketError } from '@super-line/core'
+import { defineContract, SuperLineError } from '@super-line/core'
 import { createRedisAdapter } from '@super-line/adapter-redis'
 import { createHarness, waitFor } from './harness.js'
 
@@ -86,7 +86,7 @@ describe.skipIf(!dockerAvailable)('redis targeted send + server→client request
     const b = await node()
     await expect(
       b.srv.toConn('ghost').request('confirm', { q: 'x' }, { timeout: 800 }),
-    ).rejects.toBeInstanceOf(SocketError)
+    ).rejects.toBeInstanceOf(SuperLineError)
   })
 
   it('toConn(id).close() disconnects a client on another process', async () => {

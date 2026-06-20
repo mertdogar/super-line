@@ -5,7 +5,7 @@
 Middleware runs **before** request and subscribe handlers — for rate-limiting, per-operation authz, logging, and metrics. It's a flat chain: call `next()` to proceed, or `throw` to short-circuit (rejecting the operation).
 
 ```ts
-const srv = createSocketServer(api, {
+const srv = createSuperLineServer(api, {
   server, authenticate,
   use: [
     async (ctx, info, next) => {
@@ -25,7 +25,7 @@ The `info` argument is `{ kind: 'request' | 'subscribe', name, conn }` — so th
 
 ```ts
 async (_ctx, info, next) => {
-  if (info.kind === 'subscribe' && info.name === 'feed') throw new SocketError('FORBIDDEN')
+  if (info.kind === 'subscribe' && info.name === 'feed') throw new SuperLineError('FORBIDDEN')
   await next()
 }
 ```
@@ -35,7 +35,7 @@ Middleware does **not** change `ctx`'s type — it's a cross-cutting gate, not a
 ## Lifecycle hooks
 
 ```ts
-createSocketServer(api, {
+createSuperLineServer(api, {
   server, authenticate,
   onConnection: (conn, ctx) => log('joined', conn.role),
   onDisconnect: (conn, ctx, code) => cleanup(conn),     // code = WebSocket close code

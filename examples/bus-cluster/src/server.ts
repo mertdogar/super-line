@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { createSocketServer } from '@super-line/server'
+import { createSuperLineServer } from '@super-line/server'
 import { createRedisAdapter } from '@super-line/adapter-redis'
 import { cluster } from './contract.js'
 
@@ -10,7 +10,7 @@ const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379'
 const NODE = process.env.NODE_NAME ?? `node-${PORT}`
 
 const server = http.createServer()
-const srv = createSocketServer(cluster, {
+const srv = createSuperLineServer(cluster, {
   server,
   authenticate: () => ({ role: 'watcher' as const, ctx: {} }),
   adapter: createRedisAdapter(REDIS_URL),

@@ -28,8 +28,8 @@ export const api = defineContract({
 
 - A **connection has a role**, decided at the upgrade from auth, fixed for its life. Each role gets a different typed surface *and* a different `ctx`.
 - **Direction is the axis** (named keys, never positional generics). Per `serverToClient` entry: `{ payload }` = **event** (server push); `{ payload, subscribe: true }` = **topic** (client opts in). A **shared** topic also serves as a **cluster event bus channel** (`server.publish`/`server.subscribe`/`client.subscribe`). `clientToServer` entries are `{ input, output }` **requests**.
-- **Server**: `createSocketServer(api, { authenticate })`, then `srv.implement({ shared, user, agent })`.
-- **Client**: `createClient(api, { url, role: 'user' })` → a typed proxy narrowed to that role's surface.
+- **Server**: `createSuperLineServer(api, { authenticate })`, then `srv.implement({ shared, user, agent })`.
+- **Client**: `createSuperLineClient(api, { url, role: 'user' })` → a typed proxy narrowed to that role's surface.
 
 ## The interaction flavors
 
@@ -47,10 +47,10 @@ export const api = defineContract({
 | Need | Do |
 |---|---|
 | Define contract | `defineContract({ shared, roles })` (any Standard Schema validator; Zod in examples) |
-| Server | `const srv = createSocketServer(api, { server, authenticate }); srv.implement({ shared, user, agent })` |
+| Server | `const srv = createSuperLineServer(api, { server, authenticate }); srv.implement({ shared, user, agent })` |
 | Authenticate | `authenticate: (req) => ({ role: 'user', ctx })` — `throw` to reject (401); verify the claimed role |
 | Handler | `name: async (input, ctx, conn) => output` — `ctx`/`conn` narrowed to the block's role |
-| Reply error | `throw new SocketError('FORBIDDEN', 'msg')` → client promise rejects with that code |
+| Reply error | `throw new SuperLineError('FORBIDDEN', 'msg')` → client promise rejects with that code |
 | Send to one conn | `conn.emit('event', data)` |
 | Broadcast to a room | `srv.room('room:42').broadcast('event', data)` — **shared events only** |
 | Publish a topic | `srv.forRole('user').publish('feed', data)` (role) / `srv.publish('announce', data)` (shared) — **server only** |
@@ -61,13 +61,13 @@ export const api = defineContract({
 | Heartbeat / per-conn state / backpressure | `heartbeat: { interval, maxMissed }` · `data:` schema in a role → typed `conn.data` · `backpressure: { maxBufferedBytes, onExceed }` |
 | Client call/listen/subscribe | `await client.send(input)` · `client.on('event', cb)` · `client.subscribe('feed', cb)` (await `.ready`) |
 | Multi-node | pass `adapter: createRedisAdapter('redis://…')` to every server |
-| React | `createSocketReact<typeof api, 'user'>()` → `Provider` / `useRequest` / `useEvent` / `useSubscription` |
+| React | `createSuperLineHooks<typeof api, 'user'>()` → `Provider` / `useRequest` / `useEvent` / `useSubscription` |
 
 ## Rules
 
 - **ALWAYS** keep the contract in one shared module imported by both sides. Never hand-redeclare types.
 - **ALWAYS** resolve the role server-side in `authenticate` and return `{ role, ctx }`. The client's `role` is a *claim* — verify it against the credential (`throw` to reject). Never trust it blindly.
-- **ALWAYS** `throw new SocketError(code, msg, data?)` for expected failures — clients get the typed `code`. Unknown throws become `INTERNAL`.
+- **ALWAYS** `throw new SuperLineError(code, msg, data?)` for expected failures — clients get the typed `code`. Unknown throws become `INTERNAL`.
 - **ALWAYS** gate private topic subscriptions with `authorizeSubscribe(topic, ctx, conn)` (return `false`/throw to deny).
 - **ALWAYS** treat delivery as **at-most-once**: offline clients miss messages. Make handlers idempotent; re-run join flows after reconnect.
 - **ALWAYS** add `@super-line/adapter-redis` before running more than one server process, or rooms/topics/the cluster event bus only fan out within one node.
@@ -95,7 +95,7 @@ export const api = defineContract({
 // ❌ trusting the client's claimed role
 authenticate: (req) => ({ role: claimedRole, ctx })
 // ✅ derive/verify the role from the credential server-side
-authenticate: (req) => { const u = verify(token); if (u.role !== claimed) throw new SocketError('FORBIDDEN'); return { role: u.role, ctx: u } }
+authenticate: (req) => { const u = verify(token); if (u.role !== claimed) throw new SuperLineError('FORBIDDEN'); return { role: u.role, ctx: u } }
 
 // ❌ broadcasting a role-specific event to a (mixed) room
 srv.room('lobby').broadcast('taskAssigned', data)       // type error — broadcast is shared-only
@@ -105,8 +105,8 @@ srv.forRole('agent').publish('taskAssigned', data)
 
 // ❌ returning an error sentinel
 return { error: 'nope' }
-// ✅ throw a typed SocketError; the client promise rejects with the code
-throw new SocketError('FORBIDDEN', 'not a member')
+// ✅ throw a typed SuperLineError; the client promise rejects with the code
+throw new SuperLineError('FORBIDDEN', 'not a member')
 ```
 
 ---

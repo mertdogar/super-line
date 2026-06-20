@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { createSocketServer, type Conn } from '@super-line/server'
+import { createSuperLineServer, type Conn } from '@super-line/server'
 import { createRedisAdapter } from '@super-line/adapter-redis'
 import { chat } from './contract.js'
 
@@ -14,7 +14,7 @@ const server = http.createServer()
 const roomOf = new Map<Conn, string>()
 let seq = 0
 
-const srv = createSocketServer(chat, {
+const srv = createSuperLineServer(chat, {
   server,
   adapter: createRedisAdapter(REDIS_URL),
   nodeName: NODE, // surface node-1 / node-2 in the Control Center topology

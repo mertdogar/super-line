@@ -46,11 +46,11 @@ export const chat = defineContract({
 
 ```ts
 import http from 'node:http'
-import { createSocketServer } from '@super-line/server'
+import { createSuperLineServer } from '@super-line/server'
 import { chat } from './contract'
 
 const server = http.createServer() // or pass your Express/Fastify http.Server
-const srv = createSocketServer(chat, {
+const srv = createSuperLineServer(chat, {
   server,
   authenticate: (req) => {
     const name = new URL(req.url!, 'http://x').searchParams.get('name')
@@ -81,10 +81,10 @@ server.listen(3000)
 ## 3. Client
 
 ```ts
-import { createClient } from '@super-line/client'
+import { createSuperLineClient } from '@super-line/client'
 import { chat } from './contract'
 
-const client = createClient(chat, {
+const client = createSuperLineClient(chat, {
   url: 'ws://localhost:3000',
   role: 'user', // narrows the surface to shared ∪ user; sent to authenticate to verify
   params: { name: 'ada' },
@@ -94,7 +94,7 @@ client.on('message', (m) => console.log(`${m.from}: ${m.text}`)) // typed
 const sub = client.subscribe('presence', (p) => console.log(`${p.count} online`))
 
 await client.join({ room: 'lobby' })
-await client.send({ room: 'lobby', text: 'hi' }) // typed input/output; throws typed SocketError on failure
+await client.send({ room: 'lobby', text: 'hi' }) // typed input/output; throws typed SuperLineError on failure
 
 sub.unsubscribe()
 client.close()

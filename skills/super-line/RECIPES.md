@@ -27,11 +27,11 @@ export const api = defineContract({
 ```ts
 // server.ts
 import http from 'node:http'
-import { createSocketServer } from '@super-line/server'
+import { createSuperLineServer } from '@super-line/server'
 import { api } from './contract.js'
 
 const server = http.createServer()
-const srv = createSocketServer(api, {
+const srv = createSuperLineServer(api, {
   server,
   authenticate: (req) => {
     const name = new URL(req.url ?? '', 'http://localhost').searchParams.get('name')
@@ -54,10 +54,10 @@ server.listen(3000)
 
 ```ts
 // client.ts
-import { createClient } from '@super-line/client'
+import { createSuperLineClient } from '@super-line/client'
 import { api } from './contract.js'
 
-const client = createClient(api, { url: 'ws://localhost:3000', role: 'user', params: { name: 'ada' } })
+const client = createSuperLineClient(api, { url: 'ws://localhost:3000', role: 'user', params: { name: 'ada' } })
 client.on('message', (m) => console.log(`${m.from}: ${m.text}`))
 await client.send({ room: 'lobby', text: 'hi' })
 ```
@@ -84,8 +84,8 @@ srv.implement({
   agent: { announce: async ({ room, text }, ctx) => { srv.room(room).broadcast('message', { room, text, from: `🤖 ${ctx.name}` }); return { id: nano() } } },
 })
 
-const user  = createClient(api, { url, role: 'user',  params: { name: 'ada' } })
-const agent = createClient(api, { url, role: 'agent', params: { name: 'helper' } })
+const user  = createSuperLineClient(api, { url, role: 'user',  params: { name: 'ada' } })
+const agent = createSuperLineClient(api, { url, role: 'agent', params: { name: 'helper' } })
 await user.say({ room: 'lobby', text: 'hi' })          // ✓
 await agent.announce({ room: 'lobby', text: 'on it' }) // ✓
 // user.announce(...) is a COMPILE error (not on the user surface); forced at runtime -> NOT_FOUND
@@ -98,24 +98,24 @@ In a `user` handler, `ctx` is the user's ctx; in `agent`, the agent's. In a `sha
 The client's `role` option is a **claim** sent as a query param; resolve the real role from the credential and verify the claim.
 
 ```ts
-const srv = createSocketServer(api, {
+const srv = createSuperLineServer(api, {
   server,
   authenticate: async (req) => {
     const u = new URL(req.url ?? '', 'http://localhost')
     const user = await verifyJwt(u.searchParams.get('token'))   // throw to reject with 401 (no socket opened)
-    if (user.role !== u.searchParams.get('role')) throw new SocketError('FORBIDDEN', 'role not granted')
+    if (user.role !== u.searchParams.get('role')) throw new SuperLineError('FORBIDDEN', 'role not granted')
     return user.role === 'admin'
       ? { role: 'admin' as const, ctx: { user } }
       : { role: 'user' as const, ctx: { user } }
   },
 })
-// client: createClient(api, { url, role: 'admin', params: { token } })
+// client: createSuperLineClient(api, { url, role: 'admin', params: { token } })
 ```
 
 ## Authorize topic subscriptions (private streams)
 
 ```ts
-const srv = createSocketServer(api, {
+const srv = createSuperLineServer(api, {
   server, authenticate,
   authorizeSubscribe: async (topic, ctx) => {
     if (topic.startsWith('org:')) return ctx.user.orgs.includes(topic.slice(4))
@@ -127,7 +127,7 @@ const srv = createSocketServer(api, {
 ## Middleware (rate-limit, metrics, per-message authz)
 
 ```ts
-const srv = createSocketServer(api, {
+const srv = createSuperLineServer(api, {
   server, authenticate,
   use: [
     async (ctx, info, next) => { rateLimit(info.conn.role, info.name); await next() },   // throw to reject
@@ -162,7 +162,7 @@ srv.implement({
 Don't stash a `conn` to DM someone (it's node-local). With an `identify` hook set, target the user directly — `toUser` reaches every device on any node:
 
 ```ts
-createSocketServer(api, { server, authenticate, identify: (conn) => conn.ctx.user.id })
+createSuperLineServer(api, { server, authenticate, identify: (conn) => conn.ctx.user.id })
 // later, from anywhere (any node):
 srv.toUser(targetId).emit('dm', { from, text })   // 'dm' is a shared event; all the user's devices
 srv.toConn(connId).emit('dm', { from, text })     // or one specific connection
@@ -171,7 +171,7 @@ srv.toConn(connId).emit('dm', { from, text })     // or one specific connection
 ## Introspection & presence dashboard
 
 ```ts
-createSocketServer(api, {
+createSuperLineServer(api, {
   server, authenticate,
   identify: (conn) => conn.ctx.user.id,
   describeConn: (conn) => ({ plan: conn.ctx.user.plan }),
@@ -193,7 +193,7 @@ await srv.isOnline(userId)                       // show an online dot
 ```ts
 // contract: shared.serverToClient.confirm = { input: z.object({ q: z.string() }), output: z.object({ ok: z.boolean() }) }
 
-// client answers (throw SocketError for a typed failure):
+// client answers (throw SuperLineError for a typed failure):
 client.implement({ confirm: async ({ q }) => ({ ok: await askUser(q) }) })
 
 // server asks a specific connection (cross-node), awaits the typed reply:
@@ -247,7 +247,7 @@ srv.implement({
 srv.implement({
   user: {
     setPrice: async ({ symbol, price }, ctx) => {
-      if (!ctx.user.canTrade) throw new SocketError('FORBIDDEN')
+      if (!ctx.user.canTrade) throw new SuperLineError('FORBIDDEN')
       srv.forRole('user').publish('prices', { symbol, price })   // role topic
       return { ok: true }
     },
@@ -278,22 +278,22 @@ The bus is **opt-in** pub/sub on a shared topic. It's a different tool from serv
 
 ```ts
 import { createRedisAdapter } from '@super-line/adapter-redis'
-const srv = createSocketServer(api, { server, authenticate, adapter: createRedisAdapter('redis://localhost:6379') })
+const srv = createSuperLineServer(api, { server, authenticate, adapter: createRedisAdapter('redis://localhost:6379') })
 // every server process gets an adapter pointing at the same Redis; rooms, topics, AND the cluster event bus fan out across nodes.
 ```
 
 ## Typed error handling
 
 ```ts
-import { SocketError } from '@super-line/core'
+import { SuperLineError } from '@super-line/core'
 
 // server
-throw new SocketError('NOT_FOUND', 'no such room', { room })   // code reaches the client
+throw new SuperLineError('NOT_FOUND', 'no such room', { room })   // code reaches the client
 
 // client
 try { await client.send({ room, text }) }
 catch (e) {
-  if (e instanceof SocketError && e.code === 'UNAUTHORIZED') relogin()
+  if (e instanceof SuperLineError && e.code === 'UNAUTHORIZED') relogin()
   // codes: BAD_REQUEST UNAUTHORIZED FORBIDDEN NOT_FOUND TIMEOUT VALIDATION DISCONNECTED INTERNAL
 }
 ```
@@ -321,24 +321,24 @@ These snippets are distilled from super-line's own (passing) suite. They use [Vi
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { Contract, RoleOf } from '@super-line/core'
-import { createSocketServer, type AuthResult, type ServerOptions, type SocketServer } from '@super-line/server'
-import { createClient, type Client, type ClientOptions } from '@super-line/client'
+import { createSuperLineServer, type AuthResult, type SuperLineServerOptions, type SuperLineServer } from '@super-line/server'
+import { createSuperLineClient, type SuperLineClient, type SuperLineClientOptions } from '@super-line/client'
 
 export function createHarness() {
   const cleanups: Array<() => Promise<void> | void> = []
 
   async function server<C extends Contract, A extends AuthResult<C>>(
-    contract: C, opts: Omit<ServerOptions<C, A>, 'server'>,
-  ): Promise<{ srv: SocketServer<C, A>; url: string }> {
+    contract: C, opts: Omit<SuperLineServerOptions<C, A>, 'server'>,
+  ): Promise<{ srv: SuperLineServer<C, A>; url: string }> {
     const httpServer = http.createServer()
-    const srv = createSocketServer<C, A>(contract, { ...opts, server: httpServer })
+    const srv = createSuperLineServer<C, A>(contract, { ...opts, server: httpServer })
     await new Promise<void>((r) => httpServer.listen(0, r))
     const url = `ws://127.0.0.1:${(httpServer.address() as AddressInfo).port}`
     cleanups.push(async () => { await srv.close(); await new Promise<void>((r) => httpServer.close(() => r())) })
     return { srv, url }
   }
-  function client<C extends Contract, R extends RoleOf<C>>(contract: C, opts: ClientOptions<C, R>): Client<C, R> {
-    const c = createClient(contract, opts)
+  function client<C extends Contract, R extends RoleOf<C>>(contract: C, opts: SuperLineClientOptions<C, R>): SuperLineClient<C, R> {
+    const c = createSuperLineClient(contract, opts)
     cleanups.unshift(() => c.close())          // clients close BEFORE the servers they connect to
     return c
   }
@@ -379,7 +379,7 @@ export const api = defineContract({
 
 ```ts
 import { afterEach, expect, it } from 'vitest'
-import { SocketError } from '@super-line/core'
+import { SuperLineError } from '@super-line/core'
 import { createHarness } from './harness'
 import { api } from './api'
 
@@ -391,7 +391,7 @@ it('round-trips and surfaces typed errors', async () => {
   srv.implement({
     user: {
       echo: async ({ text }) => ({ text }),
-      boom: async () => { throw new SocketError('FORBIDDEN', 'nope') },
+      boom: async () => { throw new SuperLineError('FORBIDDEN', 'nope') },
     },
   })
   const client = h.client(api, { url, role: 'user' })
@@ -426,9 +426,9 @@ it('observes connect / disconnect / errors via hooks', async () => {
     authenticate: () => ({ role: 'user' as const, ctx: { id: 'u1' } }),
     onConnection: (conn) => { captured = conn; events.push('connect') },
     onDisconnect: () => events.push('disconnect'),
-    onError: (err) => events.push(`error:${(err as SocketError).code}`),
+    onError: (err) => events.push(`error:${(err as SuperLineError).code}`),
   })
-  srv.implement({ user: { echo: async ({ text }) => ({ text }), boom: async () => { throw new SocketError('FORBIDDEN') } } })
+  srv.implement({ user: { echo: async ({ text }) => ({ text }), boom: async () => { throw new SuperLineError('FORBIDDEN') } } })
 
   const client = h.client(api, { url, role: 'user', reconnect: false })
   await client.echo({ text: 'x' })
@@ -436,7 +436,7 @@ it('observes connect / disconnect / errors via hooks', async () => {
   expect(captured?.role).toBe('user')          // the captured server-side conn carries role + ctx
 
   await expect(client.boom({})).rejects.toMatchObject({ code: 'FORBIDDEN' })
-  expect(events).toContain('error:FORBIDDEN')  // onError saw the thrown SocketError
+  expect(events).toContain('error:FORBIDDEN')  // onError saw the thrown SuperLineError
 
   client.close()
   await waitFor(() => events.includes('disconnect'))
@@ -561,11 +561,11 @@ it('one publish fires server.subscribe on both nodes exactly once', async () => 
 import { createElement, type ReactNode } from 'react'
 import { afterEach, expect, it } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
-import { createSocketReact } from '@super-line/react'
+import { createSuperLineHooks } from '@super-line/react'
 import { createHarness } from './harness'
 import { api } from './api'
 
-const { Provider, useRequest } = createSocketReact<typeof api, 'user'>()
+const { Provider, useRequest } = createSuperLineHooks<typeof api, 'user'>()
 const h = createHarness()
 afterEach(() => { cleanup(); return h.dispose() })
 

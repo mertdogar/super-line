@@ -3,12 +3,12 @@ import type { AddressInfo } from 'node:net'
 import { WebSocket } from 'ws'
 import { jsonSerializer, INSPECTOR_SUBPROTOCOL, type Contract, type RoleOf } from '@super-line/core'
 import {
-  createSocketServer,
+  createSuperLineServer,
   type AuthResult,
-  type ServerOptions,
-  type SocketServer,
+  type SuperLineServerOptions,
+  type SuperLineServer,
 } from '@super-line/server'
-import { createClient, type Client, type ClientOptions } from '@super-line/client'
+import { createSuperLineClient, type SuperLineClient, type SuperLineClientOptions } from '@super-line/client'
 
 // Spins up real loopback servers + clients and tears them down (clients first).
 export function createHarness() {
@@ -16,14 +16,14 @@ export function createHarness() {
 
   async function server<C extends Contract, A extends AuthResult<C>>(
     contract: C,
-    opts: Omit<ServerOptions<C, A>, 'server'>,
+    opts: Omit<SuperLineServerOptions<C, A>, 'server'>,
   ): Promise<{
-    srv: SocketServer<C, A>
+    srv: SuperLineServer<C, A>
     http: http.Server
     url: string
   }> {
     const httpServer = http.createServer()
-    const srv = createSocketServer<C, A>(contract, { ...opts, server: httpServer })
+    const srv = createSuperLineServer<C, A>(contract, { ...opts, server: httpServer })
     await new Promise<void>((resolve) => httpServer.listen(0, resolve))
     const { port } = httpServer.address() as AddressInfo
     cleanups.push(async () => {
@@ -35,9 +35,9 @@ export function createHarness() {
 
   function client<C extends Contract, R extends RoleOf<C>>(
     contract: C,
-    opts: ClientOptions<C, R>,
-  ): Client<C, R> {
-    const cl = createClient(contract, opts)
+    opts: SuperLineClientOptions<C, R>,
+  ): SuperLineClient<C, R> {
+    const cl = createSuperLineClient(contract, opts)
     cleanups.unshift(() => cl.close()) // clients close before the servers they connect to
     return cl
   }

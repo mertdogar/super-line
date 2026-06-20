@@ -5,7 +5,7 @@ import { WebSocketServer, type RawData } from 'ws'
 import {
   jsonSerializer,
   validate,
-  SocketError,
+  SuperLineError,
   INSPECTOR_SUBPROTOCOL,
   INSPECTOR_ROLE,
   classifyContract,
@@ -114,7 +114,7 @@ export interface MiddlewareInfo {
   conn?: Conn
 }
 
-/** Metadata passed to a {@link SocketServer.subscribe} callback alongside the event payload. */
+/** Metadata passed to a {@link SuperLineServer.subscribe} callback alongside the event payload. */
 export interface BusMeta {
   /** The node that published the event. Equals `srv.nodeId` for a same-node publish (local echo). */
   from: string
@@ -180,7 +180,7 @@ export interface ConnTarget<C extends Contract> {
   emit<E extends keyof SharedEvents<C>>(event: E, data: EmitData<SharedEvents<C>[E]>): void
   /**
    * Send a shared server→client request and await the client's typed reply
-   * (cross-node). Rejects with a `TIMEOUT` `SocketError` if no live node owns
+   * (cross-node). Rejects with a `TIMEOUT` `SuperLineError` if no live node owns
    * the connection or the client doesn't answer in time.
    */
   request<M extends keyof SharedServerRequests<C>>(
@@ -206,8 +206,8 @@ export interface RoleLens<C extends Contract, R extends RoleOf<C>> {
   publish<T extends keyof RoleTopics<C, R>>(topic: T, data: EmitData<RoleTopics<C, R>[T]>): void
 }
 
-/** Options for {@link createSocketServer}. */
-export interface ServerOptions<C extends Contract, A extends AuthResult<C>> {
+/** Options for {@link createSuperLineServer}. */
+export interface SuperLineServerOptions<C extends Contract, A extends AuthResult<C>> {
   /** The `http.Server` to attach to (compose with Express/Fastify/Hono). */
   server?: HttpServer
   /** Wire serializer; MUST match the client. Defaults to `jsonSerializer`. */
@@ -254,8 +254,8 @@ export interface ServerOptions<C extends Contract, A extends AuthResult<C>> {
   onError?: (error: unknown, info: MiddlewareInfo) => void
 }
 
-/** A running super-line server, returned by {@link createSocketServer}. */
-export interface SocketServer<C extends Contract, A extends AuthResult<C>> {
+/** A running super-line server, returned by {@link createSuperLineServer}. */
+export interface SuperLineServer<C extends Contract, A extends AuthResult<C>> {
   /** This node's stable id (unique per server process). */
   readonly nodeId: string
   /** This node's friendly name (from `nodeName`/`SUPER_LINE_NODE_NAME`, else a short `nodeId` slice). */
@@ -271,7 +271,7 @@ export interface SocketServer<C extends Contract, A extends AuthResult<C>> {
   /** Target all of a user's connections (by `identify` key) across nodes (emit/disconnect). */
   toUser(userId: string): UserTarget<C>
   /** Register handlers for shared + per-role requests (chainable). */
-  implement(handlers: Handlers<C, A>): SocketServer<C, A>
+  implement(handlers: Handlers<C, A>): SuperLineServer<C, A>
   /** Mixed-role connection group; broadcast() sends a shared contract event to members. */
   room(name: string): Room<C>
   /** Publish a SHARED topic to all subscribers (server-only publish). */
@@ -296,17 +296,17 @@ type Impl = Record<string, Record<string, AnyHandler>>
 
 /**
  * Create a server bound to a contract. Attach it to an `http.Server`, then call
- * {@link SocketServer.implement} with your handlers. `authenticate` resolves each
+ * {@link SuperLineServer.implement} with your handlers. `authenticate` resolves each
  * connection's `{ role, ctx }` at the upgrade.
  *
  * @param contract - the shared contract.
  * @param opts - server options; `authenticate` is required.
- * @returns the {@link SocketServer}.
- * @throws nothing directly; handler throws become a typed `SocketError` to the client.
+ * @returns the {@link SuperLineServer}.
+ * @throws nothing directly; handler throws become a typed `SuperLineError` to the client.
  *
  * @example
  * ```ts
- * const srv = createSocketServer(api, {
+ * const srv = createSuperLineServer(api, {
  *   server,
  *   authenticate: (req) => ({ role: 'user' as const, ctx: { id: '1' } }),
  * })
@@ -316,10 +316,10 @@ type Impl = Record<string, Record<string, AnyHandler>>
  * })
  * ```
  */
-export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
+export function createSuperLineServer<C extends Contract, A extends AuthResult<C>>(
   contract: C,
-  opts: ServerOptions<C, A>,
-): SocketServer<C, A> {
+  opts: SuperLineServerOptions<C, A>,
+): SuperLineServer<C, A> {
   const c: Contract = contract
   const serializer = opts.serializer ?? jsonSerializer
   const adapter = opts.adapter ?? createInMemoryAdapter()
@@ -429,7 +429,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     originWaiters.delete(env.i)
     if (w.timer) clearTimeout(w.timer)
     if (env.ok) w.resolve(env.d)
-    else w.reject(new SocketError(env.code, env.m, env.d))
+    else w.reject(new SuperLineError(env.code, env.m, env.d))
   }
 
   // owner side: the local client answered an sreq -> route the reply back to the origin node
@@ -448,7 +448,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
         const out = def && 'output' in def ? await validate(def.output, result.d) : result.d
         env = { i: r.corrId, ok: true, d: out }
       } catch (err) {
-        const e = err instanceof SocketError ? err : new SocketError('INTERNAL', 'Internal server error')
+        const e = err instanceof SuperLineError ? err : new SuperLineError('INTERNAL', 'Internal server error')
         env = { i: r.corrId, ok: false, code: e.code, m: e.message, d: e.data }
       }
     } else {
@@ -583,7 +583,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       const output = await handler(frame.d, conn)
       conn.send({ t: 'res', i: frame.i, d: output })
     } catch (err) {
-      const e = err instanceof SocketError ? err : new SocketError('INTERNAL', 'Internal server error')
+      const e = err instanceof SuperLineError ? err : new SuperLineError('INTERNAL', 'Internal server error')
       conn.send({ t: 'err', i: frame.i, code: e.code, m: e.message, d: e.data })
     }
   }
@@ -651,7 +651,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     getNode: async () => ({ nodeId: instanceId, nodeName, rooms: localRooms(), topics: localTopics() }),
     getConn: async (input) => {
       const id = (input as { id?: string } | undefined)?.id
-      if (!id) throw new SocketError('BAD_REQUEST', 'getConn requires an id')
+      if (!id) throw new SuperLineError('BAD_REQUEST', 'getConn requires an id')
       const local = [...conns].find((cn) => cn.id === id)
       if (local) {
         return {
@@ -662,7 +662,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
         } satisfies ConnView
       }
       const remote = await presenceOrThrow().get(id) // on another node: descriptor only, no ctx
-      if (!remote) throw new SocketError('NOT_FOUND', `Unknown connection: ${id}`)
+      if (!remote) throw new SuperLineError('NOT_FOUND', `Unknown connection: ${id}`)
       return { descriptor: remote, ctxAvailable: false } satisfies ConnView
     },
   }
@@ -813,7 +813,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       })
     } catch (err) {
       opts.onError?.(err, info)
-      const e = err instanceof SocketError ? err : new SocketError('INTERNAL', 'Internal server error')
+      const e = err instanceof SuperLineError ? err : new SuperLineError('INTERNAL', 'Internal server error')
       if (!responded) conn.send({ t: 'err', i: id, code: e.code, m: e.message, d: e.data })
       if (inspectorEnabled && info.kind === 'request')
         emitInspectorEvent({
@@ -866,7 +866,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     await dispatchOp(conn, frame.i, { kind: 'subscribe', name: frame.c, conn }, async () => {
       if (opts.authorizeSubscribe) {
         const ok = await opts.authorizeSubscribe(frame.c, conn.ctx as CtxUnion<A>, conn)
-        if (ok === false) throw new SocketError('FORBIDDEN', `Subscribe denied: ${frame.c}`)
+        if (ok === false) throw new SuperLineError('FORBIDDEN', `Subscribe denied: ${frame.c}`)
       }
       await joinChannel(conn, TOPIC + ns + ':' + frame.c) // await adapter.subscribe so ready == active
       conn.send({ t: 'res', i: frame.i, d: null })
@@ -982,7 +982,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
         ms > 0
           ? setTimeout(() => {
               originWaiters.delete(reqId)
-              reject(new SocketError('TIMEOUT', `Request '${name}' timed out`))
+              reject(new SuperLineError('TIMEOUT', `Request '${name}' timed out`))
             }, ms)
           : undefined
       originWaiters.set(reqId, { resolve, reject, timer })
@@ -991,7 +991,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
         () => {
           if (originWaiters.delete(reqId)) {
             if (timer) clearTimeout(timer)
-            reject(new SocketError('BAD_REQUEST', 'Aborted'))
+            reject(new SuperLineError('BAD_REQUEST', 'Aborted'))
           }
         },
         { once: true },
@@ -1003,7 +1003,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     })
   }
 
-  const api: SocketServer<C, A> = {
+  const api: SuperLineServer<C, A> = {
     nodeId: instanceId,
     nodeName,
     get local(): LocalView {

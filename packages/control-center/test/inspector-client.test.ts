@@ -3,8 +3,8 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { defineContract } from '@super-line/core'
-import { createSocketServer } from '@super-line/server'
-import { createClient } from '@super-line/client'
+import { createSuperLineServer } from '@super-line/server'
+import { createSuperLineClient } from '@super-line/client'
 import { createInspector, type InspectorClient } from '../src/lib/inspector-client.js'
 
 const contract = defineContract({
@@ -18,7 +18,7 @@ afterEach(async () => {
 
 async function startServer() {
   const httpServer = http.createServer()
-  const srv = createSocketServer(contract, {
+  const srv = createSuperLineServer(contract, {
     server: httpServer,
     authenticate: () => ({ role: 'user' as const, ctx: {} }),
     inspector: true,
@@ -55,7 +55,7 @@ async function waitFor(pred: () => boolean, timeout = 2000): Promise<void> {
 describe('inspector client', () => {
   it('connects and queries topology / connections / contract', async () => {
     const { srv, url } = await startServer()
-    const user = createClient(contract, { url, role: 'user' })
+    const user = createSuperLineClient(contract, { url, role: 'user' })
     cleanups.push(() => user.close())
     await user.ping() // a node only appears in topology once it holds a connection
 
@@ -86,7 +86,7 @@ describe('inspector client', () => {
     const types: string[] = []
     insp.onEvent((e) => types.push(e.type))
 
-    const user = createClient(contract, { url, role: 'user' })
+    const user = createSuperLineClient(contract, { url, role: 'user' })
     cleanups.push(() => user.close())
     await user.ping()
 

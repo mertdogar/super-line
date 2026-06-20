@@ -8,11 +8,11 @@ pnpm add @super-line/core @super-line/server zod
 
 ```ts
 import http from 'node:http'
-import { createSocketServer } from '@super-line/server'
+import { createSuperLineServer } from '@super-line/server'
 import { api } from './contract'
 
 const server = http.createServer()
-const srv = createSocketServer(api, {
+const srv = createSuperLineServer(api, {
   server,
   authenticate: (req) => ({ role: 'user' as const, ctx: { id: '1' } }), // throw -> 401
 })

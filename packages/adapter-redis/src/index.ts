@@ -132,7 +132,7 @@ function redisPresence(pub: Redis, ttlMs: number): PresenceStore {
  * @param options - a `redis://` URL string or {@link RedisAdapterOptions}.
  * @example
  * ```ts
- * createSocketServer(api, { server, adapter: createRedisAdapter('redis://localhost:6379') })
+ * createSuperLineServer(api, { server, adapter: createRedisAdapter('redis://localhost:6379') })
  * ```
  */
 export function createRedisAdapter(options: RedisAdapterOptions | string = {}): Adapter {

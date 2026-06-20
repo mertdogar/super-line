@@ -35,7 +35,7 @@ srv.publish('announce', { msg: 'maintenance at 5pm' })                  // share
 Gate private topics with `authorizeSubscribe` — return `false` or throw to deny (the client's `.ready` rejects `FORBIDDEN`):
 
 ```ts
-const srv = createSocketServer(api, {
+const srv = createSuperLineServer(api, {
   server, authenticate,
   authorizeSubscribe: async (topic, ctx, conn) => {
     if (topic.startsWith('org:')) return ctx.user.orgs.includes(topic.slice(4))
@@ -54,7 +54,7 @@ Clients can't publish — that's by design. To let a client fan something out, s
 srv.implement({
   user: {
     setPrice: async ({ symbol, price }, ctx) => {
-      if (!ctx.user.canTrade) throw new SocketError('FORBIDDEN')
+      if (!ctx.user.canTrade) throw new SuperLineError('FORBIDDEN')
       srv.forRole('user').publish('prices', { symbol, price })
       return { ok: true }
     },

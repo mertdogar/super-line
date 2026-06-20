@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { defineContract, SocketError } from '@super-line/core'
+import { defineContract, SuperLineError } from '@super-line/core'
 import { createHarness } from './harness.js'
 
 const contract = defineContract({
@@ -34,7 +34,7 @@ async function boot() {
     user: {
       echo: async ({ text }, ctx) => ({ text: `${text}:${ctx.id}`, at: 42 }),
       boom: async () => {
-        throw new SocketError('FORBIDDEN', 'nope')
+        throw new SuperLineError('FORBIDDEN', 'nope')
       },
     },
   })
@@ -52,7 +52,7 @@ describe('req/res over loopback', () => {
     expect(await client.ping({})).toEqual({ pong: true })
   })
 
-  it('rejects with a typed SocketError when the handler throws', async () => {
+  it('rejects with a typed SuperLineError when the handler throws', async () => {
     const client = await boot()
     await expect(client.boom({})).rejects.toMatchObject({ code: 'FORBIDDEN', message: 'nope' })
   })

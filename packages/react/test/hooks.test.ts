@@ -6,9 +6,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { z } from 'zod'
 import { defineContract } from '@super-line/core'
-import { createSocketServer } from '@super-line/server'
-import { createClient, type Client } from '@super-line/client'
-import { createSocketReact } from '@super-line/react'
+import { createSuperLineServer } from '@super-line/server'
+import { createSuperLineClient, type SuperLineClient } from '@super-line/client'
+import { createSuperLineHooks } from '@super-line/react'
 
 const contract = defineContract({
   roles: {
@@ -23,7 +23,7 @@ const contract = defineContract({
   },
 })
 
-const { Provider, useRequest } = createSocketReact<typeof contract, 'user'>()
+const { Provider, useRequest } = createSuperLineHooks<typeof contract, 'user'>()
 
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
@@ -31,16 +31,16 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c()
 })
 
-async function boot(): Promise<Client<typeof contract, 'user'>> {
+async function boot(): Promise<SuperLineClient<typeof contract, 'user'>> {
   const server = http.createServer()
-  const srv = createSocketServer(contract, {
+  const srv = createSuperLineServer(contract, {
     server,
     authenticate: () => ({ role: 'user' as const, ctx: {} }),
   })
   srv.implement({ user: { add: async ({ a, b }) => ({ sum: a + b }) } })
   await new Promise<void>((resolve) => server.listen(0, resolve))
   const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`
-  const client = createClient(contract, { url, role: 'user' })
+  const client = createSuperLineClient(contract, { url, role: 'user' })
   cleanups.push(() => client.close())
   cleanups.push(async () => {
     await srv.close()
@@ -49,7 +49,7 @@ async function boot(): Promise<Client<typeof contract, 'user'>> {
   return client
 }
 
-function wrapper(client: Client<typeof contract, 'user'>) {
+function wrapper(client: SuperLineClient<typeof contract, 'user'>) {
   return ({ children }: { children: ReactNode }) => createElement(Provider, { client, children })
 }
 

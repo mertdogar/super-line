@@ -1,6 +1,6 @@
 # @super-line/core
 
-Shared core for [**super-line**](https://mertdogar.github.io/super-line/) — end-to-end typesafe WebSockets for TypeScript. This package holds the pieces both ends import: `defineContract`, runtime validation, the `SocketError` model, and the `Serializer` / `Adapter` interfaces.
+Shared core for [**super-line**](https://mertdogar.github.io/super-line/) — end-to-end typesafe WebSockets for TypeScript. This package holds the pieces both ends import: `defineContract`, runtime validation, the `SuperLineError` model, and the `Serializer` / `Adapter` interfaces.
 
 ```bash
 pnpm add @super-line/core zod

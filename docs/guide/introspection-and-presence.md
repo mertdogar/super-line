@@ -41,7 +41,7 @@ const stale = srv.local.connections.filter((c) => Date.now() - (c.lastPongAt ?? 
 One timer pings every connection (default every 30s), updating `lastPingAt`/`lastPongAt`. Optionally **reap** dead sockets:
 
 ```ts
-createSocketServer(api, {
+createSuperLineServer(api, {
   server,
   authenticate,
   heartbeat: { interval: 30_000, maxMissed: 2 }, // terminate after 2 missed pongs (fires onDisconnect)
@@ -56,7 +56,7 @@ A reaped connection is `terminate()`d and flows through `onDisconnect` like any 
 The cluster view reads the **presence registry**. To make connections identifiable across nodes, give the server an `identify` hook (a stable user key) and, optionally, a `describeConn` projector for extra fields. `ctx` is **never** auto-serialized.
 
 ```ts
-createSocketServer(api, {
+createSuperLineServer(api, {
   server,
   authenticate,
   identify: (conn) => conn.ctx.userId,          // powers byUser / isOnline / toUser
@@ -103,7 +103,7 @@ shared: {
 }
 ```
 
-The client answers with `implement` (throw a `SocketError` for a typed failure):
+The client answers with `implement` (throw a `SuperLineError` for a typed failure):
 
 ```ts
 client.implement({
@@ -118,7 +118,7 @@ const answer = await srv.toConn(id).request('confirm', { q: 'ready?' }, { timeou
 answer.ok // boolean, typed
 ```
 
-`request` is offered on `toConn` only (a single, unambiguous target) and is typed to **shared** server requests — the caller has an id, not a role. If no live node owns the id, or the client doesn't answer in time, it rejects with a `TIMEOUT` `SocketError`. To request a *user*, pick a connection first: `const [c] = await srv.cluster.byUser(uid); await srv.toConn(c.id).request(...)`.
+`request` is offered on `toConn` only (a single, unambiguous target) and is typed to **shared** server requests — the caller has an id, not a role. If no live node owns the id, or the client doesn't answer in time, it rejects with a `TIMEOUT` `SuperLineError`. To request a *user*, pick a connection first: `const [c] = await srv.cluster.byUser(uid); await srv.toConn(c.id).request(...)`.
 
 ## Per-connection state
 
@@ -147,7 +147,7 @@ srv.implement({
 Guard nodes against slow consumers:
 
 ```ts
-createSocketServer(api, {
+createSuperLineServer(api, {
   server,
   authenticate,
   backpressure: { maxBufferedBytes: 8 * 1024 * 1024, onExceed: 'close' }, // or 'drop'

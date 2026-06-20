@@ -4,16 +4,16 @@
 
 ```tsx
 import { useState } from 'react'
-import { createClient } from '@super-line/client'
-import { createSocketReact } from '@super-line/react'
+import { createSuperLineClient } from '@super-line/client'
+import { createSuperLineHooks } from '@super-line/react'
 import { chat } from './contract'
 
 const { Provider, useClient, useRequest, useEvent, useSubscription } =
-  createSocketReact<typeof chat, 'user'>()
+  createSuperLineHooks<typeof chat, 'user'>()
 
 function Root() {
   // create the client once; it connects immediately and reconnects on its own
-  const [client] = useState(() => createClient(chat, { url: 'ws://localhost:3000', role: 'user', params: { name: 'ada' } }))
+  const [client] = useState(() => createSuperLineClient(chat, { url: 'ws://localhost:3000', role: 'user', params: { name: 'ada' } }))
   return (
     <Provider client={client}>
       <Room room="lobby" />
@@ -22,7 +22,7 @@ function Root() {
 }
 ```
 
-The role is a type argument to `createSocketReact<typeof chat, 'user'>()`, so every hook is narrowed to that role's surface.
+The role is a type argument to `createSuperLineHooks<typeof chat, 'user'>()`, so every hook is narrowed to that role's surface.
 
 ## The hooks
 
@@ -48,7 +48,7 @@ function Room({ room }: { room: string }) {
 - **`useRequest(method)`** → `{ data, error, isLoading, call }`. `call(input)` performs the typed request and updates state; it also returns the promise.
 - **`useSubscription(topic)`** → the latest value, re-rendering as new ones arrive. Subscribes on mount, unsubscribes on unmount.
 - **`useEvent(event, handler)`** → invokes `handler` for each pushed event (the latest handler is always used; no stale closures).
-- **`useClient()`** → the underlying `Client<C, R>`.
+- **`useClient()`** → the underlying `SuperLineClient<C, R>`.
 
 ## StrictMode
 

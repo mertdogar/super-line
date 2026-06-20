@@ -1,7 +1,7 @@
 import http from 'node:http'
 import { generateKeyPairFromSeed } from '@libp2p/crypto/keys'
 import { peerIdFromPrivateKey } from '@libp2p/peer-id'
-import { createSocketServer } from '@super-line/server'
+import { createSuperLineServer } from '@super-line/server'
 import { createLibp2pAdapter } from '@super-line/adapter-libp2p'
 import { sync } from './contract.js'
 
@@ -33,7 +33,7 @@ const bootstrap = await Promise.all(
 const server = http.createServer()
 let conns = 0
 
-const srv = createSocketServer(sync, {
+const srv = createSuperLineServer(sync, {
   server,
   authenticate: () => ({ role: 'user' as const, ctx: {} }),
   // no broker: every node joins one shared gossipsub mesh

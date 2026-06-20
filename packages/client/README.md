@@ -7,16 +7,16 @@ pnpm add @super-line/core @super-line/client zod
 ```
 
 ```ts
-import { createClient } from '@super-line/client'
+import { createSuperLineClient } from '@super-line/client'
 import { api } from './contract'
 
-const client = createClient(api, { url: 'ws://localhost:3000', role: 'user' })
+const client = createSuperLineClient(api, { url: 'ws://localhost:3000', role: 'user' })
 
 client.on('message', (m) => console.log(m.text))   // typed
 const sub = client.subscribe('prices', (p) => render(p))
 await sub.ready
 
-const out = await client.send({ text: 'hi' })       // throws typed SocketError on failure
+const out = await client.send({ text: 'hi' })       // throws typed SuperLineError on failure
 client.close()
 ```
 

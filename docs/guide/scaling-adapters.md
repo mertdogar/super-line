@@ -9,7 +9,7 @@ Rooms and topics all compile down to channel pub/sub behind the `Adapter` interf
 ```ts
 import { createRedisAdapter } from '@super-line/adapter-redis'
 
-const srv = createSocketServer(api, {
+const srv = createSuperLineServer(api, {
   server, authenticate,
   adapter: createRedisAdapter('redis://localhost:6379'),
 })
@@ -33,7 +33,7 @@ const adapter = await createLibp2pAdapter({
   bootstrap: ['/dns4/seed-1/tcp/9001/p2p/12D3Koo…'], // seed multiaddrs
   identity: { path: '/var/lib/app/p2p' }, // stable peer ID across restarts
 })
-const srv = createSocketServer(api, { server, authenticate, adapter })
+const srv = createSuperLineServer(api, { server, authenticate, adapter })
 ```
 
 It fans out rooms, topics, and the bus the same way, and a gossip-replicated directory backs `srv.cluster.*` / `srv.isOnline`. The trade-off vs. Redis: broker-less and decentralized, at the cost of eventually-consistent presence and best-effort delivery (no central store). It's **ESM-only** (libp2p is ESM-only). Run ≥2 stable seed nodes and persist their identity so bootstrap lists stay valid.

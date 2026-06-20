@@ -43,7 +43,7 @@ const lawCode = `srv.<span class="f">implement</span>({
   },
 })`
 
-const busCode = `<span class="k">const</span> srv = <span class="f">createSocketServer</span>(bus, {
+const busCode = `<span class="k">const</span> srv = <span class="f">createSuperLineServer</span>(bus, {
   server,
   adapter: <span class="f">createRedisAdapter</span>(url), <span class="c">// one line → a cluster</span>
 })

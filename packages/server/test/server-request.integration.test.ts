@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { defineContract, SocketError } from '@super-line/core'
+import { defineContract, SuperLineError } from '@super-line/core'
 import { MemoryBus, createInMemoryAdapter } from '@super-line/server'
 import { createHarness, waitFor } from './harness.js'
 
@@ -42,12 +42,12 @@ describe('server→client request (slice 6)', () => {
     expect(await srv.toConn(id).request('confirm', { q: 'nope' })).toEqual({ ok: false })
   })
 
-  it('relays a typed SocketError thrown by the client handler', async () => {
+  it('relays a typed SuperLineError thrown by the client handler', async () => {
     const { srv, url } = await server()
     const client = h.client(contract, { url, role: 'user', params: { uid: 'u1' } })
     client.implement({
       confirm: async () => {
-        throw new SocketError('FORBIDDEN', 'no', { why: 'x' })
+        throw new SuperLineError('FORBIDDEN', 'no', { why: 'x' })
       },
     })
     await client.hello({})

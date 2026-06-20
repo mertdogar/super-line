@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { defineContract, SocketError } from '@super-line/core'
+import { defineContract, SuperLineError } from '@super-line/core'
 import { createHarness, waitFor } from './harness.js'
 
 const contract = defineContract({
@@ -32,7 +32,7 @@ describe('middleware + lifecycle hooks', () => {
           order.push('a:after')
         },
         async (_ctx, info, next) => {
-          if (info.name === 'blocked') throw new SocketError('FORBIDDEN', 'no')
+          if (info.name === 'blocked') throw new SuperLineError('FORBIDDEN', 'no')
           order.push('b')
           await next()
         },
@@ -88,7 +88,7 @@ describe('middleware + lifecycle hooks', () => {
       use: [
         async (_ctx, info, next) => {
           if (info.kind === 'subscribe' && info.name === 'feed') {
-            throw new SocketError('FORBIDDEN', 'blocked-sub')
+            throw new SuperLineError('FORBIDDEN', 'blocked-sub')
           }
           await next()
         },

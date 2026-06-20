@@ -7,7 +7,7 @@ A zero-install debugging webapp for inspecting a running [super-line](https://gi
 **1. Turn on the inspector** on each server node you want to reach (off by default):
 
 ```ts
-const srv = createSocketServer(contract, {
+const srv = createSuperLineServer(contract, {
   server,
   authenticate,
   inspector: true, // exposes the reserved `superline.inspector.v1` WS channel

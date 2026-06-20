@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { createSocketServer } from '@super-line/server'
+import { createSuperLineServer } from '@super-line/server'
 import { createRedisAdapter } from '@super-line/adapter-redis'
 import { sync } from './contract.js'
 
@@ -13,7 +13,7 @@ const NODE = process.env.NODE_NAME ?? `node-${PORT}`
 const server = http.createServer()
 let conns = 0
 
-const srv = createSocketServer(sync, {
+const srv = createSuperLineServer(sync, {
   server,
   authenticate: () => ({ role: 'user' as const, ctx: {} }),
   adapter: createRedisAdapter(REDIS_URL),

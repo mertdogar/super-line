@@ -8,14 +8,14 @@ pnpm add @super-line/react
 
 ```tsx
 import { useState } from 'react'
-import { createClient } from '@super-line/client'
-import { createSocketReact } from '@super-line/react'
+import { createSuperLineClient } from '@super-line/client'
+import { createSuperLineHooks } from '@super-line/react'
 import { api } from './contract'
 
-const { Provider, useRequest, useEvent, useSubscription } = createSocketReact<typeof api, 'user'>()
+const { Provider, useRequest, useEvent, useSubscription } = createSuperLineHooks<typeof api, 'user'>()
 
 function Root() {
-  const [client] = useState(() => createClient(api, { url: 'ws://localhost:3000', role: 'user' }))
+  const [client] = useState(() => createSuperLineClient(api, { url: 'ws://localhost:3000', role: 'user' }))
   return <Provider client={client}><Room /></Provider>
 }
 
@@ -27,7 +27,7 @@ function Room() {
 }
 ```
 
-`react >= 18` is a peer dependency. Every hook is narrowed to the role passed to `createSocketReact<typeof api, 'user'>()`.
+`react >= 18` is a peer dependency. Every hook is narrowed to the role passed to `createSuperLineHooks<typeof api, 'user'>()`.
 
 - 📖 Docs: <https://mertdogar.github.io/super-line/>
 - 📚 Guide: [React](https://mertdogar.github.io/super-line/guide/react)

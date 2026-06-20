@@ -56,6 +56,10 @@ srv.room(`user:${targetId}`).broadcast('dm', { from, text })
 
 ## Running it
 
-The [`scaling` example](https://github.com/mertdogar/super-line/tree/main/examples/scaling) boots two nodes against one Redis and proves a publish, a room broadcast, and a `serverToServer` event from node B all reach node A.
+The [`scaling` example](https://github.com/mertdogar/super-line/tree/main/examples/scaling) boots a real cluster with Docker Compose — Redis, a Caddy load balancer, three server nodes, and six client containers — so you can watch a publish, a room broadcast, and a `serverToServer` event fan out across separate processes:
+
+```bash
+cd examples/scaling && docker compose up
+```
 
 Next: [React](./react).

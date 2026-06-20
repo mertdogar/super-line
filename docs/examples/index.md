@@ -40,13 +40,14 @@ pnpm --filter @super-line/example-presence start
 
 Demonstrates: [introspection & presence](/guide/introspection-and-presence).
 
-## scaling — multi-node fan-out
+## scaling — a real multi-node cluster
 
-Boots **two nodes** against one Redis and proves a topic publish, a room broadcast, and a `serverToServer` event from node B all reach a client on node A. Needs Docker/Redis.
+A genuine cluster via Docker Compose: **Redis + a Caddy load balancer + 3 server nodes + 6 client containers**. Caddy round-robins each client onto a node; you watch room broadcasts, a topic, and `serverToServer` stats fan out across separate processes. Needs Docker.
 
 ```bash
-docker run --rm -p 6379:6379 redis:7
-pnpm --filter @super-line/example-scaling start
+cd examples/scaling && docker compose up
 ```
+
+See [`examples/scaling/README.md`](https://github.com/mertdogar/super-line/tree/main/examples/scaling) for what to watch, how to connect your own client to the load balancer, and `--scale`.
 
 Demonstrates: [scaling & adapters](/guide/scaling-adapters), [serverToServer](/guide/scaling-adapters#servertoserver-coordinate-the-cluster).

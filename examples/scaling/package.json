@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "tsx src/demo.ts",
-    "server": "tsx src/server.ts"
+    "server": "tsx src/server.ts",
+    "client": "tsx src/client.ts"
   },
   "dependencies": {
     "@super-line/adapter-redis": "workspace:*",

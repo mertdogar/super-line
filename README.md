@@ -199,9 +199,8 @@ pnpm --filter @super-line/example-auth start
 # Presence + targeted send + server→client requests across 2 nodes (no Docker):
 pnpm --filter @super-line/example-presence start
 
-# Multi-node fan-out via Redis + serverToServer (needs Docker/Redis):
-docker run --rm -p 6379:6379 redis:7
-pnpm --filter @super-line/example-scaling start
+# Real cluster: Redis + Caddy LB + 3 nodes + 6 clients, fan-out across processes (needs Docker):
+cd examples/scaling && docker compose up
 ```
 
 More on each: [examples on the docs site](https://mertdogar.github.io/super-line/examples/).

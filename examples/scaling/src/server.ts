@@ -3,14 +3,12 @@ import { createSocketServer } from '@super-line/server'
 import { createRedisAdapter } from '@super-line/adapter-redis'
 import { sync } from './contract.js'
 
-// A single node. Run this twice (different PORT) behind a load balancer; the shared
-// Redis adapter makes room broadcasts, topic publishes, AND serverToServer events
-// fan out across both.
-//   PORT=8801 pnpm server   (terminal 1)
-//   PORT=8802 pnpm server   (terminal 2)
+// One cluster node. compose boots three of these (node-1/2/3) from the same image,
+// differing only by env. The shared Redis adapter fans rooms, topics, and
+// serverToServer events out across all three.
 const PORT = Number(process.env.PORT ?? 8801)
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379'
-const NODE = `node-${PORT}`
+const NODE = process.env.NODE_NAME ?? `node-${PORT}`
 
 const server = http.createServer()
 let conns = 0
@@ -19,28 +17,35 @@ const srv = createSocketServer(sync, {
   server,
   authenticate: () => ({ role: 'user' as const, ctx: {} }),
   adapter: createRedisAdapter(REDIS_URL),
-  onConnection: () => {
-    conns += 1
-    srv.emitServer('stats', { node: NODE, conns }) // tell peer nodes
+  onConnection: (conn) => {
+    srv.room('global').add(conn) // auto-join: every client lands in one shared room
+    srv.emitServer('stats', { node: NODE, conns: ++conns }) // flow 3: gossip our count
+    console.log(`[${NODE}] + conn (${conns} local)`)
   },
   onDisconnect: () => {
-    conns -= 1
-    srv.emitServer('stats', { node: NODE, conns })
+    srv.emitServer('stats', { node: NODE, conns: --conns })
+    console.log(`[${NODE}] - conn (${conns} local)`)
   },
 })
 
-// hear about the OTHER nodes' connection counts (excludes our own emits)
-srv.onServer('stats', (s) => console.log(`[peer] ${s.node} now has ${s.conns} connection(s)`))
+// flow 3: hear other nodes' counts (emitServer excludes self, so this is peers only)
+srv.onServer('stats', (s) => console.log(`[${NODE}] peer ${s.node} → ${s.conns} conns`))
 
+// flow 1: a client `say` fans out to everyone in 'global', on every node
 srv.implement({
   user: {
-    join: async ({ room }, _ctx, conn) => {
-      srv.room(room).add(conn)
+    say: async ({ from, text }) => {
+      srv.room('global').broadcast('message', { from, text })
       return { ok: true }
     },
   },
 })
 
-server.listen(PORT, () => {
-  console.log(`super-line node ${NODE} on ws://localhost:${PORT} (redis ${REDIS_URL})`)
-})
+server.listen(PORT, () => console.log(`[${NODE}] up on :${PORT} (redis ${REDIS_URL})`))
+
+// flow 2: ONE node publishes a topic on a timer; every client receives it, no matter
+// which node holds its socket — the cross-node server→client delivery proof.
+if (NODE === 'node-1') {
+  let n = 0
+  setInterval(() => srv.forRole('user').publish('announce', { from: NODE, text: `announce #${++n}` }), 5000)
+}

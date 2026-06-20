@@ -63,4 +63,25 @@ describe.skipIf(!dockerAvailable)('redis inspector events cross-process', () => 
     expect(connectEv?.descriptor?.nodeId).toBe(nodeB.srv.nodeId) // event originated on B
     insp.close()
   })
+
+  it('delivers message events (request/response) from node B to an inspector on node A', async () => {
+    const nodeA = await node()
+    const nodeB = await node()
+
+    const insp = await connectInspector(nodeA.url) // inspector on A
+    await insp.subscribeEvents()
+
+    const u = h.client(contract, { url: nodeB.url, role: 'user' }) // request handled on B
+    await u.join({ room: 'x' }) // B emits msg.request/response; they must cross the bus to A
+
+    await waitFor(() => insp.events.some((e) => e.type === 'msg.request'), 5000)
+    const req = insp.events.find((e) => e.type === 'msg.request')
+    expect(req?.name).toBe('join')
+    const input = req?.input as { room: string } | undefined
+    expect(input?.room).toBe('x')
+
+    await waitFor(() => insp.events.some((e) => e.type === 'msg.response'), 5000)
+    expect(insp.events.find((e) => e.type === 'msg.response')?.ok).toBe(true)
+    insp.close()
+  })
 })

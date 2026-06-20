@@ -36,17 +36,25 @@ each, join the same room.
 
 - the **topology** graph — `node-1`, `node-2`, and the Redis bus, with each chat tab's
   connection hanging off the node it landed on (colored by role, labelled with the chat name);
-- the **live feed** of `connect` / `room.add` / `topic.sub` / `disconnect` events as they cross
-  nodes in real time;
+- the **live feed** — lifecycle events (`connect` / `room.add` / `disconnect`) *and* the actual
+  message traffic (`join` requests + responses, the `message` room broadcast, the `presence`
+  topic publish) as they cross nodes in real time. Filter by Lifecycle / Requests / Events, pause
+  to freeze the view, and click any message row to expand its payload;
 - the **contract** explorer and a per-connection drawer.
+
+The connection endpoint is configured on the **Settings** page (saved to your browser), and the
+**Resources** page links out to the docs, repo, and npm.
 
 The nodes run with `inspector: true`, and Caddy pins `/inspect` to **node-1** (no `round_robin`),
 so the view is stable: node-1's connections show their live `ctx` (the chat `name`), while
 node-2's connections show the cross-node `ctxAvailable: false` boundary — node-local `ctx` never
 leaves its node.
 
-> The inspector channel is **read-only but unauthenticated** — fine for this local demo. Never
-> enable `inspector: true` on an internet-facing node.
+> The inspector channel is **read-only but unauthenticated**, and `inspector: true` now mirrors
+> every message payload to the bus (so it costs an extra publish per message — dev/trusted-network
+> only, never on an internet-facing node). Sensitive fields can be masked with
+> `inspector: { redact: ['password', 'token'] }`, which applies to `ctx`, `conn.data`, **and**
+> message payloads.
 
 ## What you'll see
 

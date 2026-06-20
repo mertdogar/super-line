@@ -11,6 +11,7 @@
   "bugs": "https://github.com/mertdogar/super-line/issues",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": { "super-line-zeromq-proxy": "./dist/proxy-bin.js" },
   "exports": {
     ".": {
       "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }

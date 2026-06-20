@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { createZeroMqAdapter, type ZeroMqAdapter } from '../src/index.js'
+import { createZeroMqAdapter, type ZeroMqAdapter, type ZeroMqMeshOptions } from '../src/index.js'
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const SETTLE = 200 // SUB subscriptions propagate asynchronously (slow-joiner) — let the mesh form
@@ -9,7 +9,7 @@ describe('zeromq mesh adapter', () => {
   afterEach(async () => {
     await Promise.all(open.splice(0).map((a) => a.close?.()))
   })
-  const make = async (opts: Parameters<typeof createZeroMqAdapter>[0]): Promise<ZeroMqAdapter> => {
+  const make = async (opts: ZeroMqMeshOptions): Promise<ZeroMqAdapter> => {
     const a = await createZeroMqAdapter(opts)
     open.push(a)
     return a

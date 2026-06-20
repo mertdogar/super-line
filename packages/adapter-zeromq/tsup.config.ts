@@ -2,7 +2,7 @@ import { defineConfig } from 'tsup'
 
 // ESM-only, matching the libp2p adapter; `zeromq` is a native addon kept external.
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: ['src/index.ts', 'src/proxy-bin.ts'],
   format: ['esm'],
   dts: true,
   target: 'es2022',

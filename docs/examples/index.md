@@ -83,3 +83,13 @@ cd examples/react-chat-cluster && docker compose up
 See [`examples/react-chat-cluster/README.md`](https://github.com/mertdogar/super-line/tree/main/examples/react-chat-cluster) for the topology and what each tab shows.
 
 Demonstrates: [React hooks](/guide/react), [scaling & adapters](/guide/scaling-adapters), [introspection & presence](/guide/introspection-and-presence).
+
+## react-chat-cluster-libp2p — the same cluster, no broker
+
+The same browser app and Control Center as `react-chat-cluster` above, but with **no Redis** — the two nodes peer directly over libp2p gossipsub via [`@super-line/adapter-libp2p`](/guide/scaling-adapters#decentralized-libp2p-no-broker). Same React SPA, same cross-node messages and cluster-wide (gossip-replicated) presence; the only structural change is the adapter line. Ports are offset (web `:8090`, Control Center `:8091`) so it runs alongside the Redis variant. Needs Docker.
+
+```bash
+cd examples/react-chat-cluster-libp2p && docker compose up --build
+```
+
+Demonstrates: [React hooks](/guide/react), [scaling & adapters](/guide/scaling-adapters#decentralized-libp2p-no-broker), [introspection & presence](/guide/introspection-and-presence).

@@ -1,0 +1,29 @@
+# Single entry point on :8090. Serves the built SPA and reverse-proxies the WebSocket.
+# round_robin spreads each new /ws connection across the nodes, so the first two browser tabs
+# land on different servers (sticky/ip_hash would do the opposite — same browser, same node).
+#
+# The two routes MUST be split into mutually-exclusive `handle` blocks: a top-level
+# `try_files` runs before `reverse_proxy` in Caddy's directive order, so it would rewrite
+# /ws → /index.html and the WebSocket would be served the SPA instead of being upgraded.
+# Keeping try_files inside the static handle only is what makes the /ws proxy work.
+:8090 {
+	handle /ws* {
+		reverse_proxy node-1:8787 node-2:8787 {
+			lb_policy round_robin
+		}
+	}
+
+	# The Control Center connects here. Pinned to a SINGLE node (no round_robin) so the
+	# inspector view is stable and node-1's connections show their live ctx; node-2's
+	# connections demonstrate the cross-node ctxAvailable boundary.
+	handle /inspect* {
+		reverse_proxy node-1:8787
+	}
+
+	handle {
+		root * /srv
+		encode gzip
+		try_files {path} /index.html
+		file_server
+	}
+}

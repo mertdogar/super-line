@@ -1,0 +1,29 @@
+{
+  "name": "@super-line/example-react-chat-cluster-libp2p",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "server": "tsx src/server.ts",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@libp2p/crypto": "^5.1.20",
+    "@libp2p/peer-id": "^6.0.11",
+    "@super-line/adapter-libp2p": "workspace:*",
+    "@super-line/client": "workspace:*",
+    "@super-line/core": "workspace:*",
+    "@super-line/react": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.19.2",
+    "vite": "^5.4.11"
+  }
+}

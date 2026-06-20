@@ -1,0 +1,39 @@
+name: react-chat-cluster-libp2p
+
+# Both chat nodes are the same image (built once); they differ only by NODE_NAME. No broker —
+# the nodes peer directly over libp2p gossipsub (P2P_PORT), discovering each other via a bootstrap
+# list of deterministic peer IDs.
+x-node: &node
+  build:
+    context: ../..
+    dockerfile: examples/react-chat-cluster-libp2p/Dockerfile
+  image: super-line-react-chat-cluster-libp2p:dev
+
+services:
+  node-1:
+    <<: *node
+    environment: { PORT: '8787', P2P_PORT: '9001', NODE_NAME: node-1 }
+
+  node-2:
+    <<: *node
+    environment: { PORT: '8787', P2P_PORT: '9001', NODE_NAME: node-2 }
+
+  # Serves the built SPA and load-balances WebSockets across the two nodes.
+  web:
+    build:
+      context: ../..
+      dockerfile: examples/react-chat-cluster-libp2p/Dockerfile.web
+    image: super-line-react-chat-cluster-libp2p-web:dev
+    ports: ['8090:8090']
+    volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']
+    depends_on: [node-1, node-2]
+
+  # The Control Center webapp, served on :8091. The browser connects it back to the cluster's
+  # inspector channel at ws://localhost:8090/inspect (Caddy → node-1). Open http://localhost:8091.
+  control-center:
+    build:
+      context: ../..
+      dockerfile: examples/react-chat-cluster-libp2p/Dockerfile.control-center
+    image: super-line-react-chat-cluster-libp2p-cc:dev
+    ports: ['8091:8091']
+    depends_on: [web]

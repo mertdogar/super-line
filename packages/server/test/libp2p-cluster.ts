@@ -27,7 +27,7 @@ export async function makeNode(transport: Transport = 'memory'): Promise<PubSubL
     streamMuxers: [yamux()],
     services: {
       identify: identify(),
-      pubsub: gossipsub({ emitSelf: true, allowPublishToZeroTopicPeers: true }),
+      pubsub: gossipsub({ allowPublishToZeroTopicPeers: true }),
     },
   })
   return node as unknown as PubSubLibp2p

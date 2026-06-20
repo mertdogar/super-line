@@ -4,8 +4,11 @@ import { noise } from '@chainsafe/libp2p-noise'
 import { yamux } from '@chainsafe/libp2p-yamux'
 import { identify } from '@libp2p/identify'
 import { bootstrap } from '@libp2p/bootstrap'
+import { webSockets } from '@libp2p/websockets'
+import { loadOrCreateSelfKey } from '@libp2p/config'
+import { FsDatastore } from 'datastore-fs'
 import { gossipsub, type GossipSub, type Message } from '@libp2p/gossipsub'
-import type { Libp2p } from '@libp2p/interface'
+import type { Libp2p, PrivateKey } from '@libp2p/interface'
 import type { Adapter } from '@super-line/core'
 import { GossipPresence, type PresenceMsg } from './presence.js'
 
@@ -16,19 +19,27 @@ export type PubSubLibp2p = Libp2p<{ pubsub: GossipSub }>
 export interface Libp2pAdapterOptions {
   /**
    * Bring your own (started) libp2p node. It must expose a gossipsub `pubsub`
-   * service created with `emitSelf: true` (the adapter relies on self-delivery
-   * to reach its own local members). When provided, the adapter does NOT manage
-   * the node's lifecycle — `close()` leaves it running.
+   * service (the adapter does its own loopback, so `emitSelf` can be left off).
+   * When provided, the adapter does NOT manage the node's lifecycle — `close()`
+   * leaves it running.
    */
   node?: PubSubLibp2p
   /**
-   * Listen multiaddrs for the built-in node. Defaults to `['/ip4/0.0.0.0/tcp/0']`.
-   * Seed nodes should use a FIXED port so their multiaddr stays valid in others'
-   * bootstrap lists.
+   * Listen multiaddrs for the built-in node. Defaults to `['/ip4/0.0.0.0/tcp/0']`
+   * (or `/ws` for the WebSocket transport). Seed nodes should use a FIXED port so
+   * their multiaddr stays valid in others' bootstrap lists.
    */
   listen?: string[]
   /** Bootstrap seed multiaddrs (incl. `/p2p/<peerId>`) the built-in node dials on startup. */
   bootstrap?: string[]
+  /** Transport for the built-in node. Defaults to `'tcp'`. */
+  transport?: 'tcp' | 'ws'
+  /**
+   * Peer identity for the built-in node: a raw `PrivateKey`, or `{ path }` to load-or-create
+   * a persistent Ed25519 key on disk (stable peer ID across restarts). Omit for an ephemeral
+   * key — convenient for dev, but a startup warning fires since bootstrap lists break on restart.
+   */
+  identity?: PrivateKey | { path: string }
   /** The single shared gossipsub topic every node joins. Defaults to `'super-line/v1'`. */
   topic?: string
   /**
@@ -65,17 +76,40 @@ function unframe(data: Uint8Array): { channel: string; payload: string | Uint8Ar
   return { channel, payload }
 }
 
+async function resolveIdentity(identity: Libp2pAdapterOptions['identity']): Promise<PrivateKey | undefined> {
+  if (identity === undefined) {
+    console.warn(
+      '[super-line/adapter-libp2p] no identity provided — using an ephemeral peer ID; bootstrap lists break across restarts. Pass `identity: { path }` to persist it.',
+    )
+    return undefined
+  }
+  if ('path' in identity) {
+    const datastore = new FsDatastore(identity.path)
+    await datastore.open()
+    try {
+      return await loadOrCreateSelfKey(datastore)
+    } finally {
+      await datastore.close()
+    }
+  }
+  return identity // a raw PrivateKey
+}
+
 async function buildNode(opts: Libp2pAdapterOptions): Promise<PubSubLibp2p> {
   const list = opts.bootstrap ?? []
+  const ws = opts.transport === 'ws'
+  const privateKey = await resolveIdentity(opts.identity)
   const node = await createLibp2p({
-    addresses: { listen: opts.listen ?? ['/ip4/0.0.0.0/tcp/0'] },
-    transports: [tcp()],
+    ...(privateKey ? { privateKey } : {}),
+    addresses: { listen: opts.listen ?? [ws ? '/ip4/0.0.0.0/tcp/0/ws' : '/ip4/0.0.0.0/tcp/0'] },
+    transports: [ws ? webSockets() : tcp()],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
     peerDiscovery: list.length > 0 ? [bootstrap({ list })] : [],
     services: {
       identify: identify(),
-      pubsub: gossipsub({ emitSelf: true, allowPublishToZeroTopicPeers: true }),
+      // the adapter does its own loopback, so emitSelf stays off (default) — no double delivery
+      pubsub: gossipsub({ allowPublishToZeroTopicPeers: true }),
     },
   })
   // gossipsub implements PubSub; libp2p's service generics are invariant, so widen explicitly.
@@ -97,17 +131,25 @@ async function buildNode(opts: Libp2pAdapterOptions): Promise<PubSubLibp2p> {
  * createSocketServer(api, { server, adapter })
  * ```
  */
-export async function createLibp2pAdapter(options: Libp2pAdapterOptions = {}): Promise<Adapter> {
+export async function createLibp2pAdapter(
+  options: Libp2pAdapterOptions = {},
+): Promise<Adapter & { node: PubSubLibp2p }> {
   const topic = options.topic ?? DEFAULT_TOPIC
   const ownsNode = options.node === undefined
   const node = options.node ?? (await buildNode(options))
   const pubsub = node.services.pubsub
+  if (!pubsub || typeof pubsub.publish !== 'function' || typeof pubsub.subscribe !== 'function') {
+    throw new Error('createLibp2pAdapter: the libp2p node must expose a gossipsub `pubsub` service')
+  }
+  const selfPeer = node.peerId.toString()
   const subscribed = new Set<string>()
   let handler: ((channel: string, payload: string | Uint8Array) => void) | undefined
   let closed = false
 
   const publishFramed = async (channel: string, payload: string | Uint8Array): Promise<void> => {
     if (closed) return
+    // explicit loopback to our own local members — don't depend on the node's emitSelf setting
+    if (channel !== PRESENCE_CHANNEL && subscribed.has(channel)) handler?.(channel, payload)
     try {
       await pubsub.publish(topic, frame(channel, payload))
     } catch {
@@ -124,8 +166,10 @@ export async function createLibp2pAdapter(options: Libp2pAdapterOptions = {}): P
         )
 
   const onMessage = (evt: CustomEvent<Message>): void => {
-    if (evt.detail.topic !== topic) return
-    const { channel, payload } = unframe(evt.detail.data)
+    const m = evt.detail
+    if (m.topic !== topic) return
+    if (m.type === 'signed' && m.from.toString() === selfPeer) return // our own echo — already looped back
+    const { channel, payload } = unframe(m.data)
     if (channel === PRESENCE_CHANNEL) {
       presence?.receive(JSON.parse(payload as string) as PresenceMsg)
       return
@@ -136,6 +180,7 @@ export async function createLibp2pAdapter(options: Libp2pAdapterOptions = {}): P
   pubsub.subscribe(topic)
 
   return {
+    node, // exposed so callers can read peerId / multiaddrs (e.g. to build bootstrap lists)
     subscribe(channel) {
       subscribed.add(channel)
     },

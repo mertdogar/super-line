@@ -12,10 +12,13 @@ export default defineConfig({
     '@chainsafe/libp2p-noise',
     '@chainsafe/libp2p-yamux',
     '@libp2p/bootstrap',
+    '@libp2p/config',
     '@libp2p/gossipsub',
     '@libp2p/identify',
     '@libp2p/interface',
     '@libp2p/tcp',
+    '@libp2p/websockets',
+    'datastore-fs',
     'libp2p',
   ],
 })

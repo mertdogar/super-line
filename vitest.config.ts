@@ -17,5 +17,9 @@ export default defineConfig({
   test: {
     include: ['packages/**/test/**/*.test.ts'],
     testTimeout: 10_000,
+    // Integration tests (libp2p crypto, redis testcontainers) are CPU-heavy; running one worker
+    // per core oversubscribes and starves timing-sensitive tests. Leave the OS/event-loop headroom.
+    maxWorkers: '50%',
+    minWorkers: 1,
   },
 })

@@ -14,6 +14,7 @@ import {
   type Contract,
   type Schema,
   type InspectedContract,
+  type ConnView,
   type ClientFrame,
   type ReqFrame,
   type EvtFrame,
@@ -307,6 +308,9 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   const serializer = opts.serializer ?? jsonSerializer
   const adapter = opts.adapter ?? createInMemoryAdapter()
   const inspectorEnabled = !!opts.inspector
+  const inspectorRedact = new Set<string>(
+    opts.inspector && typeof opts.inspector === 'object' ? opts.inspector.redact ?? [] : [],
+  )
   // echo the reserved subprotocol only when inspector is on, so browsers complete the handshake
   const wss = new WebSocketServer({
     noServer: true,
@@ -570,11 +574,54 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     return classifyContract(c, (s) => converted.get(s))
   }
 
+  // best-effort, never-throwing snapshot of ctx/conn.data for the inspector (node-local, display-only)
+  function safeSnapshot(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
+    if (value === null) return null
+    const t = typeof value
+    if (t === 'bigint') return `${(value as bigint).toString()}n`
+    if (t === 'function') return '[Function]'
+    if (t === 'symbol') return (value as symbol).toString()
+    if (t !== 'object') return value // string | number | boolean | undefined
+    const obj = value as object
+    if (obj instanceof Date) return obj.toISOString()
+    if (seen.has(obj)) return '[Circular]'
+    if (depth >= 6) return '[MaxDepth]'
+    seen.add(obj)
+    try {
+      if (Array.isArray(obj)) return obj.slice(0, 1000).map((v) => safeSnapshot(v, depth + 1, seen))
+      const ctor = (Object.getPrototypeOf(obj) as { constructor?: { name?: string } } | null)?.constructor?.name
+      const out: Record<string, unknown> = {}
+      if (ctor && ctor !== 'Object') out['#type'] = ctor
+      for (const [k, v] of Object.entries(obj)) {
+        out[k] = inspectorRedact.has(k) ? '[Redacted]' : safeSnapshot(v, depth + 1, seen)
+      }
+      return out
+    } finally {
+      seen.delete(obj)
+    }
+  }
+
   const inspectorHandlers: Record<string, (input: unknown, conn: Conn) => Promise<unknown>> = {
     getContract: () => buildInspectedContract(),
     getTopology: async () => presenceOrThrow().topology(),
     listConnections: async () => presenceOrThrow().list(),
     getNode: async () => ({ nodeId: instanceId, rooms: localRooms(), topics: localTopics() }),
+    getConn: async (input) => {
+      const id = (input as { id?: string } | undefined)?.id
+      if (!id) throw new SocketError('BAD_REQUEST', 'getConn requires an id')
+      const local = [...conns].find((cn) => cn.id === id)
+      if (local) {
+        return {
+          descriptor: buildDescriptor(local),
+          ctx: safeSnapshot(local.ctx),
+          data: safeSnapshot(local.data),
+          ctxAvailable: true,
+        } satisfies ConnView
+      }
+      const remote = await presenceOrThrow().get(id) // on another node: descriptor only, no ctx
+      if (!remote) throw new SocketError('NOT_FOUND', `Unknown connection: ${id}`)
+      return { descriptor: remote, ctxAvailable: false } satisfies ConnView
+    },
   }
 
   if (opts.server) {

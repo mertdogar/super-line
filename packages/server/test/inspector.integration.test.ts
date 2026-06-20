@@ -3,6 +3,7 @@ import { WebSocket } from 'ws'
 import { z } from 'zod'
 import { defineContract, jsonSerializer, INSPECTOR_SUBPROTOCOL } from '@super-line/core'
 import type { InspectedContract, Schema } from '@super-line/core'
+import { MemoryBus, createInMemoryAdapter } from '@super-line/server'
 import { createHarness, waitFor } from './harness.js'
 
 const contract = defineContract({
@@ -168,6 +169,90 @@ describe('inspector getContract (slice 3)', () => {
     expect(feed?.flavor).toBe('topic')
     expect(feed?.payload).toMatchObject({ type: 'object' })
 
+    insp.close()
+  })
+})
+
+const ctxContract = defineContract({
+  roles: { user: { clientToServer: { ping: { input: z.void(), output: z.number() } } } },
+})
+
+interface ConnViewResult {
+  descriptor: { id: string; role: string }
+  ctx?: Record<string, unknown>
+  data?: Record<string, unknown>
+  ctxAvailable: boolean
+}
+
+describe('inspector getConn (slice 4)', () => {
+  it('snapshots ctx + conn.data for a local conn, redacting and safely serializing', async () => {
+    const circular: Record<string, unknown> = { name: 'node' }
+    circular.self = circular
+    const { srv, url } = await h.server(ctxContract, {
+      authenticate: () => ({
+        role: 'user' as const,
+        ctx: { userId: 'u1', token: 'secret', big: 10n, fn: () => 1, circular },
+      }),
+      onConnection: (conn) => {
+        ;(conn.data as { count?: number }).count = 5
+      },
+      inspector: { redact: ['token'] },
+    })
+    srv.implement({ user: { ping: async () => 1 } })
+
+    const u = h.client(ctxContract, { url, role: 'user' })
+    await u.ping()
+    await waitFor(() => srv.local.connections.length === 1)
+    const id = srv.local.connections[0]!.id
+
+    const insp = await connectInspector(url)
+    const view = (await insp.request('getConn', { id })) as ConnViewResult
+    expect(view.ctxAvailable).toBe(true)
+    expect(view.descriptor.id).toBe(id)
+    expect(view.descriptor.role).toBe('user')
+    expect(view.ctx?.userId).toBe('u1')
+    expect(view.ctx?.token).toBe('[Redacted]') // redacted by field name
+    expect(view.ctx?.big).toBe('10n') // BigInt -> string
+    expect(view.ctx?.fn).toBe('[Function]')
+    const circ = view.ctx?.circular as { self?: unknown } | undefined
+    expect(circ?.self).toBe('[Circular]')
+    expect(view.data?.count).toBe(5)
+    insp.close()
+  })
+
+  it('returns NOT_FOUND for an unknown connection id', async () => {
+    const { url } = await h.server(ctxContract, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      inspector: true,
+    })
+    const insp = await connectInspector(url)
+    await expect(insp.request('getConn', { id: 'nope' })).rejects.toThrow('NOT_FOUND')
+    insp.close()
+  })
+
+  it('reports ctxAvailable:false for a conn owned by another node', async () => {
+    const bus = new MemoryBus()
+    const mk = () =>
+      h.server(ctxContract, {
+        authenticate: () => ({ role: 'user' as const, ctx: { secret: 1 } }),
+        adapter: createInMemoryAdapter(bus),
+        inspector: true,
+      })
+    const nodeA = await mk()
+    const nodeB = await mk()
+    nodeA.srv.implement({ user: { ping: async () => 1 } })
+    nodeB.srv.implement({ user: { ping: async () => 1 } })
+
+    const u = h.client(ctxContract, { url: nodeB.url, role: 'user' })
+    await u.ping()
+    await waitFor(() => nodeB.srv.local.connections.length === 1)
+    const id = nodeB.srv.local.connections[0]!.id
+
+    const insp = await connectInspector(nodeA.url) // inspector on A, conn on B
+    const view = (await insp.request('getConn', { id })) as ConnViewResult
+    expect(view.ctxAvailable).toBe(false)
+    expect(view.ctx).toBeUndefined()
+    expect(view.descriptor.id).toBe(id)
     insp.close()
   })
 })

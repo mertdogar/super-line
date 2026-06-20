@@ -1,0 +1,37 @@
+{
+  "name": "@super-line/control-center",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Control Center — a debugging webapp for inspecting a running super-line platform.",
+  "license": "MIT",
+  "author": "Mert",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@super-line/core": "workspace:^",
+    "@xyflow/react": "^12.3.5",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^2.6.0"
+  },
+  "devDependencies": {
+    "@super-line/client": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "zod": "^3.24.1"
+  }
+}

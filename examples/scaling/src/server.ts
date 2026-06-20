@@ -4,8 +4,8 @@ import { createRedisAdapter } from '@super-line/adapter-redis'
 import { sync } from './contract.js'
 
 // One cluster node. compose boots three of these (node-1/2/3) from the same image,
-// differing only by env. The shared Redis adapter fans rooms, topics, and
-// serverToServer events out across all three.
+// differing only by env. The shared Redis adapter fans rooms, topics, and the
+// cluster event bus out across all three.
 const PORT = Number(process.env.PORT ?? 8801)
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379'
 const NODE = process.env.NODE_NAME ?? `node-${PORT}`
@@ -19,17 +19,20 @@ const srv = createSocketServer(sync, {
   adapter: createRedisAdapter(REDIS_URL),
   onConnection: (conn) => {
     srv.room('global').add(conn) // auto-join: every client lands in one shared room
-    srv.emitServer('stats', { node: NODE, conns: ++conns }) // flow 3: gossip our count
+    srv.publish('stats', { node: NODE, conns: ++conns }) // flow 3: gossip our count over the bus
     console.log(`[${NODE}] + conn (${conns} local)`)
   },
   onDisconnect: () => {
-    srv.emitServer('stats', { node: NODE, conns: --conns })
+    srv.publish('stats', { node: NODE, conns: --conns })
     console.log(`[${NODE}] - conn (${conns} local)`)
   },
 })
 
-// flow 3: hear other nodes' counts (emitServer excludes self, so this is peers only)
-srv.onServer('stats', (s) => console.log(`[${NODE}] peer ${s.node} → ${s.conns} conns`))
+// flow 3: hear other nodes' counts. The bus has local echo, so skip our own via meta.from.
+srv.subscribe('stats', (s, { from }) => {
+  if (from === srv.nodeId) return
+  console.log(`[${NODE}] peer ${s.node} → ${s.conns} conns`)
+})
 
 // flow 1: a client `say` fans out to everyone in 'global', on every node
 srv.implement({

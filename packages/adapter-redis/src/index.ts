@@ -123,8 +123,9 @@ function redisPresence(pub: Redis, ttlMs: number): PresenceStore {
 
 /**
  * Create a Redis Pub/Sub {@link Adapter} for multi-node fan-out. Pass the same
- * URL to every server process so rooms, topics, and serverToServer events reach
- * clients on any node. Uses two connections (a subscriber connection can't run
+ * URL to every server process so rooms, topics, and the cluster event bus reach
+ * clients and server subscribers on any node. Uses two connections (a subscriber
+ * connection can't run
  * other commands); at-most-once delivery, matching the library's model.
  *
  * @param options - a `redis://` URL string or {@link RedisAdapterOptions}.

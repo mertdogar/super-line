@@ -6,14 +6,17 @@ import type {
   Requests,
   Events,
   Topics,
-  ServerEvents,
+  SharedTopics,
   InferOut,
 } from '@super-line/core'
 
 const api = defineContract({
   shared: {
     clientToServer: { ping: { input: z.void(), output: z.number() } },
-    serverToClient: { serverNotice: { payload: z.object({ text: z.string() }) } },
+    serverToClient: {
+      serverNotice: { payload: z.object({ text: z.string() }) },
+      broadcast: { payload: z.object({ text: z.string() }), subscribe: true },
+    },
   },
   roles: {
     user: {
@@ -37,9 +40,6 @@ const api = defineContract({
       },
     },
   },
-  serverToServer: {
-    rebalance: z.object({ shard: z.number() }),
-  },
 })
 
 type Api = typeof api
@@ -57,16 +57,16 @@ type _agentReqs = Expect<Equal<keyof Requests<Api, 'agent'>, 'ping' | 'reportRes
 
 // serverToClient split: events exclude subscribe:true; topics keep only them
 type _userEvents = Expect<Equal<keyof Events<Api, 'user'>, 'serverNotice' | 'messagePosted'>>
-type _userTopics = Expect<Equal<keyof Topics<Api, 'user'>, 'roomFeed'>>
+type _userTopics = Expect<Equal<keyof Topics<Api, 'user'>, 'roomFeed' | 'broadcast'>>
 type _agentEvents = Expect<Equal<keyof Events<Api, 'agent'>, 'serverNotice'>>
-type _agentTopics = Expect<Equal<keyof Topics<Api, 'agent'>, 'taskAssigned'>>
+type _agentTopics = Expect<Equal<keyof Topics<Api, 'agent'>, 'taskAssigned' | 'broadcast'>>
 
 // inferred member types flow through the merge
 type _sendOut = Expect<Equal<InferOut<Requests<Api, 'user'>['sendMessage']['output']>, { id: string }>>
 type _topicPayload = Expect<Equal<InferOut<Topics<Api, 'user'>['roomFeed']['payload']>, { text: string }>>
 
-// serverToServer
-type _s2s = Expect<Equal<keyof ServerEvents<Api>, 'rebalance'>>
+// shared topics are the cluster-bus surface (server.publish/subscribe) and flow into each role's client topics
+type _sharedTopics = Expect<Equal<keyof SharedTopics<Api>, 'broadcast'>>
 
 describe('contract (role + direction)', () => {
   it('validates inbound input by schema', async () => {

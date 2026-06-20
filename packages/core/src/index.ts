@@ -32,14 +32,11 @@ export type {
   SharedEvents,
   SharedTopics,
   RoleTopics,
-  ServerEvents,
   ClientInput,
   ServerInput,
   Output,
   EventData,
   EmitData,
-  ServerEmit,
-  ServerData,
 } from './contract.js'
 
 export {

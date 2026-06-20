@@ -13,7 +13,6 @@ import {
   type Serializer,
   type Schema,
   type Contract,
-  type Schema,
   type InspectedContract,
   type ConnView,
   type InspectorEvent,
@@ -29,13 +28,10 @@ import {
   type SharedEvents,
   type SharedTopics,
   type RoleTopics,
-  type ServerEvents,
   type ServerInput,
   type ClientInput,
   type Output,
   type EmitData,
-  type ServerEmit,
-  type ServerData,
   type ConnDescriptor,
   type NodeStat,
   type PresenceStore,
@@ -67,7 +63,6 @@ const TOPIC = 't:'
 const CONN = 'c:' // personal channel per connection (targeted cross-node send)
 const USER = 'u:' // personal channel per user key (cross-node fan-out)
 const REPLY = 'reply:' // per-node channel carrying server→client request replies back to the origin
-const S2S = 's2s' // reserved channel for inter-server messaging
 const INSPECT = 'i:' // reserved fan-out channel for the inspector `events` topic
 
 // Envelope carried on personal (c:/u:) channels — distinct from the raw frame fan-out of rooms/topics.
@@ -286,13 +281,6 @@ export interface SocketServer<C extends Contract, A extends AuthResult<C>> {
   ): () => void
   /** Lens for role-scoped sends, e.g. forRole('user').publish('feed', data). */
   forRole<R extends RoleOf<C>>(role: R): RoleLens<C, R>
-  /** Broadcast a typed event to all OTHER server nodes (at-most-once, excludes self). */
-  emitServer<E extends keyof ServerEvents<C>>(event: E, data: ServerEmit<ServerEvents<C>[E]>): void
-  /** Listen for inter-server events from other nodes. Returns an unsubscribe fn. */
-  onServer<E extends keyof ServerEvents<C>>(
-    event: E,
-    handler: (data: ServerData<ServerEvents<C>[E]>) => void,
-  ): () => void
   close(): Promise<void>
 }
 
@@ -342,10 +330,9 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   const inspectorConns = new Set<Conn>() // read-only inspectors: kept out of conns/presence/heartbeat
   // local members per namespaced channel (rooms + topics share this registry)
   const members = new Map<string, Set<Conn>>()
-  const serverListeners = new Map<string, Set<(data: unknown) => void>>()
   // server-side bus subscribers per topic channel (parallel to `members` which holds conns)
   const busListeners = new Map<string, Set<(data: unknown, meta: BusMeta) => void>>()
-  const instanceId = randomUUID() // identifies this node; lets emitServer exclude itself
+  const instanceId = randomUUID() // identifies this node; lets the bus drop its own looped-back echo
   const replyChannel = REPLY + instanceId
   let impl: Impl = {}
   let closing = false // close() is idempotent
@@ -378,10 +365,6 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
 
   // a frame arriving on a channel (from this node or another) is forwarded raw to local members
   adapter.onMessage((channel, payload) => {
-    if (channel === S2S) {
-      handleServerMessage(payload)
-      return
-    }
     if (channel === replyChannel) {
       handleReply(payload)
       return
@@ -465,9 +448,6 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     void adapter.publish(REPLY + r.origin, serializer.encode(env))
   }
 
-  // inter-server messaging rides the adapter on a reserved channel; subscribe if used
-  if (c.serverToServer) void adapter.subscribe(S2S)
-
   // one heartbeat timer: ping every conn (for lastPongAt liveness) + optional reaping
   const hb = opts.heartbeat === false ? null : opts.heartbeat ?? {}
   let hbTimer: ReturnType<typeof setInterval> | undefined
@@ -486,18 +466,6 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       }
     }, hb.interval ?? 30_000)
     hbTimer.unref?.()
-  }
-
-  function handleServerMessage(payload: string | Uint8Array): void {
-    let msg: { from: string; e: string; d: unknown }
-    try {
-      msg = serializer.decode(payload) as { from: string; e: string; d: unknown }
-    } catch {
-      return
-    }
-    if (msg.from === instanceId) return // exclude self
-    const set = serverListeners.get(msg.e)
-    if (set) for (const cb of set) cb(msg.d)
   }
 
   // publish a live topology event to subscribed inspectors (fans out cluster-wide via the adapter)
@@ -1040,24 +1008,6 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
         publish(topic, data) {
           publishTo(role, String(topic), data)
         },
-      }
-    },
-    emitServer(event, data) {
-      void adapter.publish(S2S, serializer.encode({ from: instanceId, e: String(event), d: data }))
-    },
-    onServer(event, handler) {
-      const name = String(event)
-      let set = serverListeners.get(name)
-      if (!set) {
-        set = new Set()
-        serverListeners.set(name, set)
-      }
-      set.add(handler as (data: unknown) => void)
-      return () => {
-        const current = serverListeners.get(name)
-        if (!current) return
-        current.delete(handler as (data: unknown) => void)
-        if (current.size === 0) serverListeners.delete(name)
       }
     },
     async close() {

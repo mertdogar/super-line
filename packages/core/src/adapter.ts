@@ -1,6 +1,6 @@
 /**
- * Cross-node fan-out seam. Rooms, topics, and serverToServer all compile down to
- * channel pub/sub. A node subscribes to a channel only while it has a local member,
+ * Cross-node fan-out seam. Rooms, topics, and the cluster event bus all compile down
+ * to channel pub/sub. A node subscribes to a channel only while it has a local member,
  * and publishes always go through the adapter (the in-memory adapter loops back),
  * so a node delivers to its local members on receipt — one code path, no double-send.
  *

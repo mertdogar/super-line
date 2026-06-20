@@ -59,15 +59,13 @@ export interface RoleBlock extends Directional {
 /**
  * The single source of truth, imported by both server and client. Split by
  * **direction** and scoped by **role**: a `shared` base every role inherits,
- * plus one block per role. `serverToServer` is node↔node (not role-scoped).
+ * plus one block per role.
  */
 export interface Contract {
   /** Surface common to every role (merged into each role's effective surface). */
   shared?: Directional
   /** Per-role surfaces. A connection's role selects which one (plus `shared`) it sees. */
   roles: Record<string, RoleBlock>
-  /** Typed node-to-node event payloads, for {@link "@super-line/server"!}'s `emitServer`/`onServer`. */
-  serverToServer?: Record<string, Schema>
 }
 
 /**
@@ -88,7 +86,6 @@ export interface Contract {
  *     user:  { clientToServer: { say:      { input: z.object({ text: z.string() }), output: z.object({ id: z.string() }) } } },
  *     agent: { clientToServer: { announce: { input: z.object({ text: z.string() }), output: z.object({ id: z.string() }) } } },
  *   },
- *   serverToServer: { rebalance: z.object({ shard: z.number() }) },
  * })
  * ```
  */
@@ -145,11 +142,6 @@ export type DataOf<C extends Contract, R extends RoleOf<C>> = C['roles'][R] exte
 /** Union of every role's `conn.data` shape (used where the role isn't narrowed, e.g. shared handlers). */
 export type AnyData<C extends Contract> = DataOf<C, RoleOf<C>>
 
-/** The `serverToServer` map, or `{}` if the contract has none. */
-export type ServerEvents<C extends Contract> = C['serverToServer'] extends Record<string, Schema>
-  ? C['serverToServer']
-  : {}
-
 // Guarded extractors: re-assert the def constraint so indexed access stays a Schema.
 /** The input type a client passes for a request (pre-validation). */
 export type ClientInput<T> = T extends RequestDef ? InferIn<T['input']> : never
@@ -161,10 +153,6 @@ export type Output<T> = T extends RequestDef ? InferOut<T['output']> : never
 export type EventData<T> = T extends ServerMessageDef ? InferOut<T['payload']> : never
 /** The data a server sends for an event/topic (pre-validation). */
 export type EmitData<T> = T extends ServerMessageDef ? InferIn<T['payload']> : never
-/** The data a server sends for a serverToServer event. */
-export type ServerEmit<T> = T extends Schema ? InferIn<T> : never
-/** The data a server receives for a serverToServer event. */
-export type ServerData<T> = T extends Schema ? InferOut<T> : never
 
 /** Infer a schema's **input** type (what you pass into the validator). */
 export type InferIn<S extends Schema> = StandardSchemaV1.InferInput<S>

@@ -109,12 +109,18 @@ function wireAdapter(pub: Publisher, sub: Subscriber, ownsSockets: boolean, pres
 
   return {
     subscribe(channel) {
+      if (closed) return
       subscribed.add(channel)
       sub.subscribe(channel)
     },
     unsubscribe(channel) {
       subscribed.delete(channel)
-      sub.unsubscribe(channel)
+      if (closed) return
+      try {
+        sub.unsubscribe(channel)
+      } catch {
+        // shutting down / socket closed — unsubscribe is best-effort
+      }
     },
     publish: send,
     onMessage(h: (channel: string, payload: string | Uint8Array) => void) {
@@ -156,7 +162,9 @@ export async function createZeroMqAdapter(options: ZeroMqAdapterOptions): Promis
   if ('pub' in options) return wireAdapter(options.pub, options.sub, false, options.presence)
 
   const hwm = options.sendHighWaterMark ?? DEFAULT_HWM
-  const pub = new Publisher({ sendHighWaterMark: hwm })
+  // linger: on close, keep flushing queued messages briefly so a graceful presence 'leave'
+  // (sent just before the socket tears down) actually reaches peers.
+  const pub = new Publisher({ sendHighWaterMark: hwm, linger: 500 })
   const sub = new Subscriber({ receiveHighWaterMark: hwm })
 
   if (options.mode === 'proxy') {

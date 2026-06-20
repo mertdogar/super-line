@@ -17,11 +17,14 @@ export default defineConfig({
   },
   test: {
     include: ['packages/**/test/**/*.test.ts'],
-    // generous for integration tests (real WS, Docker redis, libp2p crypto) under parallel load
     testTimeout: 20_000,
-    // Integration tests (libp2p crypto, redis testcontainers) are CPU-heavy; running one worker
-    // per core oversubscribes and starves timing-sensitive tests. Leave the OS/event-loop headroom.
-    maxWorkers: '50%',
-    minWorkers: 1,
+    // The ZeroMQ adapter is a native addon; native modules aren't reliably multi-thread-safe in
+    // Vitest's worker_threads (same class of problem as Prisma/bcrypt/canvas), so run each file in
+    // a child process (`forks`) — Vitest itself made this the default for this reason. And run files
+    // serially: this suite mixes Docker redis (testcontainers), libp2p crypto, and real ZeroMQ
+    // sockets, and running those concurrently starves timing-sensitive tests (3s reconnect/round-trip
+    // budgets). Serial forks trade wall-clock for determinism — the right call here.
+    pool: 'forks',
+    fileParallelism: false,
   },
 })

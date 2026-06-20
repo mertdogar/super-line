@@ -1,10 +1,35 @@
 import { Publisher, Subscriber } from 'zeromq'
 import type { Adapter } from '@super-line/core'
-import { createZeroMqAdapter, type ZeroMqPresenceOption } from '@super-line/adapter-zeromq'
+import { createZeroMqAdapter, createZeroMqProxy, type ZeroMqPresenceOption, type ZeroMqProxy } from '@super-line/adapter-zeromq'
 
 export interface Cluster {
   adapters: Adapter[]
   dispose: () => Promise<void>
+}
+
+export interface ProxyCluster extends Cluster {
+  proxy: ZeroMqProxy
+}
+
+/** Build `n` adapters that fan out through a central XSUB⇄XPUB forwarder (mode: 'proxy'). */
+export async function makeProxyCluster(n: number, presence?: ZeroMqPresenceOption): Promise<ProxyCluster> {
+  const proxy = await createZeroMqProxy({ frontendUrl: 'tcp://127.0.0.1:0', backendUrl: 'tcp://127.0.0.1:0' })
+  const adapters: Adapter[] = []
+  const dispose = async (): Promise<void> => {
+    for (const a of adapters) await a.close?.()
+    await proxy.stop()
+  }
+  try {
+    for (let i = 0; i < n; i++) {
+      adapters.push(
+        await createZeroMqAdapter({ mode: 'proxy', frontendUrl: proxy.frontendUrl, backendUrl: proxy.backendUrl, presence }),
+      )
+    }
+    return { adapters, dispose, proxy }
+  } catch (err) {
+    await dispose()
+    throw err
+  }
 }
 
 /**
@@ -36,6 +61,10 @@ export async function makeCluster(n: number, presence?: ZeroMqPresenceOption): P
       subs.push(sub)
       adapters.push(await createZeroMqAdapter({ pub: pubs[i]!, sub, presence }))
     }
+    // Let ZeroMQ establish the mesh connections + propagate the PRESENCE_CHANNEL subscriptions
+    // before any test runs. Without this slow-joiner settle, the first presence delta (sent when
+    // a client connects, right after this returns) can be dropped before the mesh is ready.
+    await new Promise((r) => setTimeout(r, 300))
     return { adapters, dispose }
   } catch (err) {
     await dispose()

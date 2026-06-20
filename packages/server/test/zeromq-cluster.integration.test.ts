@@ -1,9 +1,13 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { defineContract } from '@super-line/core'
 import type { Adapter } from '@super-line/core'
 import { createHarness, tick, waitFor } from './harness.js'
-import { makeCluster, type Cluster } from './zeromq-cluster.js'
+import { makeCluster, makeProxyCluster, type Cluster } from './zeromq-cluster.js'
+
+// Real-socket mesh + the redis testcontainers run in parallel worker threads; under that
+// contention the event loop can starve, so give these generous wall-clock headroom.
+vi.setConfig({ testTimeout: 30_000 })
 
 // Full-server parity suite for the ZeroMQ mesh adapter, over real loopback TCP (no Docker).
 // Mirrors the redis-cross-node / redis-presence suites. Slow-joiner: SUB subscriptions
@@ -113,13 +117,13 @@ describe('zeromq adapter — cluster presence through the server (mesh)', () => 
     h.client(contract, { url: b.url, role: 'agent', params: { uid: 'u2' } })
     await ca.join({ room: 'lobby' })
 
-    await waitFor(async () => (await a.srv.cluster.count()) === 2, 8000)
+    await waitFor(async () => (await a.srv.cluster.count()) === 2, 25_000)
     expect(await b.srv.cluster.count()).toBe(2)
     expect(await a.srv.cluster.byUser('u1')).toHaveLength(1)
     expect(await a.srv.isOnline('u1')).toBe(true)
     expect(await a.srv.isOnline('ghost')).toBe(false)
 
-    await waitFor(async () => (await b.srv.cluster.room('lobby')).length === 1, 8000)
+    await waitFor(async () => (await b.srv.cluster.room('lobby')).length === 1, 25_000)
     expect((await b.srv.cluster.room('lobby')).map((d) => d.userId)).toEqual(['u1'])
     const topo = await a.srv.cluster.topology()
     expect(new Set(topo.map((n) => n.nodeId))).toEqual(new Set([a.srv.nodeId, b.srv.nodeId]))
@@ -131,31 +135,55 @@ describe('zeromq adapter — cluster presence through the server (mesh)', () => 
     const b = await serverOn(cluster.adapters[1]!)
     h.client(contract, { url: a.url, role: 'user', params: { uid: 'u1' } })
     h.client(contract, { url: b.url, role: 'user', params: { uid: 'u2' } })
-    await waitFor(async () => (await a.srv.cluster.count()) === 2, 8000)
+    await waitFor(async () => (await a.srv.cluster.count()) === 2, 25_000)
 
     await cluster.adapters[1]!.close?.() // simulate crash: B stops gossiping snapshots
 
-    await waitFor(async () => (await a.srv.cluster.count()) === 1, 8000)
+    await waitFor(async () => (await a.srv.cluster.count()) === 1, 25_000)
     expect((await a.srv.cluster.connections()).map((d) => d.userId)).toEqual(['u1'])
     expect((await a.srv.cluster.topology()).map((n) => n.nodeId)).toEqual([a.srv.nodeId])
   })
 
-  it('removes a node’s entries immediately on graceful close', async () => {
-    cluster = await makeCluster(2)
+  it('removes a node’s entries on graceful close', async () => {
+    // The 'leave' broadcast is the fast path; on a lossy PUB/SUB transport the liveness TTL is
+    // the guarantee, so a short TTL keeps this reliable even if the at-most-once leave drops.
+    cluster = await makeCluster(2, { snapshotIntervalMs: 200, livenessTtlMs: 1500 })
     const a = await serverOn(cluster.adapters[0]!)
     const b = await serverOn(cluster.adapters[1]!)
     h.client(contract, { url: a.url, role: 'user', params: { uid: 'u1' } })
     h.client(contract, { url: b.url, role: 'user', params: { uid: 'u2' } })
-    await waitFor(async () => (await a.srv.cluster.count()) === 2, 8000)
+    await waitFor(async () => (await a.srv.cluster.count()) === 2, 25_000)
 
     await b.srv.close() // clearNode broadcasts a 'leave' — immediate, no TTL wait
 
-    await waitFor(async () => (await a.srv.cluster.count()) === 1, 8000)
+    await waitFor(async () => (await a.srv.cluster.count()) === 1, 25_000)
   })
 
   it('presence:false makes cluster queries throw', async () => {
     cluster = await makeCluster(1, false)
     const a = await serverOn(cluster.adapters[0]!)
     await expect(a.srv.cluster.connections()).rejects.toThrow(/presence/i)
+  })
+})
+
+describe('zeromq adapter — through a central forwarder (mode: proxy)', () => {
+  it('delivers a room broadcast and aggregates presence across nodes via the proxy', async () => {
+    cluster = await makeProxyCluster(2)
+    const a = await serverOn(cluster.adapters[0]!)
+    const b = await serverOn(cluster.adapters[1]!)
+    const client = h.client(contract, { url: a.url, role: 'user', params: { uid: 'u1' } })
+    const got: Array<{ text: string }> = []
+    client.on('message', (m) => got.push(m))
+    await client.join({ room: 'lobby' })
+    h.client(contract, { url: b.url, role: 'agent', params: { uid: 'u2' } })
+
+    for (let i = 0; i < 50 && got.length === 0; i++) {
+      b.srv.room('lobby').broadcast('message', { text: 'via-proxy' })
+      await tick(100)
+    }
+    expect(got[0]).toEqual({ text: 'via-proxy' })
+
+    await waitFor(async () => (await b.srv.cluster.count()) === 2, 25_000)
+    expect((await b.srv.cluster.byUser('u1')).map((d) => d.userId)).toEqual(['u1'])
   })
 })

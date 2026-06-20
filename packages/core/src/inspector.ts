@@ -60,7 +60,7 @@ export interface ConnView {
 /** A live topology event pushed on the `events` topic, fanned out cluster-wide. */
 export type InspectorEvent =
   | { type: 'connect'; descriptor: ConnDescriptor }
-  | { type: 'disconnect'; connId: string; nodeId: string }
+  | { type: 'disconnect'; connId: string; nodeId: string; userId?: string }
   | { type: 'room.add'; connId: string; room: string }
   | { type: 'room.remove'; connId: string; room: string }
   | { type: 'topic.sub'; connId: string; topic: string }

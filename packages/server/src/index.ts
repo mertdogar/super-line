@@ -719,7 +719,13 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
         conns.delete(conn)
         for (const channel of conn.channels) leaveChannel(conn, channel)
         void adapter.presence?.del(conn.id)
-        emitInspectorEvent({ type: 'disconnect', connId: conn.id, nodeId: instanceId })
+        const goneUserId = opts.identify?.(conn) // carry the name so the feed can label a purged conn
+        emitInspectorEvent({
+          type: 'disconnect',
+          connId: conn.id,
+          nodeId: instanceId,
+          ...(goneUserId !== undefined ? { userId: goneUserId } : {}),
+        })
         opts.onDisconnect?.(conn, ctx as CtxUnion<A>, code)
       })
       opts.onConnection?.(conn, ctx as CtxUnion<A>) // may seed conn.data before the snapshot

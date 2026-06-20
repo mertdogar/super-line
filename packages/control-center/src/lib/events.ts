@@ -1,18 +1,37 @@
-import type { InspectorEvent, MessageFlavor } from '@super-line/core'
+import type { ConnDescriptor, InspectorEvent, MessageFlavor } from '@super-line/core'
 
-/** A short human summary of a live inspector event, for the feed. */
-export function summarizeEvent(event: InspectorEvent): string {
+/** Resolves a connId / nodeId to friendly labels, so the feed shows names not hashes. */
+export interface FeedResolver {
+  conn(connId: string): ConnDescriptor | undefined
+  nodeName(nodeId: string): string
+}
+
+function nameOf(role: string, id: string, userId?: string): string {
+  return userId ? `${userId} (${role})` : `${role} ${id.slice(0, 8)}`
+}
+
+function who(connId: string, r?: FeedResolver): string {
+  const d = r?.conn(connId)
+  return d ? nameOf(d.role, d.id, d.userId) : connId.slice(0, 8)
+}
+
+/** A short human summary of a live inspector event, for the feed. Pass a resolver to show names. */
+export function summarizeEvent(event: InspectorEvent, r?: FeedResolver): string {
   switch (event.type) {
-    case 'connect':
-      return `${event.descriptor.role} ${event.descriptor.id.slice(0, 8)} on ${event.descriptor.nodeId.slice(0, 8)}`
-    case 'disconnect':
-      return `${event.connId.slice(0, 8)} on ${event.nodeId.slice(0, 8)}`
+    case 'connect': {
+      const d = event.descriptor
+      return `${nameOf(d.role, d.id, d.userId)} on ${d.nodeName}`
+    }
+    case 'disconnect': {
+      const label = event.userId ?? who(event.connId, r)
+      return `${label} on ${r?.nodeName(event.nodeId) ?? event.nodeId.slice(0, 8)}`
+    }
     case 'room.add':
     case 'room.remove':
-      return `${event.connId.slice(0, 8)} · ${event.room}`
+      return `${who(event.connId, r)} · ${event.room}`
     case 'topic.sub':
     case 'topic.unsub':
-      return `${event.connId.slice(0, 8)} · ${event.topic}`
+      return `${who(event.connId, r)} · ${event.topic}`
   }
 }
 

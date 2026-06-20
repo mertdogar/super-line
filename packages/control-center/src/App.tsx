@@ -186,7 +186,7 @@ export default function App(): React.JSX.Element {
                 ) : (
                   <p className="text-sm text-muted-foreground">No contract.</p>
                 ))}
-              {view === 'feed' && <LiveFeed events={feed} />}
+              {view === 'feed' && <LiveFeed events={feed} connections={connections} />}
             </div>
           )}
           {view === 'connections' && (

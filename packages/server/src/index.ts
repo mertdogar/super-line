@@ -8,9 +8,12 @@ import {
   SocketError,
   INSPECTOR_SUBPROTOCOL,
   INSPECTOR_ROLE,
+  classifyContract,
   type Adapter,
   type Serializer,
   type Contract,
+  type Schema,
+  type InspectedContract,
   type ClientFrame,
   type ReqFrame,
   type EvtFrame,
@@ -538,7 +541,37 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     }
   }
 
+  // getContract structure + best-effort JSON Schema via lazy, optional @standard-community/standard-json.
+  // The package (and the per-vendor converter) is optional — missing/unsupported falls back to structure only.
+  async function buildInspectedContract(): Promise<InspectedContract> {
+    let toJsonSchema: (s: Schema) => Promise<unknown>
+    try {
+      const mod = await import('@standard-community/standard-json')
+      toJsonSchema = mod.toJsonSchema as unknown as (s: Schema) => Promise<unknown>
+    } catch {
+      return classifyContract(c) // converter package not installed -> structure only
+    }
+    const schemas = new Set<Schema>()
+    classifyContract(c, (s) => {
+      schemas.add(s)
+      return undefined
+    })
+    const converted = new Map<Schema, unknown>()
+    await Promise.all(
+      [...schemas].map((s) =>
+        toJsonSchema(s).then(
+          (j) => {
+            converted.set(s, j)
+          },
+          () => {}, // unsupported vendor / missing per-vendor converter -> structure-only for this entry
+        ),
+      ),
+    )
+    return classifyContract(c, (s) => converted.get(s))
+  }
+
   const inspectorHandlers: Record<string, (input: unknown, conn: Conn) => Promise<unknown>> = {
+    getContract: () => buildInspectedContract(),
     getTopology: async () => presenceOrThrow().topology(),
     listConnections: async () => presenceOrThrow().list(),
     getNode: async () => ({ nodeId: instanceId, rooms: localRooms(), topics: localTopics() }),

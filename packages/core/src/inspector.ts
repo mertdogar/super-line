@@ -103,29 +103,41 @@ export const InspectorContract = defineContract({
 /** A schema → JSON Schema converter (best-effort). Supplied by the server in slice 3. */
 export type SchemaConverter = (schema: Schema) => unknown
 
+// attach converted schemas, omitting any the converter can't produce (structure-only for that field)
+function withSchemas(
+  msg: InspectedMessage,
+  schemas: Record<string, Schema>,
+  convert?: SchemaConverter,
+): InspectedMessage {
+  if (!convert) return msg
+  for (const [key, schema] of Object.entries(schemas)) {
+    const value = convert(schema)
+    if (value !== undefined) (msg as unknown as Record<string, unknown>)[key] = value
+  }
+  return msg
+}
+
 function classifyDirectional(d: Directional | undefined, convert?: SchemaConverter): InspectedDirectional {
   const clientToServer: InspectedMessage[] = []
   const serverToClient: InspectedMessage[] = []
   for (const [name, def] of Object.entries(d?.clientToServer ?? {})) {
-    clientToServer.push({
-      name,
-      flavor: 'request',
-      ...(convert && { input: convert(def.input), output: convert(def.output) }),
-    })
+    clientToServer.push(
+      withSchemas({ name, flavor: 'request' }, { input: def.input, output: def.output }, convert),
+    )
   }
   for (const [name, def] of Object.entries(d?.serverToClient ?? {})) {
     if ('input' in def) {
-      serverToClient.push({
-        name,
-        flavor: 'serverRequest',
-        ...(convert && { input: convert(def.input), output: convert(def.output) }),
-      })
+      serverToClient.push(
+        withSchemas({ name, flavor: 'serverRequest' }, { input: def.input, output: def.output }, convert),
+      )
     } else {
-      serverToClient.push({
-        name,
-        flavor: def.subscribe === true ? 'topic' : 'event',
-        ...(convert && { payload: convert(def.payload) }),
-      })
+      serverToClient.push(
+        withSchemas(
+          { name, flavor: def.subscribe === true ? 'topic' : 'event' },
+          { payload: def.payload },
+          convert,
+        ),
+      )
     }
   }
   return { clientToServer, serverToClient }
@@ -142,7 +154,7 @@ export function classifyContract(contract: Contract, convert?: SchemaConverter):
   }
   const serverToServer: InspectedMessage[] = []
   for (const [name, schema] of Object.entries(contract.serverToServer ?? {})) {
-    serverToServer.push({ name, flavor: 'serverEvent', ...(convert && { payload: convert(schema) }) })
+    serverToServer.push(withSchemas({ name, flavor: 'serverEvent' }, { payload: schema }, convert))
   }
   return { shared: classifyDirectional(contract.shared, convert), roles, serverToServer }
 }

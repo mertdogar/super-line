@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 import { z } from 'zod'
 import { defineContract, jsonSerializer, INSPECTOR_SUBPROTOCOL } from '@super-line/core'
+import type { InspectedContract, Schema } from '@super-line/core'
 import { createHarness, waitFor } from './harness.js'
 
 const contract = defineContract({
@@ -119,5 +120,54 @@ describe('inspector connection (slice 2)', () => {
     const { url } = await h.server(contract, { authenticate }) // inspector off
     // the server doesn't echo the reserved subprotocol, so the ws client fails the handshake
     await expect(connectInspector(url)).rejects.toThrow(/subprotocol/i)
+  })
+})
+
+// a Standard Schema with an unknown vendor: no converter exists -> structure-only for that message
+const mystery = {
+  '~standard': { version: 1, vendor: 'mystery', validate: (value: unknown) => ({ value }) },
+} as unknown as Schema
+
+const richContract = defineContract({
+  roles: {
+    user: {
+      clientToServer: {
+        say: { input: z.object({ text: z.string() }), output: z.object({ id: z.string() }) },
+        raw: { input: mystery, output: mystery },
+      },
+      serverToClient: {
+        feed: { payload: z.object({ n: z.number() }), subscribe: true },
+      },
+    },
+  },
+})
+
+describe('inspector getContract (slice 3)', () => {
+  it('returns structure + best-effort JSON Schema, falling back to structure-only per message', async () => {
+    const { url } = await h.server(richContract, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      inspector: true,
+    })
+    const insp = await connectInspector(url)
+    const got = (await insp.request('getContract')) as InspectedContract
+
+    const cts = got.roles.user?.clientToServer ?? []
+    const say = cts.find((m) => m.name === 'say')
+    expect(say?.flavor).toBe('request')
+    const sayInput = say?.input as { type?: string; properties?: Record<string, unknown> } | undefined
+    expect(sayInput?.type).toBe('object') // zod -> JSON Schema
+    expect(sayInput?.properties?.text).toBeDefined()
+    expect(say?.output).toMatchObject({ type: 'object' })
+
+    const raw = cts.find((m) => m.name === 'raw')
+    expect(raw?.flavor).toBe('request')
+    expect(raw?.input).toBeUndefined() // unknown vendor -> structure only
+    expect(raw?.output).toBeUndefined()
+
+    const feed = (got.roles.user?.serverToClient ?? []).find((m) => m.name === 'feed')
+    expect(feed?.flavor).toBe('topic')
+    expect(feed?.payload).toMatchObject({ type: 'object' })
+
+    insp.close()
   })
 })

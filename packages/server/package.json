@@ -5,8 +5,20 @@
   "description": "Typesafe WebSocket server for super-line — rooms, topics, middleware, pluggable adapters.",
   "license": "MIT",
   "author": "Mert",
-  "keywords": ["websocket", "server", "typesafe", "realtime", "rooms", "pubsub", "ws"],
-  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/server" },
+  "keywords": [
+    "websocket",
+    "server",
+    "typesafe",
+    "realtime",
+    "rooms",
+    "pubsub",
+    "ws"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mertdogar/super-line.git",
+    "directory": "packages/server"
+  },
   "homepage": "https://mertdogar.github.io/super-line/",
   "bugs": "https://github.com/mertdogar/super-line/issues",
   "main": "./dist/index.cjs",
@@ -14,14 +26,26 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "sideEffects": false,
-  "engines": { "node": ">=18" },
-  "publishConfig": { "access": "public" },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup"
   },
@@ -35,6 +59,10 @@
     "@types/ws": "^8.5.13",
     "ioredis": "^5.4.2",
     "testcontainers": "^10.13.2",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "optionalDependencies": {
+    "@standard-community/standard-json": "^0.3.5"
   }
 }

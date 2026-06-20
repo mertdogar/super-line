@@ -6,6 +6,8 @@ import {
   jsonSerializer,
   validate,
   SocketError,
+  INSPECTOR_SUBPROTOCOL,
+  INSPECTOR_ROLE,
   type Adapter,
   type Serializer,
   type Contract,
@@ -223,6 +225,12 @@ export interface ServerOptions<C extends Contract, A extends AuthResult<C>> {
   heartbeat?: { interval?: number; maxMissed?: number } | false
   /** Guard against slow consumers: when a connection's send buffer exceeds the limit, close or drop. */
   backpressure?: Backpressure
+  /**
+   * Read-only Control Center inspector channel, reached via the WS subprotocol
+   * `superline.inspector.v1`. Connections on it bypass `authenticate` and are kept out of
+   * presence, the heartbeat, and `local`/`cluster` results. **Default off; dev / trusted-network only.**
+   */
+  inspector?: boolean | { redact?: string[] }
   /** Called once per accepted connection. */
   onConnection?: (conn: Conn, ctx: CtxUnion<A>) => void
   /** Called when a connection closes, with the WebSocket close `code`. */
@@ -295,8 +303,15 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   const c: Contract = contract
   const serializer = opts.serializer ?? jsonSerializer
   const adapter = opts.adapter ?? createInMemoryAdapter()
-  const wss = new WebSocketServer({ noServer: true })
+  const inspectorEnabled = !!opts.inspector
+  // echo the reserved subprotocol only when inspector is on, so browsers complete the handshake
+  const wss = new WebSocketServer({
+    noServer: true,
+    handleProtocols: (protocols) =>
+      inspectorEnabled && protocols.has(INSPECTOR_SUBPROTOCOL) ? INSPECTOR_SUBPROTOCOL : false,
+  })
   const conns = new Set<Conn>()
+  const inspectorConns = new Set<Conn>() // read-only inspectors: kept out of conns/presence/heartbeat
   // local members per namespaced channel (rooms + topics share this registry)
   const members = new Map<string, Set<Conn>>()
   const serverListeners = new Map<string, Set<(data: unknown) => void>>()
@@ -489,10 +504,58 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     return undefined
   }
 
+  function localRooms(): string[] {
+    const out: string[] = []
+    for (const channel of members.keys()) if (channel.startsWith(ROOM)) out.push(channel.slice(ROOM.length))
+    return out
+  }
+  function localTopics(): string[] {
+    const out: string[] = []
+    for (const channel of members.keys()) {
+      if (!channel.startsWith(TOPIC)) continue
+      out.push(channel.slice(channel.indexOf(':', TOPIC.length) + 1)) // strip "t:{ns}:"
+    }
+    return out
+  }
+
+  // inspector connections dispatch against the fixed InspectorContract, never the user's contract
+  async function onInspectorFrame(conn: Conn, frame: ClientFrame): Promise<void> {
+    if (frame.t === 'req') await handleInspectorReq(conn, frame)
+  }
+
+  async function handleInspectorReq(conn: Conn, frame: ReqFrame): Promise<void> {
+    const handler = inspectorHandlers[frame.m]
+    if (!handler) {
+      conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: `Unknown message: ${frame.m}` })
+      return
+    }
+    try {
+      const output = await handler(frame.d, conn)
+      conn.send({ t: 'res', i: frame.i, d: output })
+    } catch (err) {
+      const e = err instanceof SocketError ? err : new SocketError('INTERNAL', 'Internal server error')
+      conn.send({ t: 'err', i: frame.i, code: e.code, m: e.message, d: e.data })
+    }
+  }
+
+  const inspectorHandlers: Record<string, (input: unknown, conn: Conn) => Promise<unknown>> = {
+    getTopology: async () => presenceOrThrow().topology(),
+    listConnections: async () => presenceOrThrow().list(),
+    getNode: async () => ({ nodeId: instanceId, rooms: localRooms(), topics: localTopics() }),
+  }
+
   if (opts.server) {
     opts.server.on('upgrade', (req, socket, head) => {
       void handleUpgrade(req, socket, head)
     })
+  }
+
+  function isInspectorRequest(req: IncomingMessage): boolean {
+    if (!inspectorEnabled) return false
+    const raw = req.headers['sec-websocket-protocol']
+    if (!raw) return false
+    const offered = (Array.isArray(raw) ? raw.join(',') : raw).split(',').map((p) => p.trim())
+    return offered.includes(INSPECTOR_SUBPROTOCOL)
   }
 
   async function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
@@ -501,32 +564,52 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       if (pathname !== opts.path) return
     }
 
-    let auth: A
-    try {
-      auth = await opts.authenticate(req)
-    } catch {
-      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
-      socket.destroy()
-      return
+    const inspector = isInspectorRequest(req)
+    let role: string
+    let ctx: unknown
+    if (inspector) {
+      role = INSPECTOR_ROLE // short-circuit authenticate for the read-only inspector channel
+      ctx = {}
+    } else {
+      let auth: A
+      try {
+        auth = await opts.authenticate(req)
+      } catch {
+        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
+        socket.destroy()
+        return
+      }
+      role = auth.role
+      ctx = auth.ctx
     }
 
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const conn = new Conn(ws, randomUUID(), auth.role, auth.ctx, serializer, opts.backpressure)
+      const conn = new Conn(ws, randomUUID(), role, ctx, serializer, opts.backpressure)
+      ws.on('message', (data, isBinary) => {
+        void onMessage(conn, data, isBinary)
+      })
+
+      if (inspector) {
+        // observer-invisible: not in conns/presence/heartbeat, no lifecycle hooks
+        inspectorConns.add(conn)
+        ws.on('close', () => {
+          inspectorConns.delete(conn)
+        })
+        return
+      }
+
       conns.add(conn)
       ws.on('pong', () => {
         conn.lastPongAt = Date.now()
         conn.missedPongs = 0
       })
-      ws.on('message', (data, isBinary) => {
-        void onMessage(conn, data, isBinary)
-      })
       ws.on('close', (code) => {
         conns.delete(conn)
         for (const channel of conn.channels) leaveChannel(conn, channel)
         void adapter.presence?.del(conn.id)
-        opts.onDisconnect?.(conn, auth.ctx as CtxUnion<A>, code)
+        opts.onDisconnect?.(conn, ctx as CtxUnion<A>, code)
       })
-      opts.onConnection?.(conn, auth.ctx as CtxUnion<A>) // may seed conn.data before the snapshot
+      opts.onConnection?.(conn, ctx as CtxUnion<A>) // may seed conn.data before the snapshot
       void adapter.presence?.set(buildDescriptor(conn)) // descriptor snapshot (reads conn.data)
       void joinChannel(conn, CONN + conn.id) // personal channel for targeted cross-node send
       const uid = opts.identify?.(conn)
@@ -539,6 +622,10 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     try {
       frame = serializer.decode(toWire(data, isBinary)) as ClientFrame
     } catch {
+      return
+    }
+    if (inspectorConns.has(conn)) {
+      await onInspectorFrame(conn, frame)
       return
     }
     if (frame.t === 'req') await handleReq(conn, frame)
@@ -698,17 +785,10 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       return {
         connections: [...conns],
         get rooms() {
-          const out: string[] = []
-          for (const channel of members.keys()) if (channel.startsWith(ROOM)) out.push(channel.slice(ROOM.length))
-          return out
+          return localRooms()
         },
         get topics() {
-          const out: string[] = []
-          for (const channel of members.keys()) {
-            if (!channel.startsWith(TOPIC)) continue
-            out.push(channel.slice(channel.indexOf(':', TOPIC.length) + 1)) // strip "t:{ns}:"
-          }
-          return out
+          return localTopics()
         },
       }
     },
@@ -782,6 +862,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       closing = true
       if (hbTimer) clearInterval(hbTimer)
       for (const conn of conns) conn.close()
+      for (const conn of inspectorConns) conn.close()
       await adapter.presence?.clearNode(instanceId) // remove this node's registry entries before disconnecting
       await adapter.close?.()
       await new Promise<void>((resolve) => {

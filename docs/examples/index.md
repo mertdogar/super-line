@@ -71,3 +71,15 @@ cd examples/scaling && docker compose up
 See [`examples/scaling/README.md`](https://github.com/mertdogar/super-line/tree/main/examples/scaling) for what to watch, how to connect your own client to the load balancer, and `--scale`.
 
 Demonstrates: [scaling & adapters](/guide/scaling-adapters), [the cluster event bus](/guide/scaling-adapters#the-cluster-event-bus).
+
+## react-chat-cluster — the browser app, across two servers
+
+[`react-chat`](#react-chat-browser-app) behind a real cluster via Docker Compose: **Redis + 2 server nodes + a Caddy** that serves the built SPA *and* round-robins `/ws` across the nodes. Open `http://localhost:8080` in several tabs — each lands on a different node (shown in the header), yet messages cross servers via a `room.broadcast` over the Redis adapter, and the online count is cluster-wide via `cluster.room(...)`. Needs Docker.
+
+```bash
+cd examples/react-chat-cluster && docker compose up
+```
+
+See [`examples/react-chat-cluster/README.md`](https://github.com/mertdogar/super-line/tree/main/examples/react-chat-cluster) for the topology and what each tab shows.
+
+Demonstrates: [React hooks](/guide/react), [scaling & adapters](/guide/scaling-adapters), [introspection & presence](/guide/introspection-and-presence).

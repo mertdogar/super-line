@@ -49,6 +49,16 @@ export function summarizeEvent(event: InspectorEvent, r?: FeedResolver): string 
   }
 }
 
+/** Coarse feed category, for the live-feed filter toggles. */
+export type FeedCategory = 'lifecycle' | 'requests' | 'events'
+
+export function eventCategory(type: InspectorEvent['type']): FeedCategory {
+  if (type === 'msg.request' || type === 'msg.response' || type === 'msg.serverRequest' || type === 'msg.serverReply')
+    return 'requests'
+  if (type.startsWith('msg.')) return 'events'
+  return 'lifecycle'
+}
+
 /** The inspectable payload of a message event (input/output/data), or undefined for lifecycle events. */
 export function eventPayload(event: InspectorEvent): unknown {
   switch (event.type) {

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { ConnDescriptor } from '@super-line/core'
-import { eventColor, eventPayload, flavorColor, formatDuration, summarizeEvent } from '../src/lib/events.js'
+import {
+  eventCategory,
+  eventColor,
+  eventPayload,
+  flavorColor,
+  formatDuration,
+  summarizeEvent,
+} from '../src/lib/events.js'
 
 const descriptor: ConnDescriptor = {
   id: 'abcdef1234',
@@ -59,6 +66,15 @@ describe('event helpers', () => {
     expect(summarizeEvent({ type: 'msg.broadcast', room: 'lobby', name: 'message', data: {} })).toBe('lobby ⇒ message')
     expect(summarizeEvent({ type: 'msg.publish', topic: 'presence', data: {} })).toBe('presence')
     expect(eventPayload({ type: 'connect', descriptor })).toBeUndefined() // lifecycle: nothing to expand
+  })
+
+  it('buckets events into feed categories', () => {
+    expect(eventCategory('connect')).toBe('lifecycle')
+    expect(eventCategory('room.add')).toBe('lifecycle')
+    expect(eventCategory('msg.request')).toBe('requests')
+    expect(eventCategory('msg.serverReply')).toBe('requests')
+    expect(eventCategory('msg.broadcast')).toBe('events')
+    expect(eventCategory('msg.publish')).toBe('events')
   })
 
   it('maps event types and flavors to colors', () => {

@@ -36,11 +36,13 @@ export async function makeNode(transport: Transport = 'memory'): Promise<PubSubL
 // Slice 1 used the TCP node directly.
 export const makeTcpNode = (): Promise<PubSubLibp2p> => makeNode('tcp')
 
-// Dial every node to the first, enough for gossip to propagate across the set.
-export async function connectStar(nodes: PubSubLibp2p[]): Promise<void> {
-  const [hub, ...rest] = nodes
-  if (!hub) return
-  for (const n of rest) await n.dial(hub.getMultiaddrs())
+// Dial every pair (full mesh) so every node directly sees every other as a topic subscriber.
+export async function connectAll(nodes: PubSubLibp2p[]): Promise<void> {
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      await nodes[i]!.dial(nodes[j]!.getMultiaddrs())
+    }
+  }
 }
 
 // Wait until every node sees at least `expected` peers subscribed to the topic.
@@ -74,7 +76,7 @@ export async function makeNodes(n: number, transport: Transport = 'memory'): Pro
   try {
     for (let i = 0; i < n; i++) nodes.push(await makeNode(transport))
     for (const node of nodes) node.services.pubsub.subscribe(TOPIC) // form the mesh up front
-    await connectStar(nodes)
+    await connectAll(nodes)
     await waitForSubscribers(nodes, n - 1)
   } catch (err) {
     await dispose()

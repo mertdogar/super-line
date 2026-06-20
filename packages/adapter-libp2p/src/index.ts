@@ -7,6 +7,7 @@ import { bootstrap } from '@libp2p/bootstrap'
 import { gossipsub, type GossipSub, type Message } from '@libp2p/gossipsub'
 import type { Libp2p } from '@libp2p/interface'
 import type { Adapter } from '@super-line/core'
+import { GossipPresence, type PresenceMsg } from './presence.js'
 
 /** A libp2p node whose services expose a gossipsub `pubsub`. */
 export type PubSubLibp2p = Libp2p<{ pubsub: GossipSub }>
@@ -30,9 +31,16 @@ export interface Libp2pAdapterOptions {
   bootstrap?: string[]
   /** The single shared gossipsub topic every node joins. Defaults to `'super-line/v1'`. */
   topic?: string
+  /**
+   * Cluster presence directory (powers `srv.cluster.*` / `srv.isOnline`). On by default;
+   * set `false` to disable (cluster queries then throw). Pass an object to tune timings.
+   */
+  presence?: false | { snapshotIntervalMs?: number; livenessTtlMs?: number }
 }
 
 const DEFAULT_TOPIC = 'super-line/v1'
+// reserved internal channel for presence gossip; can't collide with r:/t:/c:/u:/reply:/s2s
+const PRESENCE_CHANNEL = '\x00sl:presence'
 const enc = new TextEncoder()
 const dec = new TextDecoder()
 
@@ -98,9 +106,30 @@ export async function createLibp2pAdapter(options: Libp2pAdapterOptions = {}): P
   let handler: ((channel: string, payload: string | Uint8Array) => void) | undefined
   let closed = false
 
+  const publishFramed = async (channel: string, payload: string | Uint8Array): Promise<void> => {
+    if (closed) return
+    try {
+      await pubsub.publish(topic, frame(channel, payload))
+    } catch {
+      // at-most-once: a publish lost (e.g. before the mesh forms) is acceptable
+    }
+  }
+
+  const presence =
+    options.presence === false
+      ? undefined
+      : new GossipPresence(
+          (msg) => void publishFramed(PRESENCE_CHANNEL, JSON.stringify(msg)),
+          typeof options.presence === 'object' ? options.presence : {},
+        )
+
   const onMessage = (evt: CustomEvent<Message>): void => {
     if (evt.detail.topic !== topic) return
     const { channel, payload } = unframe(evt.detail.data)
+    if (channel === PRESENCE_CHANNEL) {
+      presence?.receive(JSON.parse(payload as string) as PresenceMsg)
+      return
+    }
     if (subscribed.has(channel)) handler?.(channel, payload)
   }
   pubsub.addEventListener('message', onMessage)
@@ -113,20 +142,15 @@ export async function createLibp2pAdapter(options: Libp2pAdapterOptions = {}): P
     unsubscribe(channel) {
       subscribed.delete(channel)
     },
-    async publish(channel, payload) {
-      if (closed) return
-      try {
-        await pubsub.publish(topic, frame(channel, payload))
-      } catch {
-        // at-most-once: a publish lost (e.g. before the mesh forms) is acceptable
-      }
-    },
+    publish: publishFramed,
     onMessage(h) {
       handler = h
     },
+    presence,
     async close() {
       if (closed) return
       closed = true
+      presence?.stop()
       pubsub.removeEventListener('message', onMessage)
       if (ownsNode) await node.stop()
     },

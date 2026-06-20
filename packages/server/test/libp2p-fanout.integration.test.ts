@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Adapter } from '@super-line/core'
 import { createLibp2pAdapter } from '@super-line/adapter-libp2p'
-import { connectStar, makeTcpNode, waitForSubscribers } from './libp2p-cluster.js'
+import { connectAll, makeTcpNode, waitForSubscribers } from './libp2p-cluster.js'
 import { waitFor } from './harness.js'
 
 // Real-TCP fidelity suite: spins up libp2p nodes over loopback (no Docker).
@@ -78,7 +78,7 @@ describe('libp2p adapter — core fan-out (real TCP)', () => {
     nodes.push(na, nb)
     const a = await adapterOn(na)
     const b = await adapterOn(nb)
-    await connectStar([na, nb])
+    await connectAll([na, nb])
     await waitForSubscribers([na, nb], 1)
 
     const aGot: Pair[] = []
@@ -102,7 +102,7 @@ describe('libp2p adapter — core fan-out (real TCP)', () => {
     nodes.push(na, nb)
     const a = await adapterOn(na)
     const b = await adapterOn(nb)
-    await connectStar([na, nb])
+    await connectAll([na, nb])
     await waitForSubscribers([na, nb], 1)
 
     const aGot: Pair[] = []

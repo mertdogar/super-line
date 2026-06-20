@@ -15,6 +15,7 @@ import {
   type Schema,
   type InspectedContract,
   type ConnView,
+  type InspectorEvent,
   type ClientFrame,
   type ReqFrame,
   type EvtFrame,
@@ -64,6 +65,7 @@ const CONN = 'c:' // personal channel per connection (targeted cross-node send)
 const USER = 'u:' // personal channel per user key (cross-node fan-out)
 const REPLY = 'reply:' // per-node channel carrying server→client request replies back to the origin
 const S2S = 's2s' // reserved channel for inter-server messaging
+const INSPECT = 'i:' // reserved fan-out channel for the inspector `events` topic
 
 // Envelope carried on personal (c:/u:) channels — distinct from the raw frame fan-out of rooms/topics.
 type PersonalEnvelope =
@@ -476,9 +478,21 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     if (set) for (const cb of set) cb(msg.d)
   }
 
+  // publish a live topology event to subscribed inspectors (fans out cluster-wide via the adapter)
+  function emitInspectorEvent(event: InspectorEvent): void {
+    if (!inspectorEnabled) return
+    void adapter.publish(INSPECT + 'events', serializer.encode({ t: 'pub', c: 'events', d: event }))
+  }
+
   function joinChannel(conn: Conn, channel: string): void | Promise<void> {
     conn.channels.add(channel)
-    if (channel.startsWith(ROOM)) void adapter.presence?.addRoom(conn.id, channel.slice(ROOM.length))
+    if (channel.startsWith(ROOM)) {
+      const room = channel.slice(ROOM.length)
+      void adapter.presence?.addRoom(conn.id, room)
+      emitInspectorEvent({ type: 'room.add', connId: conn.id, room })
+    } else if (channel.startsWith(TOPIC)) {
+      emitInspectorEvent({ type: 'topic.sub', connId: conn.id, topic: channel.slice(channel.indexOf(':', TOPIC.length) + 1) })
+    }
     const set = members.get(channel)
     if (set) {
       set.add(conn)
@@ -493,7 +507,13 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     if (!set) return
     set.delete(conn)
     conn.channels.delete(channel)
-    if (channel.startsWith(ROOM)) void adapter.presence?.removeRoom(conn.id, channel.slice(ROOM.length))
+    if (channel.startsWith(ROOM)) {
+      const room = channel.slice(ROOM.length)
+      void adapter.presence?.removeRoom(conn.id, room)
+      emitInspectorEvent({ type: 'room.remove', connId: conn.id, room })
+    } else if (channel.startsWith(TOPIC)) {
+      emitInspectorEvent({ type: 'topic.unsub', connId: conn.id, topic: channel.slice(channel.indexOf(':', TOPIC.length) + 1) })
+    }
     if (set.size === 0) {
       members.delete(channel)
       void adapter.unsubscribe(channel) // last local member -> stop receiving
@@ -528,6 +548,17 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   // inspector connections dispatch against the fixed InspectorContract, never the user's contract
   async function onInspectorFrame(conn: Conn, frame: ClientFrame): Promise<void> {
     if (frame.t === 'req') await handleInspectorReq(conn, frame)
+    else if (frame.t === 'sub') await handleInspectorSub(conn, frame)
+    else if (frame.t === 'unsub') leaveChannel(conn, INSPECT + 'events')
+  }
+
+  async function handleInspectorSub(conn: Conn, frame: { i: number; c: string }): Promise<void> {
+    if (frame.c !== 'events') {
+      conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: `Unknown topic: ${frame.c}` })
+      return
+    }
+    await joinChannel(conn, INSPECT + 'events') // await subscribe so the ack means "receiving"
+    conn.send({ t: 'res', i: frame.i, d: null })
   }
 
   async function handleInspectorReq(conn: Conn, frame: ReqFrame): Promise<void> {
@@ -674,6 +705,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
         inspectorConns.add(conn)
         ws.on('close', () => {
           inspectorConns.delete(conn)
+          for (const channel of conn.channels) leaveChannel(conn, channel) // drop its events subscription
         })
         return
       }
@@ -687,10 +719,13 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
         conns.delete(conn)
         for (const channel of conn.channels) leaveChannel(conn, channel)
         void adapter.presence?.del(conn.id)
+        emitInspectorEvent({ type: 'disconnect', connId: conn.id, nodeId: instanceId })
         opts.onDisconnect?.(conn, ctx as CtxUnion<A>, code)
       })
       opts.onConnection?.(conn, ctx as CtxUnion<A>) // may seed conn.data before the snapshot
-      void adapter.presence?.set(buildDescriptor(conn)) // descriptor snapshot (reads conn.data)
+      const descriptor = buildDescriptor(conn) // snapshot (reads conn.data)
+      void adapter.presence?.set(descriptor)
+      emitInspectorEvent({ type: 'connect', descriptor })
       void joinChannel(conn, CONN + conn.id) // personal channel for targeted cross-node send
       const uid = opts.identify?.(conn)
       if (uid !== undefined) void joinChannel(conn, USER + uid)

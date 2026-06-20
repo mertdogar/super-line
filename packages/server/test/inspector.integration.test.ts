@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { WebSocket } from 'ws'
 import { z } from 'zod'
-import { defineContract, jsonSerializer, INSPECTOR_SUBPROTOCOL } from '@super-line/core'
+import { defineContract, INSPECTOR_SUBPROTOCOL } from '@super-line/core'
 import type { InspectedContract, Schema } from '@super-line/core'
 import { MemoryBus, createInMemoryAdapter } from '@super-line/server'
-import { createHarness, waitFor } from './harness.js'
+import { connectInspector, createHarness, waitFor } from './harness.js'
 
 const contract = defineContract({
   roles: {
@@ -16,48 +15,6 @@ const contract = defineContract({
 function authenticate(req: { url?: string }) {
   const role = new URL(req.url ?? '', 'http://localhost').searchParams.get('role') as 'user' | 'agent'
   return { role, ctx: { role } }
-}
-
-interface Inspector {
-  protocol: string
-  request: (m: string, d?: unknown) => Promise<unknown>
-  close: () => void
-}
-
-// A minimal raw-ws inspector client (the typed client is slice 6): connects with the reserved
-// subprotocol, sends `req` frames, and resolves on the matching `res`/`err`.
-function connectInspector(url: string): Promise<Inspector> {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url, INSPECTOR_SUBPROTOCOL)
-    let id = 1
-    const waiters = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void }>()
-    ws.on('message', (data) => {
-      const frame = jsonSerializer.decode(data as Buffer) as {
-        t: string
-        i: number
-        d?: unknown
-        code?: string
-      }
-      const w = waiters.get(frame.i)
-      if (!w) return
-      waiters.delete(frame.i)
-      if (frame.t === 'res') w.resolve(frame.d)
-      else if (frame.t === 'err') w.reject(new Error(frame.code))
-    })
-    ws.on('open', () =>
-      resolve({
-        protocol: ws.protocol,
-        request: (m, d) =>
-          new Promise((res, rej) => {
-            const i = id++
-            waiters.set(i, { resolve: res, reject: rej })
-            ws.send(jsonSerializer.encode({ t: 'req', i, m, d }))
-          }),
-        close: () => ws.close(),
-      }),
-    )
-    ws.on('error', reject)
-  })
 }
 
 const h = createHarness()
@@ -253,6 +210,74 @@ describe('inspector getConn (slice 4)', () => {
     expect(view.ctxAvailable).toBe(false)
     expect(view.ctx).toBeUndefined()
     expect(view.descriptor.id).toBe(id)
+    insp.close()
+  })
+})
+
+const eventsContract = defineContract({
+  roles: {
+    user: {
+      clientToServer: { join: { input: z.object({ room: z.string() }), output: z.object({ ok: z.boolean() }) } },
+      serverToClient: { feed: { payload: z.object({ n: z.number() }), subscribe: true } },
+    },
+  },
+})
+const eventsAuth = () => ({ role: 'user' as const, ctx: {} })
+
+describe('inspector events topic (slice 5)', () => {
+  it('pushes live connect / room / topic / disconnect events to subscribed inspectors', async () => {
+    const { srv, url } = await h.server(eventsContract, { authenticate: eventsAuth, inspector: true })
+    srv.implement({
+      user: { join: async ({ room }, _ctx, conn) => (srv.room(room).add(conn), { ok: true }) },
+    })
+
+    const insp = await connectInspector(url)
+    await insp.subscribeEvents()
+
+    const u = h.client(eventsContract, { url, role: 'user' })
+    await u.join({ room: 'lobby' })
+    const sub = u.subscribe('feed', () => {})
+    await sub.ready
+
+    await waitFor(() => insp.events.some((e) => e.type === 'connect'))
+    await waitFor(() => insp.events.some((e) => e.type === 'room.add'))
+    await waitFor(() => insp.events.some((e) => e.type === 'topic.sub'))
+
+    const connectEv = insp.events.find((e) => e.type === 'connect')
+    expect(connectEv?.descriptor?.role).toBe('user')
+    expect(insp.events.find((e) => e.type === 'room.add')?.room).toBe('lobby')
+    expect(insp.events.find((e) => e.type === 'topic.sub')?.topic).toBe('feed')
+
+    u.close()
+    await waitFor(() => insp.events.some((e) => e.type === 'disconnect'))
+    // disconnect also tears down the conn's room/topic memberships -> remove/unsub events
+    await waitFor(() => insp.events.some((e) => e.type === 'room.remove'))
+    await waitFor(() => insp.events.some((e) => e.type === 'topic.unsub'))
+    insp.close()
+  })
+
+  it('fans out events across nodes (conn on B reaches an inspector on A)', async () => {
+    const bus = new MemoryBus()
+    const mk = () =>
+      h.server(eventsContract, {
+        authenticate: eventsAuth,
+        adapter: createInMemoryAdapter(bus),
+        inspector: true,
+      })
+    const nodeA = await mk()
+    const nodeB = await mk()
+    nodeA.srv.implement({ user: { join: async () => ({ ok: true }) } })
+    nodeB.srv.implement({ user: { join: async () => ({ ok: true }) } })
+
+    const insp = await connectInspector(nodeA.url) // inspector on A
+    await insp.subscribeEvents()
+
+    const u = h.client(eventsContract, { url: nodeB.url, role: 'user' }) // conn on B
+    await u.join({ room: 'x' })
+
+    await waitFor(() => insp.events.some((e) => e.type === 'connect'))
+    const connectEv = insp.events.find((e) => e.type === 'connect')
+    expect(connectEv?.descriptor?.nodeId).toBe(nodeB.srv.nodeId) // event originated on B
     insp.close()
   })
 })

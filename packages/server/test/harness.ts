@@ -1,6 +1,7 @@
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
-import type { Contract, RoleOf } from '@super-line/core'
+import { WebSocket } from 'ws'
+import { jsonSerializer, INSPECTOR_SUBPROTOCOL, type Contract, type RoleOf } from '@super-line/core'
 import {
   createSocketServer,
   type AuthResult,
@@ -46,6 +47,68 @@ export function createHarness() {
   }
 
   return { server, client, dispose }
+}
+
+export interface InspectorEventLike {
+  type: string
+  descriptor?: { id: string; role: string; nodeId: string }
+  connId?: string
+  room?: string
+  topic?: string
+}
+
+export interface Inspector {
+  protocol: string
+  request: (m: string, d?: unknown) => Promise<unknown>
+  subscribeEvents: () => Promise<void>
+  events: InspectorEventLike[]
+  close: () => void
+}
+
+// A minimal raw-ws inspector client (the typed client ships in @super-line/control-center):
+// connects with the reserved subprotocol, sends req/sub frames, resolves on the matching
+// res/err, and collects pub frames pushed on the `events` topic.
+export function connectInspector(url: string): Promise<Inspector> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url, INSPECTOR_SUBPROTOCOL)
+    let id = 1
+    const waiters = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void }>()
+    const events: InspectorEventLike[] = []
+    ws.on('message', (data) => {
+      const frame = jsonSerializer.decode(data as Buffer) as {
+        t: string
+        i: number
+        c?: string
+        d?: unknown
+        code?: string
+      }
+      if (frame.t === 'pub' && frame.c === 'events') {
+        events.push(frame.d as InspectorEventLike)
+        return
+      }
+      const w = waiters.get(frame.i)
+      if (!w) return
+      waiters.delete(frame.i)
+      if (frame.t === 'res') w.resolve(frame.d)
+      else if (frame.t === 'err') w.reject(new Error(frame.code))
+    })
+    const sendFrame = (frame: Record<string, unknown>): Promise<unknown> =>
+      new Promise((res, rej) => {
+        const i = id++
+        waiters.set(i, { resolve: res, reject: rej })
+        ws.send(jsonSerializer.encode({ ...frame, i }))
+      })
+    ws.on('open', () =>
+      resolve({
+        protocol: ws.protocol,
+        request: (m, d) => sendFrame({ t: 'req', m, d }),
+        subscribeEvents: () => sendFrame({ t: 'sub', c: 'events' }).then(() => undefined),
+        events,
+        close: () => ws.close(),
+      }),
+    )
+    ws.on('error', reject)
+  })
 }
 
 export const tick = (ms = 10): Promise<void> => new Promise((r) => setTimeout(r, ms))

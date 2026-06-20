@@ -1,0 +1,37 @@
+name: react-chat-cluster
+
+# Both chat nodes are the same image (built once); they differ only by NODE_NAME.
+x-node: &node
+  build:
+    context: ../..
+    dockerfile: examples/react-chat-cluster/Dockerfile
+  image: super-line-react-chat-cluster:dev
+  depends_on:
+    redis: { condition: service_healthy }
+
+services:
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  node-1:
+    <<: *node
+    environment: { PORT: '8787', NODE_NAME: node-1, REDIS_URL: redis://redis:6379 }
+
+  node-2:
+    <<: *node
+    environment: { PORT: '8787', NODE_NAME: node-2, REDIS_URL: redis://redis:6379 }
+
+  # Serves the built SPA and load-balances WebSockets across the two nodes.
+  web:
+    build:
+      context: ../..
+      dockerfile: examples/react-chat-cluster/Dockerfile.web
+    image: super-line-react-chat-cluster-web:dev
+    ports: ['8080:8080']
+    volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']
+    depends_on: [node-1, node-2]

@@ -255,26 +255,31 @@ srv.implement({
 })
 ```
 
-## serverToServer (cluster coordination)
+## Cluster event bus (cluster coordination)
 
-Top-level, not role-scoped. `emitServer` reaches **other** nodes only (excludes self); rides the same adapter.
+A bus channel is just a **shared topic**. One `server.publish` fans out to three kinds of subscriber at once: same-node `server.subscribe` listeners (local echo, in-process, no Redis/WS hop), other nodes' `server.subscribe` listeners (over the adapter, inbound-validated), and subscribed clients. `server.subscribe` fires for a publish from **any** node including this one — self-exclude with `if (from === srv.nodeId) return`.
 
 ```ts
 export const api = defineContract({
+  shared: { serverToClient: { rebalance: { payload: z.object({ shard: z.number() }), subscribe: true } } },
   roles: { user: {…} },
-  serverToServer: { rebalance: z.object({ shard: z.number() }) },
 })
 
-srv.onServer('rebalance', ({ shard }) => moveShard(shard))   // returns an unsubscribe fn
-srv.emitServer('rebalance', { shard: 3 })                    // -> every OTHER node
+const off = srv.subscribe('rebalance', ({ shard }, { from }) => {
+  if (from === srv.nodeId) return        // ignore our own publish (local echo)
+  moveShard(shard)
+})                                       // returns an unsubscribe fn
+srv.publish('rebalance', { shard: 3 })   // -> this node's listeners + every other node + subscribed clients
 ```
+
+The bus is **opt-in** pub/sub on a shared topic. It's a different tool from server-CHOSEN **events** (`conn.emit` / `room.broadcast` / `toConn(id).emit` / `toUser(id).emit`), which have no client opt-in and no server-side subscribe.
 
 ## Multi-node (Redis) — same code, scaled
 
 ```ts
 import { createRedisAdapter } from '@super-line/adapter-redis'
 const srv = createSocketServer(api, { server, authenticate, adapter: createRedisAdapter('redis://localhost:6379') })
-// every server process gets an adapter pointing at the same Redis; rooms, topics, AND serverToServer fan out across nodes.
+// every server process gets an adapter pointing at the same Redis; rooms, topics, AND the cluster event bus fan out across nodes.
 ```
 
 ## Typed error handling
@@ -525,22 +530,27 @@ it('fans out across two nodes sharing one bus', async () => {
 })
 ```
 
-### serverToServer across nodes
+### Cluster event bus across nodes
+
+`server.subscribe` fires on **every** node for a publish — the origin node via in-process local echo (no Redis hop), peers via the adapter. Assert each listener fires exactly once; self-exclude with `meta.from`.
 
 ```ts
-it('emitServer reaches other nodes and excludes the sender', async () => {
+// busApi: shared.serverToClient.rebalance = { payload: z.object({ shard: z.number() }), subscribe: true }
+
+it('one publish fires server.subscribe on both nodes exactly once', async () => {
   const bus = new MemoryBus()
-  const a = await h.server(s2sApi, { authenticate: () => ({ role: 'user' as const, ctx: {} }), adapter: createInMemoryAdapter(bus) })
-  const b = await h.server(s2sApi, { authenticate: () => ({ role: 'user' as const, ctx: {} }), adapter: createInMemoryAdapter(bus) })
+  const a = await h.server(busApi, { authenticate: () => ({ role: 'user' as const, ctx: {} }), adapter: createInMemoryAdapter(bus) })
+  const b = await h.server(busApi, { authenticate: () => ({ role: 'user' as const, ctx: {} }), adapter: createInMemoryAdapter(bus) })
 
-  const bGot: unknown[] = [], aGot: unknown[] = []
-  b.srv.onServer('rebalance', (d) => bGot.push(d))
-  a.srv.onServer('rebalance', (d) => aGot.push(d))
-  a.srv.emitServer('rebalance', { shard: 3 })
+  const aGot: unknown[] = [], bGot: unknown[] = []
+  a.srv.subscribe('rebalance', (d, { from }) => { expect(from).toBe(a.srv.nodeId); aGot.push(d) }) // origin: local echo, in-process
+  b.srv.subscribe('rebalance', (d, { from }) => { expect(from).toBe(a.srv.nodeId); bGot.push(d) }) // peer: over the bus, inbound-validated
+  a.srv.publish('rebalance', { shard: 3 })
 
-  await waitFor(() => bGot.length === 1)
+  await waitFor(() => aGot.length === 1 && bGot.length === 1)
   await tick(30)
-  expect(aGot).toEqual([])                         // sender excluded
+  expect(aGot).toEqual([{ shard: 3 }])             // origin fired once (no duplicate from a Redis round-trip)
+  expect(bGot).toEqual([{ shard: 3 }])
 })
 ```
 

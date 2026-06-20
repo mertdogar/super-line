@@ -23,12 +23,11 @@ export const api = defineContract({
     user:  { clientToServer: {…}, serverToClient: {…} },
     agent: { clientToServer: {…}, serverToClient: {…} },
   },
-  serverToServer: { /* node <-> node */ },   // optional, not role-scoped
 })
 ```
 
 - A **connection has a role**, decided at the upgrade from auth, fixed for its life. Each role gets a different typed surface *and* a different `ctx`.
-- **Direction is the axis** (named keys, never positional generics). Per `serverToClient` entry: `{ payload }` = **event** (server push); `{ payload, subscribe: true }` = **topic** (client opts in). `clientToServer` entries are `{ input, output }` **requests**.
+- **Direction is the axis** (named keys, never positional generics). Per `serverToClient` entry: `{ payload }` = **event** (server push); `{ payload, subscribe: true }` = **topic** (client opts in). A **shared** topic also serves as a **cluster event bus channel** (`server.publish`/`server.subscribe`/`client.subscribe`). `clientToServer` entries are `{ input, output }` **requests**.
 - **Server**: `createSocketServer(api, { authenticate })`, then `srv.implement({ shared, user, agent })`.
 - **Client**: `createClient(api, { url, role: 'user' })` → a typed proxy narrowed to that role's surface.
 
@@ -41,13 +40,13 @@ export const api = defineContract({
 | **topic** | `serverToClient: { payload, subscribe: true }` | client subscribes (server authorizes) | live streams |
 | **room** | server API (`srv.room`) | server controls membership | broadcast a shared event to a group |
 | **server→client request** | `serverToClient: { input, output }` | server (awaits one reply) | asking a client: confirm, sync |
-| **serverToServer** | `serverToServer: { schema }` | a server node | cluster coordination |
+| **cluster event bus** | **shared** topic (`serverToClient: { payload, subscribe: true }`) | anyone (`server.publish`); servers `server.subscribe`, clients `client.subscribe` | cluster-wide pub/sub: gossip, fleet tallies + a client stream from one declaration |
 
 ## Quick reference
 
 | Need | Do |
 |---|---|
-| Define contract | `defineContract({ shared, roles, serverToServer })` (any Standard Schema validator; Zod in examples) |
+| Define contract | `defineContract({ shared, roles })` (any Standard Schema validator; Zod in examples) |
 | Server | `const srv = createSocketServer(api, { server, authenticate }); srv.implement({ shared, user, agent })` |
 | Authenticate | `authenticate: (req) => ({ role: 'user', ctx })` — `throw` to reject (401); verify the claimed role |
 | Handler | `name: async (input, ctx, conn) => output` — `ctx`/`conn` narrowed to the block's role |
@@ -55,7 +54,7 @@ export const api = defineContract({
 | Send to one conn | `conn.emit('event', data)` |
 | Broadcast to a room | `srv.room('room:42').broadcast('event', data)` — **shared events only** |
 | Publish a topic | `srv.forRole('user').publish('feed', data)` (role) / `srv.publish('announce', data)` (shared) — **server only** |
-| Node → other nodes | `srv.emitServer('x', data)` / `srv.onServer('x', cb)` |
+| Cluster event bus | `srv.publish('announce', data)` (any node) · `srv.subscribe('announce', (data, { from }) => …)` (server-side, cluster-wide, **local echo**, returns unsubscribe) · `client.subscribe('announce', cb)` (over WS) — one shared topic. Self-exclude: `if (from === srv.nodeId) return` |
 | Introspection | `srv.local.connections/.rooms/.topics` (sync, this node) · `await srv.cluster.count()/.connections()/.byUser(uid)/.topology()` · `await srv.isOnline(uid)` (needs `identify` + presence adapter) |
 | Targeted cross-node send | `srv.toConn(id).emit('ev', d)` / `srv.toUser(uid).emit('ev', d)` · `.close()` / `.disconnect()` to kick |
 | Ask a client | `await srv.toConn(id).request('confirm', input, { timeout? })`; client: `client.implement({ confirm: async (input) => output })` |
@@ -71,7 +70,8 @@ export const api = defineContract({
 - **ALWAYS** `throw new SocketError(code, msg, data?)` for expected failures — clients get the typed `code`. Unknown throws become `INTERNAL`.
 - **ALWAYS** gate private topic subscriptions with `authorizeSubscribe(topic, ctx, conn)` (return `false`/throw to deny).
 - **ALWAYS** treat delivery as **at-most-once**: offline clients miss messages. Make handlers idempotent; re-run join flows after reconnect.
-- **ALWAYS** add `@super-line/adapter-redis` before running more than one server process, or rooms/topics/serverToServer only fan out within one node.
+- **ALWAYS** add `@super-line/adapter-redis` before running more than one server process, or rooms/topics/the cluster event bus only fan out within one node.
+- **ALWAYS** self-exclude on the bus (`if (from === srv.nodeId) return`) when you don't want to react to your own publish — `server.subscribe` has **local echo**.
 - **NEVER** trust client input — the server validates inbound automatically; keep schemas tight, don't bypass.
 
 ## Pitfalls
@@ -84,7 +84,8 @@ export const api = defineContract({
 - **`srv.local.*` is sync/this-node; `srv.cluster.*` is async/cluster-wide** (needs a presence adapter + `identify`). A `ConnDescriptor` is a connect-time snapshot, not a live `Conn`.
 - **`toConn(id).request` is shared-only + single-target** (missing target → `TIMEOUT`); `toUser` has no `request`. The client must `client.implement` the handler or it replies `NOT_FOUND`.
 - **Seed `identify`/`describeConn`/`conn.data` in `onConnection`** — it runs before the presence snapshot; mutating `conn.data` later won't update the already-written cluster descriptor. Prefer sync `srv.local.*` on hot paths (`srv.cluster.*` hits the adapter and is eventually consistent).
-- **`emitServer` excludes the sender** (other nodes only; single-node = no-op).
+- **The cluster event bus has LOCAL ECHO — you hear your own publish.** `server.subscribe` fires for a publish from ANY node *including this one* (in-process, no Redis/WS hop). Self-exclude with `if (from === srv.nodeId) return`. Peers arrive via the adapter, inbound-validated against the topic's payload; a throwing listener / bad inbound payload routes to `onError(err, { kind: 'event', name })`, listeners isolated.
+- **Don't conflate the bus with EVENTS.** `conn.emit` / `room.broadcast` / `toConn(id).emit` / `toUser(id).emit` are server-*chosen* pushes (no client opt-in, no server-side subscribe). The bus is **opt-in** pub/sub on a shared topic. Both exist — events when the server picks recipients, the bus when subscribers opt in.
 - **JSON loses `Date`.** Use `z.coerce.date()` or a `superjson` serializer on **both** ends.
 - **The client is a proxy, not awaitable** — `await client.someRequest(...)`, never `await client`.
 

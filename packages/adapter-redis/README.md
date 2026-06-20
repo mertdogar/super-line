@@ -1,6 +1,6 @@
 # @super-line/adapter-redis
 
-Redis Pub/Sub adapter for [**super-line**](https://mertdogar.github.io/super-line/) — fan out rooms, topics, and `serverToServer` events across multiple server processes.
+Redis Pub/Sub adapter for [**super-line**](https://mertdogar.github.io/super-line/) — fan out rooms, topics, and the cluster event bus (`server.publish` / `server.subscribe`) across multiple server processes.
 
 ```bash
 pnpm add @super-line/adapter-redis

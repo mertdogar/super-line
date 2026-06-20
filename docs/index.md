@@ -3,7 +3,7 @@ layout: home
 hero:
   name: super-line
   text: Typesafe WebSockets for TypeScript
-  tagline: One contract, split by direction and scoped by role. Requests, events, topics, rooms & inter-server messaging — with end-to-end types and zero codegen.
+  tagline: One contract, split by direction and scoped by role. Requests, events, topics, rooms & a cluster event bus — with end-to-end types and zero codegen.
   image:
     src: /mark.svg
     alt: super-line
@@ -29,5 +29,5 @@ features:
   - title: 📡 Events, rooms & topics
     details: Server-pushed events, server-controlled room broadcasts, and client-subscribed pub/sub streams.
   - title: 📈 Scales across nodes
-    details: Rooms, topics, and serverToServer events fan out across processes via a pluggable adapter (Redis included).
+    details: Rooms, topics, and a cluster event bus fan out across processes via a pluggable adapter (Redis included).
 ---

@@ -62,6 +62,40 @@ srv.implement({
 })
 ```
 
+## The cluster bus
+
+A **shared topic** is also a symmetric, cluster-wide pub/sub bus built on the existing topic substrate. One `server.publish` fans out to **three** kinds of subscriber at once:
+
+- **same-node `server.subscribe` listeners** — fire directly, in-process, no Redis/WS hop;
+- **other nodes' `server.subscribe` listeners** — fire via the adapter (inbound-validated);
+- **subscribed clients on any node** — receive over WS.
+
+### Server: subscribe
+
+`server.subscribe` is the server-side, cluster-wide consumer. It fires for a publish from **any** node — including this one (a **local echo**, delivered in-process with no Redis/WS round-trip). The callback gets `(data, { from })`, where `from` is the origin node id:
+
+```ts
+const off = srv.subscribe('announce', (data, { from }) => {
+  if (from === srv.nodeId) return        // self-exclude your own publishes
+  console.log('from peer', from, data.msg)
+})
+off() // unsubscribe
+```
+
+`data` is typed from the same shared `serverToClient` declaration the client subscribes to. `server.subscribe` is **shared topics only** — role-scoped server-side subscribe is deferred.
+
+Inbound events from **other** nodes are validated against the topic's payload schema; the local echo is trusted (not re-validated). A throwing listener or a bad inbound payload routes to `opts.onError(err, { kind: 'event', name })`, and each listener is **isolated** — one throw never stops the others or the message pump.
+
+### Publish from any node
+
+`server.publish` is the same `srv.publish` you already use on shared topics — any node may publish, and every subscriber (server-side and client-side, on every node) sees it:
+
+```ts
+srv.publish('announce', { msg: 'maintenance at 5pm' }) // shared topic → the bus
+```
+
+Role topics still use `srv.forRole(r).publish(...)` and reach that role's **client** subscribers only.
+
 ## Parameterized topics
 
 Topics are typed by **exact contract key**. Parameterized names like `room:{id}` aren't type-inferred yet — use a concrete key and carry the id in the payload (filter client-side), or use a [room](./events-rooms) for server-controlled grouping.

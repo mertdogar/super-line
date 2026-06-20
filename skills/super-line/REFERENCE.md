@@ -17,8 +17,10 @@ defineContract(<const C>): C                 // identity; preserves literal keys
     clientToServer?: Record<string, { input: Schema; output: Schema }>
     serverToClient?: Record<string, ServerEntry>
   }>
-  serverToServer?: Record<string, Schema>    // node <-> node payloads (not role-scoped)
 }
+// Cluster event bus: a bus channel is just a SHARED topic
+// ({ payload, subscribe: true } under shared.serverToClient). One publish fans out to
+// same-node server.subscribe listeners, other nodes' server.subscribe listeners, AND subscribed clients.
 // ServerEntry (serverToClient): { payload } => push event; { payload, subscribe: true } => topic;
 //                               { input, output } => server→client request (client answers via client.implement)
 // A role's effective surface = shared ∪ roles[R].
@@ -48,10 +50,10 @@ interface Adapter {                          // cross-node fan-out seam
 
 // contract type: Contract, Directional, RoleBlock, RequestDef, ServerMessageDef, ServerRequestDef, ServerEntry, Schema
 // surface helpers: RoleOf<C>, Requests<C,R>, ServerMessages<C,R>, Events<C,R>, Topics<C,R>,
-//   SharedRequests<C>, RoleRequests<C,R>, SharedEvents<C>, SharedTopics<C>, RoleTopics<C,R>, ServerEvents<C>,
+//   SharedRequests<C>, RoleRequests<C,R>, SharedEvents<C>, SharedTopics<C>, RoleTopics<C,R>,
 //   ServerRequests<C,R>, SharedServerRequests<C>, DataOf<C,R>, AnyData<C>
 // presence: PresenceStore, ConnDescriptor, NodeStat
-// extractors (guarded): ClientInput<T>, ServerInput<T>, Output<T>, EventData<T>, EmitData<T>, ServerEmit<T>, ServerData<T>
+// extractors (guarded): ClientInput<T>, ServerInput<T>, Output<T>, EventData<T>, EmitData<T>
 // InferIn<S>, InferOut<S>
 ```
 
@@ -84,10 +86,11 @@ interface SocketServer<C, A> {
   readonly nodeId: string                                            // this process's stable id
   implement(handlers: Handlers<C, A>): SocketServer<C, A>             // chainable
   room(name: string): Room<C>                                        // mixed-role group
-  publish<T extends keyof SharedTopics<C>>(topic: T, data): void      // SHARED topics
+  publish<T extends keyof SharedTopics<C>>(topic: T, data): void      // SHARED topics — cluster event bus: fans out to server.subscribe (this + other nodes) AND subscribed clients
   forRole<R>(role: R): { publish<T extends keyof RoleTopics<C,R>>(topic: T, data): void }  // role topics
-  emitServer<E extends keyof ServerEvents<C>>(event: E, data): void   // -> OTHER nodes (excludes self)
-  onServer<E extends keyof ServerEvents<C>>(event: E, cb: (data) => void): () => void      // returns unsubscribe
+  subscribe<T extends keyof SharedTopics<C>>(topic: T, cb: (data, meta: { from: string }) => void): () => void  // SHARED topics only; server-side, cluster-wide; returns unsubscribe
+  // server.subscribe fires for a publish from ANY node INCLUDING this one (local echo, in-process, NO Redis/WS hop).
+  // meta.from = origin node id; self-exclude with: if (from === srv.nodeId) return. Role-scoped server.subscribe is deferred.
   // introspection
   readonly local: LocalView                                          // sync, THIS node
   readonly cluster: ClusterView                                      // async, registry-backed (needs presence adapter)
@@ -165,7 +168,8 @@ Notes:
 - Dispatch resolves a handler by `conn.role`, which inherently enforces the boundary: a request not on `shared ∪ roles[conn.role]` returns **`NOT_FOUND`** (does not reveal other roles' surface).
 - `room.size` is the count on the *current node* only. A "room" and a "topic" share the same channel substrate; the difference is who subscribes (server `add` vs client `subscribe`).
 - Role topics are namespaced per role on the wire; the client subscribes by the plain topic name.
-- `emitServer` stamps a per-server instance id and drops its own messages on receive (exclude-self); single-node = no-op.
+- Cluster event bus (`server.publish` + `server.subscribe` on a shared topic): same-node listeners fire directly in-process (local echo, trusted, NOT re-validated); other nodes' listeners fire via the adapter (inbound payload validated against the topic schema). A throwing listener or a bad inbound payload routes to `opts.onError(err, { kind: 'event', name })`; each listener is isolated — one throw never stops the others or the message pump. Self-exclude with `if (from === srv.nodeId) return`.
+- The bus is OPT-IN pub/sub. It's distinct from server-CHOSEN **events** (`conn.emit` / `room.broadcast` / `toConn(id).emit` / `toUser(id).emit`) — those have no client opt-in and no server-side subscribe. Different tools; both exist.
 
 ## @super-line/client
 
@@ -217,7 +221,7 @@ createRedisAdapter(options?: { url?: string; presenceTtlMs?: number } | string):
 // createRedisAdapter('redis://localhost:6379')  — pass to every server's `adapter`
 // presenceTtlMs (default 90_000): node liveness key TTL, refreshed by the heartbeat; must exceed heartbeat interval
 ```
-Redis Pub/Sub (two connections) + a presence store. At-most-once. Run more than one server process? Every server needs an adapter pointing at the same Redis. Carries rooms, topics, serverToServer, targeted `toConn`/`toUser` sends, server→client request replies, AND the cluster presence registry.
+Redis Pub/Sub (two connections) + a presence store. At-most-once. Run more than one server process? Every server needs an adapter pointing at the same Redis. Carries rooms, topics (including cluster-bus `server.publish`/`server.subscribe`), targeted `toConn`/`toUser` sends, server→client request replies, AND the cluster presence registry.
 
 ## @super-line/react
 

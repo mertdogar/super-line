@@ -1,6 +1,6 @@
 ---
 name: super-line
-description: Use when building realtime features with super-line — TypeScript/JavaScript that imports from @super-line/core, @super-line/server, @super-line/client, @super-line/adapter-redis, or @super-line/react, or when the user mentions super-line. Covers the one contract split by direction (clientToServer/serverToClient) and scoped by role (a shared base plus per-role surfaces); the interaction flavors (req/res requests, server-pushed events, client-subscribed topics, server-controlled rooms, node-to-node serverToServer, and server→client requests where the server asks a client and awaits a typed reply via toConn.request / client.implement); upgrade-time auth that returns { role, ctx }, role enforcement (cross-role calls get NOT_FOUND), the typed SocketError model; connection introspection and presence (srv.local for this node, srv.cluster for the whole fleet — connection counts, topology, isOnline, byUser); targeted cross-node send and disconnect (srv.toConn(id) / srv.toUser(uid)); heartbeat liveness (lastPongAt) and zombie reaping; typed per-connection state (conn.data); backpressure; client reconnect and at-most-once delivery; multi-node scaling and the presence registry via the Redis adapter; testing over a real loopback server; and common pitfalls. Also reach for this skill when the user asks how to count or list connections, check who's online, broadcast or send to a specific user/connection across servers, push a message to another node, ask a connected client a question, track presence, or shape a typed WebSocket contract — even if they don't name super-line. Not for socket.io, ws, or tRPC.
+description: Use when building realtime features with super-line — TypeScript/JavaScript that imports from @super-line/core, @super-line/server, @super-line/client, @super-line/adapter-redis, or @super-line/react, or when the user mentions super-line. Covers the one contract split by direction (clientToServer/serverToClient) and scoped by role (a shared base plus per-role surfaces); the interaction flavors (req/res requests, server-pushed events, client-subscribed topics, server-controlled rooms, the cluster event bus — a symmetric cluster-wide pub/sub on a shared topic via server.publish / server.subscribe / client.subscribe — and server→client requests where the server asks a client and awaits a typed reply via toConn.request / client.implement); upgrade-time auth that returns { role, ctx }, role enforcement (cross-role calls get NOT_FOUND), the typed SocketError model; connection introspection and presence (srv.local for this node, srv.cluster for the whole fleet — connection counts, topology, isOnline, byUser); targeted cross-node send and disconnect (srv.toConn(id) / srv.toUser(uid)); heartbeat liveness (lastPongAt) and zombie reaping; typed per-connection state (conn.data); backpressure; client reconnect and at-most-once delivery; multi-node scaling and the presence registry via the Redis adapter; testing over a real loopback server; and common pitfalls. Also reach for this skill when the user asks how to count or list connections, check who's online, broadcast or send to a specific user/connection across servers, fan a publish out cluster-wide to servers and clients at once, ask a connected client a question, track presence, or shape a typed WebSocket contract — even if they don't name super-line. Not for socket.io, ws, or tRPC.
 ---
 
 # super-line
@@ -27,7 +27,6 @@ export const api = defineContract({
     user:  { clientToServer: {…}, serverToClient: {…} },
     agent: { clientToServer: {…}, serverToClient: {…} },
   },
-  serverToServer: { /* node <-> node */ },   // optional, not role-scoped
 })
 ```
 
@@ -35,7 +34,7 @@ export const api = defineContract({
 - **Direction is the axis** (named keys, never positional generics). **Per entry:**
   - `clientToServer: { name: { input, output } }` → **request** (awaited, typed errors, timeout).
   - `serverToClient: { name: { payload } }` → **event** (server pushes to chosen recipients).
-  - `serverToClient: { name: { payload, subscribe: true } }` → **topic** (client opts in via `subscribe`).
+  - `serverToClient: { name: { payload, subscribe: true } }` → **topic** (client opts in via `subscribe`). A **shared** topic doubles as a **cluster event bus channel** — see below.
 - **Server**: `createSocketServer(api, { authenticate })`, then `srv.implement({ shared, user, agent })`.
 - **Client**: `createClient(api, { url, role: 'user' })` → a typed proxy narrowed to that role's surface.
 - **No codegen.** Put the contract in a module both import. Never re-declare types on one side.
@@ -49,15 +48,15 @@ export const api = defineContract({
 | **topic** | `serverToClient: { payload, subscribe: true }` | server → many clients | **client** subscribes (server authorizes) | live streams: prices, presence, feeds |
 | **room** | server API | server → members | **server** controls (`add`/`remove`) | grouping conns to broadcast a shared event |
 | **server→client request** | `serverToClient: { input, output }` | server → client → server (one reply) | server | asking a client: `confirm`, `sync`, capability probe |
-| **serverToServer** | `serverToServer: { schema }` | node → other nodes | server | cluster coordination: rebalance, cache-invalidate |
+| **cluster event bus** | **shared** topic (`serverToClient: { payload, subscribe: true }`) | any node → all servers + all subscribed clients | anyone (`server.publish`) | cluster-wide pub/sub: gossip, fleet-wide tallies, coordination + a client-facing stream from one declaration |
 
-Decide: **Need a reply?** request. **Pushing to recipients *you* pick?** event (often via `room.broadcast`). **Clients opting into a stream?** topic. **Coordinating other server processes?** `serverToServer`.
+Decide: **Need a reply?** request. **Pushing to recipients *you* pick?** event (often via `room.broadcast`). **Clients opting into a stream?** topic. **Coordinating other server processes (and optionally clients) on a symmetric channel?** the **cluster event bus** — a shared topic with `server.publish` + `server.subscribe` + `client.subscribe`.
 
 ## Quick reference
 
 | Need | Do |
 |---|---|
-| Define contract | `defineContract({ shared, roles, serverToServer })` (schemas = any Standard Schema validator; Zod in examples) |
+| Define contract | `defineContract({ shared, roles })` (schemas = any Standard Schema validator; Zod in examples) |
 | Server | `const srv = createSocketServer(api, { server, authenticate }); srv.implement({ shared, user, agent })` |
 | Authenticate | `authenticate: (req) => ({ role: 'user', ctx })` — `throw` to reject (401). Read the claimed role from `req` query and verify it. |
 | Handler | `name: async (input, ctx, conn) => output` — `ctx`/`conn` narrowed to the block's role |
@@ -65,8 +64,9 @@ Decide: **Need a reply?** request. **Pushing to recipients *you* pick?** event (
 | Send to one conn | `conn.emit('event', data)` (scoped to the conn's role events) |
 | Broadcast to a room | `srv.room('room:42').broadcast('event', data)` — **shared events only** (mixed-role room) |
 | Publish a role topic | `srv.forRole('user').publish('feed', data)` — **server only** |
-| Publish a shared topic | `srv.publish('announce', data)` — **server only** |
-| Node → other nodes | `srv.emitServer('rebalance', data)` / `srv.onServer('rebalance', cb)` |
+| Publish a shared topic | `srv.publish('announce', data)` — **server only** (any node; this IS the bus publish) |
+| Cluster event bus | `srv.publish('announce', data)` (any node) · `srv.subscribe('announce', (data, { from }) => …)` (server-side, cluster-wide, **local echo**, returns unsubscribe) · `client.subscribe('announce', (data) => …)` (over WS) — all from ONE shared topic |
+| Self-exclude on the bus | `srv.subscribe('announce', (data, { from }) => { if (from === srv.nodeId) return; … })` — you hear your own publish |
 | Client | `const client = createClient(api, { url, role: 'user' })` |
 | Client call | `await client.send(input, { timeoutMs?, signal? })` |
 | Client listen | `client.on('event', (d) => …)` → returns unsubscribe |
@@ -82,7 +82,7 @@ Decide: **Need a reply?** request. **Pushing to recipients *you* pick?** event (
 | Per-conn state | declare `data:` schema in a role block → `conn.data` typed per role, mutable, starts `{}` |
 | Backpressure | `backpressure: { maxBufferedBytes, onExceed: 'close' | 'drop' }` in server opts |
 
-Full signatures → **REFERENCE.md**. End-to-end best-practice patterns (roles, auth, presence, DMs, scaling, serverToServer, testing) → **RECIPES.md**.
+Full signatures → **REFERENCE.md**. End-to-end best-practice patterns (roles, auth, presence, DMs, scaling, the cluster event bus, testing) → **RECIPES.md**.
 
 ## Rules
 
@@ -91,7 +91,8 @@ Full signatures → **REFERENCE.md**. End-to-end best-practice patterns (roles, 
 - **ALWAYS** `throw new SocketError(code, msg, data?)` from handlers for expected failures — clients get the typed `code`. Unknown throws become `INTERNAL` (no internals leaked).
 - **ALWAYS** gate topic subscriptions with `authorizeSubscribe(topic, ctx, conn)` when topics carry private data (return `false` or throw to deny).
 - **ALWAYS** treat delivery as **at-most-once**: offline clients miss messages (no replay). Make handlers idempotent; re-run join flows after reconnect; don't assume in-flight requests survive a drop.
-- **ALWAYS** add a real adapter (`@super-line/adapter-redis`) before running more than one server process — otherwise rooms/topics/serverToServer only fan out within one node.
+- **ALWAYS** add a real adapter (`@super-line/adapter-redis`) before running more than one server process — otherwise rooms/topics/the cluster event bus only fan out within one node.
+- **ALWAYS** self-exclude on the bus when you don't want to react to your own publish — `server.subscribe` has **local echo**: `if (from === srv.nodeId) return`. The bus fires same-node listeners in-process (no Redis/WS hop); peers arrive via the adapter and are inbound-validated against the topic's payload schema.
 - **PREFER** `events` (server picks recipients) over `topics` when the server decides who gets it; use `topics` only for client-initiated subscriptions.
 - **PREFER** `srv.local.*` (sync, in-process) for hot-path reads; reach for `srv.cluster.*` only when you genuinely need the whole fleet. Cluster reads hit the adapter (Redis) and are **eventually consistent** — a snapshot, not a transaction. Don't poll them in a tight loop.
 - **ALWAYS** seed cluster-descriptor fields (`identify`/`describeConn` inputs, `conn.data`) in `onConnection` — it runs just *before* the presence snapshot. Mutating `conn.data` later in a handler updates the in-process conn but **not** the already-written descriptor.
@@ -110,7 +111,9 @@ Full signatures → **REFERENCE.md**. End-to-end best-practice patterns (roles, 
 - **Don't `toConn`/`toUser` a client in the *same tick* it connects.** The personal `c:{id}`/`u:{uid}` channel is subscribed fire-and-forget on connect; on Redis that `SUBSCRIBE` takes a moment to propagate, so a send issued in the same millisecond can miss. In real flows any prior `await` (a handler, an introspection call) closes the window — only synthetic "connect then immediately push" code hits it.
 - **`cluster.*` / `isOnline` need a presence-capable adapter AND `identify`.** The in-memory and Redis adapters have presence; a custom pub/sub-only adapter makes `srv.cluster.*` throw. `byUser`/`isOnline`/`toUser` also need the `identify` hook set, or they see no user key.
 - **Heartbeat liveness (`lastPongAt`) is node-local, not in the registry.** Cluster liveness is "node alive + conn present"; for per-socket freshness read `conn.lastPongAt` on the owning node. A crashed node's conns drop from cluster queries only after its alive-TTL expires.
-- **`serverToServer` excludes the sender.** `emitServer` reaches *other* nodes only; on a single node it's a no-op.
+- **The cluster event bus has LOCAL ECHO — you hear your own publish.** `server.subscribe` fires for a publish from ANY node *including this one* (delivered in-process, no Redis/WS round-trip). Self-exclude with `if (from === srv.nodeId) return`. (Contrast the old `serverToServer`, which excluded the sender — the bus does not.)
+- **Don't conflate the bus with EVENTS.** `conn.emit` / `room.broadcast` / `toConn(id).emit` / `toUser(id).emit` are server-*chosen* pushes with no client opt-in and no server-side subscribe. The bus is **opt-in** pub/sub on a shared topic (`client.subscribe` to opt in; `server.subscribe` for cluster-wide server-side fan-in). Both exist; pick events when the server decides recipients, the bus when subscribers opt in.
+- **Bus errors route to `opts.onError`.** A throwing listener or a bad inbound payload from another node goes to `onError(err, { kind: 'event', name })`; each listener is isolated — one throw never stops the others or the message pump.
 - **JSON serializer loses rich types.** Default JSON turns `Date` into a string; use `z.coerce.date()` or configure `superjson` as the serializer on **both** ends (they must match).
 - **The client is not awaitable.** It's a proxy; don't `await client` (only `await client.someRequest(...)`).
 - **`subscribe().ready` rejects on denial/disconnect.** `await sub.ready` (or handle rejection) if you need to know the subscription was accepted.

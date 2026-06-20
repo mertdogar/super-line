@@ -40,9 +40,29 @@ pnpm --filter @super-line/example-presence start
 
 Demonstrates: [introspection & presence](/guide/introspection-and-presence).
 
+## event-bus — single-process cluster event bus
+
+One process shows the [cluster event bus](/guide/scaling-adapters#the-cluster-event-bus) on a shared topic: a `server.publish` fans out to several in-process `server.subscribe` listeners (showing local echo — your own publish fires in-process, no round-trip) plus one client subscriber over WS. No Redis needed.
+
+```bash
+pnpm --filter @super-line/example-event-bus start
+```
+
+Demonstrates: [the cluster event bus](/guide/scaling-adapters#the-cluster-event-bus).
+
+## bus-cluster — multi-node server.subscribe showcase
+
+A cluster via Docker Compose: **Redis + Caddy + 3 server nodes + watcher clients**. Every node bumps a counter and `server.subscribe`s to every node's bumps, converging a shared tally — own bumps land in-process via local echo, peers' arrive over Redis. node-1 publishes a client-facing `total` snapshot. Needs Docker.
+
+```bash
+cd examples/bus-cluster && docker compose up
+```
+
+Demonstrates: [the cluster event bus](/guide/scaling-adapters#the-cluster-event-bus), [scaling & adapters](/guide/scaling-adapters).
+
 ## scaling — a real multi-node cluster
 
-A genuine cluster via Docker Compose: **Redis + a Caddy load balancer + 3 server nodes + 6 client containers**. Caddy round-robins each client onto a node; you watch room broadcasts, a topic, and `serverToServer` stats fan out across separate processes. Needs Docker.
+A genuine cluster via Docker Compose: **Redis + a Caddy load balancer + 3 server nodes + 6 client containers**. Caddy round-robins each client onto a node; you watch room broadcasts, a topic, and `stats` gossip — migrated to a shared `stats` topic over the cluster event bus — fan out across separate processes. Needs Docker.
 
 ```bash
 cd examples/scaling && docker compose up
@@ -50,4 +70,4 @@ cd examples/scaling && docker compose up
 
 See [`examples/scaling/README.md`](https://github.com/mertdogar/super-line/tree/main/examples/scaling) for what to watch, how to connect your own client to the load balancer, and `--scale`.
 
-Demonstrates: [scaling & adapters](/guide/scaling-adapters), [serverToServer](/guide/scaling-adapters#servertoserver-coordinate-the-cluster).
+Demonstrates: [scaling & adapters](/guide/scaling-adapters), [the cluster event bus](/guide/scaling-adapters#the-cluster-event-bus).

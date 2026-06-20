@@ -57,6 +57,10 @@ To push a *role-specific* event to a group, use a [topic](./topics) (`forRole(r)
 
 Use an **event** when the **server** decides who receives it (notifications, room broadcasts, targeted pushes). Use a [**topic**](./topics) when the **client** opts into a stream. Both are `serverToClient`; the only difference is the `subscribe: true` flag and who initiates.
 
+## Events vs the cluster bus
+
+Events are server-**chosen** pushes (`conn.emit` / `room.broadcast` / `srv.toConn(id).emit` / `srv.toUser(id).emit`) — the recipient gets them with **no opt-in** and there's **no server-side subscribe**. The [cluster bus](./topics#the-cluster-bus) is the opposite: **opt-in** pub/sub on a shared topic, where any node `server.publish`es and both clients (`client.subscribe`) and other servers (`server.subscribe`) choose to listen. They're different tools — reach for an event when the server decides who's pushed to, and the bus when subscribers opt in and you need cross-node, server-side fan-out.
+
 ## Delivery
 
 Events are **at-most-once** — a client that's offline misses them (no replay). Design for it: see [Reconnection & delivery](./reconnection-delivery).

@@ -20,7 +20,7 @@
 
 <br />
 
-**super-line** is a typesafe WebSocket library for TypeScript. You write **one contract**; the server implements it and the client calls it with full end-to-end type inference — no codegen. The contract is split by **direction** (`clientToServer` / `serverToClient`) and scoped by **role** — a `user` and an `agent` connect to the same server and each get their own typed surface, with a `shared` base in common. Requests, events, topics, rooms, and node-to-node messaging share one connection, and everything fans out across processes through a pluggable adapter (in-memory for one node, Redis for many).
+**super-line** is a typesafe WebSocket library for TypeScript. You write **one contract**; the server implements it and the client calls it with full end-to-end type inference — no codegen. The contract is split by **direction** (`clientToServer` / `serverToClient`) and scoped by **role** — a `user` and an `agent` connect to the same server and each get their own typed surface, with a `shared` base in common. Requests, events, topics, rooms, and a cluster-wide event bus share one connection, and everything fans out across processes through a pluggable adapter (in-memory for one node, Redis for many).
 
 > 📖 **Full documentation: [mertdogar.github.io/super-line](https://mertdogar.github.io/super-line/)** — guides, the complete API reference, and runnable examples.
 
@@ -47,14 +47,14 @@
 | ↔️ **Req/res** | Unary `await client.x()` with typed errors, timeout & `AbortSignal`. |
 | 📣 **Events & rooms** | Server-pushed events; server-controlled room broadcasts. |
 | 📡 **Topics** | Client-subscribed pub/sub streams, authorized server-side. |
-| 🖧 **Inter-server** | Typed `emitServer` / `onServer` for node-to-node coordination. |
+| 🚌 **Cluster event bus** | `server.publish` / `server.subscribe` on a shared topic — cluster-wide pub/sub to server listeners (every node, local echo) and subscribed clients at once. |
 | 📨 **Server→client req/res** | `await srv.toConn(id).request(...)` — ask a client and await a typed reply, across nodes. |
 | 🛰️ **Presence & introspection** | `srv.local.*` (sync) + `srv.cluster.*` (counts, topology, `isOnline`) backed by a Redis registry. |
 | 🩺 **Control Center** | `inspector: true` + `npx @super-line/control-center` — a shadcn webapp for live topology, contract, roles & ctx. |
 | 🎯 **Targeted send** | `srv.toConn(id)` / `srv.toUser(uid)` emit or kick any connection on any node. |
 | 🔌 **Composable** | Attaches to your `http.Server`; lifecycle hooks + middleware. |
 | 🔁 **Resilient client** | Auto-reconnect, re-subscribe, in-flight reject, queue-and-flush. |
-| 📈 **Scales** | Rooms, topics, inter-server events & presence fan out across nodes via an adapter (Redis included). |
+| 📈 **Scales** | Rooms, topics, the cluster event bus & presence fan out across nodes via an adapter (Redis included). |
 
 ## Install
 
@@ -199,8 +199,14 @@ pnpm --filter @super-line/example-auth start
 # Presence + targeted send + server→client requests across 2 nodes (no Docker):
 pnpm --filter @super-line/example-presence start
 
+# Cluster event bus in one process — server.publish + several server.subscribe listeners (local echo) + a client subscriber (no Redis):
+pnpm --filter @super-line/example-event-bus start
+
 # Real cluster: Redis + Caddy LB + 3 nodes + 6 clients, fan-out across processes (needs Docker):
 cd examples/scaling && docker compose up
+
+# Bus across a cluster: Redis + Caddy + 3 nodes converge a shared tally over the event bus (needs Docker):
+cd examples/bus-cluster && docker compose up
 ```
 
 More on each: [examples on the docs site](https://mertdogar.github.io/super-line/examples/).
@@ -226,7 +232,7 @@ For **Cursor, GitHub Copilot, and other agents** (one condensed file + where to 
 | Req/res | ✅ | ack callbacks | ✅ | ❌ |
 | Rooms | ✅ | ✅ | ❌ | ❌ |
 | Topics (pub/sub) | ✅ | ⚠️ via rooms | subscriptions | ❌ |
-| Inter-server messaging | ✅ | ✅ | ❌ | ❌ |
+| Cluster event bus | ✅ | ✅ | ❌ | ❌ |
 | Server→client req/res | ✅ | ⚠️ ack-less | ❌ | ❌ |
 | Presence / introspection | ✅ cluster-wide | ⚠️ rooms only | ❌ | ❌ |
 | Multi-node | ✅ adapter | ✅ adapter | ❌ | ❌ |
@@ -253,7 +259,7 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 | Package | Purpose |
 | --- | --- |
 | [`@super-line/core`](packages/core) | `defineContract` (roles + direction), validation, wire protocol, `Serializer` / `Adapter` interfaces, `SocketError` |
-| [`@super-line/server`](packages/server) | `createSocketServer` over `ws`: role-keyed `implement`, rooms, topics, `forRole`, `emitServer`/`onServer`, server→client requests (`toConn`/`toUser`), local + cluster introspection, heartbeat, middleware, in-memory adapter |
+| [`@super-line/server`](packages/server) | `createSocketServer` over `ws`: role-keyed `implement`, rooms, topics, `forRole`, the cluster event bus (`publish`/`subscribe`), server→client requests (`toConn`/`toUser`), local + cluster introspection, heartbeat, middleware, in-memory adapter |
 | [`@super-line/client`](packages/client) | `createClient` (role-scoped surface, reconnect, typed calls, `on` / `subscribe`) |
 | [`@super-line/adapter-redis`](packages/adapter-redis) | Redis Pub/Sub adapter for multi-node fan-out |
 | [`@super-line/react`](packages/react) | `createSocketReact<C, Role>` → `useRequest` / `useEvent` / `useSubscription` |
@@ -261,7 +267,7 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 
 ## Status
 
-Pre-1.0. **Implemented:** role-scoped contracts, req/res, events, rooms, topics, inter-server (`emitServer`/`onServer`), auth, reconnect, middleware, in-memory + Redis adapters, React hooks. **Not yet:** fire-and-forget client→server signals (every client→server is req/res today), mutable per-connection state, NATS adapter, wildcard/retained topics, session resume/replay, parameterized-topic type inference (topics are typed by exact contract key for now), backpressure safeguards.
+Pre-1.0. **Implemented:** role-scoped contracts, req/res, events, rooms, topics, the cluster event bus (`server.publish`/`server.subscribe`), auth, reconnect, middleware, in-memory + Redis adapters, React hooks. **Not yet:** fire-and-forget client→server signals (every client→server is req/res today), mutable per-connection state, NATS adapter, wildcard/retained topics, session resume/replay, parameterized-topic type inference (topics are typed by exact contract key for now), backpressure safeguards.
 
 ## License
 

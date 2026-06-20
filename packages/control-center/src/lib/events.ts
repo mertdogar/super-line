@@ -29,7 +29,6 @@ const FLAVOR_COLORS: Record<MessageFlavor, string> = {
   event: '#34d399',
   topic: '#a78bfa',
   serverRequest: '#60a5fa',
-  serverEvent: '#fb923c',
 }
 
 export function flavorColor(flavor: MessageFlavor): string {

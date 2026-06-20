@@ -10,7 +10,7 @@ export const INSPECTOR_SUBPROTOCOL = 'superline.inspector.v1'
 export const INSPECTOR_ROLE = 'inspector'
 
 /** How a contract message is used on the wire. */
-export type MessageFlavor = 'request' | 'event' | 'topic' | 'serverRequest' | 'serverEvent'
+export type MessageFlavor = 'request' | 'event' | 'topic' | 'serverRequest'
 
 /** One message in an {@link InspectedContract}. Schemas are best-effort JSON Schema, omitted when unavailable. */
 export interface InspectedMessage {
@@ -22,7 +22,7 @@ export interface InspectedMessage {
   input?: unknown
   /** Best-effort JSON Schema of the request/server-request output. */
   output?: unknown
-  /** Best-effort JSON Schema of an event/topic/serverToServer payload. */
+  /** Best-effort JSON Schema of an event/topic payload. */
   payload?: unknown
 }
 
@@ -36,7 +36,6 @@ export interface InspectedDirectional {
 export interface InspectedContract {
   shared: InspectedDirectional
   roles: Record<string, InspectedDirectional>
-  serverToServer: InspectedMessage[]
 }
 
 /** The connected node's local view — what `getNode` returns. */
@@ -152,9 +151,5 @@ export function classifyContract(contract: Contract, convert?: SchemaConverter):
   for (const [role, block] of Object.entries(contract.roles)) {
     roles[role] = classifyDirectional(block, convert)
   }
-  const serverToServer: InspectedMessage[] = []
-  for (const [name, schema] of Object.entries(contract.serverToServer ?? {})) {
-    serverToServer.push(withSchemas({ name, flavor: 'serverEvent' }, { payload: schema }, convert))
-  }
-  return { shared: classifyDirectional(contract.shared, convert), roles, serverToServer }
+  return { shared: classifyDirectional(contract.shared, convert), roles }
 }

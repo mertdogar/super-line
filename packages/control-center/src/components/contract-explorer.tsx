@@ -93,16 +93,6 @@ export function ContractExplorer({ contract }: { contract: InspectedContract }):
       {Object.entries(contract.roles).map(([role, dir]) => (
         <Block key={role} title={`role · ${role}`} dir={dir} />
       ))}
-      {contract.serverToServer.length > 0 ? (
-        <div className="rounded-lg border bg-card/40 p-3">
-          <div className="mb-2 text-sm font-semibold">serverToServer</div>
-          <div className="flex flex-col gap-1.5">
-            {contract.serverToServer.map((m) => (
-              <Message key={m.name} message={m} />
-            ))}
-          </div>
-        </div>
-      ) : null}
     </div>
   )
 }

@@ -25,7 +25,6 @@ const api = defineContract({
       serverToClient: { poke: { input: z.object({ n: z.number() }), output: z.boolean() } },
     },
   },
-  serverToServer: { rebalance: z.object({ shard: z.number() }) },
 })
 
 type Equal<A, B> =
@@ -45,7 +44,6 @@ describe('classifyContract', () => {
     ])
     expect(out.roles.user?.clientToServer).toEqual([{ name: 'say', flavor: 'request' }])
     expect(out.roles.user?.serverToClient).toEqual([{ name: 'poke', flavor: 'serverRequest' }])
-    expect(out.serverToServer).toEqual([{ name: 'rebalance', flavor: 'serverEvent' }])
   })
 
   it('attaches schema projections for every schema when a converter is given', () => {
@@ -56,8 +54,8 @@ describe('classifyContract', () => {
     }
     const out = classifyContract(api, convert)
 
-    // ping in/out, notice payload, feed payload, say in/out, poke in/out, rebalance payload = 9
-    expect(seen).toHaveLength(9)
+    // ping in/out, notice payload, feed payload, say in/out, poke in/out = 8
+    expect(seen).toHaveLength(8)
 
     expect(out.shared.clientToServer[0]).toEqual({
       name: 'ping',
@@ -75,11 +73,6 @@ describe('classifyContract', () => {
       flavor: 'serverRequest',
       input: { converted: true },
       output: { converted: true },
-    })
-    expect(out.serverToServer[0]).toEqual({
-      name: 'rebalance',
-      flavor: 'serverEvent',
-      payload: { converted: true },
     })
   })
 })

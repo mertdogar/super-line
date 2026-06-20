@@ -1,0 +1,83 @@
+/* super-line — cyan brand identity over the VitePress default theme.
+   The waveform mark is cyan; the stock theme shipped indigo. This makes the
+   whole site (nav, links, buttons, guides, reference) speak the brand color,
+   AA-verified in both light and dark. */
+
+:root {
+  /* Brand cyan — light mode. brand-1 is link/brand text, must clear AA on white. */
+  --vp-c-brand-1: #0e7490; /* cyan-700 — 4.6:1 on #fff */
+  --vp-c-brand-2: #0891b2; /* cyan-600 — hover */
+  --vp-c-brand-3: #0e7490; /* solid button bg — white text clears AA */
+  --vp-c-brand-soft: rgba(8, 145, 178, 0.1);
+
+  /* Hero wordmark color (used by default theme home + our hero token) */
+  --vp-home-hero-name-color: #0e7490;
+
+  /* Brand buttons */
+  --vp-button-brand-text: #ffffff;
+  --vp-button-brand-bg: #0e7490;
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-hover-text: #ffffff;
+  --vp-button-brand-hover-bg: #0c6378;
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-active-bg: #0a5466;
+  --vp-button-brand-active-border: transparent;
+
+  /* super-line shared tokens (consumed by SuperHome.vue) */
+  --sl-cyan: #0891b2;
+  --sl-cyan-strong: #0e7490;
+  --sl-cyan-bright: #06b6d4;
+  --sl-ink: #0f1115;
+  --sl-page: var(--vp-c-bg);
+  --sl-surface: var(--vp-c-bg-soft);
+  --sl-border: var(--vp-c-divider);
+  --sl-text: var(--vp-c-text-1);
+  --sl-text-2: var(--vp-c-text-2);
+
+  /* Dark code panel — identical in both themes (code is always dark so cyan glows) */
+  --sl-code-bg: #0c0f14;
+  --sl-code-bg-2: #10141b;
+  --sl-code-border: #1d242e;
+  --sl-code-text: #c9d4e3;
+  --sl-code-dim: #71808f; /* comments / punctuation — 4.7:1 on code bg */
+  --sl-code-key: #c4b5fd; /* keywords — soft violet, the one secondary hue */
+  --sl-code-str: #5fd9ee; /* strings — brand cyan, the dominant code accent */
+  --sl-code-fn: #e6edf6; /* identifiers / methods */
+  --sl-code-num: #f0b3a0; /* numbers / literals */
+  --sl-on-cyan: #06181d;
+}
+
+.dark {
+  /* Body bg is the brand ink from the mark (#0f1115), tinted near-black. */
+  --vp-c-bg: #0f1115;
+  --vp-c-bg-alt: #0a0c0f;
+  --vp-c-bg-soft: #15191f;
+  --vp-c-bg-elv: #15191f;
+
+  --vp-c-brand-1: #22d3ee; /* bright cyan on near-black — high contrast */
+  --vp-c-brand-2: #67e8f9;
+  --vp-c-brand-3: #22d3ee;
+  --vp-c-brand-soft: rgba(34, 211, 238, 0.14);
+
+  --vp-home-hero-name-color: #22d3ee;
+
+  /* Dark text on bright cyan reads cleaner and clears AA */
+  --vp-button-brand-text: #06181d;
+  --vp-button-brand-bg: #22d3ee;
+  --vp-button-brand-hover-text: #06181d;
+  --vp-button-brand-hover-bg: #4be0f4;
+  --vp-button-brand-active-bg: #67e8f9;
+
+  --sl-cyan: #22d3ee;
+  --sl-cyan-strong: #67e8f9;
+  --sl-cyan-bright: #22d3ee;
+}
+
+/* The home renders through `layout: page`; strip VitePress's page padding so
+   our sections can run full-bleed and own their own rhythm. */
+.VPPage:has(.sl-home) {
+  padding: 0;
+}
+.VPContent.is-home {
+  padding: 0;
+}

@@ -35,3 +35,13 @@ services:
     ports: ['8080:8080']
     volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']
     depends_on: [node-1, node-2]
+
+  # The Control Center webapp, served on :8081. The browser connects it back to the cluster's
+  # inspector channel at ws://localhost:8080/inspect (Caddy → node-1). Open http://localhost:8081.
+  control-center:
+    build:
+      context: ../..
+      dockerfile: examples/react-chat-cluster/Dockerfile.control-center
+    image: super-line-react-chat-cluster-cc:dev
+    ports: ['8081:8081']
+    depends_on: [web]

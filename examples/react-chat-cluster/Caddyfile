@@ -13,6 +13,13 @@
 		}
 	}
 
+	# The Control Center connects here. Pinned to a SINGLE node (no round_robin) so the
+	# inspector view is stable and node-1's connections show their live ctx; node-2's
+	# connections demonstrate the cross-node ctxAvailable boundary.
+	handle /inspect* {
+		reverse_proxy node-1:8787
+	}
+
 	handle {
 		root * /srv
 		encode gzip

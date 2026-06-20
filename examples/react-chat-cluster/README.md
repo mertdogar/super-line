@@ -19,11 +19,34 @@ browser :8080 ── web (Caddy) ┬─ GET /    → the vite-built SPA
 
 ```bash
 cd examples/react-chat-cluster
-docker compose up        # builds the images once, then boots redis + 2 nodes + web
+docker compose up --build   # boots redis + 2 nodes + web + the Control Center
 ```
+
+> Use `--build`. The node image bakes the TypeScript source in at build time, so without it
+> `docker compose up` silently reuses a stale image and source changes (e.g. enabling the
+> inspector) won't take effect. Unchanged layers are cached, so a no-op rebuild is fast.
 
 Open <http://localhost:8080> in **two or more tabs** (same browser is fine). Pick a name in
 each, join the same room.
+
+## Inspect it with the Control Center
+
+`docker compose up` also boots the [Control Center](../../packages/control-center) at
+<http://localhost:8081> — a live view of this exact cluster:
+
+- the **topology** graph — `node-1`, `node-2`, and the Redis bus, with each chat tab's
+  connection hanging off the node it landed on (colored by role, labelled with the chat name);
+- the **live feed** of `connect` / `room.add` / `topic.sub` / `disconnect` events as they cross
+  nodes in real time;
+- the **contract** explorer and a per-connection drawer.
+
+The nodes run with `inspector: true`, and Caddy pins `/inspect` to **node-1** (no `round_robin`),
+so the view is stable: node-1's connections show their live `ctx` (the chat `name`), while
+node-2's connections show the cross-node `ctxAvailable: false` boundary — node-local `ctx` never
+leaves its node.
+
+> The inspector channel is **read-only but unauthenticated** — fine for this local demo. Never
+> enable `inspector: true` on an internet-facing node.
 
 ## What you'll see
 

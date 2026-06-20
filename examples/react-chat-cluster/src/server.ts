@@ -17,6 +17,8 @@ let seq = 0
 const srv = createSocketServer(chat, {
   server,
   adapter: createRedisAdapter(REDIS_URL),
+  inspector: true, // read-only Control Center channel (dev/trusted-network only)
+  identify: (conn) => (conn.ctx as { name: string }).name, // surface the chat name cluster-wide
   authenticate: (req) => {
     const name = new URL(req.url ?? '', 'http://localhost').searchParams.get('name')?.trim()
     if (!name) throw new Error('name is required')

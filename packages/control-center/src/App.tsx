@@ -5,12 +5,16 @@ import type {
   InspectedContract,
   InspectorEvent,
   NodeStat,
+  NodeView,
 } from '@super-line/core'
 import { useInspector } from '@/hooks/use-inspector'
 import type { InspectorStatus } from '@/lib/inspector-client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { TopologyGraph } from '@/components/topology-graph'
+import { RoomLens } from '@/components/room-lens'
+import { roomsOf } from '@/lib/topology'
 import { cn } from '@/lib/utils'
 
 type View = 'topology' | 'connections' | 'contract' | 'feed'
@@ -52,18 +56,26 @@ export default function App(): React.JSX.Element {
   const [topology, setTopology] = React.useState<NodeStat[]>([])
   const [connections, setConnections] = React.useState<ConnDescriptor[]>([])
   const [contract, setContract] = React.useState<InspectedContract | null>(null)
+  const [nodeView, setNodeView] = React.useState<NodeView | null>(null)
   const [feed, setFeed] = React.useState<InspectorEvent[]>([])
+  const [highlightRoom, setHighlightRoom] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     if (!client || status !== 'open') return
     let live = true
     const load = (): void => {
-      Promise.all([client.getTopology(), client.listConnections(), client.getContract()])
-        .then(([t, conns, ct]) => {
+      Promise.all([
+        client.getTopology(),
+        client.listConnections(),
+        client.getContract(),
+        client.getNode(),
+      ])
+        .then(([t, conns, ct, nv]) => {
           if (!live) return
           setTopology(t)
           setConnections(conns)
           setContract(ct)
+          setNodeView(nv)
         })
         .catch(() => {})
     }
@@ -80,6 +92,8 @@ export default function App(): React.JSX.Element {
   }, [client, status])
 
   const totalConns = topology.reduce((sum, n) => sum + n.connections, 0)
+  const roles = React.useMemo(() => [...new Set(connections.map((c) => c.role))].sort(), [connections])
+  const rooms = React.useMemo(() => roomsOf(connections), [connections])
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">
@@ -132,55 +146,73 @@ export default function App(): React.JSX.Element {
           <Badge variant="muted">{totalConns} conns</Badge>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-auto p-4">
-          {view === 'topology' && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Topology (raw)</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Json data={{ topology, connections }} />
-              </CardContent>
-            </Card>
-          )}
-          {view === 'connections' && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Connections ({connections.length})</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Json data={connections} />
-              </CardContent>
-            </Card>
-          )}
-          {view === 'contract' && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Contract</CardTitle>
-              </CardHeader>
-              <CardContent>{contract ? <Json data={contract} /> : <p className="text-sm text-muted-foreground">No contract.</p>}</CardContent>
-            </Card>
-          )}
-          {view === 'feed' && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Live feed ({feed.length})</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {feed.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Waiting for events…</p>
-                ) : (
-                  <ul className="flex flex-col gap-1 text-xs">
-                    {feed.map((event, i) => (
-                      <li key={i} className="flex items-center gap-2 rounded-md border px-2 py-1">
-                        <Badge>{event.type}</Badge>
-                        <span className="truncate text-muted-foreground">{JSON.stringify(event)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </CardContent>
-            </Card>
+        <main className="min-h-0 flex-1 overflow-hidden">
+          {view === 'topology' ? (
+            <div className="flex h-full">
+              <div className="min-w-0 flex-1">
+                <TopologyGraph
+                  topology={topology}
+                  connections={connections}
+                  node={nodeView}
+                  highlightRoom={highlightRoom}
+                />
+              </div>
+              <RoomLens
+                roles={roles}
+                rooms={rooms}
+                topics={nodeView?.topics ?? []}
+                selected={highlightRoom}
+                onSelect={setHighlightRoom}
+              />
+            </div>
+          ) : (
+            <div className="h-full overflow-auto p-4">
+              {view === 'connections' && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Connections ({connections.length})</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Json data={connections} />
+                  </CardContent>
+                </Card>
+              )}
+              {view === 'contract' && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Contract</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {contract ? (
+                      <Json data={contract} />
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No contract.</p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+              {view === 'feed' && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Live feed ({feed.length})</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {feed.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Waiting for events…</p>
+                    ) : (
+                      <ul className="flex flex-col gap-1 text-xs">
+                        {feed.map((event, i) => (
+                          <li key={i} className="flex items-center gap-2 rounded-md border px-2 py-1">
+                            <Badge>{event.type}</Badge>
+                            <span className="truncate text-muted-foreground">{JSON.stringify(event)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           )}
         </main>
       </div>

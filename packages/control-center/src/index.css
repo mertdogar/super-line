@@ -59,3 +59,17 @@ body {
   color: var(--foreground);
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
+
+/* read-only topology graph: hide connection handles, tone down attribution */
+.react-flow__handle {
+  opacity: 0;
+}
+.react-flow__attribution {
+  background: transparent;
+  font-size: 10px;
+}
+.react-flow__controls-button {
+  background: var(--card);
+  border-color: var(--border);
+  color: var(--foreground);
+}

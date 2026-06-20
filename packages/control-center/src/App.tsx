@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Boxes, FileText, Network, Radio, Settings } from 'lucide-react'
+import { Boxes, FileText, LibraryBig, Network, Radio, Settings } from 'lucide-react'
 import type {
   ConnDescriptor,
   InspectedContract,
@@ -16,11 +16,12 @@ import { ConnDetail } from '@/components/conn-detail'
 import { ContractExplorer } from '@/components/contract-explorer'
 import { LiveFeed } from '@/components/live-feed'
 import { SettingsPage } from '@/components/settings-page'
+import { ResourcesPage } from '@/components/resources-page'
 import { StatusDot } from '@/components/status-dot'
 import { roomsOf } from '@/lib/topology'
 import { cn } from '@/lib/utils'
 
-type View = 'topology' | 'connections' | 'contract' | 'feed' | 'settings'
+type View = 'topology' | 'connections' | 'contract' | 'feed' | 'settings' | 'resources'
 type NavItem = { id: View; label: string; icon: typeof Network }
 
 const NAV: NavItem[] = [
@@ -29,7 +30,10 @@ const NAV: NavItem[] = [
   { id: 'contract', label: 'Contract', icon: FileText },
   { id: 'feed', label: 'Live feed', icon: Radio },
 ]
-const NAV_BOTTOM: NavItem[] = [{ id: 'settings', label: 'Settings', icon: Settings }]
+const NAV_BOTTOM: NavItem[] = [
+  { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'resources', label: 'Resources', icon: LibraryBig },
+]
 
 const STORAGE_KEY = 'superline.cc.url'
 const DEFAULT_URL = 'ws://localhost:3000'
@@ -209,6 +213,7 @@ export default function App(): React.JSX.Element {
                 ))}
               {view === 'feed' && <LiveFeed events={feed} connections={connections} />}
               {view === 'settings' && <SettingsPage url={url} status={status} onConnect={connect} />}
+              {view === 'resources' && <ResourcesPage />}
             </div>
           )}
           {view === 'connections' && (

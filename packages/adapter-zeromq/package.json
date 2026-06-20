@@ -1,0 +1,30 @@
+{
+  "name": "@super-line/adapter-zeromq",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "ZeroMQ adapter for super-line — brokerless mesh (or lightweight forwarder) multi-node fan-out + presence.",
+  "license": "MIT",
+  "author": "Mert",
+  "keywords": ["websocket", "zeromq", "zmq", "pubsub", "adapter", "scaling", "super-line"],
+  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/adapter-zeromq" },
+  "homepage": "https://mertdogar.github.io/super-line/",
+  "bugs": "https://github.com/mertdogar/super-line/issues",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "engines": { "node": ">=18" },
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsup"
+  },
+  "dependencies": {
+    "@super-line/core": "workspace:^",
+    "zeromq": "^6.0.0"
+  }
+}

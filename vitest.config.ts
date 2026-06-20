@@ -11,6 +11,7 @@ export default defineConfig({
       '@super-line/client': src('packages/client/src/index.ts'),
       '@super-line/adapter-redis': src('packages/adapter-redis/src/index.ts'),
       '@super-line/adapter-libp2p': src('packages/adapter-libp2p/src/index.ts'),
+      '@super-line/adapter-zeromq': src('packages/adapter-zeromq/src/index.ts'),
       '@super-line/react': src('packages/react/src/index.ts'),
     },
   },

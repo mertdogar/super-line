@@ -7,3 +7,4 @@ allowBuilds:
   esbuild: true
   protobufjs: false
   ssh2: false
+  zeromq: true

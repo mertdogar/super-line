@@ -11,6 +11,7 @@ import {
   classifyContract,
   type Adapter,
   type Serializer,
+  type Schema,
   type Contract,
   type Schema,
   type InspectedContract,
@@ -19,6 +20,8 @@ import {
   type ClientFrame,
   type ReqFrame,
   type EvtFrame,
+  type PubFrame,
+  type EventData,
   type RoleOf,
   type Events,
   type SharedRequests,
@@ -108,12 +111,18 @@ export type Handlers<C extends Contract, A> = ([keyof SharedRequests<C>] extends
 
 /** Context passed to middleware and lifecycle hooks about the current operation. */
 export interface MiddlewareInfo {
-  /** Whether this is a request or a topic subscribe. */
-  kind: 'request' | 'subscribe'
-  /** The request/topic name. */
+  /** Whether this is a request, a topic subscribe, or a bus event delivery. */
+  kind: 'request' | 'subscribe' | 'event'
+  /** The request/topic/event name. */
   name: string
-  /** The connection the operation is on (`conn.role` available). */
-  conn: Conn
+  /** The connection the operation is on, if any (`conn.role` available). Absent for bus events. */
+  conn?: Conn
+}
+
+/** Metadata passed to a {@link SocketServer.subscribe} callback alongside the event payload. */
+export interface BusMeta {
+  /** The node that published the event. Equals `srv.nodeId` for a same-node publish (local echo). */
+  from: string
 }
 
 /**
@@ -265,6 +274,16 @@ export interface SocketServer<C extends Contract, A extends AuthResult<C>> {
   room(name: string): Room<C>
   /** Publish a SHARED topic to all subscribers (server-only publish). */
   publish<T extends keyof SharedTopics<C>>(topic: T, data: EmitData<SharedTopics<C>[T]>): void
+  /**
+   * Subscribe SERVER-side to a shared topic, cluster-wide. The callback fires for a
+   * publish from any node — including this one (local echo, delivered in-process with
+   * no round-trip). `meta.from` is the publishing node; self-exclude with
+   * `if (meta.from === srv.nodeId) return`. Returns an unsubscribe fn.
+   */
+  subscribe<T extends keyof SharedTopics<C>>(
+    topic: T,
+    handler: (data: EventData<SharedTopics<C>[T]>, meta: BusMeta) => void,
+  ): () => void
   /** Lens for role-scoped sends, e.g. forRole('user').publish('feed', data). */
   forRole<R extends RoleOf<C>>(role: R): RoleLens<C, R>
   /** Broadcast a typed event to all OTHER server nodes (at-most-once, excludes self). */
@@ -324,6 +343,8 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   // local members per namespaced channel (rooms + topics share this registry)
   const members = new Map<string, Set<Conn>>()
   const serverListeners = new Map<string, Set<(data: unknown) => void>>()
+  // server-side bus subscribers per topic channel (parallel to `members` which holds conns)
+  const busListeners = new Map<string, Set<(data: unknown, meta: BusMeta) => void>>()
   const instanceId = randomUUID() // identifies this node; lets emitServer exclude itself
   const replyChannel = REPLY + instanceId
   let impl: Impl = {}
@@ -370,8 +391,9 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       return
     }
     const set = members.get(channel)
-    if (!set) return
-    for (const conn of set) conn.sendRaw(payload)
+    if (set) for (const conn of set) conn.sendRaw(payload)
+    const busSet = busListeners.get(channel)
+    if (busSet) deliverBus(payload, busSet)
   })
 
   // the server→client request feature subscribes its reply channel up front (one per node)
@@ -498,8 +520,9 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       set.add(conn)
       return
     }
+    const alreadySubscribed = busListeners.has(channel) // a server-side subscriber may already hold it
     members.set(channel, new Set([conn]))
-    return adapter.subscribe(channel) // first local member -> start receiving the channel
+    if (!alreadySubscribed) return adapter.subscribe(channel) // first local member of either kind
   }
 
   function leaveChannel(conn: Conn, channel: string): void {
@@ -516,7 +539,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     }
     if (set.size === 0) {
       members.delete(channel)
-      void adapter.unsubscribe(channel) // last local member -> stop receiving
+      if (!busListeners.has(channel)) void adapter.unsubscribe(channel) // no conns or bus subs left
     }
   }
 
@@ -763,7 +786,8 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       last = idx
       const mw = chain[idx]
       if (!mw) return terminal()
-      return Promise.resolve(mw(info.conn.ctx as CtxUnion<A>, info, () => dispatch(idx + 1)))
+      // middleware only runs for request/subscribe ops, which always carry a conn (bus events skip the chain)
+      return Promise.resolve(mw(info.conn!.ctx as CtxUnion<A>, info, () => dispatch(idx + 1)))
     }
     return dispatch(0)
   }
@@ -842,7 +866,51 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   }
 
   function publishTo(ns: string, name: string, data: unknown): void {
-    void adapter.publish(TOPIC + ns + ':' + name, serializer.encode({ t: 'pub', c: name, d: data }))
+    const channel = TOPIC + ns + ':' + name
+    // local echo: fire same-node bus subscribers in-process (no adapter round-trip), trusted (not re-validated)
+    const busSet = busListeners.get(channel)
+    if (busSet) for (const cb of busSet) callBus(cb, data, instanceId, name)
+    void adapter.publish(channel, serializer.encode({ t: 'pub', c: name, d: data, i: instanceId } satisfies PubFrame))
+  }
+
+  function callBus(
+    cb: (data: unknown, meta: BusMeta) => void,
+    data: unknown,
+    from: string,
+    name: string,
+  ): void {
+    try {
+      cb(data, { from }) // isolate each listener: one throw can't kill siblings or the message pump
+    } catch (err) {
+      opts.onError?.(err, { kind: 'event', name })
+    }
+  }
+
+  // a bus frame from another node: validate the payload (inbound), then fan out to local subscribers
+  function deliverBus(payload: string | Uint8Array, set: Set<(data: unknown, meta: BusMeta) => void>): void {
+    let frame: PubFrame
+    try {
+      frame = serializer.decode(payload) as PubFrame
+    } catch {
+      return
+    }
+    if (frame.i === instanceId) return // own publish looped back; local listeners already fired directly
+    const from = frame.i ?? ''
+    const name = frame.c
+    const def = c.shared?.serverToClient?.[name]
+    const schema = def && typeof def === 'object' && 'payload' in def ? (def.payload as Schema) : undefined
+    void (async () => {
+      let data = frame.d
+      if (schema) {
+        try {
+          data = await validate(schema, frame.d)
+        } catch (err) {
+          opts.onError?.(err, { kind: 'event', name })
+          return
+        }
+      }
+      for (const cb of set) callBus(cb, data, from, name)
+    })()
   }
 
   // emit/close to a personal (c:/u:) channel; the owning node delivers via handlePersonal
@@ -946,6 +1014,26 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     room,
     publish(topic, data) {
       publishTo('shared', String(topic), data)
+    },
+    subscribe(topic, handler) {
+      const channel = TOPIC + 'shared:' + String(topic)
+      let set = busListeners.get(channel)
+      if (!set) {
+        set = new Set()
+        busListeners.set(channel, set)
+        if (!members.has(channel)) void adapter.subscribe(channel) // first local member of either kind
+      }
+      const cb = handler as (data: unknown, meta: BusMeta) => void
+      set.add(cb)
+      return () => {
+        const current = busListeners.get(channel)
+        if (!current) return
+        current.delete(cb)
+        if (current.size === 0) {
+          busListeners.delete(channel)
+          if (!members.has(channel)) void adapter.unsubscribe(channel)
+        }
+      }
     },
     forRole(role) {
       return {

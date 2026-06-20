@@ -111,6 +111,7 @@ function redisPresence(pub: Redis, ttlMs: number): PresenceStore {
       for (const [nodeId, ds] of byNode) {
         out.push({
           nodeId,
+          nodeName: ds[0]?.nodeName ?? nodeId,
           connections: ds.length,
           rooms: new Set(ds.flatMap((d) => d.rooms)).size,
           alive: true,

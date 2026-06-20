@@ -47,8 +47,15 @@ describe('inspector connection (slice 2)', () => {
 
     const insp = await connectInspector(url)
 
-    const node = (await insp.request('getNode')) as { nodeId: string; rooms: string[]; topics: string[] }
+    const node = (await insp.request('getNode')) as {
+      nodeId: string
+      nodeName: string
+      rooms: string[]
+      topics: string[]
+    }
     expect(node.nodeId).toBe(srv.nodeId)
+    expect(node.nodeName).toBe(srv.nodeName)
+    expect(node.nodeName).toBe(srv.nodeId.slice(0, 8)) // default: short slice of nodeId
     expect(node.rooms).toEqual([])
     expect(node.topics).toEqual([])
 
@@ -56,7 +63,7 @@ describe('inspector connection (slice 2)', () => {
     expect(conns).toHaveLength(2) // the inspector itself is excluded from presence
     expect(conns.every((cn) => cn.role === 'user')).toBe(true)
 
-    const topo = (await insp.request('getTopology')) as Array<{ nodeId: string; connections: number }>
+    const topo = (await insp.request('getTopology')) as Array<{ nodeId: string; nodeName: string; connections: number }>
     expect(topo).toHaveLength(1)
     expect(topo[0]?.nodeId).toBe(srv.nodeId)
     expect(topo[0]?.connections).toBe(2) // inspector not counted
@@ -64,6 +71,25 @@ describe('inspector connection (slice 2)', () => {
     // observer-invisible in the server's own local view too
     expect(srv.local.connections).toHaveLength(2)
 
+    insp.close()
+  })
+
+  it('surfaces a friendly nodeName through getNode / getTopology / listConnections', async () => {
+    const { srv, url } = await h.server(contract, { authenticate, inspector: true, nodeName: 'node-A' })
+    srv.implement({ user: { ping: async () => 1 }, agent: {} })
+    expect(srv.nodeName).toBe('node-A')
+
+    const u = h.client(contract, { url, role: 'user' })
+    await u.ping()
+    await waitFor(() => srv.local.connections.length === 1)
+
+    const insp = await connectInspector(url)
+    const node = (await insp.request('getNode')) as { nodeName: string }
+    expect(node.nodeName).toBe('node-A')
+    const topo = (await insp.request('getTopology')) as Array<{ nodeName: string }>
+    expect(topo[0]?.nodeName).toBe('node-A')
+    const conns = (await insp.request('listConnections')) as Array<{ nodeName: string }>
+    expect(conns[0]?.nodeName).toBe('node-A')
     insp.close()
   })
 

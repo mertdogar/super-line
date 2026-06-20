@@ -34,6 +34,8 @@ export interface ConnDescriptor {
   role: string
   /** The node that holds this connection. */
   nodeId: string
+  /** The node's friendly name (defaults to a short slice of `nodeId`). */
+  nodeName: string
   /** When the connection was accepted (`Date.now()`). */
   connectedAt: number
   /** The stable user key from the server's `identify` hook, if any. */
@@ -48,6 +50,8 @@ export interface ConnDescriptor {
 export interface NodeStat {
   /** The node's id. */
   nodeId: string
+  /** The node's friendly name (defaults to a short slice of `nodeId`). */
+  nodeName: string
   /** Number of connections on the node. */
   connections: number
   /** Number of distinct rooms with members on the node. */

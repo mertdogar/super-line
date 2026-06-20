@@ -41,6 +41,7 @@ export interface InspectedContract {
 /** The connected node's local view — what `getNode` returns. */
 export interface NodeView {
   nodeId: string
+  nodeName: string
   rooms: string[]
   topics: string[]
 }

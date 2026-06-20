@@ -216,6 +216,11 @@ export interface ServerOptions<C extends Contract, A extends AuthResult<C>> {
   adapter?: Adapter
   /** Only handle upgrades for this pathname; others are left untouched. */
   path?: string
+  /**
+   * Friendly name for this node, surfaced in `srv.nodeName`, the cluster descriptor, and the
+   * Control Center topology. Defaults to `SUPER_LINE_NODE_NAME` or a short slice of `nodeId`.
+   */
+  nodeName?: string
   /** Runs at the HTTP upgrade. Return { role, ctx }, or throw to reject with 401. */
   authenticate: (req: IncomingMessage) => Awaitable<A>
   /** Stable user key for a connection (powers `cluster.byUser`, `isOnline`, and `toUser`). */
@@ -253,6 +258,8 @@ export interface ServerOptions<C extends Contract, A extends AuthResult<C>> {
 export interface SocketServer<C extends Contract, A extends AuthResult<C>> {
   /** This node's stable id (unique per server process). */
   readonly nodeId: string
+  /** This node's friendly name (from `nodeName`/`SUPER_LINE_NODE_NAME`, else a short `nodeId` slice). */
+  readonly nodeName: string
   /** Synchronous, node-local introspection (connections, rooms, topics on this process). */
   readonly local: LocalView
   /** Asynchronous, cluster-wide introspection backed by the adapter's presence directory. */
@@ -333,6 +340,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
   // server-side bus subscribers per topic channel (parallel to `members` which holds conns)
   const busListeners = new Map<string, Set<(data: unknown, meta: BusMeta) => void>>()
   const instanceId = randomUUID() // identifies this node; lets the bus drop its own looped-back echo
+  const nodeName = opts.nodeName ?? process.env.SUPER_LINE_NODE_NAME ?? instanceId.slice(0, 8)
   const replyChannel = REPLY + instanceId
   let impl: Impl = {}
   let closing = false // close() is idempotent
@@ -351,6 +359,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
       id: conn.id,
       role: conn.role,
       nodeId: instanceId,
+      nodeName,
       connectedAt: conn.connectedAt,
       ...(userId !== undefined ? { userId } : {}),
       rooms,
@@ -627,7 +636,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
     getContract: () => buildInspectedContract(),
     getTopology: async () => presenceOrThrow().topology(),
     listConnections: async () => presenceOrThrow().list(),
-    getNode: async () => ({ nodeId: instanceId, rooms: localRooms(), topics: localTopics() }),
+    getNode: async () => ({ nodeId: instanceId, nodeName, rooms: localRooms(), topics: localTopics() }),
     getConn: async (input) => {
       const id = (input as { id?: string } | undefined)?.id
       if (!id) throw new SocketError('BAD_REQUEST', 'getConn requires an id')
@@ -932,6 +941,7 @@ export function createSocketServer<C extends Contract, A extends AuthResult<C>>(
 
   const api: SocketServer<C, A> = {
     nodeId: instanceId,
+    nodeName,
     get local(): LocalView {
       return {
         connections: [...conns],

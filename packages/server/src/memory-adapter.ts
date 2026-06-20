@@ -80,6 +80,7 @@ class MemoryPresence implements PresenceStore {
     }
     return [...byNode.entries()].map(([nodeId, ds]) => ({
       nodeId,
+      nodeName: ds[0]?.nodeName ?? nodeId,
       connections: ds.length,
       rooms: new Set(ds.flatMap((d) => d.rooms)).size,
       alive: true,

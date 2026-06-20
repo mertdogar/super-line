@@ -9,11 +9,14 @@ import type {
 } from '@super-line/core'
 import { useInspector } from '@/hooks/use-inspector'
 import type { InspectorStatus } from '@/lib/inspector-client'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TopologyGraph } from '@/components/topology-graph'
 import { RoomLens } from '@/components/room-lens'
+import { ConnectionsTable } from '@/components/connections-table'
+import { ConnDetail } from '@/components/conn-detail'
+import { ContractExplorer } from '@/components/contract-explorer'
+import { LiveFeed } from '@/components/live-feed'
 import { roomsOf } from '@/lib/topology'
 import { cn } from '@/lib/utils'
 
@@ -27,14 +30,6 @@ const NAV: Array<{ id: View; label: string; icon: typeof Network }> = [
 ]
 
 const DEFAULT_URL = new URLSearchParams(window.location.search).get('url') ?? 'ws://localhost:3000'
-
-function Json({ data }: { data: unknown }): React.JSX.Element {
-  return (
-    <pre className="max-h-[72vh] overflow-auto rounded-md border bg-background/40 p-3 text-xs leading-relaxed">
-      {JSON.stringify(data, null, 2)}
-    </pre>
-  )
-}
 
 function StatusDot({ status }: { status: InspectorStatus }): React.JSX.Element {
   const color =
@@ -59,6 +54,7 @@ export default function App(): React.JSX.Element {
   const [nodeView, setNodeView] = React.useState<NodeView | null>(null)
   const [feed, setFeed] = React.useState<InspectorEvent[]>([])
   const [highlightRoom, setHighlightRoom] = React.useState<string | null>(null)
+  const [selectedConnId, setSelectedConnId] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     if (!client || status !== 'open') return
@@ -146,7 +142,7 @@ export default function App(): React.JSX.Element {
           <Badge variant="muted">{totalConns} conns</Badge>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-hidden">
+        <main className="relative min-h-0 flex-1 overflow-hidden">
           {view === 'topology' ? (
             <div className="flex h-full">
               <div className="min-w-0 flex-1">
@@ -167,52 +163,34 @@ export default function App(): React.JSX.Element {
             </div>
           ) : (
             <div className="h-full overflow-auto p-4">
+              <div className="mb-3 text-sm font-semibold capitalize">
+                {view === 'feed' ? 'Live feed' : view}
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  {view === 'connections'
+                    ? `${connections.length} connections`
+                    : view === 'feed'
+                      ? `${feed.length} events`
+                      : ''}
+                </span>
+              </div>
               {view === 'connections' && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Connections ({connections.length})</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <Json data={connections} />
-                  </CardContent>
-                </Card>
+                <ConnectionsTable
+                  connections={connections}
+                  selectedId={selectedConnId}
+                  onSelect={setSelectedConnId}
+                />
               )}
-              {view === 'contract' && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Contract</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {contract ? (
-                      <Json data={contract} />
-                    ) : (
-                      <p className="text-sm text-muted-foreground">No contract.</p>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-              {view === 'feed' && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Live feed ({feed.length})</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {feed.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">Waiting for events…</p>
-                    ) : (
-                      <ul className="flex flex-col gap-1 text-xs">
-                        {feed.map((event, i) => (
-                          <li key={i} className="flex items-center gap-2 rounded-md border px-2 py-1">
-                            <Badge>{event.type}</Badge>
-                            <span className="truncate text-muted-foreground">{JSON.stringify(event)}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
+              {view === 'contract' &&
+                (contract ? (
+                  <ContractExplorer contract={contract} />
+                ) : (
+                  <p className="text-sm text-muted-foreground">No contract.</p>
+                ))}
+              {view === 'feed' && <LiveFeed events={feed} />}
             </div>
+          )}
+          {view === 'connections' && (
+            <ConnDetail client={client} connId={selectedConnId} onClose={() => setSelectedConnId(null)} />
           )}
         </main>
       </div>

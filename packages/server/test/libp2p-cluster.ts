@@ -6,7 +6,7 @@ import { yamux } from '@chainsafe/libp2p-yamux'
 import { identify } from '@libp2p/identify'
 import { gossipsub } from '@libp2p/gossipsub'
 import type { Adapter } from '@super-line/core'
-import { createLibp2pAdapter, type PubSubLibp2p } from '@super-line/adapter-libp2p'
+import { createLibp2pAdapter, type Libp2pAdapterOptions, type PubSubLibp2p } from '@super-line/adapter-libp2p'
 
 export type { PubSubLibp2p } from '@super-line/adapter-libp2p'
 
@@ -86,4 +86,7 @@ export async function makeNodes(n: number, transport: Transport = 'memory'): Pro
 }
 
 // A fresh adapter on a persistent node (cheap — no crypto, just a topic subscribe + listener).
-export const adapterOn = (node: PubSubLibp2p): Promise<Adapter> => createLibp2pAdapter({ node })
+export const adapterOn = (
+  node: PubSubLibp2p,
+  presence?: Libp2pAdapterOptions['presence'],
+): Promise<Adapter> => createLibp2pAdapter({ node, presence })

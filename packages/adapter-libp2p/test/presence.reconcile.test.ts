@@ -94,3 +94,29 @@ describe('GossipPresence reconcile', () => {
     ])
   })
 })
+
+describe('GossipPresence liveness', () => {
+  it('excludes a node not heard from within the TTL', () => {
+    let t = 1000
+    const p = new GossipPresence(() => {}, { snapshotIntervalMs: 1e9, livenessTtlMs: 1000, now: () => t })
+    instances.push(p)
+    p.set(desc('a1', 'A')) // self — never pruned
+    p.receive({ t: 'd', n: 'B', q: 1, op: { k: 'set', d: desc('b1', 'B') } }) // B seen at t=1000
+    expect(p.count()).toBe(2)
+
+    t = 2500 // 1500ms since B was last heard from > ttl
+    expect(p.list().map((d) => d.id)).toEqual(['a1'])
+  })
+
+  it('keeps a node alive when heard from again before the TTL', () => {
+    let t = 1000
+    const p = new GossipPresence(() => {}, { snapshotIntervalMs: 1e9, livenessTtlMs: 1000, now: () => t })
+    instances.push(p)
+    p.set(desc('a1', 'A'))
+    p.receive({ t: 'd', n: 'B', q: 1, op: { k: 'set', d: desc('b1', 'B') } }) // t=1000
+    t = 1800
+    p.receive({ t: 's', n: 'B', q: 1, ts: 0, c: [desc('b1', 'B')] }) // refresh at t=1800
+    t = 2500 // only 700ms since last B message < ttl
+    expect(p.count()).toBe(2)
+  })
+})

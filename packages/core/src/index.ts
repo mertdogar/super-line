@@ -42,6 +42,23 @@ export type {
   ServerData,
 } from './contract.js'
 
+export {
+  InspectorContract,
+  classifyContract,
+  INSPECTOR_SUBPROTOCOL,
+  INSPECTOR_ROLE,
+} from './inspector.js'
+export type {
+  MessageFlavor,
+  InspectedMessage,
+  InspectedDirectional,
+  InspectedContract,
+  NodeView,
+  ConnView,
+  InspectorEvent,
+  SchemaConverter,
+} from './inspector.js'
+
 export { PROTOCOL } from './wire.js'
 export type {
   Frame,

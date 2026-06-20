@@ -1,0 +1,53 @@
+name: bus-cluster
+
+# Every app container is the same image (built once); they differ only by command + env.
+x-app: &app
+  build:
+    context: ../..
+    dockerfile: examples/bus-cluster/Dockerfile
+  image: super-line-bus-cluster:dev
+
+services:
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  node-1:
+    <<: *app
+    command: pnpm --filter @super-line/example-bus-cluster server
+    environment: { PORT: '8801', NODE_NAME: node-1, REDIS_URL: redis://redis:6379 }
+    depends_on:
+      redis: { condition: service_healthy }
+
+  node-2:
+    <<: *app
+    command: pnpm --filter @super-line/example-bus-cluster server
+    environment: { PORT: '8801', NODE_NAME: node-2, REDIS_URL: redis://redis:6379 }
+    depends_on:
+      redis: { condition: service_healthy }
+
+  node-3:
+    <<: *app
+    command: pnpm --filter @super-line/example-bus-cluster server
+    environment: { PORT: '8801', NODE_NAME: node-3, REDIS_URL: redis://redis:6379 }
+    depends_on:
+      redis: { condition: service_healthy }
+
+  caddy:
+    image: caddy:2
+    ports: ['8080:8080']
+    volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']
+    depends_on: [node-1, node-2, node-3]
+
+  # A few watcher clients, each a real process with one WebSocket through Caddy.
+  client:
+    <<: *app
+    command: pnpm --filter @super-line/example-bus-cluster client
+    environment: { GATEWAY_URL: ws://caddy:8080 }
+    depends_on: [caddy]
+    deploy:
+      replicas: 3

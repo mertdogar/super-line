@@ -9,6 +9,7 @@
     "../packages/adapter-redis",
     "../packages/adapter-libp2p",
     "../packages/adapter-zeromq",
+    "../packages/adapter-rabbitmq",
     "../packages/react"
   ],
   "out": "reference",

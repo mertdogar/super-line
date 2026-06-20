@@ -1,0 +1,56 @@
+name: scaling-rabbitmq
+
+# Every app container is the same image (built once); they differ only by command + env.
+x-app: &app
+  build:
+    context: ../..
+    dockerfile: examples/scaling-rabbitmq/Dockerfile
+  image: super-line-scaling-rabbitmq:dev
+
+services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    # A custom default user — RabbitMQ's built-in `guest` is refused over non-loopback connections.
+    environment: { RABBITMQ_DEFAULT_USER: superline, RABBITMQ_DEFAULT_PASS: superline }
+    ports: ['15672:15672'] # management UI: http://localhost:15672 (superline / superline)
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  node-1:
+    <<: *app
+    command: pnpm --filter @super-line/example-scaling-rabbitmq server
+    environment: { PORT: '8801', NODE_NAME: node-1, RABBITMQ_URL: 'amqp://superline:superline@rabbitmq:5672' }
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+
+  node-2:
+    <<: *app
+    command: pnpm --filter @super-line/example-scaling-rabbitmq server
+    environment: { PORT: '8801', NODE_NAME: node-2, RABBITMQ_URL: 'amqp://superline:superline@rabbitmq:5672' }
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+
+  node-3:
+    <<: *app
+    command: pnpm --filter @super-line/example-scaling-rabbitmq server
+    environment: { PORT: '8801', NODE_NAME: node-3, RABBITMQ_URL: 'amqp://superline:superline@rabbitmq:5672' }
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+
+  caddy:
+    image: caddy:2
+    ports: ['8080:8080']
+    volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']
+    depends_on: [node-1, node-2, node-3]
+
+  # Six fungible clients, each a real process with one WebSocket through Caddy.
+  client:
+    <<: *app
+    command: pnpm --filter @super-line/example-scaling-rabbitmq client
+    environment: { GATEWAY_URL: ws://caddy:8080 }
+    depends_on: [caddy]
+    deploy:
+      replicas: 6

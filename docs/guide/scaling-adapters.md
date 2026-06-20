@@ -38,9 +38,20 @@ const srv = createSocketServer(api, { server, authenticate, adapter })
 
 It fans out rooms, topics, and the bus the same way, and a gossip-replicated directory backs `srv.cluster.*` / `srv.isOnline`. The trade-off vs. Redis: broker-less and decentralized, at the cost of eventually-consistent presence and best-effort delivery (no central store). It's **ESM-only** (libp2p is ESM-only). Run ≥2 stable seed nodes and persist their identity so bootstrap lists stay valid.
 
-::: tip Which adapter?
-Redis is the pragmatic default for a backend cluster (simple, central, strong presence). Reach for libp2p when you specifically want **no shared infrastructure** — self-hosted, on-prem, or edge deployments where running a broker is undesirable.
-:::
+## Broker-routed: RabbitMQ
+
+Already run RabbitMQ, or want the broker to do **selective routing**? [`@super-line/adapter-rabbitmq`](https://www.npmjs.com/package/@super-line/adapter-rabbitmq) implements the same `Adapter` contract over RabbitMQ. Channels become routing keys on one durable `direct` exchange; each node owns an exclusive, auto-delete queue and binds only the channels it has local members for — so the broker delivers each message only to the nodes that subscribed.
+
+```ts
+import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
+
+const adapter = await createRabbitmqAdapter('amqp://localhost:5672')
+const srv = createSocketServer(api, { server, authenticate, adapter })
+```
+
+The factory is **async** (it connects and declares its topology before returning a ready adapter). It's built on [`rabbitmq-client`](https://www.npmjs.com/package/rabbitmq-client), so a dropped connection auto-reconnects and the node's bindings are replayed. RabbitMQ has no shared key-value store, so — like libp2p — presence is **gossip-replicated** over the same exchange (eventually consistent; a crashed node's connections clear after a liveness TTL, ~30s by default, vs Redis's broker-enforced key expiry; graceful shutdown clears promptly). Delivery is at-most-once (transient messages, no acks, no persistence). One caveat Redis doesn't have: AMQP routing keys cap at **255 bytes**, so a channel name (embedding room / user / topic) longer than that is rejected with a clear error.
+
+(See the **Which adapter?** tip below, after the ZeroMQ option, for how to choose between all four.)
 
 ## The cluster event bus
 
@@ -109,7 +120,7 @@ const adapter = await createZeroMqAdapter({
 ```
 
 ::: tip Which adapter?
-**Redis** is the pragmatic default for a backend cluster — simple, central, strong presence. **ZeroMQ mesh** is the lightest way to go broker-less: no extra service, gorgeous at a handful of nodes, but O(N²) connections with a static peer list (use proxy mode, or Redis, for large/dynamic fleets). **libp2p** is the heavyweight decentralized option (NAT traversal, encrypted transports, discovery) for self-hosted / edge deployments.
+**Redis** is the pragmatic default for a backend cluster — simple, central, strong presence. **RabbitMQ** fits teams already running it, or who want the broker to selectively route per channel (gossip-replicated presence, at-most-once). **ZeroMQ mesh** is the lightest way to go broker-less: no extra service, gorgeous at a handful of nodes, but O(N²) connections with a static peer list (use proxy mode, or Redis, for large/dynamic fleets). **libp2p** is the heavyweight decentralized option (NAT traversal, encrypted transports, discovery) for self-hosted / edge deployments. All share one `Adapter` seam, so switching is a one-line change.
 :::
 
 The [`react-chat-cluster-zeromq` example](https://github.com/mertdogar/super-line/tree/main/examples/react-chat-cluster-zeromq) is the Redis chat cluster with the broker **deleted** — same app, one fewer service.
@@ -136,6 +147,12 @@ The [`scaling-libp2p` example](https://github.com/mertdogar/super-line/tree/main
 
 ```bash
 cd examples/scaling-libp2p && docker compose up
+```
+
+The [`scaling-rabbitmq` example](https://github.com/mertdogar/super-line/tree/main/examples/scaling-rabbitmq) is the same cluster over **RabbitMQ** — with the management UI exposed so you can watch the exchange, per-node queues, and bindings live:
+
+```bash
+cd examples/scaling-rabbitmq && docker compose up
 ```
 
 For a bus-focused cluster, [`bus-cluster`](https://github.com/mertdogar/super-line/tree/main/examples/bus-cluster) has every node bump a counter and `server.subscribe` to every node's bumps, converging a shared tally — own bumps land in-process via local echo, peers' arrive over Redis.

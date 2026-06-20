@@ -1,0 +1,8 @@
+# Port-only address → plain HTTP on :8080, no automatic TLS.
+# reverse_proxy upgrades WebSockets automatically; lb_policy spreads the long-lived
+# connections evenly across the three nodes (Caddy defaults to `random` otherwise).
+:8080 {
+	reverse_proxy node-1:8801 node-2:8801 node-3:8801 {
+		lb_policy round_robin
+	}
+}

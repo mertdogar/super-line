@@ -1,0 +1,51 @@
+name: react-chat-cluster-rabbitmq
+
+# Both chat nodes are the same image (built once); they differ only by NODE_NAME. The shared
+# RabbitMQ broker fans rooms, topics, and presence across the two nodes.
+x-node: &node
+  build:
+    context: ../..
+    dockerfile: examples/react-chat-cluster-rabbitmq/Dockerfile
+  image: super-line-react-chat-cluster-rabbitmq:dev
+  depends_on:
+    rabbitmq: { condition: service_healthy }
+
+services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    # A custom default user — RabbitMQ's built-in `guest` is refused over non-loopback connections.
+    environment: { RABBITMQ_DEFAULT_USER: superline, RABBITMQ_DEFAULT_PASS: superline }
+    ports: ['15673:15672'] # management UI: http://localhost:15673 (superline / superline)
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  node-1:
+    <<: *node
+    environment: { PORT: '8787', NODE_NAME: node-1, RABBITMQ_URL: 'amqp://superline:superline@rabbitmq:5672' }
+
+  node-2:
+    <<: *node
+    environment: { PORT: '8787', NODE_NAME: node-2, RABBITMQ_URL: 'amqp://superline:superline@rabbitmq:5672' }
+
+  # Serves the built SPA and load-balances WebSockets across the two nodes.
+  web:
+    build:
+      context: ../..
+      dockerfile: examples/react-chat-cluster-rabbitmq/Dockerfile.web
+    image: super-line-react-chat-cluster-rabbitmq-web:dev
+    ports: ['8100:8080']
+    volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']
+    depends_on: [node-1, node-2]
+
+  # The Control Center webapp, served on :8101. The browser connects it back to the cluster's
+  # inspector channel at ws://localhost:8100/inspect (Caddy → node-1). Open http://localhost:8101.
+  control-center:
+    build:
+      context: ../..
+      dockerfile: examples/react-chat-cluster-rabbitmq/Dockerfile.control-center
+    image: super-line-react-chat-cluster-rabbitmq-cc:dev
+    ports: ['8101:8101']
+    depends_on: [web]

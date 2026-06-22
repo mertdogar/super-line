@@ -818,6 +818,43 @@ importers:
         specifier: ^3.0.2
         version: 3.0.7
 
+  packages/transport-libp2p:
+    dependencies:
+      '@libp2p/interface':
+        specifier: ^3.2.4
+        version: 3.2.4
+      '@libp2p/utils':
+        specifier: ^7.2.3
+        version: 7.2.3
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+    devDependencies:
+      '@chainsafe/libp2p-noise':
+        specifier: ^17.0.0
+        version: 17.0.0
+      '@chainsafe/libp2p-yamux':
+        specifier: ^8.0.1
+        version: 8.0.1
+      '@libp2p/memory':
+        specifier: ^2.0.22
+        version: 2.0.22
+      '@multiformats/multiaddr':
+        specifier: ^13.0.3
+        version: 13.0.3
+      '@super-line/client':
+        specifier: workspace:*
+        version: link:../client
+      '@super-line/server':
+        specifier: workspace:*
+        version: link:../server
+      libp2p:
+        specifier: ^3.3.4
+        version: 3.3.4
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+
   packages/transport-loopback:
     dependencies:
       '@super-line/core':

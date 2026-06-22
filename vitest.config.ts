@@ -17,6 +17,7 @@ export default defineConfig({
       '@super-line/transport-websocket': src('packages/transport-websocket/src/index.ts'),
       '@super-line/transport-loopback': src('packages/transport-loopback/src/index.ts'),
       '@super-line/transport-http': src('packages/transport-http/src/index.ts'),
+      '@super-line/transport-libp2p': src('packages/transport-libp2p/src/index.ts'),
     },
   },
   test: {

@@ -139,3 +139,60 @@ default `'both'`), `sessionTimeout` (60s), `keepalive` (20s, SSE comment), `poll
 - A new guide page (e.g. `docs/guide/http-transport.md`) covering SSE vs long-poll, the EventSource-in-Node caveat,
   composing WS+HTTP on one server, and proxy guidance.
 - `@super-line/transport-http` added to the package list / README index wherever transports are enumerated.
+
+---
+
+## Step 3 — libp2p transport (BUILT 2026-06-22)
+
+**Additive** — a new package, no breaking changes to existing API.
+
+### New package
+
+`@super-line/transport-libp2p` — carries the wire protocol over a **libp2p protocol stream**. Exports
+`libp2pServerTransport`, `libp2pClientTransport`, and their option types. **Bring-your-own node:** the transport
+takes a started `Libp2p` node (the user picks the libp2p transports — ws / webrtc-direct / relayed-webrtc /
+webtransport — and listen addrs). Runtime deps are only `@super-line/core` + `@libp2p/interface` (types) +
+`@libp2p/utils` (`lpStream` framing); **`libp2p` is a peerDependency** (the user already builds the node). This
+is a SEPARATE node from `@super-line/adapter-libp2p` (which runs gossipsub for server↔server fan-out).
+
+### Usage (to document — a new "libp2p / WebRTC transport" guide page)
+
+```ts
+// Server — register the protocol on a started node
+import { libp2pServerTransport } from '@super-line/transport-libp2p'
+const srv = createSuperLineServer(contract, {
+  transports: [libp2pServerTransport({ node /*, protocol: '/super-line/1.0.0' */ })],
+  authenticate: (h) => ({ role: h.query.role, ctx: {} }), // h.transport === 'libp2p'; h.peer = { id, addr }; role+params come from the first stream frame
+})
+
+// Client — dial the server's multiaddr(s)
+import { libp2pClientTransport } from '@super-line/transport-libp2p'
+const client = createSuperLineClient(contract, {
+  transport: libp2pClientTransport({ node: clientNode, multiaddr: serverNode.getMultiaddrs() }),
+  role: 'user',
+})
+```
+
+### Facts worth documenting
+- **Bring-your-own libp2p node.** The transport never creates/stops the node; the user configures it
+  (`createLibp2p({ transports, connectionEncrypters: [noise()], streamMuxers: [yamux()] })`). For a browser→server
+  WebRTC deployment the node uses `@libp2p/webrtc`; libp2p owns the signaling (we never write any) — see
+  `PLAN-transports.md §3` for the webrtc-direct / circuit-relay-v2 connectivity matrix.
+- **Auth is the first stream frame** (libp2p has no HTTP headers/query): the client sends `{role, params}` as the
+  first length-prefixed frame; the server reads it, builds the `Handshake` (`peer.id` = noise-verified PeerId,
+  `peer.addr` = remote multiaddr), runs `authenticate`, and aborts the stream on reject. Same
+  `authenticate(Handshake)` shape as the other transports.
+- **Length-prefix framed** (`lpStream`): a libp2p `'message'` event does NOT preserve frame boundaries (yamux
+  chunks large sends), so the transport length-prefixes every frame. Invisible to the app.
+- Reuses the same app-level ping/pong liveness and the same no-session-resume reconnect model as the other transports.
+
+### Docs impact (add at the end, alongside the Step 1 sweep)
+- A new guide page (e.g. `docs/guide/libp2p-transport.md`) covering bring-your-own-node, the first-frame auth,
+  the WebRTC/relay connectivity matrix, and the separate-node-from-adapter-libp2p note.
+- `@super-line/transport-libp2p` added to the package list / README index wherever transports are enumerated.
+
+---
+
+## All transports — final package list (for the docs/README sweep)
+`@super-line/core` (interfaces) · `@super-line/transport-websocket` · `@super-line/transport-http` (sse+longpoll) ·
+`@super-line/transport-libp2p` (libp2p family / webrtc) · `@super-line/transport-loopback` (in-memory test substrate).

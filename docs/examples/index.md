@@ -20,6 +20,17 @@ A live React chat (Vite + a WS server). Open two browser tabs to chat in real ti
 pnpm --filter @super-line/example-react-chat dev   # http://localhost:5173
 ```
 
+## hono — one server for HTTP + WebSockets
+
+super-line attached to a [Hono](https://hono.dev) app (`@hono/node-server`) on **one process, one port**: Hono serves the built frontend and REST routes while super-line owns the WebSocket bus, both on the same Node `http.Server` (the `{ server }` option — no library changes). Three live cards — a server-uptime [topic](/guide/topics), shared todos (req/res + a topic), and shared cursors whose identity is assigned server-side into `ctx` — plus a `POST /api/todos` **REST→WS bridge**: `curl` a todo in and watch it appear in every open tab. The bridge route and the WS upgrade share one auth rule. Open a few tabs and move your mouse.
+
+```bash
+pnpm --filter @super-line/example-hono build
+pnpm --filter @super-line/example-hono start   # http://localhost:3000
+```
+
+Demonstrates: [topics](/guide/topics), [requests](/guide/requests), [middleware & lifecycle](/guide/middleware-lifecycle), composing with an HTTP framework.
+
 ## auth — roles as an authorization boundary
 
 Token auth with an `admin` and a `user` role. `whoami` is shared; `secret` is admin-only. A user calling `secret` gets `NOT_FOUND`; a bad token is rejected at the upgrade.

@@ -1,0 +1,181 @@
+:root {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  color: #1e293b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #f1f5f9;
+}
+
+#gate {
+  max-width: 24rem;
+  margin: 6rem auto;
+  padding: 2rem;
+  background: #fff;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+#gate h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+}
+
+#gate p {
+  margin: 0 0 1.5rem;
+  color: #64748b;
+}
+
+input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+}
+
+button {
+  padding: 0.5rem 0.9rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #2563eb;
+}
+
+#app {
+  max-width: 40rem;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  display: grid;
+  gap: 1.5rem;
+}
+
+.card {
+  background: #fff;
+  border-radius: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.card small {
+  display: block;
+  margin-top: 0.75rem;
+  color: #94a3b8;
+}
+
+.uptime {
+  font-size: 2.5rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+#todo-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+#todo-form input {
+  flex: 1;
+}
+
+#todo-list {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+#todo-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.4rem;
+  background: #f8fafc;
+}
+
+#todo-list li .text {
+  flex: 1;
+}
+
+#todo-list li.done .text {
+  text-decoration: line-through;
+  color: #94a3b8;
+}
+
+#todo-list li .edit {
+  flex: 1;
+}
+
+#todo-list li em {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+#todo-list li button {
+  background: transparent;
+  color: #cbd5e1;
+  padding: 0.1rem 0.4rem;
+}
+
+#todo-list li button:hover {
+  color: #ef4444;
+}
+
+#cursors {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+  transition: transform 80ms linear;
+}
+
+.cursor::before {
+  content: '';
+  position: absolute;
+  width: 0;
+  height: 0;
+  border-left: 6px solid currentColor;
+  border-bottom: 6px solid currentColor;
+  border-right: 6px solid transparent;
+  border-top: 6px solid transparent;
+  transform: rotate(-45deg);
+}
+
+.cursor span {
+  position: absolute;
+  left: 0.75rem;
+  top: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.4rem;
+  background: currentColor;
+  color: #fff;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}

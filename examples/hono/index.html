@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>super-line × hono</title>
+  </head>
+  <body>
+    <form id="gate">
+      <h1>super-line × hono</h1>
+      <p>Open this page in a few tabs to see it live.</p>
+      <input id="name" placeholder="your name" autocomplete="off" autofocus />
+      <button type="submit">Join</button>
+    </form>
+
+    <main id="app" hidden>
+      <section class="card">
+        <h2>Server uptime</h2>
+        <div id="uptime" class="uptime">00:00:00</div>
+        <small>pushed every second over the <code>uptime</code> topic</small>
+      </section>
+
+      <section class="card">
+        <h2>Shared todos</h2>
+        <form id="todo-form">
+          <input id="todo-input" placeholder="add a todo…" autocomplete="off" />
+          <button type="submit">Add</button>
+        </form>
+        <ul id="todo-list"></ul>
+        <small>double-click to edit · or <code>POST /api/todos</code> from curl</small>
+      </section>
+    </main>
+
+    <div id="cursors"></div>
+    <script type="module" src="/src/client.ts"></script>
+  </body>
+</html>

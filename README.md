@@ -195,6 +195,9 @@ pnpm --filter @super-line/example-chat start
 # Browser React chat (Vite + WS server; open two tabs to chat live):
 pnpm --filter @super-line/example-react-chat dev   # http://localhost:5173
 
+# Hono (HTTP) + super-line (WS) on ONE port — uptime topic, shared todos, live cursors + a curl→WS bridge:
+pnpm --filter @super-line/example-hono build && pnpm --filter @super-line/example-hono start   # http://localhost:3000
+
 # Token auth with roles (admin-only `secret`; user gets NOT_FOUND):
 pnpm --filter @super-line/example-auth start
 

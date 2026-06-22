@@ -1,0 +1,24 @@
+{
+  "name": "@super-line/example-hono",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "start": "tsx src/server.ts",
+    "dev": "concurrently -k -n vite,server -c green,blue \"vite build --watch\" \"tsx watch src/server.ts\""
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@super-line/client": "workspace:*",
+    "@super-line/core": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "hono": "^4.6.14",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "tsx": "^4.19.2",
+    "vite": "^5.4.11"
+  }
+}

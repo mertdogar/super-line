@@ -540,6 +540,49 @@ importers:
         specifier: ^4.19.2
         version: 4.22.4
 
+  examples/transports:
+    dependencies:
+      '@chainsafe/libp2p-noise':
+        specifier: ^17.0.0
+        version: 17.0.0
+      '@chainsafe/libp2p-yamux':
+        specifier: ^8.0.1
+        version: 8.0.1
+      '@libp2p/tcp':
+        specifier: ^11.0.22
+        version: 11.0.22
+      '@super-line/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@super-line/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@super-line/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      '@super-line/transport-http':
+        specifier: workspace:*
+        version: link:../../packages/transport-http
+      '@super-line/transport-libp2p':
+        specifier: workspace:*
+        version: link:../../packages/transport-libp2p
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
+      eventsource:
+        specifier: ^3.0.2
+        version: 3.0.7
+      libp2p:
+        specifier: ^3.3.4
+        version: 3.3.4
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
+
   packages/adapter-libp2p:
     dependencies:
       '@chainsafe/libp2p-noise':

@@ -1,113 +1,71 @@
-# Transports
+# Choose your wire
 
-super-line separates **what** travels (the contract — requests, events, topics, validated and routed by the
-server-authoritative core) from **how** it travels (the wire). The "how" is a pluggable **transport**: the server
-accepts connections on one or more transports, the client dials on one.
+super-line separates **what** travels — your typed contract: requests, events, topics, validated and routed by a server-authoritative core — from **how** it travels: the **transport**.
 
-The transport only moves opaque bytes over a *logical* connection — it hides physical churn (HTTP's many requests,
-SSE/EventSource reconnects, peer signaling) and never inspects a frame. The serializer, validation, rooms, topics,
-liveness (app-level ping/pong) and reconnect semantics live in the core, identically across every transport.
+That separation is the point. The same server, the same client, the same handlers run over a WebSocket, an HTTP/SSE stream, or a libp2p/WebRTC peer connection. **The transport is one line; everything above it is identical.**
 
 ```ts
-// server: one or more transports
-createSuperLineServer(contract, { transports: [webSocketServerTransport({ server })], authenticate })
-// client: one transport
-createSuperLineClient(contract, { transport: webSocketClientTransport({ url: 'ws://localhost:3000' }), role: 'user' })
+// the ONLY thing that changes between wires:
+webSocketClientTransport({ url: 'ws://localhost:3000' })   // WebSocket
+httpClientTransport({ url: 'http://localhost:3000' })       // HTTP — SSE / long-poll
+libp2pClientTransport({ node, multiaddr })                  // libp2p / WebRTC
+loopbackTransport.client()                                  // in-memory (tests)
 ```
 
-`authenticate` always receives a normalized **Handshake** — `{ transport, headers, query, peer?, raw }` — so the
-same auth code works on every transport (read `h.query.token`, `h.headers`, or for peer transports `h.peer`).
+```ts
+const client = createSuperLineClient(contract, {
+  transport: webSocketClientTransport({ url: 'ws://localhost:3000' }), // ← swap this one line
+  role: 'user',
+})
+await client.send({ room: 'lobby', text: 'hi' }) // identical on every wire
+```
 
-## Available transports
+A server can even accept **several at once** on one `http.Server`:
 
-| Package | Wire | Use it for |
+```ts
+createSuperLineServer(contract, {
+  transports: [webSocketServerTransport({ server }), httpServerTransport({ server })],
+  authenticate,
+})
+```
+
+WebSocket uses the HTTP `upgrade` channel and HTTP uses the `request` channel, so they coexist without collision — a browser that can't open a WebSocket falls back to HTTP against the very same server.
+
+## Which wire?
+
+| If you need… | Use | Package |
 |---|---|---|
-| `@super-line/transport-websocket` | WebSocket (full-duplex) | the default — lowest latency, broadest support |
-| `@super-line/transport-http` | SSE or long-poll downstream + POST upstream | restrictive networks/proxies where WS is blocked |
-| `@super-line/transport-libp2p` | libp2p protocol stream (ws / WebRTC / WebTransport) | p2p / WebRTC deployments; bring your own libp2p node |
-| `@super-line/transport-loopback` | in-memory (no socket) | tests — wire a real server + client in one process |
+| The default — lowest latency, full-duplex, broadest support | **WebSocket** | [`@super-line/transport-websocket`](./transport-websocket) |
+| To survive restrictive networks / proxies that block or buffer WebSocket | **HTTP** (SSE or long-poll) | [`@super-line/transport-http`](./transport-http) |
+| Peer-to-peer / **WebRTC** / WebTransport, browser↔server with no signaling code | **libp2p** | [`@super-line/transport-libp2p`](./transport-libp2p) |
+| Fast, deterministic tests with a real server + client in one process | **Loopback** | [`@super-line/transport-loopback`](./transport-loopback) |
 
-Transports compose: a server can list several (`transports: [webSocketServerTransport({ server }),
-httpServerTransport({ server })]`) on the same `http.Server` — WS uses the HTTP `upgrade` channel, HTTP uses the
-`request` channel, so they never collide.
+Start with WebSocket. Reach for HTTP as a fallback wire, libp2p when you want WebRTC/p2p, and loopback in your test suite.
 
-## WebSocket (default)
+## One handshake, every wire
 
-```ts
-import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
-
-// server
-webSocketServerTransport({ server, path: '/ws', backpressure: { maxBufferedBytes: 1_000_000 } })
-// client (browser: WebSocket is global; Node < 22: pass `WebSocket`)
-webSocketClientTransport({ url: 'wss://api.example.com' })
-```
-
-`path`, `backpressure`, and the Control Center `inspector` subprotocol are WS-transport options.
-
-## HTTP — SSE & long-poll
-
-For environments that block or buffer WebSocket. SSE (`EventSource`) or long-poll downstream, `POST` upstream,
-over one logical session.
+`authenticate` always receives a normalized **Handshake** — the same shape regardless of transport — so your auth code is written once:
 
 ```ts
-import { httpServerTransport, httpClientTransport } from '@super-line/transport-http'
-
-// server — mount on the same http.Server as WS
-httpServerTransport({ server, basePath: '/superline' })
-
-// browser client (EventSource + fetch are global)
-httpClientTransport({ url: 'https://api.example.com', mode: 'sse' })
+authenticate: (h) => {
+  // h: { transport, headers, query, peer?, raw }
+  const token = h.query.token        // WS/HTTP carry it on the URL; libp2p carries it in the first frame
+  // h.peer = { id, addr } for peer transports (the verified PeerId)
+  return { role: 'user', ctx: verify(token) }
+}
 ```
 
-In **Node**, `EventSource` isn't global — pass one (the `eventsource` npm package) for SSE mode, or use
-`mode: 'longpoll'` (which needs only `fetch`):
+## What every transport shares
 
-```ts
-import { EventSource } from 'eventsource'
-httpClientTransport({ url, EventSource })          // sse
-httpClientTransport({ url, mode: 'longpoll' })     // fetch-only
-```
+The transport only moves opaque bytes over a *logical* connection and never inspects a frame. Everything else lives in the core and behaves identically on every wire:
 
-Notes: base64 framing makes the HTTP transport heavier than WS for large binary payloads (it's the
-compat/fallback wire); behind proxies that buffer SSE, prefer `mode: 'longpoll'`.
+- **Server-authority** — roles fixed at connect; the server owns rooms/topics and validates every inbound message; cross-role calls → `NOT_FOUND`.
+- **Liveness** — app-level ping/pong frames the core sends and answers; no per-transport heartbeat.
+- **Reconnect** — a dropped logical connection re-authenticates and re-subscribes (no session resume). The transport hides the *physical* churn (HTTP's many requests, SSE reconnects, peer re-dials) beneath that one logical connection.
+- **Validation, rooms, topics, serialization, and the cluster `Adapter`** — unchanged. The transport is just the pipe.
 
-## libp2p (incl. WebRTC)
+::: tip Transports vs adapters
+A **transport** is the *client↔server* wire (this page). An [**adapter**](./scaling-adapters) is the *server↔server* fan-out substrate for multi-node clusters (Redis, libp2p, …). They're independent — you pick each separately.
+:::
 
-Carries the wire over a libp2p protocol stream. **Bring your own started `Libp2p` node** — you choose its
-transports (`@libp2p/websockets`, `@libp2p/webrtc` for WebRTC-direct/relayed, `@libp2p/webtransport`) and listen
-addresses; libp2p owns any WebRTC signaling, so super-line writes none. (This is a *separate* node from
-`@super-line/adapter-libp2p`, which is server↔server fan-out.)
-
-```ts
-import { libp2pServerTransport, libp2pClientTransport } from '@super-line/transport-libp2p'
-
-// server: register the protocol on a node
-libp2pServerTransport({ node })
-// client: dial the server's multiaddr(s)
-libp2pClientTransport({ node: clientNode, multiaddr: serverNode.getMultiaddrs() })
-```
-
-libp2p has no HTTP headers/query, so auth rides the **first stream frame**: the client sends `{ role, params }`,
-and `authenticate` receives a Handshake with `transport: 'libp2p'`, `query: { role, ...params }`, and
-`peer: { id, addr }` (the noise-verified PeerId). The package depends only on `@super-line/core`,
-`@libp2p/interface`, and `@libp2p/utils`; **`libp2p` is a peerDependency** (you already build the node).
-
-## Loopback (tests)
-
-Wire a real server and client in one process with no socket — ideal for fast, deterministic tests.
-
-```ts
-import { createLoopbackTransport } from '@super-line/transport-loopback'
-
-const loopback = createLoopbackTransport()
-const srv = createSuperLineServer(contract, { transports: [loopback.server], authenticate })
-const client = createSuperLineClient(contract, { transport: loopback.client(), role: 'user' })
-```
-
-## What stays the same on every transport
-
-- **`authenticate(handshake)`** and the server-authoritative model (roles fixed at connect; cross-role → `NOT_FOUND`).
-- **Liveness** — app-level ping/pong frames the core sends/answers; no per-transport heartbeat.
-- **Reconnect** — a dropped logical connection re-authenticates and re-subscribes (no session resume). The
-  transport hides physical reconnects beneath that.
-- **Validation, rooms, topics, the cluster `Adapter`** — all unchanged; the transport is just the pipe.
+Next: pick a wire — [WebSocket](./transport-websocket) · [HTTP](./transport-http) · [libp2p & WebRTC](./transport-libp2p) · [Loopback](./transport-loopback).

@@ -1,0 +1,26 @@
+{
+  "name": "@super-line/example-transports",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@super-line/core": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "@super-line/client": "workspace:*",
+    "@super-line/transport-websocket": "workspace:*",
+    "@super-line/transport-http": "workspace:*",
+    "@super-line/transport-libp2p": "workspace:*",
+    "@chainsafe/libp2p-noise": "^17.0.0",
+    "@chainsafe/libp2p-yamux": "^8.0.1",
+    "@libp2p/tcp": "^11.0.22",
+    "eventsource": "^3.0.2",
+    "libp2p": "^3.3.4",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

@@ -127,8 +127,9 @@ onBeforeUnmount(() => {
           </h1>
           <p class="sl-lede">
             One contract for every pattern on the wire — requests, events, and
-            subscriptions — with end-to-end types and zero codegen. The same API
-            on a single server or a cluster of nodes.
+            subscriptions — with end-to-end types and zero codegen. Run the same
+            code over <strong>WebSocket, HTTP, or WebRTC</strong>, on a single
+            server or a cluster of nodes.
           </p>
           <div class="sl-cta">
             <a class="sl-btn sl-btn--primary" :href="withBase('/guide/getting-started')">Get started</a>
@@ -137,7 +138,7 @@ onBeforeUnmount(() => {
           </div>
           <p class="sl-install">
             <span class="sl-install__p">pnpm add</span>
-            @super-line/core @super-line/server @super-line/client
+            @super-line/core @super-line/server @super-line/client @super-line/transport-websocket
           </p>
         </div>
 

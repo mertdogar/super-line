@@ -27,6 +27,16 @@ export default defineConfig({
           ],
         },
         {
+          text: 'Transports',
+          items: [
+            { text: 'Choose your wire', link: '/guide/transports' },
+            { text: 'WebSocket', link: '/guide/transport-websocket' },
+            { text: 'HTTP — SSE & long-poll', link: '/guide/transport-http' },
+            { text: 'libp2p & WebRTC', link: '/guide/transport-libp2p' },
+            { text: 'Loopback (testing)', link: '/guide/transport-loopback' },
+          ],
+        },
+        {
           text: 'Interaction flavors',
           items: [
             { text: 'Requests', link: '/guide/requests' },
@@ -47,7 +57,6 @@ export default defineConfig({
         {
           text: 'Client',
           items: [
-            { text: 'Transports', link: '/guide/transports' },
             { text: 'Reconnection & delivery', link: '/guide/reconnection-delivery' },
             { text: 'Serialization', link: '/guide/serialization' },
           ],

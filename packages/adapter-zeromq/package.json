@@ -1,6 +1,6 @@
 {
   "name": "@super-line/adapter-zeromq",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "ZeroMQ adapter for super-line — brokerless mesh (or lightweight forwarder) multi-node fan-out + presence.",
   "license": "MIT",

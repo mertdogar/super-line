@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 import { withBase } from 'vitepress'
 
 /* Hand-highlighted snippets. Code is the hero, so highlighting is tuned to the
@@ -60,6 +60,91 @@ const busOut = [
   { node: 'client', txt: '← cluster total 6', tally: '{ n1:2, n2:2, n3:2 }', self: false },
 ]
 
+/* ── transports: same code, any wire ─────────────────────────────────
+   One client, one call — only the `transport:` line changes between wires.
+   Each wire animates with its own texture (full-duplex line, marching SSE
+   chunks, a peer-to-peer hop, an in-process blink). Calls are real
+   super-line (verified against the transport packages + examples/transports). */
+type Wire = {
+  id: 'ws' | 'http' | 'libp2p' | 'loopback'
+  label: string
+  recv: string
+  tag: string
+  pkg: string
+  code: string
+}
+const wires: Wire[] = [
+  {
+    id: 'ws',
+    label: 'WebSocket',
+    recv: 'websocket',
+    tag: 'full-duplex · lowest latency · the default',
+    pkg: '@super-line/transport-websocket',
+    code: `<span class="f">webSocketClientTransport</span>({ url })`,
+  },
+  {
+    id: 'http',
+    label: 'HTTP',
+    recv: 'sse',
+    tag: 'SSE / long-poll · slips through proxies that block WS',
+    pkg: '@super-line/transport-http',
+    code: `<span class="f">httpClientTransport</span>({ url })`,
+  },
+  {
+    id: 'libp2p',
+    label: 'libp2p',
+    recv: 'libp2p',
+    tag: 'peer-to-peer · WebRTC / WebTransport · no signaling code',
+    pkg: '@super-line/transport-libp2p',
+    code: `<span class="f">libp2pClientTransport</span>({ node, multiaddr })`,
+  },
+  {
+    id: 'loopback',
+    label: 'Loopback',
+    recv: 'loopback',
+    tag: 'in-process · deterministic · your test suite',
+    pkg: '@super-line/transport-loopback',
+    code: `loopbackTransport.<span class="f">client</span>()`,
+  },
+]
+const activeWire = ref<Wire['id']>('ws')
+const arrived = ref(false)
+const activeMeta = computed(() => wires.find((w) => w.id === activeWire.value) as Wire)
+const wireCode = computed(
+  () => `<span class="c">// one client — identical on every wire</span>
+<span class="k">const</span> client = <span class="f">createSuperLineClient</span>(chat, {
+  transport: <span class="wl">${activeMeta.value.code}</span>,<span class="c"> // ← the only line that changes</span>
+  role: <span class="s">'user'</span>,
+})
+<span class="k">await</span> client.<span class="f">send</span>({ text: <span class="s">'hi'</span> }) <span class="c">// same call, every wire</span>`,
+)
+
+const prefersMotion = () =>
+  typeof window !== 'undefined' &&
+  window.matchMedia('(prefers-reduced-motion: no-preference)').matches
+let wireCycle: ReturnType<typeof setInterval> | null = null
+let arriveTimer: ReturnType<typeof setTimeout> | null = null
+
+function selectWire(id: Wire['id'], byUser = false) {
+  activeWire.value = id
+  arrived.value = false
+  if (arriveTimer) clearTimeout(arriveTimer)
+  if (!prefersMotion()) {
+    arrived.value = true
+    return
+  }
+  arriveTimer = setTimeout(() => (arrived.value = true), 1050)
+  // once the visitor drives the demo, stop the carousel and let them explore
+  if (byUser && wireCycle) {
+    clearInterval(wireCycle)
+    wireCycle = null
+  }
+}
+function cycleWire() {
+  const i = wires.findIndex((w) => w.id === activeWire.value)
+  selectWire(wires[(i + 1) % wires.length].id)
+}
+
 type Cell = { kind: 'yes' | 'no' | 'mid'; t?: string }
 const cols = ['super-line', 'Socket.IO', 'tRPC', 'raw ws', 'dist. emitter']
 const rows: { label: string; cells: Cell[] }[] = [
@@ -68,6 +153,7 @@ const rows: { label: string; cells: Cell[] }[] = [
   { label: 'Req/res — both directions', cells: [{ kind: 'yes' }, { kind: 'mid', t: 'ack cbs' }, { kind: 'mid', t: 'c→s only' }, { kind: 'no' }, { kind: 'no' }] },
   { label: 'Events & rooms', cells: [{ kind: 'yes' }, { kind: 'yes' }, { kind: 'no' }, { kind: 'no' }, { kind: 'mid', t: 'events' }] },
   { label: 'Topics (pub/sub)', cells: [{ kind: 'yes' }, { kind: 'mid', t: 'via rooms' }, { kind: 'mid', t: 'subs' }, { kind: 'no' }, { kind: 'yes' }] },
+  { label: 'Pluggable transport (WS · HTTP · libp2p)', cells: [{ kind: 'yes' }, { kind: 'mid', t: 'WS + poll' }, { kind: 'mid', t: 'link-based' }, { kind: 'no' }, { kind: 'no' }] },
   { label: 'Cross-node fan-out', cells: [{ kind: 'yes' }, { kind: 'yes' }, { kind: 'no' }, { kind: 'no' }, { kind: 'yes' }] },
   { label: 'Per-role contracts', cells: [{ kind: 'yes' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }] },
   { label: 'Presence / introspection', cells: [{ kind: 'yes', t: 'cluster' }, { kind: 'mid', t: 'rooms' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }] },
@@ -79,6 +165,15 @@ let io: IntersectionObserver | null = null
 let fallback: ReturnType<typeof setTimeout> | null = null
 
 onMounted(() => {
+  // transport demo: time the "arrival" badge and auto-advance the wire carousel
+  // (motion-gated — under reduced-motion it parks on a wire, fully readable).
+  if (prefersMotion()) {
+    arriveTimer = setTimeout(() => (arrived.value = true), 1050)
+    wireCycle = setInterval(cycleWire, 3600)
+  } else {
+    arrived.value = true
+  }
+
   const el = root.value
   if (!el) return
   // Only arm the scroll-reveal when motion is welcome; content is visible by
@@ -105,6 +200,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   io?.disconnect()
   if (fallback) clearTimeout(fallback)
+  if (wireCycle) clearInterval(wireCycle)
+  if (arriveTimer) clearTimeout(arriveTimer)
 })
 </script>
 
@@ -128,8 +225,8 @@ onBeforeUnmount(() => {
           <p class="sl-lede">
             One contract for every pattern on the wire — requests, events, and
             subscriptions — with end-to-end types and zero codegen. Run the same
-            code over <strong>WebSocket, HTTP, or WebRTC</strong>, on a single
-            server or a cluster of nodes.
+            code over <strong>WebSocket, HTTP, or libp2p/WebRTC</strong> — the
+            transport is one line — on a single node or a cluster.
           </p>
           <div class="sl-cta">
             <a class="sl-btn sl-btn--primary" :href="withBase('/guide/getting-started')">Get started</a>
@@ -213,8 +310,165 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <!-- ░░ IT WORKS ON ONE NODE — THEN YOU ADD A SECOND ░░ -->
+    <!-- ░░ SAME APP, ANY WIRE (TRANSPORTS) ░░ -->
     <section class="sl-sec">
+      <div class="sl-shell">
+        <div class="sl-sec__head reveal">
+          <p class="sl-kicker"><span class="sl-new">New</span> Pluggable transports</p>
+          <h2>Same app. Any wire.</h2>
+          <p>
+            super-line splits <strong>what</strong> travels — your typed
+            contract — from <strong>how</strong> it travels. The same server,
+            the same client, the same handlers run over a WebSocket, an HTTP/SSE
+            stream, or a libp2p/WebRTC peer connection.
+            <span class="sl-hl">The transport is one line; everything above it is
+            identical.</span>
+          </p>
+        </div>
+
+        <div class="sl-wireboard reveal">
+          <div class="sl-wireboard__bar" role="tablist" aria-label="Pick a transport">
+            <button
+              v-for="w in wires"
+              :key="w.id"
+              class="sl-wiretab"
+              :class="{ 'is-on': activeWire === w.id }"
+              type="button"
+              role="tab"
+              :aria-selected="activeWire === w.id"
+              @click="selectWire(w.id, true)"
+            >
+              {{ w.label }}
+            </button>
+            <code class="sl-wireboard__pkg">{{ activeMeta.pkg }}</code>
+          </div>
+
+          <div
+            class="sl-stage"
+            role="img"
+            :aria-label="`Signal travelling from client to server over ${activeMeta.label} — ${activeMeta.tag}`"
+          >
+            <svg class="sl-lane" viewBox="0 0 760 168" :data-wire="activeWire" aria-hidden="true">
+              <defs>
+                <filter id="slGlow" x="-25%" y="-60%" width="150%" height="220%">
+                  <feGaussianBlur stdDeviation="3" result="b" />
+                  <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+              </defs>
+
+              <!-- endpoints -->
+              <g class="sl-lnode">
+                <rect x="18" y="58" width="108" height="52" rx="11" />
+                <circle class="sl-lnode__led" cx="40" cy="84" r="3.5" />
+                <text x="80" y="88" text-anchor="middle">client</text>
+              </g>
+              <g class="sl-lnode">
+                <rect x="634" y="58" width="108" height="52" rx="11" />
+                <circle class="sl-lnode__led" cx="716" cy="84" r="3.5" />
+                <text x="680" y="88" text-anchor="middle">server</text>
+              </g>
+
+              <!-- WebSocket — a continuous full-duplex waveform -->
+              <g v-show="activeWire === 'ws'" class="sl-w sl-w--ws">
+                <path
+                  class="sl-w__base"
+                  d="M126 84 H232 l14 0 l12 -34 l18 64 l12 -30 H378 l14 0 l12 -30 l18 56 l12 -26 H634"
+                />
+                <path
+                  class="sl-w__sweep"
+                  pathLength="100"
+                  d="M126 84 H232 l14 0 l12 -34 l18 64 l12 -30 H378 l14 0 l12 -30 l18 56 l12 -26 H634"
+                />
+                <path
+                  class="sl-w__return"
+                  pathLength="100"
+                  d="M126 84 H232 l14 0 l12 -34 l18 64 l12 -30 H378 l14 0 l12 -30 l18 56 l12 -26 H634"
+                />
+              </g>
+
+              <!-- HTTP — discrete SSE / long-poll chunks marching server-ward -->
+              <g v-show="activeWire === 'http'" class="sl-w sl-w--http">
+                <path class="sl-w__base" d="M126 84 H634" />
+                <path class="sl-w__march" pathLength="100" d="M126 84 H634" />
+              </g>
+
+              <!-- libp2p — a peer-to-peer hop through the mesh -->
+              <g v-show="activeWire === 'libp2p'" class="sl-w sl-w--libp2p">
+                <path class="sl-w__base" d="M126 84 C 214 30, 300 30, 380 84 S 556 138, 634 84" />
+                <path
+                  class="sl-w__sweep"
+                  pathLength="100"
+                  d="M126 84 C 214 30, 300 30, 380 84 S 556 138, 634 84"
+                />
+                <circle class="sl-peer" style="--d: 0.45s" cx="250" cy="45" r="5" />
+                <circle class="sl-peer" style="--d: 1.25s" cx="500" cy="123" r="5" />
+              </g>
+
+              <!-- Loopback — same process, no wire at all -->
+              <g v-show="activeWire === 'loopback'" class="sl-w sl-w--loop">
+                <path class="sl-w__base sl-w__base--dot" d="M126 84 H634" />
+                <g class="sl-loop">
+                  <rect x="324" y="68" width="112" height="32" rx="16" />
+                  <text x="380" y="88" text-anchor="middle">in-process</text>
+                </g>
+              </g>
+            </svg>
+
+            <p class="sl-stage__cap">
+              <span class="sl-stage__wire">{{ activeMeta.label }}</span>{{ activeMeta.tag }}
+            </p>
+          </div>
+
+          <div class="sl-wireboard__code">
+            <pre class="sl-pre"><code :key="activeWire" v-html="wireCode" /></pre>
+            <div class="sl-wirebadge" :class="{ 'is-on': arrived }">
+              <span class="sl-wirebadge__tag">client → {{ activeMeta.label.toLowerCase() }}</span>
+              <span class="sl-wirebadge__txt">send({ text: 'hi' })</span>
+              <span class="sl-wirebadge__res">
+                <template v-if="arrived">✓ received via "{{ activeMeta.recv }}"</template>
+                <template v-else>… on the wire</template>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <p class="sl-real sl-wire-real">
+          Real: <code>examples/transports</code> — one server mounts WebSocket,
+          HTTP and libp2p <em>at once</em>; three clients call the same
+          <code>echo</code>, each over a different wire.
+        </p>
+
+        <div class="sl-axes reveal" aria-label="super-line has two independent pluggable axes: transport and adapter">
+          <div class="sl-axis">
+            <span class="sl-axis__glyph" aria-hidden="true">↕</span>
+            <div class="sl-axis__body">
+              <p class="sl-axis__h">
+                <strong>Transport</strong> — the client&nbsp;↔&nbsp;server wire
+                <span class="sl-axis__here">this section</span>
+              </p>
+              <p class="sl-axis__chips">
+                <code>WebSocket</code><code>HTTP</code><code>libp2p</code><code>loopback</code>
+              </p>
+            </div>
+          </div>
+          <div class="sl-axis">
+            <span class="sl-axis__glyph" aria-hidden="true">↔</span>
+            <div class="sl-axis__body">
+              <p class="sl-axis__h">
+                <strong>Adapter</strong> — the server&nbsp;↔&nbsp;server fan-out
+                <span class="sl-axis__here sl-axis__here--next">next ↓</span>
+              </p>
+              <p class="sl-axis__chips">
+                <code>Redis</code><code>libp2p</code><code>RabbitMQ</code><code>ZeroMQ</code>
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ░░ IT WORKS ON ONE NODE — THEN YOU ADD A SECOND ░░ -->
+    <section class="sl-sec sl-sec--alt">
       <div class="sl-shell sl-split sl-split--rev">
         <div class="sl-split__copy reveal">
           <h2>It works on one node. Then you add a second.</h2>
@@ -256,7 +510,7 @@ onBeforeUnmount(() => {
     </section>
 
     <!-- ░░ CONTROL CENTER ░░ -->
-    <section class="sl-sec sl-sec--alt">
+    <section class="sl-sec">
       <div class="sl-shell sl-split">
         <div class="sl-split__copy reveal">
           <h2>See the whole network.</h2>
@@ -300,7 +554,7 @@ onBeforeUnmount(() => {
     </section>
 
     <!-- ░░ SERVER-AUTHORITATIVE ░░ -->
-    <section class="sl-sec">
+    <section class="sl-sec sl-sec--alt">
       <div class="sl-shell">
         <div class="sl-sec__head reveal">
           <h2>Opinionated, on purpose: the server is in charge.</h2>
@@ -324,7 +578,7 @@ onBeforeUnmount(() => {
     </section>
 
     <!-- ░░ COMPARISON ░░ -->
-    <section class="sl-sec sl-sec--alt">
+    <section class="sl-sec">
       <div class="sl-shell">
         <div class="sl-sec__head reveal">
           <h2>One library where you'd otherwise reach for several.</h2>
@@ -360,10 +614,11 @@ onBeforeUnmount(() => {
     <section class="sl-sec sl-sec--foot">
       <div class="sl-shell sl-foot">
         <div class="reveal">
-          <h2>One bus. Every pattern. Zero codegen.</h2>
+          <h2>One bus. Every pattern. Any wire.</h2>
           <p class="sl-foot__lead">
-            Requests, events, and subscriptions over one typed connection — with
-            reconnection, presence, and a cluster event bus built in. Add an
+            Requests, events, and subscriptions over one typed connection, zero
+            codegen — on WebSocket, HTTP, or libp2p, with reconnection, presence,
+            and a cluster event bus built in. Swap the wire in one line; add an
             adapter only when you outgrow a single node.
           </p>
           <div class="sl-term sl-term--install" aria-label="Install command">
@@ -378,9 +633,9 @@ onBeforeUnmount(() => {
           </div>
           <p class="sl-status">
             Pre-1.0 — role-scoped contracts, req/res, events, rooms, topics, the
-            cluster event bus, presence, reconnect, and pluggable adapters
-            (in-memory and Redis today; libp2p in the works) are implemented and
-            tested.
+            cluster event bus, presence, and reconnect are implemented and tested
+            — over pluggable transports (WebSocket, HTTP, libp2p, loopback) and
+            pluggable adapters (in-memory, Redis, libp2p, RabbitMQ, ZeroMQ).
           </p>
         </div>
       </div>
@@ -799,6 +1054,306 @@ onBeforeUnmount(() => {
   color: var(--sl-code-str);
 }
 
+/* ── transports: same app, any wire ─────────────────────────────── */
+.sl-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0 0 0.7rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--sl-text-2);
+}
+.sl-new {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--sl-on-cyan);
+  background: var(--sl-cyan-bright);
+  padding: 0.14rem 0.45rem;
+  border-radius: 999px;
+}
+.sl-hl {
+  color: var(--sl-cyan-strong);
+  font-weight: 600;
+}
+
+.sl-wireboard {
+  margin-top: clamp(1.6rem, 3.5vw, 2.4rem);
+  border-radius: 16px;
+  background: var(--sl-code-bg);
+  border: 1px solid var(--sl-code-border);
+  box-shadow: 0 24px 60px -28px rgba(2, 12, 20, 0.7), 0 2px 10px -4px rgba(2, 12, 20, 0.5);
+  overflow: hidden;
+}
+.sl-wireboard__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.7rem;
+  background: var(--sl-code-bg-2);
+  border-bottom: 1px solid var(--sl-code-border);
+}
+.sl-wiretab {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--sl-code-dim);
+  font: 600 0.8rem/1 var(--vp-font-family-mono);
+  padding: 0.4rem 0.72rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color 0.18s, background-color 0.18s, border-color 0.18s;
+}
+.sl-wiretab:hover {
+  color: var(--sl-code-text);
+}
+.sl-wiretab.is-on {
+  color: var(--sl-on-cyan);
+  background: var(--sl-cyan-bright);
+  border-color: var(--sl-cyan-bright);
+}
+.sl-wiretab:focus-visible {
+  outline: 2px solid var(--sl-cyan-bright);
+  outline-offset: 2px;
+}
+.sl-wireboard__pkg {
+  margin-left: auto;
+  font: 500 0.72rem/1 var(--vp-font-family-mono);
+  color: var(--sl-code-dim);
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.sl-stage {
+  padding: clamp(0.4rem, 2vw, 0.9rem) clamp(0.5rem, 2vw, 1.1rem) 0.85rem;
+  background:
+    radial-gradient(120% 82% at 50% 38%, color-mix(in oklab, var(--sl-cyan) 8%, transparent), transparent 70%),
+    var(--sl-code-bg);
+}
+.sl-lane {
+  width: 100%;
+  height: auto;
+  display: block;
+  max-height: 208px;
+}
+.sl-lnode rect {
+  fill: var(--sl-code-bg-2);
+  stroke: var(--sl-code-border);
+  stroke-width: 1.5;
+}
+.sl-lnode text {
+  fill: var(--sl-code-text);
+  font: 600 15px var(--vp-font-family-mono);
+}
+.sl-lnode__led {
+  fill: var(--sl-cyan-bright);
+}
+.sl-w__base {
+  fill: none;
+  stroke: color-mix(in oklab, var(--sl-cyan) 34%, transparent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.sl-w--http .sl-w__base {
+  stroke-dasharray: 4 8;
+}
+.sl-w__base--dot {
+  stroke-dasharray: 2 9;
+}
+.sl-w__sweep,
+.sl-w__return,
+.sl-w__march {
+  fill: none;
+  stroke: var(--sl-cyan-bright);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: url(#slGlow);
+}
+.sl-w__sweep {
+  stroke-dasharray: 9 91;
+  stroke-dashoffset: 55;
+}
+.sl-w__return {
+  stroke-dasharray: 5 95;
+  stroke-width: 2;
+  opacity: 0.5;
+}
+.sl-w__march {
+  stroke-dasharray: 7 9;
+}
+.sl-peer {
+  fill: var(--sl-cyan-bright);
+  opacity: 0.5;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.sl-loop rect {
+  fill: color-mix(in oklab, var(--sl-cyan) 16%, var(--sl-code-bg-2));
+  stroke: var(--sl-cyan);
+  stroke-width: 1.5;
+}
+.sl-loop text {
+  fill: var(--sl-code-str);
+  font: 600 13px var(--vp-font-family-mono);
+}
+.sl-stage__cap {
+  margin: 0.25rem 0 0;
+  text-align: center;
+  font: 500 clamp(0.72rem, 0.95vw, 0.82rem) / 1.4 var(--vp-font-family-mono);
+  color: var(--sl-code-dim);
+}
+.sl-stage__wire {
+  color: var(--sl-code-str);
+  font-weight: 600;
+  margin-right: 0.5rem;
+}
+
+.sl-wireboard__code {
+  border-top: 1px solid var(--sl-code-border);
+}
+.sl-wireboard__code .sl-pre {
+  padding-bottom: 0.4rem;
+}
+.sl-pre :deep(.wl) {
+  border-radius: 4px;
+  padding: 0.05em 0.32em;
+  background: color-mix(in oklab, var(--sl-cyan) 16%, transparent);
+}
+.sl-wirebadge {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0.7rem 1rem;
+  border-top: 1px solid var(--sl-code-border);
+  background: var(--sl-code-bg-2);
+  font: 500 clamp(0.7rem, 0.9vw, 0.78rem) / 1.4 var(--vp-font-family-mono);
+}
+.sl-wirebadge__tag {
+  color: var(--sl-code-str);
+  border: 1px solid color-mix(in oklab, var(--sl-cyan) 40%, transparent);
+  border-radius: 5px;
+  padding: 0.05rem 0.4rem;
+}
+.sl-wirebadge__txt {
+  color: var(--sl-code-text);
+}
+.sl-wirebadge__res {
+  margin-left: auto;
+  color: var(--sl-code-dim);
+  transition: color 0.25s;
+}
+.sl-wirebadge.is-on .sl-wirebadge__res {
+  color: var(--sl-code-str);
+}
+.sl-wire-real {
+  margin-top: 1.05rem;
+}
+
+.sl-axes {
+  margin-top: clamp(1.5rem, 3.5vw, 2.2rem);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+  gap: clamp(0.75rem, 2vw, 1.1rem);
+}
+.sl-axis {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+}
+.sl-axis__glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--sl-cyan) 14%, transparent);
+  color: var(--sl-cyan-strong);
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.sl-axis__h {
+  margin: 0 0 0.55rem;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: var(--sl-text);
+}
+.sl-axis__h strong {
+  color: var(--sl-cyan-strong);
+}
+.sl-axis__here {
+  display: inline-block;
+  margin-left: 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--sl-text-2);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 999px;
+  padding: 0.04rem 0.5rem;
+}
+.sl-axis__here--next {
+  color: var(--sl-cyan-strong);
+  border-color: color-mix(in oklab, var(--sl-cyan) 40%, var(--vp-c-divider));
+}
+.sl-axis__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+}
+.sl-axis__chips code {
+  font-size: 0.74rem;
+  background: var(--vp-c-bg);
+}
+
+@keyframes sl-sweep {
+  from { stroke-dashoffset: 100; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes sl-return {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: 100; }
+}
+@keyframes sl-chunk {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -16; }
+}
+@keyframes sl-peer {
+  0%, 100% { opacity: 0.35; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.25); }
+}
+@keyframes sl-blink {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+@keyframes sl-wlin {
+  from { background: color-mix(in oklab, var(--sl-cyan) 40%, transparent); }
+  to { background: color-mix(in oklab, var(--sl-cyan) 16%, transparent); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sl-w__sweep { animation: sl-sweep 1.6s linear infinite; }
+  .sl-w--libp2p .sl-w__sweep { animation-duration: 2.2s; }
+  .sl-w__return { animation: sl-return 2.6s linear infinite; }
+  .sl-w__march { animation: sl-chunk 0.85s linear infinite; }
+  .sl-peer { animation: sl-peer 1.7s ease-in-out infinite; animation-delay: var(--d, 0s); }
+  .sl-loop { animation: sl-blink 1.3s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+  .sl-wireboard__code .sl-pre :deep(.wl) { animation: sl-wlin 0.5s ease both; }
+}
+
 /* ── tenets ─────────────────────────────────────────────────────── */
 .sl-tenets {
   list-style: none;
@@ -949,6 +1504,8 @@ onBeforeUnmount(() => {
 @media (max-width: 560px) {
   .sl-swap { grid-template-columns: 1fr; }
   .sl-swap__arrow { transform: rotate(90deg); margin-inline: auto; }
+  .sl-wireboard__pkg { display: none; }
+  .sl-lane { max-height: 172px; }
 }
 
 /* ── motion (enhances an already-visible default) ──────────────── */

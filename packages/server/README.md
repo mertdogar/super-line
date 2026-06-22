@@ -3,18 +3,19 @@
 The server for [**super-line**](https://mertdogar.github.io/super-line/) — end-to-end typesafe WebSockets for TypeScript. Implements a shared contract over [`ws`](https://www.npmjs.com/package/ws): role-keyed handlers, rooms, topics, middleware, lifecycle hooks, and node-to-node messaging.
 
 ```bash
-pnpm add @super-line/core @super-line/server zod
+pnpm add @super-line/core @super-line/server @super-line/transport-websocket zod
 ```
 
 ```ts
 import http from 'node:http'
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { api } from './contract'
 
 const server = http.createServer()
 const srv = createSuperLineServer(api, {
-  server,
-  authenticate: (req) => ({ role: 'user' as const, ctx: { id: '1' } }), // throw -> 401
+  transports: [webSocketServerTransport({ server })],
+  authenticate: (h) => ({ role: 'user' as const, ctx: { id: '1' } }), // throw -> 401
 })
 
 srv.implement({
@@ -29,7 +30,7 @@ srv.implement({
 server.listen(3000)
 ```
 
-Authenticate returns `{ role, ctx }`; cross-role calls are rejected with `NOT_FOUND`. Scale across processes with [`@super-line/adapter-redis`](https://www.npmjs.com/package/@super-line/adapter-redis).
+Authenticate receives the `Handshake` (`{ transport, headers, query, peer?, raw }`) and returns `{ role, ctx }`; cross-role calls are rejected with `NOT_FOUND`. The wire is carried by a pluggable transport — [`@super-line/transport-websocket`](https://www.npmjs.com/package/@super-line/transport-websocket) provides the WS transport shown above; other transports (HTTP/SSE, libp2p) are available — see the Transports guide. Scale across processes with [`@super-line/adapter-redis`](https://www.npmjs.com/package/@super-line/adapter-redis).
 
 - 📖 Docs: <https://mertdogar.github.io/super-line/>
 - 📚 Guides: [roles & auth](https://mertdogar.github.io/super-line/guide/roles-auth), [events & rooms](https://mertdogar.github.io/super-line/guide/events-rooms)

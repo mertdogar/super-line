@@ -4,7 +4,7 @@ import typedocSidebar from '../reference/typedoc-sidebar.json'
 export default defineConfig({
   title: 'super-line',
   description:
-    'End-to-end typesafe WebSockets for TypeScript — role-scoped contracts, req/res, rooms & topics from one contract.',
+    'End-to-end typesafe realtime for TypeScript — role-scoped contracts, req/res, rooms & topics from one contract, over WebSocket, HTTP, or libp2p.',
   base: '/super-line/',
   cleanUrls: true,
   lastUpdated: true,
@@ -47,6 +47,7 @@ export default defineConfig({
         {
           text: 'Client',
           items: [
+            { text: 'Transports', link: '/guide/transports' },
             { text: 'Reconnection & delivery', link: '/guide/reconnection-delivery' },
             { text: 'Serialization', link: '/guide/serialization' },
           ],

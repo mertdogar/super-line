@@ -53,6 +53,8 @@ interface Adapter {                          // cross-node fan-out seam
 //   SharedRequests<C>, RoleRequests<C,R>, SharedEvents<C>, SharedTopics<C>, RoleTopics<C,R>,
 //   ServerRequests<C,R>, SharedServerRequests<C>, DataOf<C,R>, AnyData<C>
 // presence: PresenceStore, ConnDescriptor, NodeStat
+// transport interfaces: RawConn, Handshake, AuthOutcome, ServerTransport, ClientTransport, PingFrame, PongFrame
+//   (the WS transport is @super-line/transport-websocket; HTTP/SSE + libp2p transports are separate packages)
 // extractors (guarded): ClientInput<T>, ServerInput<T>, Output<T>, EventData<T>, EmitData<T>
 // InferIn<S>, InferOut<S>
 ```
@@ -66,11 +68,10 @@ createSuperLineServer<C, A extends AuthResult<C>>(contract: C, opts: SuperLineSe
 type AuthResult<C> = { [R in keyof C['roles']]: { role: R; ctx: unknown } }[keyof C['roles']]
 
 interface SuperLineServerOptions<C, A> {
-  server?: http.Server                       // attach to your server (compose w/ Express/Fastify/Hono)
+  transports: ServerTransport[]               // REQUIRED. e.g. [webSocketServerTransport({ server })] from @super-line/transport-websocket
   serializer?: Serializer                     // default jsonSerializer; MUST match the client
   adapter?: Adapter                           // default: per-server in-memory; use redis for multi-node
-  path?: string                               // only handle upgrades for this pathname
-  authenticate: (req: IncomingMessage) => A | Promise<A>   // REQUIRED. Return { role, ctx }; throw -> 401
+  authenticate: (h: Handshake) => A | Promise<A>   // REQUIRED. Return { role, ctx }; throw -> 401. h = { transport, headers, query, peer?, raw }
   authorizeSubscribe?: (topic, ctx, conn) => boolean | void | Promise<boolean | void> // false/throw -> deny
   use?: Middleware<A>[]                        // run before request/subscribe handlers
   onConnection?: (conn, ctx) => void           // runs just BEFORE the presence snapshot (seed conn.data here)
@@ -79,8 +80,11 @@ interface SuperLineServerOptions<C, A> {
   identify?: (conn) => string | undefined      // stable user key -> cluster.byUser / isOnline / toUser
   describeConn?: (conn) => Record<string, unknown>  // extra fields merged into the cluster descriptor (ctx never auto-serialized)
   heartbeat?: { interval?: number; maxMissed?: number } | false  // default { interval: 30_000 }; maxMissed -> reap
-  backpressure?: { maxBufferedBytes: number; onExceed?: 'close' | 'drop' }  // guard slow consumers ('close' -> 1013)
+  inspector?: boolean                          // gate msg.* telemetry; also pass inspector:true to webSocketServerTransport
 }
+// path + backpressure now live on the transport: webSocketServerTransport({ server, path, backpressure })
+// The Backpressure type lives in @super-line/transport-websocket (no longer in @super-line/server).
+// Handshake (from @super-line/core): { transport, headers, query: Record<string,string>, peer?, raw } — raw is the escape hatch (IncomingMessage for WS).
 
 interface SuperLineServer<C, A> {
   readonly nodeId: string                                            // this process's stable id
@@ -152,13 +156,13 @@ class Conn<Ev, Ctx, Role, Data = unknown> {
   lastPingAt?: number                          // last heartbeat ping sent
   data: Data                                   // mutable per-conn state, typed per role (contract `data` schema); starts {}
   readonly channels: Set<string>
-  readonly ws: WebSocket                       // underlying 'ws' socket
   send(frame): void                            // internal frame (you rarely call this)
   sendRaw(payload): void
   emit<E extends keyof Ev>(event: E, data): void   // push an event to THIS conn (node-local, role-scoped)
   close(): void
+  terminate(): void                            // abruptly drop the underlying transport
 }
-// conn.ws.terminate() abruptly drops the socket — handy in tests to simulate a network drop.
+// conn.terminate() abruptly drops the connection — handy in tests to simulate a network drop. (conn.ws is removed.)
 
 // also exported: MemoryBus, createInMemoryAdapter (share one MemoryBus across servers to simulate nodes)
 createInMemoryAdapter(bus?: MemoryBus): Adapter
@@ -177,9 +181,9 @@ Notes:
 createSuperLineClient<C, R extends keyof C['roles']>(contract: C, opts: SuperLineClientOptions<C, R>): SuperLineClient<C, R>
 
 interface SuperLineClientOptions<C, R> {
-  url: string
+  transport: ClientTransport                   // REQUIRED. e.g. webSocketClientTransport({ url }) from @super-line/transport-websocket
   role: R                                      // REQUIRED: narrows the surface AND is sent to the server to verify
-  params?: Record<string, string>             // appended as query string (read in authenticate); `role` is added automatically
+  params?: Record<string, string>             // appended as query string (read in authenticate via h.query); `role` is added automatically
   serializer?: Serializer                       // MUST match the server
   timeoutMs?: number                            // default 30000
   validate?: 'off' | 'inbound'                  // default 'off'; 'inbound' re-validates server->client (catch drift)
@@ -188,8 +192,9 @@ interface SuperLineClientOptions<C, R> {
   reconnectBaseMs?: number                      // default 500
   reconnectMaxMs?: number                       // default 30000
   reconnectFactor?: number                      // default 2
-  WebSocket?: typeof WebSocket                  // default globalThis.WebSocket (browsers, Node 22+)
 }
+// url + a custom WebSocket impl now live on the transport: webSocketClientTransport({ url, WebSocket }).
+// Other transports (HTTP/SSE, libp2p) are available — see the Transports guide.
 
 // SuperLineClient<C, R> is a typed proxy narrowed to role R's effective surface (shared ∪ R):
 type SuperLineClient<C, R> = {
@@ -237,4 +242,4 @@ createSuperLineHooks<C, R extends keyof C['roles']>(): {
   }
 }
 ```
-Create the client once (e.g. `useState(() => createSuperLineClient(api, { url, role: 'user' }))`), wrap with `<Provider client={client}>`, then use the hooks inside.
+Create the client once (e.g. `useState(() => createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user' }))`, `webSocketClientTransport` from `@super-line/transport-websocket`), wrap with `<Provider client={client}>`, then use the hooks inside.

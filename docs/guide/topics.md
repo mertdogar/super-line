@@ -35,8 +35,10 @@ srv.publish('announce', { msg: 'maintenance at 5pm' })                  // share
 Gate private topics with `authorizeSubscribe` — return `false` or throw to deny (the client's `.ready` rejects `FORBIDDEN`):
 
 ```ts
+import { webSocketServerTransport } from '@super-line/transport-websocket'
+
 const srv = createSuperLineServer(api, {
-  server, authenticate,
+  transports: [webSocketServerTransport({ server })], authenticate,
   authorizeSubscribe: async (topic, ctx, conn) => {
     if (topic.startsWith('org:')) return ctx.user.orgs.includes(topic.slice(4))
     return true

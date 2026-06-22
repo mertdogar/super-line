@@ -41,8 +41,10 @@ const stale = srv.local.connections.filter((c) => Date.now() - (c.lastPongAt ?? 
 One timer pings every connection (default every 30s), updating `lastPingAt`/`lastPongAt`. Optionally **reap** dead sockets:
 
 ```ts
+import { webSocketServerTransport } from '@super-line/transport-websocket'
+
 createSuperLineServer(api, {
-  server,
+  transports: [webSocketServerTransport({ server })],
   authenticate,
   heartbeat: { interval: 30_000, maxMissed: 2 }, // terminate after 2 missed pongs (fires onDisconnect)
 })
@@ -57,7 +59,7 @@ The cluster view reads the **presence registry**. To make connections identifiab
 
 ```ts
 createSuperLineServer(api, {
-  server,
+  transports: [webSocketServerTransport({ server })],
   authenticate,
   identify: (conn) => conn.ctx.userId,          // powers byUser / isOnline / toUser
   describeConn: (conn) => ({ plan: conn.ctx.plan }), // extra descriptor fields
@@ -148,9 +150,13 @@ Guard nodes against slow consumers:
 
 ```ts
 createSuperLineServer(api, {
-  server,
+  transports: [
+    webSocketServerTransport({
+      server,
+      backpressure: { maxBufferedBytes: 8 * 1024 * 1024, onExceed: 'close' }, // or 'drop'
+    }),
+  ],
   authenticate,
-  backpressure: { maxBufferedBytes: 8 * 1024 * 1024, onExceed: 'close' }, // or 'drop'
 })
 ```
 

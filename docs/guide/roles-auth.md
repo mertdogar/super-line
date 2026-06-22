@@ -1,21 +1,25 @@
 # Roles & auth
 
-A connection's **role** is resolved once, at the HTTP upgrade, and fixed for its lifetime. It decides which surface and which `ctx` the connection gets — and it's enforced server-side.
+A connection's **role** is resolved once, when the connection is established, and fixed for its lifetime. It decides which surface and which `ctx` the connection gets — and it's enforced server-side.
 
 ## authenticate returns `{ role, ctx }`
 
-`authenticate` runs at the upgrade. Return `{ role, ctx }`, or `throw` to reject with 401 (no socket is opened):
+`authenticate` runs as the connection opens. It receives the **handshake** (`{ transport, headers, query, peer?, raw }`) — read query params via `h.query.X` and headers via `h.headers`, regardless of which transport carried the connection. Return `{ role, ctx }`, or `throw` to reject (no connection is opened):
 
 ```ts
+import { webSocketServerTransport } from '@super-line/transport-websocket'
+
 const srv = createSuperLineServer(api, {
-  server,
-  authenticate: async (req) => {
-    const token = new URL(req.url ?? '', 'http://x').searchParams.get('token')
-    const user = await verifyJwt(token)   // throw -> 401
+  transports: [webSocketServerTransport({ server })],
+  authenticate: async (h) => {
+    const token = h.query.token
+    const user = await verifyJwt(token)   // throw -> rejected
     return { role: 'user' as const, ctx: { user } }
   },
 })
 ```
+
+`@super-line/transport-websocket` provides the WebSocket transport. Other transports (HTTP/SSE, libp2p) are available — see the Transports guide; they all hand `authenticate` the same `Handshake`.
 
 Return `role` as a **literal** (`'user' as const`) so it's inferred as a role key rather than widening to `string`.
 
@@ -24,8 +28,8 @@ Return `role` as a **literal** (`'user' as const`) so it's inferred as a role ke
 Different roles usually carry different identity data. Return a discriminated `{ role, ctx }` and each handler block sees the right `ctx`:
 
 ```ts
-authenticate: (req) => {
-  const u = verify(req)
+authenticate: (h) => {
+  const u = verify(h)
   return u.role === 'admin'
     ? { role: 'admin' as const, ctx: { adminId: u.id } }
     : { role: 'user' as const,  ctx: { userId: u.id } }
@@ -41,12 +45,12 @@ In a `shared` handler, `ctx` is the union of all roles' ctx — use common field
 
 ## The role is a claim — verify it
 
-The client passes its `role` to `createSuperLineClient`; it's sent as a query param so `authenticate` can read it. **It's a claim, not a fact** — always verify it against the credential:
+The client passes its `role` to `createSuperLineClient`; it's surfaced to `authenticate` on the handshake (`h.query.role` for the WS/HTTP transports) so `authenticate` can read it. **It's a claim, not a fact** — always verify it against the credential:
 
 ```ts
-authenticate: (req) => {
-  const u = verify(tokenFrom(req))
-  const claimed = new URL(req.url ?? '', 'http://x').searchParams.get('role')
+authenticate: (h) => {
+  const u = verify(tokenFrom(h))
+  const claimed = h.query.role
   if (u.role !== claimed) throw new SuperLineError('FORBIDDEN', 'role not granted')
   return { role: u.role, ctx: { user: u } }
 }

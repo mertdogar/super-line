@@ -28,14 +28,15 @@ To preserve `Date`, `Map`, `Set`, `BigInt`, etc. transparently, plug in a `super
 ```ts
 import superjson from 'superjson'
 import type { Serializer } from '@super-line/core'
+import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
 
 const serializer: Serializer = {
   encode: (v) => superjson.stringify(v),
   decode: (d) => superjson.parse(typeof d === 'string' ? d : new TextDecoder().decode(d)),
 }
 
-createSuperLineServer(api, { server, authenticate, serializer })
-createSuperLineClient(api, { url, role: 'user', serializer })   // MUST match
+createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate, serializer })
+createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user', serializer })   // MUST match
 ```
 
 ## Custom serializers

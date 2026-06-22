@@ -13,6 +13,7 @@ pnpm add @super-line/adapter-libp2p
 
 ```ts
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createLibp2pAdapter } from '@super-line/adapter-libp2p'
 import { api } from './contract'
 
@@ -23,7 +24,11 @@ const adapter = await createLibp2pAdapter({
   identity: { path: '/var/lib/app/p2p' },
 })
 
-const srv = createSuperLineServer(api, { server, authenticate, adapter })
+const srv = createSuperLineServer(api, {
+  transports: [webSocketServerTransport({ server })],
+  authenticate,
+  adapter,
+})
 console.log('p2p:', adapter.node.getMultiaddrs().map(String)) // share a seed's address for bootstrap lists
 ```
 

@@ -9,13 +9,19 @@ pnpm add @super-line/react
 ```tsx
 import { useState } from 'react'
 import { createSuperLineClient } from '@super-line/client'
+import { webSocketClientTransport } from '@super-line/transport-websocket'
 import { createSuperLineHooks } from '@super-line/react'
 import { api } from './contract'
 
 const { Provider, useRequest, useEvent, useSubscription } = createSuperLineHooks<typeof api, 'user'>()
 
 function Root() {
-  const [client] = useState(() => createSuperLineClient(api, { url: 'ws://localhost:3000', role: 'user' }))
+  const [client] = useState(() =>
+    createSuperLineClient(api, {
+      transport: webSocketClientTransport({ url: 'ws://localhost:3000' }),
+      role: 'user',
+    }),
+  )
   return <Provider client={client}><Room /></Provider>
 }
 

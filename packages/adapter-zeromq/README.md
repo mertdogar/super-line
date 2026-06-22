@@ -8,11 +8,12 @@ pnpm add @super-line/adapter-zeromq
 
 ```ts
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createZeroMqAdapter } from '@super-line/adapter-zeromq'
 import { api } from './contract'
 
 const srv = createSuperLineServer(api, {
-  server,
+  transports: [webSocketServerTransport({ server })],
   authenticate,
   adapter: await createZeroMqAdapter({
     bind: 'tcp://0.0.0.0:5555',

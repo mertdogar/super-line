@@ -8,9 +8,11 @@ Rooms and topics all compile down to channel pub/sub behind the `Adapter` interf
 
 ```ts
 import { createRedisAdapter } from '@super-line/adapter-redis'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 
 const srv = createSuperLineServer(api, {
-  server, authenticate,
+  transports: [webSocketServerTransport({ server })],
+  authenticate,
   adapter: createRedisAdapter('redis://localhost:6379'),
 })
 ```
@@ -27,13 +29,18 @@ Don't want to run a broker at all? [`@super-line/adapter-libp2p`](https://www.np
 
 ```ts
 import { createLibp2pAdapter } from '@super-line/adapter-libp2p'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 
 const adapter = await createLibp2pAdapter({
   listen: ['/ip4/0.0.0.0/tcp/9001'],
   bootstrap: ['/dns4/seed-1/tcp/9001/p2p/12D3Koo…'], // seed multiaddrs
   identity: { path: '/var/lib/app/p2p' }, // stable peer ID across restarts
 })
-const srv = createSuperLineServer(api, { server, authenticate, adapter })
+const srv = createSuperLineServer(api, {
+  transports: [webSocketServerTransport({ server })],
+  authenticate,
+  adapter,
+})
 ```
 
 It fans out rooms, topics, and the bus the same way, and a gossip-replicated directory backs `srv.cluster.*` / `srv.isOnline`. The trade-off vs. Redis: broker-less and decentralized, at the cost of eventually-consistent presence and best-effort delivery (no central store). It's **ESM-only** (libp2p is ESM-only). Run ≥2 stable seed nodes and persist their identity so bootstrap lists stay valid.
@@ -44,9 +51,14 @@ Already run RabbitMQ, or want the broker to do **selective routing**? [`@super-l
 
 ```ts
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 
 const adapter = await createRabbitmqAdapter('amqp://localhost:5672')
-const srv = createSuperLineServer(api, { server, authenticate, adapter })
+const srv = createSuperLineServer(api, {
+  transports: [webSocketServerTransport({ server })],
+  authenticate,
+  adapter,
+})
 ```
 
 The factory is **async** (it connects and declares its topology before returning a ready adapter). It's built on [`rabbitmq-client`](https://www.npmjs.com/package/rabbitmq-client), so a dropped connection auto-reconnects and the node's bindings are replayed. RabbitMQ has no shared key-value store, so — like libp2p — presence is **gossip-replicated** over the same exchange (eventually consistent; a crashed node's connections clear after a liveness TTL, ~30s by default, vs Redis's broker-enforced key expiry; graceful shutdown clears promptly). Delivery is at-most-once (transient messages, no acks, no persistence). One caveat Redis doesn't have: AMQP routing keys cap at **255 bytes**, so a channel name (embedding room / user / topic) longer than that is rejected with a clear error.
@@ -98,13 +110,18 @@ Don't want to run a broker, and don't need the full libp2p stack? [`@super-line/
 
 ```ts
 import { createZeroMqAdapter } from '@super-line/adapter-zeromq'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 
 // mesh: bind a PUB, connect a SUB to every peer (discovery is just addresses, no registry)
 const adapter = await createZeroMqAdapter({
   bind: 'tcp://0.0.0.0:9101',
   peers: ['tcp://node-2:9101', 'tcp://node-3:9101'],
 })
-const srv = createSuperLineServer(api, { server, authenticate, adapter })
+const srv = createSuperLineServer(api, {
+  transports: [webSocketServerTransport({ server })],
+  authenticate,
+  adapter,
+})
 ```
 
 It fans out rooms, topics, and the bus the same way, with a gossip-replicated directory backing `srv.cluster.*` / `srv.isOnline` (eventually-consistent, like libp2p — there's no central store). At-most-once delivery, matching the rest of the library. ZeroMQ's `connect` is lazy and auto-reconnecting, so nodes can start in any order. It's **ESM-only** and a **native addon** (Node-only).

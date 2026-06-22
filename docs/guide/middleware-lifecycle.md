@@ -5,8 +5,11 @@
 Middleware runs **before** request and subscribe handlers — for rate-limiting, per-operation authz, logging, and metrics. It's a flat chain: call `next()` to proceed, or `throw` to short-circuit (rejecting the operation).
 
 ```ts
+import { webSocketServerTransport } from '@super-line/transport-websocket'
+
 const srv = createSuperLineServer(api, {
-  server, authenticate,
+  transports: [webSocketServerTransport({ server })],
+  authenticate,
   use: [
     async (ctx, info, next) => {
       rateLimit(info.conn.role, info.name) // throw to reject
@@ -36,7 +39,8 @@ Middleware does **not** change `ctx`'s type — it's a cross-cutting gate, not a
 
 ```ts
 createSuperLineServer(api, {
-  server, authenticate,
+  transports: [webSocketServerTransport({ server })],
+  authenticate,
   onConnection: (conn, ctx) => log('joined', conn.role),
   onDisconnect: (conn, ctx, code) => cleanup(conn),     // code = WebSocket close code
   onError: (err, info) => report(err, info),            // any throw in middleware/handlers

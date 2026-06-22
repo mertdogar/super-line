@@ -11,22 +11,25 @@ import type { AddressInfo } from 'node:net'
 import type { Contract, RoleOf } from '@super-line/core'
 import { createSuperLineServer, type AuthResult, type SuperLineServerOptions, type SuperLineServer } from '@super-line/server'
 import { createSuperLineClient, type SuperLineClient, type SuperLineClientOptions } from '@super-line/client'
+import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
 
 export function createHarness() {
   const cleanups: Array<() => Promise<void> | void> = []
 
   async function server<C extends Contract, A extends AuthResult<C>>(
-    contract: C, opts: Omit<SuperLineServerOptions<C, A>, 'server'>,
+    contract: C, opts: Omit<SuperLineServerOptions<C, A>, 'transports'>,
   ): Promise<{ srv: SuperLineServer<C, A>; url: string }> {
     const httpServer = http.createServer()
-    const srv = createSuperLineServer<C, A>(contract, { ...opts, server: httpServer })
+    const srv = createSuperLineServer<C, A>(contract, { ...opts, transports: [webSocketServerTransport({ server: httpServer })] })
     await new Promise<void>((r) => httpServer.listen(0, r))
     const url = `ws://127.0.0.1:${(httpServer.address() as AddressInfo).port}`
     cleanups.push(async () => { await srv.close(); await new Promise<void>((r) => httpServer.close(() => r())) })
     return { srv, url }
   }
-  function client<C extends Contract, R extends RoleOf<C>>(contract: C, opts: SuperLineClientOptions<C, R>): SuperLineClient<C, R> {
-    const c = createSuperLineClient(contract, opts)
+  function client<C extends Contract, R extends RoleOf<C>>(
+    contract: C, { url, ...opts }: Omit<SuperLineClientOptions<C, R>, 'transport'> & { url: string },
+  ): SuperLineClient<C, R> {
+    const c = createSuperLineClient(contract, { ...opts, transport: webSocketClientTransport({ url }) })
     cleanups.unshift(() => c.close()) // clients close BEFORE the servers they connect to
     return c
   }
@@ -71,7 +74,7 @@ it('rejects a cross-role call with NOT_FOUND', async () => {
 
 ## Hooks as seams + simulating a drop
 
-`onConnection` captures the server-side `conn`; `conn.ws.terminate()` simulates a network drop:
+`onConnection` captures the server-side `conn`; `conn.terminate()` simulates a network drop:
 
 ```ts
 let last: Conn | undefined
@@ -84,7 +87,7 @@ const client = h.client(api, { url, role: 'user', reconnectBaseMs: 10 })
 
 const inflight = client.hang({})
 await tick(20)
-last!.ws.terminate()
+last!.terminate()
 await expect(inflight).rejects.toMatchObject({ code: 'DISCONNECTED' }) // in-flight rejects
 ```
 

@@ -28,13 +28,14 @@ export const api = defineContract({
 // server.ts
 import http from 'node:http'
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { api } from './contract.js'
 
 const server = http.createServer()
 const srv = createSuperLineServer(api, {
-  server,
-  authenticate: (req) => {
-    const name = new URL(req.url ?? '', 'http://localhost').searchParams.get('name')
+  transports: [webSocketServerTransport({ server })],  // WS transport; HTTP/SSE + libp2p transports also available
+  authenticate: (h) => {
+    const name = h.query.name                          // h: Handshake = { transport, headers, query, peer?, raw }
     if (!name) throw new Error('unauthorized')         // -> 401 at the upgrade
     return { role: 'user' as const, ctx: { name } }    // role + ctx; ctx.name in every user handler
   },
@@ -55,9 +56,10 @@ server.listen(3000)
 ```ts
 // client.ts
 import { createSuperLineClient } from '@super-line/client'
+import { webSocketClientTransport } from '@super-line/transport-websocket'
 import { api } from './contract.js'
 
-const client = createSuperLineClient(api, { url: 'ws://localhost:3000', role: 'user', params: { name: 'ada' } })
+const client = createSuperLineClient(api, { transport: webSocketClientTransport({ url: 'ws://localhost:3000' }), role: 'user', params: { name: 'ada' } })
 client.on('message', (m) => console.log(`${m.from}: ${m.text}`))
 await client.send({ room: 'lobby', text: 'hi' })
 ```
@@ -84,8 +86,8 @@ srv.implement({
   agent: { announce: async ({ room, text }, ctx) => { srv.room(room).broadcast('message', { room, text, from: `🤖 ${ctx.name}` }); return { id: nano() } } },
 })
 
-const user  = createSuperLineClient(api, { url, role: 'user',  params: { name: 'ada' } })
-const agent = createSuperLineClient(api, { url, role: 'agent', params: { name: 'helper' } })
+const user  = createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user',  params: { name: 'ada' } })
+const agent = createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'agent', params: { name: 'helper' } })
 await user.say({ room: 'lobby', text: 'hi' })          // ✓
 await agent.announce({ room: 'lobby', text: 'on it' }) // ✓
 // user.announce(...) is a COMPILE error (not on the user surface); forced at runtime -> NOT_FOUND
@@ -99,24 +101,23 @@ The client's `role` option is a **claim** sent as a query param; resolve the rea
 
 ```ts
 const srv = createSuperLineServer(api, {
-  server,
-  authenticate: async (req) => {
-    const u = new URL(req.url ?? '', 'http://localhost')
-    const user = await verifyJwt(u.searchParams.get('token'))   // throw to reject with 401 (no socket opened)
-    if (user.role !== u.searchParams.get('role')) throw new SuperLineError('FORBIDDEN', 'role not granted')
+  transports: [webSocketServerTransport({ server })],
+  authenticate: async (h) => {
+    const user = await verifyJwt(h.query.token)                 // throw to reject with 401 (no socket opened)
+    if (user.role !== h.query.role) throw new SuperLineError('FORBIDDEN', 'role not granted')
     return user.role === 'admin'
       ? { role: 'admin' as const, ctx: { user } }
       : { role: 'user' as const, ctx: { user } }
   },
 })
-// client: createSuperLineClient(api, { url, role: 'admin', params: { token } })
+// client: createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'admin', params: { token } })
 ```
 
 ## Authorize topic subscriptions (private streams)
 
 ```ts
 const srv = createSuperLineServer(api, {
-  server, authenticate,
+  transports: [webSocketServerTransport({ server })], authenticate,
   authorizeSubscribe: async (topic, ctx) => {
     if (topic.startsWith('org:')) return ctx.user.orgs.includes(topic.slice(4))
     return true                                // return false or throw -> client's sub.ready rejects FORBIDDEN
@@ -128,7 +129,7 @@ const srv = createSuperLineServer(api, {
 
 ```ts
 const srv = createSuperLineServer(api, {
-  server, authenticate,
+  transports: [webSocketServerTransport({ server })], authenticate,
   use: [
     async (ctx, info, next) => { rateLimit(info.conn.role, info.name); await next() },   // throw to reject
     async (_ctx, info, next) => { const t = Date.now(); await next(); metric(info.name, Date.now() - t) },
@@ -162,7 +163,7 @@ srv.implement({
 Don't stash a `conn` to DM someone (it's node-local). With an `identify` hook set, target the user directly — `toUser` reaches every device on any node:
 
 ```ts
-createSuperLineServer(api, { server, authenticate, identify: (conn) => conn.ctx.user.id })
+createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate, identify: (conn) => conn.ctx.user.id })
 // later, from anywhere (any node):
 srv.toUser(targetId).emit('dm', { from, text })   // 'dm' is a shared event; all the user's devices
 srv.toConn(connId).emit('dm', { from, text })     // or one specific connection
@@ -172,7 +173,7 @@ srv.toConn(connId).emit('dm', { from, text })     // or one specific connection
 
 ```ts
 createSuperLineServer(api, {
-  server, authenticate,
+  transports: [webSocketServerTransport({ server })], authenticate,
   identify: (conn) => conn.ctx.user.id,
   describeConn: (conn) => ({ plan: conn.ctx.user.plan }),
 })
@@ -278,7 +279,7 @@ The bus is **opt-in** pub/sub on a shared topic. It's a different tool from serv
 
 ```ts
 import { createRedisAdapter } from '@super-line/adapter-redis'
-const srv = createSuperLineServer(api, { server, authenticate, adapter: createRedisAdapter('redis://localhost:6379') })
+const srv = createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate, adapter: createRedisAdapter('redis://localhost:6379') })
 // every server process gets an adapter pointing at the same Redis; rooms, topics, AND the cluster event bus fan out across nodes.
 ```
 
@@ -323,22 +324,24 @@ import type { AddressInfo } from 'node:net'
 import type { Contract, RoleOf } from '@super-line/core'
 import { createSuperLineServer, type AuthResult, type SuperLineServerOptions, type SuperLineServer } from '@super-line/server'
 import { createSuperLineClient, type SuperLineClient, type SuperLineClientOptions } from '@super-line/client'
+import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
 
 export function createHarness() {
   const cleanups: Array<() => Promise<void> | void> = []
 
   async function server<C extends Contract, A extends AuthResult<C>>(
-    contract: C, opts: Omit<SuperLineServerOptions<C, A>, 'server'>,
+    contract: C, opts: Omit<SuperLineServerOptions<C, A>, 'transports'>,
   ): Promise<{ srv: SuperLineServer<C, A>; url: string }> {
     const httpServer = http.createServer()
-    const srv = createSuperLineServer<C, A>(contract, { ...opts, server: httpServer })
+    const srv = createSuperLineServer<C, A>(contract, { ...opts, transports: [webSocketServerTransport({ server: httpServer })] })
     await new Promise<void>((r) => httpServer.listen(0, r))
     const url = `ws://127.0.0.1:${(httpServer.address() as AddressInfo).port}`
     cleanups.push(async () => { await srv.close(); await new Promise<void>((r) => httpServer.close(() => r())) })
     return { srv, url }
   }
-  function client<C extends Contract, R extends RoleOf<C>>(contract: C, opts: SuperLineClientOptions<C, R>): SuperLineClient<C, R> {
-    const c = createSuperLineClient(contract, opts)
+  function client<C extends Contract, R extends RoleOf<C>>(contract: C, opts: Omit<SuperLineClientOptions<C, R>, 'transport'> & { url: string }): SuperLineClient<C, R> {
+    const { url, ...rest } = opts
+    const c = createSuperLineClient(contract, { ...rest, transport: webSocketClientTransport({ url }) })
     cleanups.unshift(() => c.close())          // clients close BEFORE the servers they connect to
     return c
   }
@@ -404,7 +407,7 @@ it('round-trips and surfaces typed errors', async () => {
 
 ```ts
 it('rejects a cross-role call with NOT_FOUND', async () => {
-  const { srv, url } = await h.server(twoRoleApi, { authenticate: (req) => resolveRole(req) })
+  const { srv, url } = await h.server(twoRoleApi, { authenticate: (h) => resolveRole(h) })
   srv.implement({ user: { sendMessage: async () => ({ id: '1' }) }, agent: { reportResult: async () => ({ ok: true }) } })
 
   const user = h.client(twoRoleApi, { url, role: 'user' })
@@ -449,8 +452,8 @@ it('observes connect / disconnect / errors via hooks', async () => {
 it('rejects a bad token and never opens a socket', async () => {
   let connects = 0
   const { srv, url } = await h.server(api, {
-    authenticate: (req) => {
-      const token = new URL(req.url ?? '', 'http://x').searchParams.get('token')
+    authenticate: (h) => {
+      const token = h.query.token
       if (token !== 'good') throw new Error('unauthorized')
       return { role: 'user' as const, ctx: {} }
     },
@@ -485,7 +488,7 @@ it('denies an unauthorized subscribe and delivers an authorized one', async () =
 })
 ```
 
-### Reconnect: simulate a drop with `conn.ws.terminate()`
+### Reconnect: simulate a drop with `conn.terminate()`
 
 ```ts
 import type { Conn } from '@super-line/server'
@@ -502,7 +505,7 @@ it('auto-reconnects, re-subscribes, and rejects in-flight on drop', async () => 
   const inflight = client.boom({})              // never resolves server-side
   await tick(20)                                // ensure it's sent
   const first = last
-  first!.ws.terminate()                         // simulate a network drop
+  first!.terminate()                            // simulate a network drop
 
   await expect(inflight).rejects.toMatchObject({ code: 'DISCONNECTED' })   // in-flight rejects
   await waitFor(() => last !== first && client.connected, 3000)            // reconnected (new conn)

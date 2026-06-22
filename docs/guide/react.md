@@ -5,6 +5,7 @@
 ```tsx
 import { useState } from 'react'
 import { createSuperLineClient } from '@super-line/client'
+import { webSocketClientTransport } from '@super-line/transport-websocket'
 import { createSuperLineHooks } from '@super-line/react'
 import { chat } from './contract'
 
@@ -13,7 +14,11 @@ const { Provider, useClient, useRequest, useEvent, useSubscription } =
 
 function Root() {
   // create the client once; it connects immediately and reconnects on its own
-  const [client] = useState(() => createSuperLineClient(chat, { url: 'ws://localhost:3000', role: 'user', params: { name: 'ada' } }))
+  const [client] = useState(() => createSuperLineClient(chat, {
+    transport: webSocketClientTransport({ url: 'ws://localhost:3000' }),
+    role: 'user',
+    params: { name: 'ada' },
+  }))
   return (
     <Provider client={client}>
       <Room room="lobby" />

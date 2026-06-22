@@ -8,13 +8,14 @@ It ships as `@super-line/control-center` and runs with `npx` — no install.
 
 ## Enable the inspector
 
-The Control Center connects over a reserved WebSocket subprotocol (`superline.inspector.v1`). Turn it on per node with one option (it is **off by default**):
+The Control Center connects over a reserved WebSocket subprotocol (`superline.inspector.v1`). Turn it on per node — the inspector is server-authoritative, so set `inspector: true` both on the server opts (gates the `msg.*` telemetry) and on the WebSocket transport (negotiates the subprotocol). It is **off by default**:
 
 ```ts
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 
 const srv = createSuperLineServer(contract, {
-  server,
+  transports: [webSocketServerTransport({ server, inspector: true })],
   authenticate,
   inspector: true,
 })

@@ -35,8 +35,8 @@ export const api = defineContract({
   - `clientToServer: { name: { input, output } }` → **request** (awaited, typed errors, timeout).
   - `serverToClient: { name: { payload } }` → **event** (server pushes to chosen recipients).
   - `serverToClient: { name: { payload, subscribe: true } }` → **topic** (client opts in via `subscribe`). A **shared** topic doubles as a **cluster event bus channel** — see below.
-- **Server**: `createSuperLineServer(api, { authenticate })`, then `srv.implement({ shared, user, agent })`.
-- **Client**: `createSuperLineClient(api, { url, role: 'user' })` → a typed proxy narrowed to that role's surface.
+- **Server**: `createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate })`, then `srv.implement({ shared, user, agent })`. The WS transport comes from `@super-line/transport-websocket`; other transports (HTTP/SSE, libp2p) are available — see the Transports guide.
+- **Client**: `createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user' })` → a typed proxy narrowed to that role's surface.
 - **No codegen.** Put the contract in a module both import. Never re-declare types on one side.
 
 ## The interaction flavors — pick the right one
@@ -57,8 +57,8 @@ Decide: **Need a reply?** request. **Pushing to recipients *you* pick?** event (
 | Need | Do |
 |---|---|
 | Define contract | `defineContract({ shared, roles })` (schemas = any Standard Schema validator; Zod in examples) |
-| Server | `const srv = createSuperLineServer(api, { server, authenticate }); srv.implement({ shared, user, agent })` |
-| Authenticate | `authenticate: (req) => ({ role: 'user', ctx })` — `throw` to reject (401). Read the claimed role from `req` query and verify it. |
+| Server | `const srv = createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate }); srv.implement({ shared, user, agent })` (`webSocketServerTransport` from `@super-line/transport-websocket`) |
+| Authenticate | `authenticate: (h) => ({ role: 'user', ctx })` — `throw` to reject (401). Read the claimed role from the `Handshake` (`h.query.role` / `h.headers`) and verify it. |
 | Handler | `name: async (input, ctx, conn) => output` — `ctx`/`conn` narrowed to the block's role |
 | Reply error | `throw new SuperLineError('FORBIDDEN', 'msg')` → client promise rejects with that typed code |
 | Send to one conn | `conn.emit('event', data)` (scoped to the conn's role events) |
@@ -67,7 +67,7 @@ Decide: **Need a reply?** request. **Pushing to recipients *you* pick?** event (
 | Publish a shared topic | `srv.publish('announce', data)` — **server only** (any node; this IS the bus publish) |
 | Cluster event bus | `srv.publish('announce', data)` (any node) · `srv.subscribe('announce', (data, { from }) => …)` (server-side, cluster-wide, **local echo**, returns unsubscribe) · `client.subscribe('announce', (data) => …)` (over WS) — all from ONE shared topic |
 | Self-exclude on the bus | `srv.subscribe('announce', (data, { from }) => { if (from === srv.nodeId) return; … })` — you hear your own publish |
-| Client | `const client = createSuperLineClient(api, { url, role: 'user' })` |
+| Client | `const client = createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user' })` (`webSocketClientTransport` from `@super-line/transport-websocket`) |
 | Client call | `await client.send(input, { timeoutMs?, signal? })` |
 | Client listen | `client.on('event', (d) => …)` → returns unsubscribe |
 | Client subscribe | `const sub = client.subscribe('feed', (d) => …); await sub.ready; sub.unsubscribe()` |
@@ -122,9 +122,9 @@ Full signatures → **REFERENCE.md**. End-to-end best-practice patterns (roles, 
 
 ```ts
 // ❌ trusting the client's claimed role
-authenticate: (req) => ({ role: claimedRole, ctx })       // a user can self-promote to admin
+authenticate: (h) => ({ role: claimedRole, ctx })         // a user can self-promote to admin
 // ✅ derive/verify the role from the credential server-side
-authenticate: (req) => { const u = verify(token); if (u.role !== claimed) throw new SuperLineError('FORBIDDEN'); return { role: u.role, ctx: u } }
+authenticate: (h) => { const u = verify(h.query.token); if (u.role !== h.query.role) throw new SuperLineError('FORBIDDEN'); return { role: u.role, ctx: u } }
 
 // ❌ broadcasting a role-specific event to a (mixed) room
 srv.room('lobby').broadcast('taskAssigned', data)          // type error — broadcast is shared-only

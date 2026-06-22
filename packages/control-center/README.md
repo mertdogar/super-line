@@ -7,12 +7,16 @@ A zero-install debugging webapp for inspecting a running [super-line](https://gi
 **1. Turn on the inspector** on each server node you want to reach (off by default):
 
 ```ts
+import { webSocketServerTransport } from '@super-line/transport-websocket'
+
 const srv = createSuperLineServer(contract, {
-  server,
+  transports: [webSocketServerTransport({ server, inspector: true })], // negotiates the inspector subprotocol
   authenticate,
-  inspector: true, // exposes the reserved `superline.inspector.v1` WS channel
+  inspector: true, // gates the reserved `superline.inspector.v1` channel (server-authoritative)
 })
 ```
+
+The inspector is server-authoritative: pass `inspector: true` **both** on the server opts (to gate the telemetry) **and** on `webSocketServerTransport` (to negotiate the subprotocol).
 
 **2. Run the Control Center** and point it at any node:
 

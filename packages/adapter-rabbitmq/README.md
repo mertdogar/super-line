@@ -8,11 +8,12 @@ pnpm add @super-line/adapter-rabbitmq
 
 ```ts
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
 import { api } from './contract'
 
 const srv = createSuperLineServer(api, {
-  server,
+  transports: [webSocketServerTransport({ server })],
   authenticate,
   adapter: await createRabbitmqAdapter('amqp://localhost:5672'),
 })

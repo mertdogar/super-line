@@ -8,11 +8,12 @@ pnpm add @super-line/adapter-redis
 
 ```ts
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createRedisAdapter } from '@super-line/adapter-redis'
 import { api } from './contract'
 
 const srv = createSuperLineServer(api, {
-  server,
+  transports: [webSocketServerTransport({ server })],
   authenticate,
   adapter: createRedisAdapter('redis://localhost:6379'),
 })

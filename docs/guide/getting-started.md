@@ -1,17 +1,17 @@
 # Getting started
 
-super-line is a typesafe WebSocket library for TypeScript. You write **one contract**; the server implements it and the client calls it with full end-to-end type inference — no codegen.
+super-line is a typesafe realtime data bus for TypeScript. You write **one contract**; the server implements it and the client calls it with full end-to-end type inference — no codegen. The wire is **pluggable**: WebSocket by default, with HTTP (SSE / long-poll) and libp2p transports also available (see [Transports](./transports)).
 
 ## Install
 
 ```bash
-pnpm add @super-line/core @super-line/server @super-line/client zod
+pnpm add @super-line/core @super-line/server @super-line/client @super-line/transport-websocket zod
 # optional
 pnpm add @super-line/adapter-redis   # multi-node fan-out
 pnpm add @super-line/react           # React hooks
 ```
 
-Requirements: **Node 18+** (server). The client uses the global `WebSocket` (browsers, and Node 22+); on older Node, pass `{ WebSocket }`.
+Requirements: **Node 18+** (server). The WebSocket client uses the global `WebSocket` (browsers, and Node 22+); on older Node, pass `webSocketClientTransport({ url, WebSocket })`.
 
 ## 1. Define the contract (shared)
 
@@ -47,14 +47,15 @@ export const chat = defineContract({
 ```ts
 import http from 'node:http'
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { chat } from './contract'
 
 const server = http.createServer() // or pass your Express/Fastify http.Server
 const srv = createSuperLineServer(chat, {
-  server,
-  authenticate: (req) => {
-    const name = new URL(req.url!, 'http://x').searchParams.get('name')
-    if (!name) throw new Error('unauthorized') // throw -> 401 at the upgrade, no socket
+  transports: [webSocketServerTransport({ server })], // WS is one transport; HTTP/SSE + libp2p also ship — see Transports
+  authenticate: (h) => {
+    const name = h.query.name // the Handshake: { transport, headers, query, peer?, raw }
+    if (!name) throw new Error('unauthorized') // throw -> rejected (WS: 401 at the upgrade, no socket)
     return { role: 'user' as const, ctx: { name } } // role + ctx; ctx in every handler
   },
 })
@@ -82,12 +83,13 @@ server.listen(3000)
 
 ```ts
 import { createSuperLineClient } from '@super-line/client'
+import { webSocketClientTransport } from '@super-line/transport-websocket'
 import { chat } from './contract'
 
 const client = createSuperLineClient(chat, {
-  url: 'ws://localhost:3000',
+  transport: webSocketClientTransport({ url: 'ws://localhost:3000' }),
   role: 'user', // narrows the surface to shared ∪ user; sent to authenticate to verify
-  params: { name: 'ada' },
+  params: { name: 'ada' }, // carried in the handshake -> readable as h.query.name in authenticate
 })
 
 client.on('message', (m) => console.log(`${m.from}: ${m.text}`)) // typed

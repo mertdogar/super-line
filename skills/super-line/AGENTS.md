@@ -28,8 +28,8 @@ export const api = defineContract({
 
 - A **connection has a role**, decided at the upgrade from auth, fixed for its life. Each role gets a different typed surface *and* a different `ctx`.
 - **Direction is the axis** (named keys, never positional generics). Per `serverToClient` entry: `{ payload }` = **event** (server push); `{ payload, subscribe: true }` = **topic** (client opts in). A **shared** topic also serves as a **cluster event bus channel** (`server.publish`/`server.subscribe`/`client.subscribe`). `clientToServer` entries are `{ input, output }` **requests**.
-- **Server**: `createSuperLineServer(api, { authenticate })`, then `srv.implement({ shared, user, agent })`.
-- **Client**: `createSuperLineClient(api, { url, role: 'user' })` → a typed proxy narrowed to that role's surface.
+- **Server**: `createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate })`, then `srv.implement({ shared, user, agent })`. WS transport from `@super-line/transport-websocket`; other transports (HTTP/SSE, libp2p) exist — see the Transports guide.
+- **Client**: `createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user' })` → a typed proxy narrowed to that role's surface.
 
 ## The interaction flavors
 
@@ -47,8 +47,8 @@ export const api = defineContract({
 | Need | Do |
 |---|---|
 | Define contract | `defineContract({ shared, roles })` (any Standard Schema validator; Zod in examples) |
-| Server | `const srv = createSuperLineServer(api, { server, authenticate }); srv.implement({ shared, user, agent })` |
-| Authenticate | `authenticate: (req) => ({ role: 'user', ctx })` — `throw` to reject (401); verify the claimed role |
+| Server | `const srv = createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate }); srv.implement({ shared, user, agent })` (`webSocketServerTransport` from `@super-line/transport-websocket`) |
+| Authenticate | `authenticate: (h) => ({ role: 'user', ctx })` — `throw` to reject (401); read claimed role from the `Handshake` (`h.query.role`/`h.headers`) and verify it |
 | Handler | `name: async (input, ctx, conn) => output` — `ctx`/`conn` narrowed to the block's role |
 | Reply error | `throw new SuperLineError('FORBIDDEN', 'msg')` → client promise rejects with that code |
 | Send to one conn | `conn.emit('event', data)` |
@@ -93,9 +93,9 @@ export const api = defineContract({
 
 ```ts
 // ❌ trusting the client's claimed role
-authenticate: (req) => ({ role: claimedRole, ctx })
+authenticate: (h) => ({ role: claimedRole, ctx })
 // ✅ derive/verify the role from the credential server-side
-authenticate: (req) => { const u = verify(token); if (u.role !== claimed) throw new SuperLineError('FORBIDDEN'); return { role: u.role, ctx: u } }
+authenticate: (h) => { const u = verify(h.query.token); if (u.role !== h.query.role) throw new SuperLineError('FORBIDDEN'); return { role: u.role, ctx: u } }
 
 // ❌ broadcasting a role-specific event to a (mixed) room
 srv.room('lobby').broadcast('taskAssigned', data)       // type error — broadcast is shared-only

@@ -42,6 +42,7 @@ export default defineConfig({
             { text: 'Requests', link: '/guide/requests' },
             { text: 'Events & rooms', link: '/guide/events-rooms' },
             { text: 'Topics', link: '/guide/topics' },
+            { text: 'The cluster event bus', link: '/guide/cluster-event-bus' },
           ],
         },
         {
@@ -59,13 +60,17 @@ export default defineConfig({
           items: [
             { text: 'Reconnection & delivery', link: '/guide/reconnection-delivery' },
             { text: 'Serialization', link: '/guide/serialization' },
+            { text: 'React', link: '/guide/react' },
           ],
         },
         {
-          text: 'Scaling & integrations',
+          text: 'Adapters',
           items: [
-            { text: 'Scaling & adapters', link: '/guide/scaling-adapters' },
-            { text: 'React', link: '/guide/react' },
+            { text: 'Choose your backbone', link: '/guide/scaling-adapters' },
+            { text: 'Redis', link: '/guide/adapter-redis' },
+            { text: 'libp2p', link: '/guide/adapter-libp2p' },
+            { text: 'RabbitMQ', link: '/guide/adapter-rabbitmq' },
+            { text: 'ZeroMQ', link: '/guide/adapter-zeromq' },
           ],
         },
         {

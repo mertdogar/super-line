@@ -38,7 +38,7 @@ Direction is encoded as **named keys**, never positional generics — you can't 
 
 A `serverToClient` entry is an **event** by default; adding `subscribe: true` turns it into a **topic** the client opts into. (Topics fold into `serverToClient` so there's just one axis to learn.)
 
-A **shared topic** is also the **cluster event bus**: the same declaration types `server.publish` (any node fans out), `server.subscribe` (in-process, cluster-wide server-side consumers with local echo), and `client.subscribe` over WS — one decl, three subscriber kinds. See [Topics](./topics#the-cluster-bus).
+A **shared topic** is also the **cluster event bus**: the same declaration types `server.publish` (any node fans out), `server.subscribe` (in-process, cluster-wide server-side consumers with local echo), and `client.subscribe` over WS — one decl, three subscriber kinds. See [The cluster event bus](./cluster-event-bus).
 
 ## Roles
 

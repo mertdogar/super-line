@@ -12,7 +12,7 @@ The big win: **you write no WebRTC signaling.** You hand the transport a libp2p 
 
 The transport takes a started `Libp2p` node — *you* choose its transports (`@libp2p/websockets`, `@libp2p/webrtc`, `@libp2p/webtransport`), encryption, muxer, and listen addresses. The package's only runtime deps are `@super-line/core`, `@libp2p/interface`, and `@libp2p/utils`; **`libp2p` is a peer dependency** (you already build the node).
 
-> This is a **separate** node from [`@super-line/adapter-libp2p`](./scaling-adapters), which uses gossipsub for *server↔server* fan-out. Transports carry client↔server traffic; adapters carry node↔node fan-out.
+> This is a **separate** node from [`@super-line/adapter-libp2p`](./adapter-libp2p), which uses gossipsub for *server↔server* fan-out. Transports carry client↔server traffic; adapters carry node↔node fan-out.
 
 ```ts
 import { createLibp2p } from 'libp2p'

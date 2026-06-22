@@ -53,13 +53,13 @@ Demonstrates: [introspection & presence](/guide/introspection-and-presence).
 
 ## event-bus — single-process cluster event bus
 
-One process shows the [cluster event bus](/guide/scaling-adapters#the-cluster-event-bus) on a shared topic: a `server.publish` fans out to several in-process `server.subscribe` listeners (showing local echo — your own publish fires in-process, no round-trip) plus one client subscriber over WS. No Redis needed.
+One process shows the [cluster event bus](/guide/cluster-event-bus) on a shared topic: a `server.publish` fans out to several in-process `server.subscribe` listeners (showing local echo — your own publish fires in-process, no round-trip) plus one client subscriber over WS. No Redis needed.
 
 ```bash
 pnpm --filter @super-line/example-event-bus start
 ```
 
-Demonstrates: [the cluster event bus](/guide/scaling-adapters#the-cluster-event-bus).
+Demonstrates: [the cluster event bus](/guide/cluster-event-bus).
 
 ## bus-cluster — multi-node server.subscribe showcase
 
@@ -69,7 +69,7 @@ A cluster via Docker Compose: **Redis + Caddy + 3 server nodes + watcher clients
 cd examples/bus-cluster && docker compose up
 ```
 
-Demonstrates: [the cluster event bus](/guide/scaling-adapters#the-cluster-event-bus), [scaling & adapters](/guide/scaling-adapters).
+Demonstrates: [the cluster event bus](/guide/cluster-event-bus), [scaling & adapters](/guide/scaling-adapters).
 
 ## scaling — a real multi-node cluster
 
@@ -81,7 +81,7 @@ cd examples/scaling && docker compose up
 
 See [`examples/scaling/README.md`](https://github.com/mertdogar/super-line/tree/main/examples/scaling) for what to watch, how to connect your own client to the load balancer, and `--scale`.
 
-Demonstrates: [scaling & adapters](/guide/scaling-adapters), [the cluster event bus](/guide/scaling-adapters#the-cluster-event-bus).
+Demonstrates: [scaling & adapters](/guide/scaling-adapters), [the cluster event bus](/guide/cluster-event-bus).
 
 ## react-chat-cluster — the browser app, across two servers
 
@@ -97,10 +97,10 @@ Demonstrates: [React hooks](/guide/react), [scaling & adapters](/guide/scaling-a
 
 ## react-chat-cluster-libp2p — the same cluster, no broker
 
-The same browser app and Control Center as `react-chat-cluster` above, but with **no Redis** — the two nodes peer directly over libp2p gossipsub via [`@super-line/adapter-libp2p`](/guide/scaling-adapters#decentralized-libp2p-no-broker). Same React SPA, same cross-node messages and cluster-wide (gossip-replicated) presence; the only structural change is the adapter line. Ports are offset (web `:8090`, Control Center `:8091`) so it runs alongside the Redis variant. Needs Docker.
+The same browser app and Control Center as `react-chat-cluster` above, but with **no Redis** — the two nodes peer directly over libp2p gossipsub via [`@super-line/adapter-libp2p`](/guide/adapter-libp2p). Same React SPA, same cross-node messages and cluster-wide (gossip-replicated) presence; the only structural change is the adapter line. Ports are offset (web `:8090`, Control Center `:8091`) so it runs alongside the Redis variant. Needs Docker.
 
 ```bash
 cd examples/react-chat-cluster-libp2p && docker compose up --build
 ```
 
-Demonstrates: [React hooks](/guide/react), [scaling & adapters](/guide/scaling-adapters#decentralized-libp2p-no-broker), [introspection & presence](/guide/introspection-and-presence).
+Demonstrates: [React hooks](/guide/react), [scaling & adapters](/guide/adapter-libp2p), [introspection & presence](/guide/introspection-and-presence).

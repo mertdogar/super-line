@@ -53,13 +53,23 @@ shared: {
 To push a *role-specific* event to a group, use a [topic](./topics) (`forRole(r).publish`) or iterate and `conn.emit`. `room.broadcast` is deliberately shared-only.
 :::
 
+## Direct messages
+
+Don't stash a `conn` to DM a user — it's node-local. Put each connection in a **per-user room** and broadcast a shared event to it, which works across nodes:
+
+```ts
+onConnection: (conn, ctx) => srv.room(`user:${ctx.user.id}`).add(conn),
+// later, from any node:
+srv.room(`user:${targetId}`).broadcast('dm', { from, text })
+```
+
 ## Event vs topic
 
 Use an **event** when the **server** decides who receives it (notifications, room broadcasts, targeted pushes). Use a [**topic**](./topics) when the **client** opts into a stream. Both are `serverToClient`; the only difference is the `subscribe: true` flag and who initiates.
 
 ## Events vs the cluster bus
 
-Events are server-**chosen** pushes (`conn.emit` / `room.broadcast` / `srv.toConn(id).emit` / `srv.toUser(id).emit`) — the recipient gets them with **no opt-in** and there's **no server-side subscribe**. The [cluster bus](./topics#the-cluster-bus) is the opposite: **opt-in** pub/sub on a shared topic, where any node `server.publish`es and both clients (`client.subscribe`) and other servers (`server.subscribe`) choose to listen. They're different tools — reach for an event when the server decides who's pushed to, and the bus when subscribers opt in and you need cross-node, server-side fan-out.
+Events are server-**chosen** pushes (`conn.emit` / `room.broadcast` / `srv.toConn(id).emit` / `srv.toUser(id).emit`) — the recipient gets them with **no opt-in** and there's **no server-side subscribe**. The [cluster bus](./cluster-event-bus) is the opposite: **opt-in** pub/sub on a shared topic, where any node `server.publish`es and both clients (`client.subscribe`) and other servers (`server.subscribe`) choose to listen. They're different tools — reach for an event when the server decides who's pushed to, and the bus when subscribers opt in and you need cross-node, server-side fan-out.
 
 ## Delivery
 

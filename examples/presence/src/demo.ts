@@ -2,6 +2,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { createSuperLineServer, MemoryBus, createInMemoryAdapter } from '@super-line/server'
 import { createSuperLineClient } from '@super-line/client'
+import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
 import { ops } from './contract.js'
 
 // One-command demo, NO external services. It boots TWO nodes that share one
@@ -13,8 +14,8 @@ import { ops } from './contract.js'
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 // auth reads the user id from the query string; identify exposes it to the cluster registry
-function authenticate(req: { url?: string }) {
-  const uid = new URL(req.url ?? '', 'http://localhost').searchParams.get('uid') ?? 'anon'
+function authenticate(h: { query: Record<string, string> }) {
+  const uid = h.query.uid ?? 'anon'
   return { role: 'user' as const, ctx: { userId: uid } }
 }
 const identify = (conn: { ctx: unknown }) => (conn.ctx as { userId: string }).userId
@@ -22,7 +23,7 @@ const identify = (conn: { ctx: unknown }) => (conn.ctx as { userId: string }).us
 async function node(bus: MemoryBus) {
   const server = http.createServer()
   const srv = createSuperLineServer(ops, {
-    server,
+    transports: [webSocketServerTransport({ server })],
     authenticate,
     identify,
     describeConn: (conn) => ({ userId: (conn.ctx as { userId: string }).userId }),
@@ -46,7 +47,7 @@ async function main(): Promise<void> {
   console.log(`node B: ${b.url}  (id ${b.srv.nodeId.slice(0, 8)})\n`)
 
   // alice connects to node A, bob to node B. alice answers server→client `confirm` requests.
-  const alice = createSuperLineClient(ops, { url: a.url, role: 'user', params: { uid: 'alice' } })
+  const alice = createSuperLineClient(ops, { transport: webSocketClientTransport({ url: a.url }), role: 'user', params: { uid: 'alice' } })
   const notices: string[] = []
   alice.on('notice', (n) => {
     notices.push(n.text)
@@ -58,7 +59,7 @@ async function main(): Promise<void> {
       return { approved: true }
     },
   })
-  const bob = createSuperLineClient(ops, { url: b.url, role: 'user', params: { uid: 'bob' } })
+  const bob = createSuperLineClient(ops, { transport: webSocketClientTransport({ url: b.url }), role: 'user', params: { uid: 'bob' } })
   await Promise.all([alice.hello({}), bob.hello({})])
   await tick(50) // let both presence registrations settle
 

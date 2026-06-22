@@ -11,8 +11,8 @@ const contract = defineContract({
   },
 })
 
-function authenticate(req: { url?: string }) {
-  const token = new URL(req.url ?? '', 'http://localhost').searchParams.get('token')
+function authenticate(h: { query: Record<string, string> }) {
+  const token = h.query.token
   if (token !== 'good') throw new Error('bad token')
   return { role: 'user' as const, ctx: { token } }
 }

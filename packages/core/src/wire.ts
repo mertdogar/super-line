@@ -35,7 +35,15 @@ export interface SErrFrame {
   m: string
   d?: unknown
 }
-export type ClientFrame = ReqFrame | SubFrame | UnsubFrame | SResFrame | SErrFrame
+// App-level liveness. The server sends `ping`; the recipient answers `pong`. These replace
+// WebSocket protocol pings so every transport (SSE, libp2p, …) shares one heartbeat.
+export interface PingFrame {
+  t: 'ping'
+}
+export interface PongFrame {
+  t: 'pong'
+}
+export type ClientFrame = ReqFrame | SubFrame | UnsubFrame | SResFrame | SErrFrame | PingFrame | PongFrame
 
 // Server -> Client
 export interface ResFrame {
@@ -68,6 +76,6 @@ export interface SReqFrame {
   m: string // request name
   d: unknown // input
 }
-export type ServerFrame = ResFrame | ErrFrame | EvtFrame | PubFrame | SReqFrame
+export type ServerFrame = ResFrame | ErrFrame | EvtFrame | PubFrame | SReqFrame | PingFrame | PongFrame
 
 export type Frame = ClientFrame | ServerFrame

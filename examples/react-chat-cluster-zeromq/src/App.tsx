@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createSuperLineClient } from '@super-line/client'
+import { webSocketClientTransport } from '@super-line/transport-websocket'
 import { createSuperLineHooks } from '@super-line/react'
 import { chat } from './contract.js'
 
@@ -51,7 +52,9 @@ function JoinForm({ onJoin }: { onJoin: (creds: { name: string; room: string }) 
 
 function ChatApp({ name, room }: { name: string; room: string }) {
   // create the client once; it connects immediately and reconnects on its own
-  const [client] = useState(() => createSuperLineClient(chat, { url: WS_URL, role: 'user', params: { name } }))
+  const [client] = useState(() =>
+    createSuperLineClient(chat, { transport: webSocketClientTransport({ url: WS_URL }), role: 'user', params: { name } }),
+  )
   useEffect(() => () => client.close(), [client])
 
   return (

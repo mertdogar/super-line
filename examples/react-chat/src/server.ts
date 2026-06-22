@@ -1,5 +1,6 @@
 import http from 'node:http'
 import { createSuperLineServer, type Conn } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { chat } from './contract.js'
 
 const PORT = Number(process.env.PORT ?? 8787)
@@ -16,9 +17,9 @@ const adjust = (room: string, delta: number) => {
 }
 
 const srv = createSuperLineServer(chat, {
-  server,
-  authenticate: (req) => {
-    const name = new URL(req.url ?? '', 'http://localhost').searchParams.get('name')?.trim()
+  transports: [webSocketServerTransport({ server })],
+  authenticate: (h) => {
+    const name = h.query.name?.trim()
     if (!name) throw new Error('name is required')
     return { role: 'user' as const, ctx: { name } }
   },

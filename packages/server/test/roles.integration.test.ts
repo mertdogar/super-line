@@ -30,8 +30,8 @@ afterEach(() => h.dispose())
 async function boot() {
   const { srv, url } = await h.server(contract, {
     // role + ctx come from the claimed role param, verified here
-    authenticate: (req) => {
-      const role = (new URL(req.url ?? '', 'http://localhost').searchParams.get('role') ?? 'user') as Role
+    authenticate: (h) => {
+      const role = (h.query.role ?? 'user') as Role
       return role === 'agent'
         ? { role: 'agent' as const, ctx: { agentId: 'a1' } }
         : { role: 'user' as const, ctx: { userId: 'u1' } }

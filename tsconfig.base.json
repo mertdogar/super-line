@@ -21,7 +21,9 @@
       "@super-line/adapter-libp2p": ["./packages/adapter-libp2p/src/index.ts"],
       "@super-line/adapter-zeromq": ["./packages/adapter-zeromq/src/index.ts"],
       "@super-line/adapter-rabbitmq": ["./packages/adapter-rabbitmq/src/index.ts"],
-      "@super-line/react": ["./packages/react/src/index.ts"]
+      "@super-line/react": ["./packages/react/src/index.ts"],
+      "@super-line/transport-websocket": ["./packages/transport-websocket/src/index.ts"],
+      "@super-line/transport-loopback": ["./packages/transport-loopback/src/index.ts"]
     }
   }
 }

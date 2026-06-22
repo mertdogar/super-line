@@ -1,5 +1,6 @@
 import http from 'node:http'
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createRedisAdapter } from '@super-line/adapter-redis'
 import { cluster } from './contract.js'
 
@@ -11,7 +12,7 @@ const NODE = process.env.NODE_NAME ?? `node-${PORT}`
 
 const server = http.createServer()
 const srv = createSuperLineServer(cluster, {
-  server,
+  transports: [webSocketServerTransport({ server })],
   authenticate: () => ({ role: 'watcher' as const, ctx: {} }),
   adapter: createRedisAdapter(REDIS_URL),
 })

@@ -23,11 +23,10 @@ const contract = defineContract({
   roles: { user: {}, agent: {} },
 })
 
-function auth(req: { url?: string }) {
-  const u = new URL(req.url ?? '', 'http://localhost')
+function auth(h: { query: Record<string, string> }) {
   return {
-    role: (u.searchParams.get('role') as 'user' | 'agent') ?? 'user',
-    ctx: { userId: u.searchParams.get('uid') ?? 'anon' },
+    role: (h.query.role as 'user' | 'agent') ?? 'user',
+    ctx: { userId: h.query.uid ?? 'anon' },
   }
 }
 const identify = (conn: { ctx: unknown }) => (conn.ctx as { userId: string }).userId

@@ -9,6 +9,7 @@ import { defineContract } from '@super-line/core'
 import { createSuperLineServer } from '@super-line/server'
 import { createSuperLineClient, type SuperLineClient } from '@super-line/client'
 import { createSuperLineHooks } from '@super-line/react'
+import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
 
 const contract = defineContract({
   roles: {
@@ -34,13 +35,13 @@ afterEach(async () => {
 async function boot(): Promise<SuperLineClient<typeof contract, 'user'>> {
   const server = http.createServer()
   const srv = createSuperLineServer(contract, {
-    server,
+    transports: [webSocketServerTransport({ server })],
     authenticate: () => ({ role: 'user' as const, ctx: {} }),
   })
   srv.implement({ user: { add: async ({ a, b }) => ({ sum: a + b }) } })
   await new Promise<void>((resolve) => server.listen(0, resolve))
   const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`
-  const client = createSuperLineClient(contract, { url, role: 'user' })
+  const client = createSuperLineClient(contract, { transport: webSocketClientTransport({ url }), role: 'user' })
   cleanups.push(() => client.close())
   cleanups.push(async () => {
     await srv.close()

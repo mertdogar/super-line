@@ -51,8 +51,7 @@
     "prepublishOnly": "tsup"
   },
   "dependencies": {
-    "@super-line/core": "workspace:^",
-    "ws": "^8.18.0"
+    "@super-line/core": "workspace:^"
   },
   "devDependencies": {
     "@chainsafe/libp2p-noise": "^17.0.0",
@@ -68,8 +67,11 @@
     "@super-line/adapter-redis": "workspace:*",
     "@super-line/adapter-zeromq": "workspace:*",
     "@super-line/client": "workspace:*",
+    "@super-line/transport-loopback": "workspace:*",
+    "@super-line/transport-websocket": "workspace:*",
     "@types/ws": "^8.5.13",
     "ioredis": "^5.4.2",
+    "ws": "^8.18.0",
     "libp2p": "^3.3.4",
     "rabbitmq-client": "^5.0.0",
     "testcontainers": "^10.13.2",

@@ -71,4 +71,14 @@ export type {
   SReqFrame,
   SResFrame,
   SErrFrame,
+  PingFrame,
+  PongFrame,
 } from './wire.js'
+
+export type {
+  RawConn,
+  Handshake,
+  AuthOutcome,
+  ServerTransport,
+  ClientTransport,
+} from './transport.js'

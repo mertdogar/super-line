@@ -28,6 +28,7 @@
     "@super-line/client": "workspace:*",
     "@super-line/core": "workspace:*",
     "@super-line/server": "workspace:*",
+    "@super-line/transport-websocket": "workspace:*",
     "@tailwindcss/vite": "^4.0.0",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",

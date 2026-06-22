@@ -24,9 +24,8 @@ const contract = defineContract({
   roles: { user: {} },
 })
 
-function auth(req: { url?: string }) {
-  const u = new URL(req.url ?? '', 'http://localhost')
-  return { role: 'user' as const, ctx: { userId: u.searchParams.get('uid') ?? 'anon' } }
+function auth(h: { query: Record<string, string> }) {
+  return { role: 'user' as const, ctx: { userId: h.query.uid ?? 'anon' } }
 }
 const identify = (conn: { ctx: unknown }) => (conn.ctx as { userId: string }).userId
 

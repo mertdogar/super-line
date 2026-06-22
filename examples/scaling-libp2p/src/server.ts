@@ -2,6 +2,7 @@ import http from 'node:http'
 import { generateKeyPairFromSeed } from '@libp2p/crypto/keys'
 import { peerIdFromPrivateKey } from '@libp2p/peer-id'
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createLibp2pAdapter } from '@super-line/adapter-libp2p'
 import { sync } from './contract.js'
 
@@ -34,7 +35,7 @@ const server = http.createServer()
 let conns = 0
 
 const srv = createSuperLineServer(sync, {
-  server,
+  transports: [webSocketServerTransport({ server })],
   authenticate: () => ({ role: 'user' as const, ctx: {} }),
   // no broker: every node joins one shared gossipsub mesh
   adapter: await createLibp2pAdapter({

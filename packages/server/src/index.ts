@@ -1,12 +1,8 @@
-import type { IncomingMessage, Server as HttpServer } from 'node:http'
-import type { Duplex } from 'node:stream'
 import { randomUUID } from 'node:crypto'
-import { WebSocketServer, type RawData } from 'ws'
 import {
   jsonSerializer,
   validate,
   SuperLineError,
-  INSPECTOR_SUBPROTOCOL,
   INSPECTOR_ROLE,
   classifyContract,
   type Adapter,
@@ -16,6 +12,10 @@ import {
   type InspectedContract,
   type ConnView,
   type InspectorEvent,
+  type ServerTransport,
+  type RawConn,
+  type Handshake,
+  type AuthOutcome,
   type ClientFrame,
   type ReqFrame,
   type EvtFrame,
@@ -39,10 +39,10 @@ import {
   type DataOf,
   type AnyData,
 } from '@super-line/core'
-import { Conn, type Backpressure } from './conn.js'
+import { Conn } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
 
-export { Conn, type Backpressure } from './conn.js'
+export { Conn } from './conn.js'
 export { MemoryBus, createInMemoryAdapter } from './memory-adapter.js'
 
 type Awaitable<T> = T | Promise<T>
@@ -208,21 +208,19 @@ export interface RoleLens<C extends Contract, R extends RoleOf<C>> {
 
 /** Options for {@link createSuperLineServer}. */
 export interface SuperLineServerOptions<C extends Contract, A extends AuthResult<C>> {
-  /** The `http.Server` to attach to (compose with Express/Fastify/Hono). */
-  server?: HttpServer
+  /** Client↔server transports to accept connections on (e.g. `webSocketServerTransport({ server })`). */
+  transports: ServerTransport[]
   /** Wire serializer; MUST match the client. Defaults to `jsonSerializer`. */
   serializer?: Serializer
   /** Cross-node fan-out adapter. Defaults to a per-server in-memory adapter. */
   adapter?: Adapter
-  /** Only handle upgrades for this pathname; others are left untouched. */
-  path?: string
   /**
    * Friendly name for this node, surfaced in `srv.nodeName`, the cluster descriptor, and the
    * Control Center topology. Defaults to `SUPER_LINE_NODE_NAME` or a short slice of `nodeId`.
    */
   nodeName?: string
-  /** Runs at the HTTP upgrade. Return { role, ctx }, or throw to reject with 401. */
-  authenticate: (req: IncomingMessage) => Awaitable<A>
+  /** Authenticate a connection from its normalized {@link Handshake}. Return { role, ctx }, or throw to reject. */
+  authenticate: (handshake: Handshake) => Awaitable<A>
   /** Stable user key for a connection (powers `cluster.byUser`, `isOnline`, and `toUser`). */
   identify?: (conn: Conn) => string | undefined
   /** Extra fields merged into the connection's cluster descriptor (e.g. `{ plan }`). `ctx` is never auto-serialized. */
@@ -238,12 +236,10 @@ export interface SuperLineServerOptions<C extends Contract, A extends AuthResult
    * Defaults to `{ interval: 30_000 }` (no reaping).
    */
   heartbeat?: { interval?: number; maxMissed?: number } | false
-  /** Guard against slow consumers: when a connection's send buffer exceeds the limit, close or drop. */
-  backpressure?: Backpressure
   /**
-   * Read-only Control Center inspector channel, reached via the WS subprotocol
-   * `superline.inspector.v1`. Connections on it bypass `authenticate` and are kept out of
-   * presence, the heartbeat, and `local`/`cluster` results. **Default off; dev / trusted-network only.**
+   * Enable the read-only Control Center inspector: emit `msg.*` telemetry and accept inspector
+   * clients. The WS transport must also be created with `inspector: true` to negotiate the
+   * `superline.inspector.v1` subprotocol. **Default off; dev / trusted-network only.**
    */
   inspector?: boolean | { redact?: string[] }
   /** Called once per accepted connection. */
@@ -307,8 +303,8 @@ type Impl = Record<string, Record<string, AnyHandler>>
  * @example
  * ```ts
  * const srv = createSuperLineServer(api, {
- *   server,
- *   authenticate: (req) => ({ role: 'user' as const, ctx: { id: '1' } }),
+ *   transports: [webSocketServerTransport({ server })],
+ *   authenticate: (h) => ({ role: 'user' as const, ctx: { id: '1' } }),
  * })
  * srv.implement({
  *   shared: { join: async ({ room }, _ctx, conn) => { srv.room(room).add(conn); return { ok: true } } },
@@ -327,12 +323,6 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
   const inspectorRedact = new Set<string>(
     opts.inspector && typeof opts.inspector === 'object' ? opts.inspector.redact ?? [] : [],
   )
-  // echo the reserved subprotocol only when inspector is on, so browsers complete the handshake
-  const wss = new WebSocketServer({
-    noServer: true,
-    handleProtocols: (protocols) =>
-      inspectorEnabled && protocols.has(INSPECTOR_SUBPROTOCOL) ? INSPECTOR_SUBPROTOCOL : false,
-  })
   const conns = new Set<Conn>()
   const inspectorConns = new Set<Conn>() // read-only inspectors: kept out of conns/presence/heartbeat
   // local members per namespaced channel (rooms + topics share this registry)
@@ -478,12 +468,14 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       void adapter.presence?.beat(instanceId)
       for (const conn of conns) {
         if (hb.maxMissed != null && conn.missedPongs >= hb.maxMissed) {
-          conn.ws.terminate()
+          conn.terminate()
           continue
         }
         conn.missedPongs++
         conn.lastPingAt = now
-        conn.ws.ping()
+        // app-level liveness frame: deliberately goes through the normal send path, so a connection
+        // over its backpressure limit is closed/dropped here like any other slow consumer.
+        conn.send({ t: 'ping' })
       }
     }, hb.interval ?? 30_000)
     hbTimer.unref?.()
@@ -667,105 +659,75 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     },
   }
 
-  if (opts.server) {
-    opts.server.on('upgrade', (req, socket, head) => {
-      void handleUpgrade(req, socket, head)
-    })
+  // Core owns the auth decision; each transport calls this at its native moment and rejects natively on throw.
+  const authHook = async (handshake: Handshake): Promise<AuthOutcome> => {
+    const auth = await opts.authenticate(handshake)
+    return { role: auth.role, ctx: auth.ctx }
   }
 
-  function isInspectorRequest(req: IncomingMessage): boolean {
-    if (!inspectorEnabled) return false
-    const raw = req.headers['sec-websocket-protocol']
-    if (!raw) return false
-    const offered = (Array.isArray(raw) ? raw.join(',') : raw).split(',').map((p) => p.trim())
-    return offered.includes(INSPECTOR_SUBPROTOCOL)
-  }
-
-  async function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
-    if (opts.path) {
-      const { pathname } = new URL(req.url ?? '/', 'http://localhost')
-      if (pathname !== opts.path) return
+  // A transport accepted (and authenticated) a connection — wire it up. Inspector conns
+  // (role === INSPECTOR_ROLE, set by the transport) are observer-invisible.
+  function acceptConn(raw: RawConn, auth: AuthOutcome): void {
+    const role = auth.role
+    const ctx = auth.ctx
+    const inspector = role === INSPECTOR_ROLE
+    if (inspector && !inspectorEnabled) {
+      raw.close() // server-authoritative: refuse an inspector a transport offered but this server didn't enable
+      return
     }
+    const connId = randomUUID()
+    const conn = new Conn(
+      raw,
+      connId,
+      role,
+      ctx,
+      serializer,
+      inspectorEnabled
+        ? (event, data) =>
+            emitInspectorEvent({ type: 'msg.event', target: connId, name: event, data: safeSnapshot(data) })
+        : undefined,
+    )
+    raw.onMessage((bytes) => {
+      void onMessage(conn, bytes)
+    })
 
-    const inspector = isInspectorRequest(req)
-    let role: string
-    let ctx: unknown
     if (inspector) {
-      role = INSPECTOR_ROLE // short-circuit authenticate for the read-only inspector channel
-      ctx = {}
-    } else {
-      let auth: A
-      try {
-        auth = await opts.authenticate(req)
-      } catch {
-        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
-        socket.destroy()
-        return
-      }
-      role = auth.role
-      ctx = auth.ctx
+      // observer-invisible: not in conns/presence/heartbeat, no lifecycle hooks
+      inspectorConns.add(conn)
+      raw.onClose(() => {
+        inspectorConns.delete(conn)
+        for (const channel of conn.channels) leaveChannel(conn, channel) // drop its events subscription
+      })
+      return
     }
 
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      const connId = randomUUID()
-      const conn = new Conn(
-        ws,
-        connId,
-        role,
-        ctx,
-        serializer,
-        opts.backpressure,
-        inspectorEnabled
-          ? (event, data) =>
-              emitInspectorEvent({ type: 'msg.event', target: connId, name: event, data: safeSnapshot(data) })
-          : undefined,
-      )
-      ws.on('message', (data, isBinary) => {
-        void onMessage(conn, data, isBinary)
+    conns.add(conn)
+    raw.onClose((code) => {
+      conns.delete(conn)
+      for (const channel of conn.channels) leaveChannel(conn, channel)
+      void adapter.presence?.del(conn.id)
+      const goneUserId = opts.identify?.(conn) // carry the name so the feed can label a purged conn
+      emitInspectorEvent({
+        type: 'disconnect',
+        connId: conn.id,
+        nodeId: instanceId,
+        ...(goneUserId !== undefined ? { userId: goneUserId } : {}),
       })
-
-      if (inspector) {
-        // observer-invisible: not in conns/presence/heartbeat, no lifecycle hooks
-        inspectorConns.add(conn)
-        ws.on('close', () => {
-          inspectorConns.delete(conn)
-          for (const channel of conn.channels) leaveChannel(conn, channel) // drop its events subscription
-        })
-        return
-      }
-
-      conns.add(conn)
-      ws.on('pong', () => {
-        conn.lastPongAt = Date.now()
-        conn.missedPongs = 0
-      })
-      ws.on('close', (code) => {
-        conns.delete(conn)
-        for (const channel of conn.channels) leaveChannel(conn, channel)
-        void adapter.presence?.del(conn.id)
-        const goneUserId = opts.identify?.(conn) // carry the name so the feed can label a purged conn
-        emitInspectorEvent({
-          type: 'disconnect',
-          connId: conn.id,
-          nodeId: instanceId,
-          ...(goneUserId !== undefined ? { userId: goneUserId } : {}),
-        })
-        opts.onDisconnect?.(conn, ctx as CtxUnion<A>, code)
-      })
-      opts.onConnection?.(conn, ctx as CtxUnion<A>) // may seed conn.data before the snapshot
-      const descriptor = buildDescriptor(conn) // snapshot (reads conn.data)
-      void adapter.presence?.set(descriptor)
-      emitInspectorEvent({ type: 'connect', descriptor })
-      void joinChannel(conn, CONN + conn.id) // personal channel for targeted cross-node send
-      const uid = opts.identify?.(conn)
-      if (uid !== undefined) void joinChannel(conn, USER + uid)
+      opts.onDisconnect?.(conn, ctx as CtxUnion<A>, code)
     })
+    opts.onConnection?.(conn, ctx as CtxUnion<A>) // may seed conn.data before the snapshot
+    const descriptor = buildDescriptor(conn) // snapshot (reads conn.data)
+    void adapter.presence?.set(descriptor)
+    emitInspectorEvent({ type: 'connect', descriptor })
+    void joinChannel(conn, CONN + conn.id) // personal channel for targeted cross-node send
+    const uid = opts.identify?.(conn)
+    if (uid !== undefined) void joinChannel(conn, USER + uid)
   }
 
-  async function onMessage(conn: Conn, data: RawData, isBinary: boolean): Promise<void> {
+  async function onMessage(conn: Conn, bytes: Uint8Array): Promise<void> {
     let frame: ClientFrame
     try {
-      frame = serializer.decode(toWire(data, isBinary)) as ClientFrame
+      frame = serializer.decode(bytes) as ClientFrame
     } catch {
       return
     }
@@ -782,7 +744,14 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       await handleClientReply(conn, frame.i, { ok: true, d: frame.d })
     } else if (frame.t === 'serr') {
       await handleClientReply(conn, frame.i, { ok: false, code: frame.code, m: frame.m, d: frame.d })
+    } else if (frame.t === 'pong') {
+      conn.lastPongAt = Date.now()
+      conn.missedPongs = 0
     }
+  }
+
+  for (const transport of opts.transports) {
+    void transport.start({ authenticate: authHook, onConnection: acceptConn })
   }
 
   function runMiddleware(info: MiddlewareInfo, terminal: () => Promise<void>): Promise<void> {
@@ -1092,16 +1061,8 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       for (const conn of inspectorConns) conn.close()
       await adapter.presence?.clearNode(instanceId) // remove this node's registry entries before disconnecting
       await adapter.close?.()
-      await new Promise<void>((resolve) => {
-        wss.close(() => resolve())
-      })
+      for (const transport of opts.transports) await transport.stop()
     },
   }
   return api
-}
-
-function toWire(data: RawData, _isBinary: boolean): Uint8Array {
-  if (Array.isArray(data)) return Buffer.concat(data)
-  if (data instanceof ArrayBuffer) return new Uint8Array(data)
-  return data as Buffer
 }

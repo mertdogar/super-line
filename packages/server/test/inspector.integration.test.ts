@@ -12,8 +12,8 @@ const contract = defineContract({
   },
 })
 
-function authenticate(req: { url?: string }) {
-  const role = new URL(req.url ?? '', 'http://localhost').searchParams.get('role') as 'user' | 'agent'
+function authenticate(h: { query: Record<string, string> }) {
+  const role = h.query.role as 'user' | 'agent'
   return { role, ctx: { role } }
 }
 

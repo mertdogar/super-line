@@ -1,5 +1,6 @@
 import http from 'node:http'
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createZeroMqAdapter } from '@super-line/adapter-zeromq'
 import { sync } from './contract.js'
 
@@ -19,7 +20,7 @@ const server = http.createServer()
 let conns = 0
 
 const srv = createSuperLineServer(sync, {
-  server,
+  transports: [webSocketServerTransport({ server })],
   authenticate: () => ({ role: 'user' as const, ctx: {} }),
   nodeName: NODE, // surface node-1/2/3 in the Control Center topology
   adapter: await createZeroMqAdapter({ bind: `tcp://0.0.0.0:${ZMQ_PORT}`, peers }),

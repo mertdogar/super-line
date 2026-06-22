@@ -12,6 +12,7 @@
     "@super-line/client": "workspace:*",
     "@super-line/core": "workspace:*",
     "@super-line/server": "workspace:*",
+    "@super-line/transport-websocket": "workspace:*",
     "ioredis": "^5.4.2",
     "zod": "^3.24.1"
   },

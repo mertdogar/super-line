@@ -1,5 +1,6 @@
 import http from 'node:http'
 import { createSuperLineServer, type Conn } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createZeroMqAdapter } from '@super-line/adapter-zeromq'
 import { chat } from './contract.js'
 
@@ -20,13 +21,13 @@ let seq = 0
 const adapter = await createZeroMqAdapter({ bind: ZMQ_BIND, peers: ZMQ_PEERS })
 
 const srv = createSuperLineServer(chat, {
-  server,
+  transports: [webSocketServerTransport({ server, inspector: true })],
   adapter,
   nodeName: NODE, // surface node-1 / node-2 / node-3 in the Control Center topology
   inspector: true, // read-only Control Center channel (dev/trusted-network only)
   identify: (conn) => (conn.ctx as { name: string }).name, // surface the chat name cluster-wide
-  authenticate: (req) => {
-    const name = new URL(req.url ?? '', 'http://localhost').searchParams.get('name')?.trim()
+  authenticate: (h) => {
+    const name = h.query.name?.trim()
     if (!name) throw new Error('name is required')
     return { role: 'user' as const, ctx: { name } }
   },

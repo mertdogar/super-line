@@ -50,6 +50,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -72,6 +75,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       ioredis:
         specifier: ^5.4.2
         version: 5.11.1
@@ -94,6 +100,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -113,6 +122,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -163,6 +175,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -185,6 +200,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -231,6 +249,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       ioredis:
         specifier: ^5.4.2
         version: 5.11.1
@@ -283,6 +304,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -326,6 +350,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       rabbitmq-client:
         specifier: ^5.0.0
         version: 5.0.8
@@ -372,6 +399,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -412,6 +442,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       ioredis:
         specifier: ^5.4.2
         version: 5.11.1
@@ -443,6 +476,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -465,6 +501,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       rabbitmq-client:
         specifier: ^5.0.0
         version: 5.0.8
@@ -490,6 +529,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -581,6 +623,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../transport-websocket
       '@tailwindcss/vite':
         specifier: ^4.0.0
         version: 4.3.1(vite@6.4.3(@types/node@22.19.21)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))
@@ -649,6 +694,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../transport-websocket
       '@testing-library/react':
         specifier: ^16.1.0
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -676,9 +724,6 @@ importers:
       '@super-line/core':
         specifier: workspace:^
         version: link:../core
-      ws:
-        specifier: ^8.18.0
-        version: 8.21.0
     devDependencies:
       '@chainsafe/libp2p-noise':
         specifier: ^17.0.0
@@ -719,6 +764,12 @@ importers:
       '@super-line/client':
         specifier: workspace:*
         version: link:../client
+      '@super-line/transport-loopback':
+        specifier: workspace:*
+        version: link:../transport-loopback
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../transport-websocket
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1
@@ -734,6 +785,9 @@ importers:
       testcontainers:
         specifier: ^10.13.2
         version: 10.28.0
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.0
       zeromq:
         specifier: ^6.0.0
         version: 6.5.0
@@ -747,6 +801,25 @@ importers:
       '@standard-community/standard-json':
         specifier: ^0.3.5
         version: 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76)
+
+  packages/transport-loopback:
+    dependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+
+  packages/transport-websocket:
+    dependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.0
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
 
 packages:
 

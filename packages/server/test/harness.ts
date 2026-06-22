@@ -9,6 +9,7 @@ import {
   type SuperLineServer,
 } from '@super-line/server'
 import { createSuperLineClient, type SuperLineClient, type SuperLineClientOptions } from '@super-line/client'
+import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
 
 // Spins up real loopback servers + clients and tears them down (clients first).
 export function createHarness() {
@@ -16,14 +17,17 @@ export function createHarness() {
 
   async function server<C extends Contract, A extends AuthResult<C>>(
     contract: C,
-    opts: Omit<SuperLineServerOptions<C, A>, 'server'>,
+    opts: Omit<SuperLineServerOptions<C, A>, 'transports'>,
   ): Promise<{
     srv: SuperLineServer<C, A>
     http: http.Server
     url: string
   }> {
     const httpServer = http.createServer()
-    const srv = createSuperLineServer<C, A>(contract, { ...opts, server: httpServer })
+    const srv = createSuperLineServer<C, A>(contract, {
+      ...opts,
+      transports: [webSocketServerTransport({ server: httpServer, inspector: !!opts.inspector })],
+    })
     await new Promise<void>((resolve) => httpServer.listen(0, resolve))
     const { port } = httpServer.address() as AddressInfo
     cleanups.push(async () => {
@@ -35,9 +39,13 @@ export function createHarness() {
 
   function client<C extends Contract, R extends RoleOf<C>>(
     contract: C,
-    opts: SuperLineClientOptions<C, R>,
+    opts: Omit<SuperLineClientOptions<C, R>, 'transport'> & { url: string },
   ): SuperLineClient<C, R> {
-    const cl = createSuperLineClient(contract, opts)
+    const { url, ...rest } = opts
+    const cl = createSuperLineClient(contract, {
+      ...rest,
+      transport: webSocketClientTransport({ url }),
+    } as SuperLineClientOptions<C, R>)
     cleanups.unshift(() => cl.close()) // clients close before the servers they connect to
     return cl
   }

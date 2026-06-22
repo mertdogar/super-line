@@ -2,6 +2,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { createSuperLineServer } from '@super-line/server'
 import { createSuperLineClient } from '@super-line/client'
+import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
 import { bus } from './contract.js'
 
 // One process, one server node — the cluster event bus working *within* a single instance.
@@ -11,7 +12,7 @@ import { bus } from './contract.js'
 async function main(): Promise<void> {
   const server = http.createServer()
   const srv = createSuperLineServer(bus, {
-    server,
+    transports: [webSocketServerTransport({ server })],
     authenticate: () => ({ role: 'watcher' as const, ctx: {} }),
   })
 
@@ -29,7 +30,7 @@ async function main(): Promise<void> {
   const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`
 
   // a connected client subscribes to the same event — delivered over the WebSocket.
-  const client = createSuperLineClient(bus, { url, role: 'watcher' })
+  const client = createSuperLineClient(bus, { transport: webSocketClientTransport({ url }), role: 'watcher' })
   await client.subscribe('announce', (a) => console.log(`  [client]  announce "${a.text}"`)).ready
 
   // one publish from the server fans out to BOTH in-process subscribers (synchronously, no hop)

@@ -35,6 +35,7 @@
   },
   "devDependencies": {
     "@super-line/server": "workspace:*",
+    "@super-line/transport-websocket": "workspace:*",
     "@testing-library/react": "^16.1.0",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",

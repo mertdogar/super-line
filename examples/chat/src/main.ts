@@ -2,6 +2,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { createSuperLineServer } from '@super-line/server'
 import { createSuperLineClient } from '@super-line/client'
+import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
 import { chat } from './contract.js'
 
 // End-to-end dogfood: one server, a human (user) and an AI (agent) in the same room.
@@ -11,12 +12,11 @@ async function main(): Promise<void> {
   let messageId = 0
 
   const srv = createSuperLineServer(chat, {
-    server,
+    transports: [webSocketServerTransport({ server })],
     // role + name arrive as query params; the client sends its claimed role automatically
-    authenticate: (req) => {
-      const u = new URL(req.url ?? '', 'http://localhost')
-      const name = u.searchParams.get('name') ?? 'anon'
-      return u.searchParams.get('role') === 'agent'
+    authenticate: (h) => {
+      const name = h.query.name ?? 'anon'
+      return h.query.role === 'agent'
         ? { role: 'agent' as const, ctx: { name } }
         : { role: 'user' as const, ctx: { name } }
     },
@@ -46,8 +46,16 @@ async function main(): Promise<void> {
   await new Promise<void>((resolve) => server.listen(0, resolve))
   const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`
 
-  const alice = createSuperLineClient(chat, { url, role: 'user', params: { name: 'alice' } })
-  const helper = createSuperLineClient(chat, { url, role: 'agent', params: { name: 'helper' } })
+  const alice = createSuperLineClient(chat, {
+    transport: webSocketClientTransport({ url }),
+    role: 'user',
+    params: { name: 'alice' },
+  })
+  const helper = createSuperLineClient(chat, {
+    transport: webSocketClientTransport({ url }),
+    role: 'agent',
+    params: { name: 'helper' },
+  })
 
   alice.on('message', (m) => console.log(`  alice sees  -> ${m.from}: ${m.text}`))
   helper.on('message', (m) => console.log(`  helper sees -> ${m.from}: ${m.text}`))

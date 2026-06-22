@@ -1,5 +1,6 @@
 import http from 'node:http'
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createRedisAdapter } from '@super-line/adapter-redis'
 import { sync } from './contract.js'
 
@@ -14,7 +15,7 @@ const server = http.createServer()
 let conns = 0
 
 const srv = createSuperLineServer(sync, {
-  server,
+  transports: [webSocketServerTransport({ server })],
   authenticate: () => ({ role: 'user' as const, ctx: {} }),
   adapter: createRedisAdapter(REDIS_URL),
   onConnection: (conn) => {

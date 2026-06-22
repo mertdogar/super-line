@@ -1,5 +1,6 @@
 import http from 'node:http'
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
 import { sync } from './contract.js'
 
@@ -17,7 +18,7 @@ let conns = 0
 const adapter = await createRabbitmqAdapter(RABBITMQ_URL)
 
 const srv = createSuperLineServer(sync, {
-  server,
+  transports: [webSocketServerTransport({ server })],
   authenticate: () => ({ role: 'user' as const, ctx: {} }),
   adapter,
   onConnection: (conn) => {

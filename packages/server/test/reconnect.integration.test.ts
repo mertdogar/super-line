@@ -39,7 +39,7 @@ describe('client reconnect', () => {
     await waitFor(() => received.length === 1)
 
     const firstConn = lastConn
-    firstConn!.ws.terminate() // simulate a network drop
+    firstConn!.terminate() // simulate a network drop
 
     await waitFor(() => lastConn !== firstConn && client.connected, 3000)
 
@@ -63,7 +63,7 @@ describe('client reconnect', () => {
 
     const inflight = client.hang({})
     await tick(20) // ensure the request was sent
-    lastConn!.ws.terminate()
+    lastConn!.terminate()
 
     await expect(inflight).rejects.toMatchObject({ code: 'DISCONNECTED' })
   })

@@ -1,0 +1,203 @@
+import type { IncomingMessage, Server as HttpServer } from 'node:http'
+import type { Duplex } from 'node:stream'
+import { WebSocketServer, type RawData, type WebSocket as WsServerSocket } from 'ws'
+import {
+  INSPECTOR_SUBPROTOCOL,
+  INSPECTOR_ROLE,
+  type RawConn,
+  type ServerTransport,
+  type ClientTransport,
+  type Handshake,
+  type AuthOutcome,
+} from '@super-line/core'
+
+/** Backpressure policy for the WS server: what to do when a connection's send buffer grows too large. */
+export interface Backpressure {
+  /** Buffer size (bytes) above which {@link Backpressure.onExceed} kicks in. */
+  maxBufferedBytes: number
+  /** `'close'` (default) drops the connection with code 1013; `'drop'` skips the frame. */
+  onExceed?: 'close' | 'drop'
+}
+
+/** Options for {@link webSocketServerTransport}. */
+export interface WebSocketServerTransportOptions {
+  /** The `http.Server` to attach to (compose with Express/Fastify/Hono). */
+  server?: HttpServer
+  /** Only handle upgrades for this pathname; others are left untouched. */
+  path?: string
+  /** Guard against slow consumers: when a connection's send buffer exceeds the limit, close or drop. */
+  backpressure?: Backpressure
+  /** Accept Control Center inspector clients via the `superline.inspector.v1` subprotocol (dev/trusted only). */
+  inspector?: boolean
+}
+
+/** Options for {@link webSocketClientTransport}. */
+export interface WebSocketClientTransportOptions {
+  /** The server URL, e.g. `ws://localhost:3000`. */
+  url: string
+  /** Override the WebSocket implementation (defaults to `globalThis.WebSocket`). */
+  WebSocket?: typeof WebSocket
+}
+
+/** A WebSocket server transport: attaches to an `http.Server` and accepts upgrades. */
+export function webSocketServerTransport(opts: WebSocketServerTransportOptions = {}): ServerTransport {
+  // echo the reserved subprotocol only when inspector is on, so browsers complete the handshake
+  const wss = new WebSocketServer({
+    noServer: true,
+    handleProtocols: (protocols) =>
+      opts.inspector && protocols.has(INSPECTOR_SUBPROTOCOL) ? INSPECTOR_SUBPROTOCOL : false,
+  })
+  let hooks: Parameters<ServerTransport['start']>[0] | undefined
+  let upgradeHandler: ((req: IncomingMessage, socket: Duplex, head: Buffer) => void) | undefined
+  let stopped = false
+
+  function isInspectorRequest(req: IncomingMessage): boolean {
+    if (!opts.inspector) return false
+    const raw = req.headers['sec-websocket-protocol']
+    if (!raw) return false
+    const offered = (Array.isArray(raw) ? raw.join(',') : raw).split(',').map((p) => p.trim())
+    return offered.includes(INSPECTOR_SUBPROTOCOL)
+  }
+
+  async function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+    if (opts.path) {
+      const { pathname } = new URL(req.url ?? '/', 'http://localhost')
+      if (pathname !== opts.path) return
+    }
+    const accept = (auth: AuthOutcome): void => {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        hooks!.onConnection(wsServerRawConn(ws, opts.backpressure), auth)
+      })
+    }
+    if (isInspectorRequest(req)) {
+      accept({ role: INSPECTOR_ROLE, ctx: {} }) // short-circuit authenticate for the read-only inspector channel
+      return
+    }
+    let auth: AuthOutcome
+    try {
+      auth = await hooks!.authenticate(buildHandshake(req))
+    } catch {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
+      socket.destroy()
+      return
+    }
+    if (stopped) {
+      socket.destroy() // the transport was stopped while authenticating — drop instead of accepting on a dead server
+      return
+    }
+    accept(auth)
+  }
+
+  return {
+    start(h) {
+      hooks = h
+      if (opts.server) {
+        upgradeHandler = (req, socket, head) => {
+          void handleUpgrade(req, socket, head)
+        }
+        opts.server.on('upgrade', upgradeHandler)
+      }
+    },
+    async stop() {
+      stopped = true
+      if (opts.server && upgradeHandler) opts.server.removeListener('upgrade', upgradeHandler)
+      await new Promise<void>((resolve) => wss.close(() => resolve()))
+    },
+  }
+}
+
+/** A WebSocket client transport: dials one server URL per `connect`. */
+export function webSocketClientTransport(opts: WebSocketClientTransportOptions): ClientTransport {
+  const resolved = opts.WebSocket ?? (globalThis.WebSocket as typeof WebSocket | undefined)
+  if (!resolved) throw new Error('No WebSocket implementation found; pass opts.WebSocket')
+  const WS: typeof WebSocket = resolved
+  return {
+    connect(handshakeParams, hooks) {
+      const ws = new WS(buildUrl(opts.url, handshakeParams))
+      ws.binaryType = 'arraybuffer'
+      ws.onopen = () => hooks.onOpen()
+      ws.onmessage = (event: MessageEvent) => hooks.onMessage(toClientBytes(event.data))
+      ws.onclose = (event: CloseEvent) => hooks.onClose(event.code)
+      return {
+        get writable() {
+          return ws.readyState === WS.OPEN
+        },
+        send(bytes) {
+          if (ws.readyState === WS.OPEN) ws.send(bytes)
+        },
+        onMessage() {}, // client core uses the hooks passed to connect()
+        onClose() {},
+        onDrain() {},
+        close(code, reason) {
+          ws.close(code, reason)
+        },
+        terminate() {
+          ws.close() // browser WebSocket has no hard terminate
+        },
+      } satisfies RawConn
+    },
+  }
+}
+
+/** Wrap a `ws` socket as a {@link RawConn} (the server transport's per-connection adapter). Exported for tests. */
+export function wsServerRawConn(ws: WsServerSocket, backpressure?: Backpressure): RawConn {
+  // true => the frame was handled by the backpressure policy and must not be sent
+  function overBackpressure(): boolean {
+    if (!backpressure || ws.bufferedAmount <= backpressure.maxBufferedBytes) return false
+    if (backpressure.onExceed === 'drop') {
+      console.warn('[super-line] dropping frame: connection over backpressure limit')
+      return true
+    }
+    ws.close(1013) // 'close' (default): too much backlog
+    return true
+  }
+  return {
+    get writable() {
+      return ws.readyState === ws.OPEN
+    },
+    send(bytes) {
+      if (ws.readyState !== ws.OPEN || overBackpressure()) return
+      ws.send(bytes)
+    },
+    onMessage(cb) {
+      ws.on('message', (data: RawData, isBinary: boolean) => cb(toWire(data, isBinary)))
+    },
+    onClose(cb) {
+      ws.on('close', (code: number, reason: Buffer) => cb(code, reason.toString()))
+    },
+    onDrain() {},
+    close(code, reason) {
+      ws.close(code, reason)
+    },
+    terminate() {
+      ws.terminate()
+    },
+  }
+}
+
+function buildHandshake(req: IncomingMessage): Handshake {
+  const url = new URL(req.url ?? '/', 'http://localhost')
+  const query: Record<string, string> = {}
+  for (const [k, v] of url.searchParams) query[k] = v
+  return { transport: 'websocket', headers: req.headers, query, raw: req }
+}
+
+function buildUrl(url: string, params: Record<string, string>): string {
+  if (Object.keys(params).length === 0) return url
+  const u = new URL(url)
+  for (const [key, value] of Object.entries(params)) u.searchParams.set(key, value)
+  return u.toString()
+}
+
+const encoder = new TextEncoder()
+function toClientBytes(data: string | ArrayBuffer | Blob): Uint8Array {
+  if (typeof data === 'string') return encoder.encode(data)
+  if (data instanceof ArrayBuffer) return new Uint8Array(data)
+  return new Uint8Array() // binaryType is 'arraybuffer', so Blob should not occur
+}
+
+function toWire(data: RawData, _isBinary: boolean): Uint8Array {
+  if (Array.isArray(data)) return new Uint8Array(Buffer.concat(data))
+  if (data instanceof ArrayBuffer) return new Uint8Array(data)
+  return new Uint8Array(data as Buffer)
+}

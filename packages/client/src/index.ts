@@ -18,6 +18,8 @@ import {
   type Output,
   type EventData,
   type SReqFrame,
+  type ClientTransport,
+  type RawConn,
 } from '@super-line/core'
 import { backoffDelay } from './backoff.js'
 
@@ -92,11 +94,11 @@ export interface ValidationErrorInfo {
 
 /** Options for {@link createSuperLineClient}. */
 export interface SuperLineClientOptions<C extends Contract, R extends RoleOf<C>> {
-  /** The server URL, e.g. `ws://localhost:3000`. */
-  url: string
+  /** The transport to dial on, e.g. `webSocketClientTransport({ url: 'ws://localhost:3000' })`. */
+  transport: ClientTransport
   /** This client's role; narrows the surface and is sent to the server to verify. */
   role: R
-  /** Extra query params appended to the URL (read in `authenticate`); `role` is added automatically. */
+  /** Extra handshake params passed to the transport (read in `authenticate`); `role` is added automatically. */
   params?: Record<string, string>
   /** Wire serializer; MUST match the server. Defaults to `jsonSerializer`. */
   serializer?: Serializer
@@ -114,8 +116,6 @@ export interface SuperLineClientOptions<C extends Contract, R extends RoleOf<C>>
   reconnectMaxMs?: number
   /** Backoff growth factor. Defaults to `2`. */
   reconnectFactor?: number
-  /** Override the WebSocket implementation (defaults to `globalThis.WebSocket`). */
-  WebSocket?: typeof WebSocket
 }
 
 interface Request {
@@ -153,7 +153,11 @@ function deferred(): Deferred {
  *
  * @example
  * ```ts
- * const client = createSuperLineClient(api, { url: 'ws://localhost:3000', role: 'user', params: { token } })
+ * const client = createSuperLineClient(api, {
+ *   transport: webSocketClientTransport({ url: 'ws://localhost:3000' }),
+ *   role: 'user',
+ *   params: { token },
+ * })
  * client.on('message', (m) => console.log(m.text))
  * const out = await client.send({ text: 'hi' }) // throws SuperLineError on failure
  * ```
@@ -173,12 +177,9 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     maxMs: opts.reconnectMaxMs ?? 30_000,
     factor: opts.reconnectFactor ?? 2,
   }
-  const resolved = opts.WebSocket ?? (globalThis.WebSocket as typeof WebSocket | undefined)
-  if (!resolved) throw new Error('No WebSocket implementation found; pass opts.WebSocket')
-  const WS: typeof WebSocket = resolved
 
-  // role rides along as a query param so the server's authenticate can verify it
-  const url = buildUrl(opts.url, { ...opts.params, role })
+  // role rides along in the handshake params so the server's authenticate can verify it
+  const handshakeParams = { ...opts.params, role }
   const requests = new Map<number, Request>()
   const listeners = new Map<string, Set<(data: unknown) => void>>()
   const topicListeners = new Map<string, Set<(data: unknown) => void>>()
@@ -198,27 +199,26 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     return def && 'payload' in def ? def.payload : undefined
   }
 
-  let ws!: WebSocket
+  let rawConn: RawConn | undefined
   let nextId = 1
   let closed = false
   let attempt = 0
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 
   function connect(): void {
-    ws = new WS(url)
-    ws.binaryType = 'arraybuffer'
-    ws.onopen = onOpen
-    ws.onmessage = (event: MessageEvent) => {
-      onMessage(event.data as string | ArrayBuffer)
-    }
-    ws.onclose = onClose
+    rawConn = opts.transport.connect(handshakeParams, {
+      onOpen,
+      onMessage,
+      onClose,
+      onDrain: () => {},
+    })
   }
 
   function onOpen(): void {
     attempt = 0
     for (const op of requests.values()) {
       if (!op.sent) {
-        ws.send(op.frame)
+        rawConn?.send(op.frame)
         op.sent = true
       }
     }
@@ -246,11 +246,15 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     reconnectTimer = setTimeout(connect, backoffDelay(attempt++, backoff))
   }
 
-  function onMessage(data: string | ArrayBuffer): void {
+  function onMessage(data: Uint8Array): void {
     let frame: ServerFrame
     try {
-      frame = serializer.decode(data instanceof ArrayBuffer ? new Uint8Array(data) : data) as ServerFrame
+      frame = serializer.decode(data) as ServerFrame
     } catch {
+      return
+    }
+    if (frame.t === 'ping') {
+      rawConn?.send(serializer.encode({ t: 'pong' }))
       return
     }
     if (frame.t === 'res') {
@@ -308,7 +312,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
 
   async function handleServerRequest(frame: SReqFrame): Promise<void> {
     const send = (f: object) => {
-      if (ws.readyState === WS.OPEN) ws.send(serializer.encode(f))
+      if (rawConn?.writable) rawConn.send(serializer.encode(f))
     }
     const handler = serverHandlers.get(frame.m)
     if (!handler) {
@@ -379,8 +383,8 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
         },
         { once: true },
       )
-      if (ws.readyState === WS.OPEN) {
-        ws.send(frame)
+      if (rawConn?.writable) {
+        rawConn.send(frame)
         op.sent = true
       }
     })
@@ -389,7 +393,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   function sendSub(topic: string): void {
     const id = nextId++
     subAckById.set(id, topic)
-    ws.send(serializer.encode({ t: 'sub', i: id, c: topic }))
+    rawConn?.send(serializer.encode({ t: 'sub', i: id, c: topic }))
   }
 
   function topicSet(topic: string): Set<(data: unknown) => void> {
@@ -410,7 +414,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       const d = deferred()
       readyByTopic.set(topic, d)
       ready = d.promise
-      if (ws.readyState === WS.OPEN) sendSub(topic) // else onOpen re-subscribes
+      if (rawConn?.writable) sendSub(topic) // else onOpen re-subscribes
     } else {
       ready = readyByTopic.get(topic)?.promise ?? Promise.resolve()
     }
@@ -427,7 +431,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
         if (set.size === 0) {
           topicListeners.delete(topic)
           readyByTopic.delete(topic)
-          if (ws.readyState === WS.OPEN) ws.send(serializer.encode({ t: 'unsub', c: topic }))
+          if (rawConn?.writable) rawConn.send(serializer.encode({ t: 'unsub', c: topic }))
         }
       },
     }
@@ -460,10 +464,10 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     close(): void {
       closed = true
       if (reconnectTimer) clearTimeout(reconnectTimer)
-      ws.close()
+      rawConn?.close()
     },
     get connected(): boolean {
-      return ws.readyState === WS.OPEN
+      return rawConn?.writable ?? false
     },
   }
 
@@ -474,11 +478,4 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       return (input: unknown, callOpts?: CallOptions) => call(prop, input, callOpts)
     },
   }) as unknown as SuperLineClient<C, R>
-}
-
-function buildUrl(url: string, params?: Record<string, string>): string {
-  if (!params || Object.keys(params).length === 0) return url
-  const u = new URL(url)
-  for (const [key, value] of Object.entries(params)) u.searchParams.set(key, value)
-  return u.toString()
 }

@@ -16,6 +16,7 @@ export default defineConfig({
       '@super-line/react': src('packages/react/src/index.ts'),
       '@super-line/transport-websocket': src('packages/transport-websocket/src/index.ts'),
       '@super-line/transport-loopback': src('packages/transport-loopback/src/index.ts'),
+      '@super-line/transport-http': src('packages/transport-http/src/index.ts'),
     },
   },
   test: {

@@ -82,3 +82,60 @@ The mechanical transform for each: server `{ server }`→`{ transports: [webSock
 - **READMEs (8):** server, client, react, control-center, adapter-redis, adapter-rabbitmq, adapter-zeromq, adapter-libp2p.
 - **skills/super-line/ (4):** SKILL.md, REFERENCE.md, AGENTS.md, RECIPES.md.
 - `docs/reference/**` is typedoc-generated — regenerates from the (already-updated) source doc-comments on `docs:build`; do NOT hand-edit.
+
+---
+
+## Step 2 — HTTP transport: SSE + long-poll (BUILT 2026-06-22)
+
+**Additive** — a new package, no breaking changes to existing API. Nothing in Step 1's migration list changes;
+this only *adds* a transport to document.
+
+### New package
+
+`@super-line/transport-http` — carries the wire protocol over HTTP: **SSE** (or **long-poll**) downstream +
+**POST** upstream, presenting one logical connection to the core. Exports `httpServerTransport`,
+`httpClientTransport`, and their option types. Zero runtime deps beyond `@super-line/core` (server uses
+`node:http`/`node:crypto`; client uses global `fetch` + an injected `EventSource`).
+
+### Usage (to document — a new "HTTP / SSE transport" guide page)
+
+```ts
+// Server — composes on the SAME http.Server as the WS transport (HTTP owns 'request', WS owns 'upgrade')
+import { httpServerTransport } from '@super-line/transport-http'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
+const srv = createSuperLineServer(contract, {
+  transports: [webSocketServerTransport({ server }), httpServerTransport({ server })],
+  authenticate: (h) => ({ role: 'user', ctx: {} }), // same Handshake (h.query / h.headers) as WS; h.transport is 'sse'|'longpoll'
+})
+
+// Client (browser) — EventSource + fetch are global, nothing to inject
+import { httpClientTransport } from '@super-line/transport-http'
+const client = createSuperLineClient(contract, {
+  transport: httpClientTransport({ url: 'http://localhost:3000' }), // mode: 'sse' (default) | 'longpoll'
+  role: 'user',
+})
+
+// Client (Node) — EventSource is NOT global in Node; inject the `eventsource` package for SSE mode
+import { EventSource } from 'eventsource'
+httpClientTransport({ url: 'http://localhost:3000', EventSource })
+// long-poll mode needs no EventSource (uses fetch only): httpClientTransport({ url, mode: 'longpoll' })
+```
+
+**Server options:** `server` (required), `basePath` (default `/superline`), `mode` (`'sse'|'longpoll'|'both'`,
+default `'both'`), `sessionTimeout` (60s), `keepalive` (20s, SSE comment), `pollTimeout` (25s), `maxBodyBytes`
+(1MB → 413), `cors` (opt-in). **Client options:** `url`, `basePath`, `mode` (`'sse'` default), `EventSource`
+(inject in Node), `fetch` (inject; default global).
+
+### Facts worth documenting
+- **EventSource is not global in Node** (flag-gated even in v24) — Node SSE clients must pass `opts.EventSource`
+  (the `eventsource` npm package); browsers have it natively. Long-poll mode needs only `fetch`.
+- **Heavier than WS for big binary payloads** (base64 framing ≈ +33%); it's the fallback/compat transport.
+- **Proxy notes:** SSE sets `Cache-Control: no-cache, no-transform` + `X-Accel-Buffering: no` and writes a
+  keepalive comment; behind buffering proxies that still break SSE, use `mode: 'longpoll'`.
+- Reuses the same `authenticate(Handshake)` (query/headers), the same app-level ping/pong liveness, and the same
+  no-session-resume reconnect model as WS — so docs can cross-reference the Step 1 concepts.
+
+### Docs impact (add at the end, alongside the Step 1 sweep)
+- A new guide page (e.g. `docs/guide/http-transport.md`) covering SSE vs long-poll, the EventSource-in-Node caveat,
+  composing WS+HTTP on one server, and proxy guidance.
+- `@super-line/transport-http` added to the package list / README index wherever transports are enumerated.

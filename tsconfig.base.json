@@ -23,7 +23,8 @@
       "@super-line/adapter-rabbitmq": ["./packages/adapter-rabbitmq/src/index.ts"],
       "@super-line/react": ["./packages/react/src/index.ts"],
       "@super-line/transport-websocket": ["./packages/transport-websocket/src/index.ts"],
-      "@super-line/transport-loopback": ["./packages/transport-loopback/src/index.ts"]
+      "@super-line/transport-loopback": ["./packages/transport-loopback/src/index.ts"],
+      "@super-line/transport-http": ["./packages/transport-http/src/index.ts"]
     }
   }
 }

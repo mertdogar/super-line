@@ -764,6 +764,9 @@ importers:
       '@super-line/client':
         specifier: workspace:*
         version: link:../client
+      '@super-line/transport-http':
+        specifier: workspace:*
+        version: link:../transport-http
       '@super-line/transport-loopback':
         specifier: workspace:*
         version: link:../transport-loopback
@@ -773,6 +776,9 @@ importers:
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1
+      eventsource:
+        specifier: ^3.0.2
+        version: 3.0.7
       ioredis:
         specifier: ^5.4.2
         version: 5.11.1
@@ -801,6 +807,16 @@ importers:
       '@standard-community/standard-json':
         specifier: ^0.3.5
         version: 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76)
+
+  packages/transport-http:
+    dependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+    devDependencies:
+      eventsource:
+        specifier: ^3.0.2
+        version: 3.0.7
 
   packages/transport-loopback:
     dependencies:
@@ -3007,6 +3023,14 @@ packages:
   events@3.3.0:
     resolution: {integrity: sha512-mQw+2fkQbALzQ7V0MY0IqdnXNOeTtP4r0lN9z7AAawCXgqea7bDii20AYrIBrFd/Hx0M2Ocz6S111CaFkUcb0Q==}
     engines: {node: '>=0.8.x'}
+
+  eventsource-parser@3.1.0:
+    resolution: {integrity: sha512-kJezFj9YFAMLeORyi7aCLxLbD5/qWMQnoMVlVPyHIll7lgRJCc3JVln9Vgl9nwQi0YkMnhdGTMNn7CkRRAptMg==}
+    engines: {node: '>=18.0.0'}
+
+  eventsource@3.0.7:
+    resolution: {integrity: sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==}
+    engines: {node: '>=18.0.0'}
 
   expect-type@1.3.0:
     resolution: {integrity: sha512-knvyeauYhqjOYvQ66MznSMs83wmHrCycNEN6Ao+2AeYEfxUIkuiVxdEa1qlGEPK+We3n0THiDciYSsCcgW/DoA==}
@@ -6624,6 +6648,12 @@ snapshots:
       - bare-abort-controller
 
   events@3.3.0: {}
+
+  eventsource-parser@3.1.0: {}
+
+  eventsource@3.0.7:
+    dependencies:
+      eventsource-parser: 3.1.0
 
   expect-type@1.3.0: {}
 

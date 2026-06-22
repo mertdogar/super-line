@@ -1,0 +1,35 @@
+{
+  "name": "@super-line/transport-http",
+  "version": "0.3.0",
+  "type": "module",
+  "description": "HTTP client↔server transport for super-line (SSE or long-poll downstream + POST upstream).",
+  "license": "MIT",
+  "author": "Mert",
+  "keywords": ["super-line", "transport", "http", "sse", "long-poll", "realtime"],
+  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/transport-http" },
+  "homepage": "https://mertdogar.github.io/super-line/",
+  "bugs": "https://github.com/mertdogar/super-line/issues",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "engines": { "node": ">=18" },
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "tsup"
+  },
+  "dependencies": {
+    "@super-line/core": "workspace:^"
+  },
+  "devDependencies": {
+    "eventsource": "^3.0.2"
+  }
+}

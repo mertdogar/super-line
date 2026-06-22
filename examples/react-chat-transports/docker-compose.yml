@@ -1,0 +1,33 @@
+name: react-chat-transports
+
+# One chat node mounting THREE client↔server transports (WebSocket + HTTP on the http.Server,
+# libp2p on a node). The browser's dial picks which wire to dial. No cluster, no broker — the
+# point here is three transports to ONE server, not cross-node fan-out.
+services:
+  node-1:
+    build:
+      context: ../..
+      dockerfile: examples/react-chat-transports/Dockerfile
+    image: super-line-react-chat-transports:dev
+    environment: { PORT: '8787', P2P_PORT: '9101', NODE_NAME: node-1 }
+    # the libp2p /ws port is dialed DIRECTLY by the browser (not proxied through Caddy)
+    ports: ['9101:9101']
+
+  # Caddy: serves the built SPA and reverse-proxies /ws, /superline*, /inspect, /libp2p-addr to the node.
+  web:
+    build:
+      context: ../..
+      dockerfile: examples/react-chat-transports/Dockerfile.web
+    image: super-line-react-chat-transports-web:dev
+    ports: ['8100:8100']
+    volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']
+    depends_on: [node-1]
+
+  # The Control Center webapp on :8101; the browser connects it back to ws://localhost:8100/inspect.
+  control-center:
+    build:
+      context: ../..
+      dockerfile: examples/react-chat-transports/Dockerfile.control-center
+    image: super-line-react-chat-transports-cc:dev
+    ports: ['8101:8101']
+    depends_on: [web]

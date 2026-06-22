@@ -1,0 +1,30 @@
+# Single entry point on :8100. Serves the built SPA and reverse-proxies each transport's endpoint
+# to the node. Mutually-exclusive `handle` blocks: a top-level `try_files` would rewrite /ws etc. to
+# /index.html, so try_files stays INSIDE the static handle only (the seed's documented gotcha).
+#
+# Note: the libp2p wire is NOT proxied here — the browser fetches /libp2p-addr, then dials the node's
+# published /ws port (9101) directly.
+:8100 {
+	handle /ws* {
+		reverse_proxy node-1:8787
+	}
+
+	handle /superline* {
+		reverse_proxy node-1:8787
+	}
+
+	handle /inspect* {
+		reverse_proxy node-1:8787
+	}
+
+	handle /libp2p-addr {
+		reverse_proxy node-1:8787
+	}
+
+	handle {
+		root * /srv
+		encode gzip
+		try_files {path} /index.html
+		file_server
+	}
+}

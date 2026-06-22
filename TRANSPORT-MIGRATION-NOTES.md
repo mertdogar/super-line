@@ -196,3 +196,12 @@ const client = createSuperLineClient(contract, {
 ## All transports — final package list (for the docs/README sweep)
 `@super-line/core` (interfaces) · `@super-line/transport-websocket` · `@super-line/transport-http` (sse+longpoll) ·
 `@super-line/transport-libp2p` (libp2p family / webrtc) · `@super-line/transport-loopback` (in-memory test substrate).
+
+## Showcase examples (built to "shout" the feature)
+- **`examples/transports`** — the headline: one contract, one server mounting WS + HTTP + libp2p at once, three
+  clients whose only difference is the transport line, all returning identical results. Verified runnable (`pnpm start`).
+- **`examples/react-chat-transports`** — a dockerized React chat with a live **transport dial** (WebSocket / HTTP /
+  libp2p; loopback excluded). Switching rebuilds the client on the new wire while history persists; each message
+  shows the wire it arrived on. `docker compose up` (web :8100, control-center :8101) or local `pnpm dev` + `pnpm server`.
+  Verified: typecheck/lint/vite-build clean, server boots all three transports, WS+HTTP browser round-trip verified,
+  libp2p proven over Node (memory/tcp/ws) and confirmed working in the docker setup.

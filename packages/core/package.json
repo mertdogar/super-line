@@ -23,7 +23,8 @@
   "files": ["dist"],
   "publishConfig": { "access": "public" },
   "scripts": {
-    "build": "tsup"
+    "build": "tsup",
+    "prepublishOnly": "tsup"
   },
   "dependencies": {
     "@standard-schema/spec": "^1.0.0"

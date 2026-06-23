@@ -71,9 +71,25 @@ export type {
   SReqFrame,
   SResFrame,
   SErrFrame,
+  SOpenFrame,
+  SCloseFrame,
+  SWriteFrame,
+  SReadFrame,
+  SChangeFrame,
   PingFrame,
   PongFrame,
 } from './wire.js'
+
+export type {
+  Principal,
+  Perms,
+  AccessRules,
+  Resource,
+  StoreChange,
+  ServerStore,
+  ClientStore,
+  ResourceReplica,
+} from './store.js'
 
 export type {
   RawConn,

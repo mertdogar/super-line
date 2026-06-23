@@ -20,6 +20,8 @@ export class Conn<
   data: Data = {} as Data
   /** The client↔server transport (wire) this connection was accepted on (set by the server at accept). */
   transport?: string
+  /** ACL identity for stores: `identify(conn) ?? conn.id`, set by the server at accept (always defined there). */
+  principal?: string
 
   /** When this connection was accepted (`Date.now()`). */
   readonly connectedAt = Date.now()
@@ -71,4 +73,13 @@ export class Conn<
   terminate(): void {
     this.raw.terminate()
   }
+}
+
+/**
+ * The ACL principal for a connection: the stable `identify` key when configured, else the
+ * (random, per-connection) `conn.id`. Always returns a string — store access rules never key
+ * on `undefined`. Distinct from `identify`'s raw output (which may be undefined, used for presence).
+ */
+export function resolvePrincipal(conn: Conn, identify?: (conn: Conn) => string | undefined): string {
+  return identify?.(conn) ?? conn.id
 }

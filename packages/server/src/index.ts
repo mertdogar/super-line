@@ -39,10 +39,10 @@ import {
   type DataOf,
   type AnyData,
 } from '@super-line/core'
-import { Conn } from './conn.js'
+import { Conn, resolvePrincipal } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
 
-export { Conn } from './conn.js'
+export { Conn, resolvePrincipal } from './conn.js'
 export { MemoryBus, createInMemoryAdapter } from './memory-adapter.js'
 
 type Awaitable<T> = T | Promise<T>
@@ -689,6 +689,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
         : undefined,
     )
     conn.transport = auth.transport
+    conn.principal = resolvePrincipal(conn, opts.identify) // ACL identity for stores; always defined
     raw.onMessage((bytes) => {
       void onMessage(conn, bytes)
     })

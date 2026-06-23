@@ -43,7 +43,45 @@ export interface PingFrame {
 export interface PongFrame {
   t: 'pong'
 }
-export type ClientFrame = ReqFrame | SubFrame | UnsubFrame | SResFrame | SErrFrame | PingFrame | PongFrame
+// Store frames (off-contract, reserved). `n` = store name, `id` = Resource id, `u` = opaque update, `o` = writer origin.
+// Open + read are acked via res (snapshot) / err; write via res (ok) / err (e.g. FORBIDDEN).
+export interface SOpenFrame {
+  t: 'sopen'
+  i: number // correlation id (acked via res with the catch-up snapshot / err)
+  n: string // store name
+  id: string // resource id
+}
+export interface SCloseFrame {
+  t: 'sclose'
+  n: string
+  id: string
+}
+export interface SWriteFrame {
+  t: 'swr'
+  i: number // correlation id (acked via res / err)
+  n: string
+  id: string
+  u: unknown // opaque update (CRDT delta | full JSON value)
+  o: string // writer origin (echo-break)
+}
+export interface SReadFrame {
+  t: 'srd'
+  i: number // correlation id (acked via res with the snapshot / err)
+  n: string
+  id: string
+}
+export type ClientFrame =
+  | ReqFrame
+  | SubFrame
+  | UnsubFrame
+  | SResFrame
+  | SErrFrame
+  | SOpenFrame
+  | SCloseFrame
+  | SWriteFrame
+  | SReadFrame
+  | PingFrame
+  | PongFrame
 
 // Server -> Client
 export interface ResFrame {
@@ -76,6 +114,22 @@ export interface SReqFrame {
   m: string // request name
   d: unknown // input
 }
-export type ServerFrame = ResFrame | ErrFrame | EvtFrame | PubFrame | SReqFrame | PingFrame | PongFrame
+// a server→client Store Change push (fan-out of an applied mutation on a Resource the client subscribes to)
+export interface SChangeFrame {
+  t: 'sch'
+  n: string // store name
+  id: string // resource id
+  u: unknown // opaque update
+  o: string // writer origin (echo-break)
+}
+export type ServerFrame =
+  | ResFrame
+  | ErrFrame
+  | EvtFrame
+  | PubFrame
+  | SReqFrame
+  | SChangeFrame
+  | PingFrame
+  | PongFrame
 
 export type Frame = ClientFrame | ServerFrame

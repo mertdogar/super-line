@@ -18,7 +18,7 @@ import type {
   Output,
   EventData,
 } from '@super-line/core'
-import type { SuperLineClient } from '@super-line/client'
+import type { ResourceHandle, SuperLineClient } from '@super-line/client'
 
 /** State returned by `useRequest`. */
 export interface RequestState<T> {
@@ -113,5 +113,33 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     return { ...state, call }
   }
 
-  return { Provider, useClient, useEvent, useSubscription, useRequest }
+  /**
+   * Open a Store Resource and track it reactively: returns its latest `data` (`undefined` until the
+   * catch-up snapshot arrives) plus `set`/`update` to write through. `data` is untyped — stores are
+   * off-contract (ADR-0003) — so pass `T` to assert its shape. The handle is closed on unmount.
+   */
+  function useResource<T = unknown>(
+    name: string,
+    id: string,
+  ): { data: T | undefined; set: (value: T) => void; update: (partial: Partial<T>) => void } {
+    const client = useClient()
+    const [data, setData] = useState<T>()
+    const handleRef = useRef<ResourceHandle | undefined>(undefined)
+    useEffect(() => {
+      const handle = client.store(name).open(id)
+      handleRef.current = handle
+      setData(handle.getSnapshot() as T | undefined) // reset to the fresh handle's state on id/name change
+      const unsub = handle.subscribe(() => setData(handle.getSnapshot() as T | undefined))
+      return () => {
+        unsub()
+        handle.close()
+        handleRef.current = undefined
+      }
+    }, [client, name, id])
+    const set = useCallback((value: T) => handleRef.current?.set(value), [])
+    const update = useCallback((partial: Partial<T>) => handleRef.current?.update(partial), [])
+    return { data, set, update }
+  }
+
+  return { Provider, useClient, useEvent, useSubscription, useRequest, useResource }
 }

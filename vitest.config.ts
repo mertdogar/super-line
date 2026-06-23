@@ -15,6 +15,7 @@ export default defineConfig({
       '@super-line/adapter-rabbitmq': src('packages/adapter-rabbitmq/src/index.ts'),
       '@super-line/react': src('packages/react/src/index.ts'),
       '@super-line/store-memory': src('packages/store-memory/src/index.ts'),
+      '@super-line/store-sync': src('packages/store-sync/src/index.ts'),
       '@super-line/transport-websocket': src('packages/transport-websocket/src/index.ts'),
       '@super-line/transport-loopback': src('packages/transport-loopback/src/index.ts'),
       '@super-line/transport-http': src('packages/transport-http/src/index.ts'),

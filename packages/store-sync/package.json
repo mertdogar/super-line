@@ -1,0 +1,33 @@
+{
+  "name": "@super-line/store-sync",
+  "version": "0.4.0",
+  "type": "module",
+  "description": "CRDT (Yjs, via super-store) Store for super-line — a merging, real-time collaborative persisted-state pair.",
+  "license": "MIT",
+  "author": "Mert",
+  "keywords": ["super-line", "store", "crdt", "yjs", "super-store", "sync", "collaboration"],
+  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/store-sync" },
+  "homepage": "https://mertdogar.github.io/super-line/",
+  "bugs": "https://github.com/mertdogar/super-line/issues",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "engines": { "node": ">=18" },
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "tsup"
+  },
+  "dependencies": {
+    "@super-line/core": "workspace:^",
+    "@super-store/store": "^0.2.0"
+  }
+}

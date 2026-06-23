@@ -6,9 +6,14 @@ and revokes access per client, and validates every read/write — while clients 
 catches up to the current state and stays live.
 
 Like a [transport](./transports), a Store is **pluggable** and ships as a **server + client pair** you
-pass at construction. The default, [`@super-line/store-memory`](https://www.npmjs.com/package/@super-line/store-memory),
-is last-writer-wins and in-memory. A merging **CRDT** Store (backed by [super-store](https://github.com/mertdogar/super-store))
-is the other end of the same interface — *one plumbing, two consistency models*.
+pass at construction. Two implementations ship today — *one plumbing, two consistency models*:
+
+- **`@super-line/store-memory`** — last-writer-wins, in-memory. The zero-dependency default.
+- **`@super-line/store-sync`** — a merging **CRDT** Store backed by [super-store](https://github.com/mertdogar/super-store)
+  (Yjs). Concurrent writes to different fields converge instead of clobbering; for true multiplayer.
+
+Both expose the same `…StoreServer()` / `…StoreClient()` pair, so switching consistency models is a
+one-line swap at construction — the wire, ACLs, fan-out, and client handle are identical.
 
 ::: tip Off-contract by design
 Unlike requests, events, and topics, a Store is **not** declared in `defineContract`, and its `data` is
@@ -40,6 +45,13 @@ const client = createSuperLineClient(api, {
   params: { uid: 'alice' },
   stores: { docs: memoryStoreClient() },
 })
+```
+
+For a collaborative, merging store, swap the pair for the CRDT one — nothing else changes:
+
+```ts
+import { syncStoreServer } from '@super-line/store-sync' // server: stores: { docs: syncStoreServer() }
+import { syncStoreClient } from '@super-line/store-sync' // client: stores: { docs: syncStoreClient() }
 ```
 
 ## Server-authoritative access

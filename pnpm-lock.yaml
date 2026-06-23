@@ -1062,6 +1062,15 @@ importers:
         specifier: workspace:^
         version: link:../core
 
+  packages/store-sync:
+    dependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+      '@super-store/store':
+        specifier: ^0.2.0
+        version: 0.2.0
+
   packages/transport-http:
     dependencies:
       '@super-line/core':
@@ -2451,6 +2460,10 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@super-store/store@0.2.0':
+    resolution: {integrity: sha512-s5iVVBrKPP2Fw8yBVgKBrRSbgPo73u6oec5qji8jEQAnwm36s1JwERzGkPX5iyTd4s3sOwbEAc8L7h+u6E3uig==}
+    engines: {node: '>=18'}
 
   '@swc/core-darwin-arm64@1.15.41':
     resolution: {integrity: sha512-kREh6J5paQFvP3i7f/4FbqRNOJREutVFVOkder4GVyCBQ39YmER55cW/y1NNjwrchzFqgYswFn0mMDCqbqKzrw==}
@@ -6643,6 +6656,10 @@ snapshots:
     optional: true
 
   '@standard-schema/spec@1.1.0': {}
+
+  '@super-store/store@0.2.0':
+    dependencies:
+      yjs: 13.6.31
 
   '@swc/core-darwin-arm64@1.15.41':
     optional: true

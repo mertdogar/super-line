@@ -20,7 +20,27 @@ A live React chat (Vite + a WS server). Open two browser tabs to chat in real ti
 pnpm --filter @super-line/example-react-chat dev   # http://localhost:5173
 ```
 
-## synced-canvas — collaborative state with a CRDT
+## store — a permissioned document store
+
+A scripted, single-process demo of the [Store](/guide/store) primitive on the in-memory LWW backend. The server creates a permissioned note and assigns per-user access; two users open it and one's write reaches the other live; a read-only user is denied a write (`FORBIDDEN`); a third user can't open the doc until the server grants access at runtime; and the server co-writes the document.
+
+```bash
+pnpm --filter @super-line/example-store start
+```
+
+Demonstrates: [stores](/guide/store), [roles](/guide/roles-auth), [errors](/guide/errors).
+
+## store-sync-json — a collaborative JSON editor (CRDT)
+
+A React app over the [CRDT Store](/guide/synced-state) (`@super-line/store-sync` — Yjs via super-store): a [`@visual-json`](https://visual-json.dev) editor bound to one shared Resource via [`useResource`](/guide/react). Open two tabs (or add `?name=bob`), edit any field, and watch edits **merge** live — concurrent edits to different fields both survive, unlike last-writer-wins. **Server nudge** triggers a server co-write.
+
+```bash
+pnpm --filter @super-line/example-store-sync-json dev   # http://localhost:5273
+```
+
+Demonstrates: [synced state (CRDT)](/guide/synced-state), [stores](/guide/store), [React hooks](/guide/react).
+
+## synced-canvas — roll-your-own CRDT (no Store seam)
 
 Two browser apps demonstrating **synced JSON state over super-line, backed by a CRDT** — a collaborative canvas where multiple tabs *and the server* co-edit one document, persisted server-side. super-line stays CRDT-agnostic: it relays opaque base64 update bytes per room and never parses the doc. A debug side panel mirrors the live state and logs each patch tagged by origin (`local` / `peer` / `server`), so you can watch the server's edits land. Built once with [Yjs](https://github.com/yjs/yjs) and once with [Automerge](https://automerge.org) — open either in two windows (run one at a time).
 

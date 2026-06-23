@@ -1,7 +1,9 @@
 # ADR-0001: Use Automerge (not Yjs) as the CRDT for synced state
 
-- Status: Accepted
+- Status: **Superseded by [ADR-0002](./0002-yjs-via-super-store-over-automerge.md)** (2026-06-23)
 - Date: 2026-06-23
+
+> **Superseded.** The CRDT engine was subsequently built as `super-store` on **Yjs**, which provides the plain-object ergonomics that tipped this decision toward Automerge — and avoids the WASM cost this ADR accepted. See ADR-0002. The z-order / fractional-index modelling below still stands (library-agnostic).
 
 ## Context
 

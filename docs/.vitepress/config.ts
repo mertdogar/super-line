@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitepress'
+import llmstxt, { copyOrDownloadAsMarkdownButtons } from 'vitepress-plugin-llms'
 import typedocSidebar from '../reference/typedoc-sidebar.json'
 
 export default defineConfig({
@@ -9,6 +10,14 @@ export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
   head: [['link', { rel: 'icon', href: '/super-line/mark.svg' }]],
+  markdown: {
+    config(md) {
+      md.use(copyOrDownloadAsMarkdownButtons)
+    },
+  },
+  vite: {
+    plugins: [llmstxt({ domain: 'https://mertdogar.github.io' })],
+  },
   themeConfig: {
     logo: '/mark.svg',
     nav: [

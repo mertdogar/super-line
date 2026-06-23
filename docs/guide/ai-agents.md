@@ -56,3 +56,14 @@ If your agent uses a different rules path (e.g. `.windsurfrules`, `.clinerules/`
 The guide tracks the published API. Re-run the command above to refresh after upgrading super-line. The content mirrors these docs, so an agent that can browse the web can also just be pointed at <https://mertdogar.github.io/super-line/>.
 
 > Prefer not to use the terminal? Every file is browsable at [`skills/super-line/`](https://github.com/mertdogar/super-line/tree/main/skills/super-line) — copy its contents into the path your agent expects.
+
+## Point an agent at these docs directly
+
+Every page on this site is also published as raw markdown, and the whole site is indexed for LLMs — so you can hand a page (or all of them) to an agent without copying anything by hand.
+
+- **Per-page actions.** Each doc page has a **Copy markdown** button (with **View as Markdown**, **Open in ChatGPT**, and **Open in Claude**). "Open in …" sends the agent the page's markdown URL and asks it to read from there.
+- **Any page as markdown.** Append `.md` to a page's URL — e.g. <https://mertdogar.github.io/super-line/guide/the-contract.md>.
+- **`llms.txt`** — a machine-readable index of every page, at <https://mertdogar.github.io/super-line/llms.txt>.
+- **`llms-full.txt`** — the entire documentation concatenated into one file, at <https://mertdogar.github.io/super-line/llms-full.txt>.
+
+These follow the [llms.txt](https://llmstxt.org) convention, so an agent that can browse the web can ingest the full docs from a single URL.

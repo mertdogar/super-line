@@ -1,6 +1,6 @@
 {
   "name": "@super-line/store-memory",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "In-memory last-writer-wins Store for super-line — the zero-dependency default Store pair.",
   "license": "MIT",

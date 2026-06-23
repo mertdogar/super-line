@@ -20,6 +20,9 @@ import {
   type SReqFrame,
   type ClientTransport,
   type RawConn,
+  type ClientStore,
+  type ResourceReplica,
+  type StoreChange,
 } from '@super-line/core'
 import { backoffDelay } from './backoff.js'
 
@@ -76,12 +79,44 @@ export type SuperLineClient<C extends Contract, R extends RoleOf<C>> = ClientMet
   ): Subscription
   /** Register handlers answering server→client requests. Throw a `SuperLineError` for a typed failure. */
   implement(handlers: ServerHandlers<C, R>): void
+  /** Client-side handle for a configured Store (`client.store('scene').open(id)`). Throws if the name isn't configured. */
+  store(name: string): ClientStoreHandle
   /** Close the connection and stop reconnecting. */
   close(): void
   /** Whether the socket is currently open. */
   readonly connected: boolean
   /** This client's role. */
   readonly role: R
+}
+
+/**
+ * A reactive handle over one opened Store Resource (mirrors super-store's `StoreValue` surface).
+ * `data` is untyped — stores are off-contract (ADR-0003). `set`/`update` mutate the local replica and
+ * write the resulting Change through to the server.
+ */
+export interface ResourceHandle {
+  /** The current snapshot (`undefined` until the catch-up snapshot arrives). */
+  getSnapshot(): unknown
+  /** Subscribe to changes (local writes + remote merges). Returns an unsubscribe fn. */
+  subscribe(cb: () => void): () => void
+  /** Replace the value (LWW) or mutate the local doc (CRDT); the Change is sent to the server. */
+  set(data: unknown): void
+  /** Merge a partial update; the Change is sent to the server. */
+  update(partial: unknown): void
+  /** Resolves once the catch-up snapshot has been applied; rejects if the open is denied. */
+  readonly ready: Promise<void>
+  /** Stop receiving changes and tell the server to unsubscribe. */
+  close(): void
+}
+
+/** Client-side handle for one configured Store, reached via `client.store(name)`. */
+export interface ClientStoreHandle {
+  /** Open a reactive handle for a Resource (catch-up snapshot + live changes + write-through). */
+  open(id: string): ResourceHandle
+  /** One-shot read of a Resource's current value. */
+  read(id: string): Promise<unknown>
+  /** One-shot replace of a Resource's value (last-writer-wins). */
+  write(id: string, data: unknown): Promise<void>
 }
 
 /** Describes which inbound payload failed validation, passed to `onValidationError`. */
@@ -108,6 +143,13 @@ export interface SuperLineClientOptions<C extends Contract, R extends RoleOf<C>>
   validate?: 'off' | 'inbound'
   /** Called when an inbound payload fails validation (only with `validate: 'inbound'`). */
   onValidationError?: (error: unknown, info: ValidationErrorInfo) => void
+  /**
+   * Client halves of the Store pairs, keyed by name to match the server's `stores`
+   * (`{ scene: crdtStoreClient(), config: memoryStoreClient() }`). Surfaced as `client.store(name)`.
+   */
+  stores?: Record<string, ClientStore>
+  /** Called when a store write is rejected by the server (e.g. FORBIDDEN). Default: logs to console. */
+  onStoreError?: (error: unknown, info: { store: string; id: string }) => void
   /** Auto-reconnect on drop. Defaults to `true`. */
   reconnect?: boolean
   /** Initial reconnect backoff in ms. Defaults to `500`. */
@@ -186,6 +228,17 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   const readyByTopic = new Map<string, Deferred>() // topics awaiting their first ack
   const subAckById = new Map<number, string>() // outstanding sub frame id -> topic
   const serverHandlers = new Map<string, (input: unknown) => unknown>() // answer server→client requests
+  const storeMap = (opts.stores ?? {}) as Record<string, ClientStore>
+  // opened Resources, keyed `name\0id`: routes inbound `sch` to the local replicas and re-snapshots on reconnect
+  interface OpenEntry {
+    store: string
+    id: string
+    replicas: Set<ResourceReplica>
+    ready: Deferred
+    settled: boolean
+  }
+  const openResources = new Map<string, OpenEntry>()
+  const openKey = (store: string, id: string): string => store + ' ' + id
 
   // resolve contract defs from this role's effective surface (shared ∪ role)
   function reqDef(method: string): RequestDef | undefined {
@@ -223,6 +276,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       }
     }
     for (const topic of topicListeners.keys()) sendSub(topic)
+    for (const entry of openResources.values()) sendOpen(entry) // re-snapshot opened Resources (at-most-once recovery)
   }
 
   function onClose(): void {
@@ -307,6 +361,12 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       if (set) for (const cb of set) cb(frame.d)
     } else if (frame.t === 'sreq') {
       void handleServerRequest(frame)
+    } else if (frame.t === 'sch') {
+      const entry = openResources.get(openKey(frame.n, frame.id))
+      if (entry) {
+        const change = { id: frame.id, update: frame.u, origin: frame.o }
+        for (const replica of entry.replicas) replica.applyRemote(change) // own-origin merges are no-ops
+      }
     }
   }
 
@@ -437,6 +497,107 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     }
   }
 
+  // Store request/response correlation reuses the `requests` map: store ops get a res/err carrying the same
+  // `i`, and `reqDef('store:*')` is undefined so inbound validation is skipped. One-shot ops (read/write)
+  // ride the generic unsent-resend on reconnect; opens are driven by `sendOpen` + the onOpen entry loop.
+  function trackRequest(method: string, makeFrame: (id: number) => object): Promise<unknown> {
+    if (closed) return Promise.reject(new SuperLineError('DISCONNECTED', 'Client closed'))
+    const id = nextId++
+    const frame = serializer.encode(makeFrame(id))
+    return new Promise<unknown>((resolve, reject) => {
+      const timer =
+        defaultTimeout > 0
+          ? setTimeout(() => {
+              requests.delete(id)
+              reject(new SuperLineError('TIMEOUT', `${method} timed out`))
+            }, defaultTimeout)
+          : undefined
+      const op: Request = { method, frame, resolve, reject, timer, sent: false }
+      requests.set(id, op)
+      if (rawConn?.writable) {
+        rawConn.send(frame)
+        op.sent = true
+      }
+    })
+  }
+
+  function sendStoreWrite(store: string, change: StoreChange): void {
+    void trackRequest('store:write', (i) => ({ t: 'swr', i, n: store, id: change.id, u: change.update, o: change.origin })).catch(
+      (err) => {
+        if (opts.onStoreError) opts.onStoreError(err, { store, id: change.id })
+        else console.error(`[super-line] store write rejected for ${store}/${change.id}`, err)
+      },
+    )
+  }
+
+  // Send `sopen` and seed every replica of the entry. Resolves the entry's `ready` on first catch-up; a
+  // disconnect mid-open is retried by onOpen (don't settle), an explicit denial settles+rejects.
+  function sendOpen(entry: OpenEntry): void {
+    if (!rawConn?.writable) return // onOpen re-sends for every entry on (re)connect
+    void trackRequest('store:open', (i) => ({ t: 'sopen', i, n: entry.store, id: entry.id }))
+      .then((snapshot) => {
+        for (const replica of entry.replicas) replica.seed(snapshot)
+        if (!entry.settled) {
+          entry.settled = true
+          entry.ready.resolve()
+        }
+      })
+      .catch((err) => {
+        if (err instanceof SuperLineError && err.code === 'DISCONNECTED') return // reconnect retries
+        if (!entry.settled) {
+          entry.settled = true
+          entry.ready.reject(err)
+        }
+      })
+  }
+
+  function openResource(store: string, clientStore: ClientStore, id: string): ResourceHandle {
+    const replica = clientStore.open(id)
+    const key = openKey(store, id)
+    let entry = openResources.get(key)
+    if (!entry) {
+      entry = { store, id, replicas: new Set(), ready: deferred(), settled: false }
+      openResources.set(key, entry)
+    }
+    entry.replicas.add(replica)
+    sendOpen(entry) // seeds this replica (and harmlessly re-seeds siblings)
+    return {
+      getSnapshot: () => replica.getSnapshot(),
+      subscribe: (cb) => replica.subscribe(cb),
+      set: (data) => {
+        const change = replica.set(data)
+        if (change) sendStoreWrite(store, change)
+      },
+      update: (partial) => {
+        const change = replica.update(partial)
+        if (change) sendStoreWrite(store, change)
+      },
+      ready: entry.ready.promise,
+      close: () => {
+        const e = openResources.get(key)
+        if (!e) return
+        e.replicas.delete(replica)
+        if (e.replicas.size === 0) {
+          openResources.delete(key)
+          if (rawConn?.writable) rawConn.send(serializer.encode({ t: 'sclose', n: store, id }))
+        }
+      },
+    }
+  }
+
+  function storeHandle(name: string): ClientStoreHandle {
+    const clientStore = storeMap[name]
+    if (!clientStore) throw new SuperLineError('NOT_FOUND', `Store not configured: ${name}`)
+    return {
+      open: (id) => openResource(name, clientStore, id),
+      read: (id) => trackRequest('store:read', (i) => ({ t: 'srd', i, n: name, id })),
+      write: (id, data) =>
+        trackRequest('store:write', (i) => ({ t: 'swr', i, n: name, id, u: data, o: clientStore.origin })).then(
+          () => undefined,
+        ),
+    }
+  }
+
   connect()
 
   const base = {
@@ -456,6 +617,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       }
     },
     subscribe,
+    store: storeHandle,
     implement(handlers: Record<string, (input: unknown) => unknown>): void {
       for (const [name, handler] of Object.entries(handlers)) {
         if (handler) serverHandlers.set(name, handler)

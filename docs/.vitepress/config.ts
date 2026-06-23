@@ -46,6 +46,10 @@ export default defineConfig({
           ],
         },
         {
+          text: 'Patterns',
+          items: [{ text: 'Synced state (CRDT)', link: '/guide/synced-state' }],
+        },
+        {
           text: 'Server',
           items: [
             { text: 'Roles & auth', link: '/guide/roles-auth' },

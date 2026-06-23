@@ -195,6 +195,11 @@ pnpm --filter @super-line/example-chat start
 # Browser React chat (Vite + WS server; open two tabs to chat live):
 pnpm --filter @super-line/example-react-chat dev   # http://localhost:5173
 
+# Collaborative canvas — synced JSON state over super-line, backed by a CRDT (open two tabs;
+# server is a co-writer, with a live state + patch debug panel). Run one at a time:
+pnpm --filter @super-line/example-synced-canvas-yjs dev         # Yjs        · http://localhost:5173
+pnpm --filter @super-line/example-synced-canvas-automerge dev   # Automerge  · http://localhost:5173
+
 # Hono (HTTP) + super-line (WS) on ONE port — uptime topic, shared todos, live cursors + a curl→WS bridge:
 pnpm --filter @super-line/example-hono build && pnpm --filter @super-line/example-hono start   # http://localhost:3000
 

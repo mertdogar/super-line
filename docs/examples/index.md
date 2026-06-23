@@ -20,6 +20,17 @@ A live React chat (Vite + a WS server). Open two browser tabs to chat in real ti
 pnpm --filter @super-line/example-react-chat dev   # http://localhost:5173
 ```
 
+## synced-canvas — collaborative state with a CRDT
+
+Two browser apps demonstrating **synced JSON state over super-line, backed by a CRDT** — a collaborative canvas where multiple tabs *and the server* co-edit one document, persisted server-side. super-line stays CRDT-agnostic: it relays opaque base64 update bytes per room and never parses the doc. A debug side panel mirrors the live state and logs each patch tagged by origin (`local` / `peer` / `server`), so you can watch the server's edits land. Built once with [Yjs](https://github.com/yjs/yjs) and once with [Automerge](https://automerge.org) — open either in two windows (run one at a time).
+
+```bash
+pnpm --filter @super-line/example-synced-canvas-yjs dev         # http://localhost:5173
+pnpm --filter @super-line/example-synced-canvas-automerge dev   # http://localhost:5173
+```
+
+Demonstrates: [synced state (CRDT)](/guide/synced-state), [events & rooms](/guide/events-rooms), [requests](/guide/requests).
+
 ## hono — one server for HTTP + WebSockets
 
 super-line attached to a [Hono](https://hono.dev) app (`@hono/node-server`) on **one process, one port**: Hono serves the built frontend and REST routes while super-line owns the WebSocket bus, both on the same Node `http.Server` (the `{ server }` option — no library changes). Three live cards — a server-uptime [topic](/guide/topics), shared todos (req/res + a topic), and shared cursors whose identity is assigned server-side into `ctx` — plus a `POST /api/todos` **REST→WS bridge**: `curl` a todo in and watch it appear in every open tab. The bridge route and the WS upgrade share one auth rule. Open a few tabs and move your mouse.

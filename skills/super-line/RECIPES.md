@@ -283,6 +283,65 @@ const srv = createSuperLineServer(api, { transports: [webSocketServerTransport({
 // every server process gets an adapter pointing at the same Redis; rooms, topics, AND the cluster event bus fan out across nodes.
 ```
 
+## Synced state with a CRDT (Yjs / Automerge)
+
+super-line has no built-in shared-document type, but it's an ideal transport for one: keep a CRDT doc per room and relay **opaque** update bytes (base64-wrapped, so they ride the default JSON serializer). The **server holds the canonical doc** — so it persists state and can be a **co-writer** — and the doc's update observer is the single fan-out point. An `origin` tag marks who wrote each update so clients can break the echo.
+
+```ts
+// contract.ts — carries opaque base64 CRDT bytes
+export const api = defineContract({
+  shared: {
+    serverToClient: {
+      update: { payload: z.object({ docId: z.string(), update: z.string(), origin: z.enum(['peer', 'server']) }) }, // shared → room.broadcast
+    },
+  },
+  roles: {
+    user: {
+      clientToServer: {
+        joinDoc: { input: z.object({ docId: z.string() }), output: z.object({ snapshot: z.string() }) },
+        pushUpdate: { input: z.object({ docId: z.string(), update: z.string() }), output: z.object({ ok: z.boolean() }) },
+      },
+    },
+  },
+})
+```
+
+```ts
+// server.ts — canonical Y.Doc per room; observer fans out + persists for BOTH client merges and server edits
+const docs = new Map<string, Y.Doc>(), store = new Map<string, Uint8Array>() // swap store for a DB to persist
+function getDoc(docId: string): Y.Doc {
+  const live = docs.get(docId); if (live) return live
+  const doc = new Y.Doc(); const saved = store.get(docId); if (saved) Y.applyUpdate(doc, saved)
+  doc.on('update', (update, origin) => {
+    store.set(docId, Y.encodeStateAsUpdate(doc))
+    srv.room(`doc:${docId}`).broadcast('update', { docId, update: b64(update), origin: origin === 'server' ? 'server' : 'peer' })
+  })
+  docs.set(docId, doc); return doc
+}
+srv.implement({
+  user: {
+    joinDoc: async ({ docId }, _c, conn) => { const d = getDoc(docId); srv.room(`doc:${docId}`).add(conn); return { snapshot: b64(Y.encodeStateAsUpdate(d)) } },
+    pushUpdate: async ({ docId, update }) => { Y.applyUpdate(getDoc(docId), unb64(update), 'client'); return { ok: true } }, // applying a seen update is a no-op
+  },
+})
+// server as co-writer: doc.transact(() => …, 'server') → the same observer fans it out like any client edit
+```
+
+```ts
+// client.ts — local Y.Doc; push local edits, apply remote ones (origin breaks the echo)
+const doc = new Y.Doc()
+doc.on('update', (u, origin) => { if (origin === 'local') void client.pushUpdate({ docId, update: b64(u) }) })
+client.on('update', (m) => { if (m.docId === docId) Y.applyUpdate(doc, unb64(m.update), m.origin) })
+await client.joinDoc({ docId }).then(({ snapshot }) => Y.applyUpdate(doc, unb64(snapshot), 'sync'))
+// b64/unb64 = base64 ⇄ Uint8Array (btoa/atob work in the browser and Node 22+)
+```
+
+- **CRDT-agnostic** — the wire is opaque bytes, so Automerge (`getChanges`/`applyChanges`, or its `generateSyncMessage` sync protocol) drops in with the same contract.
+- **Multi-node free** — `room.broadcast` fans across nodes via the adapter; the origin-node echo-break you use on the bus applies to CRDT bytes too.
+- **At-most-once still applies** — an offline client misses live updates; re-`joinDoc` on reconnect to re-snapshot.
+- **Authority is reactive, not preventive** — a CRDT can't veto a partial update; the server can only react (observe merged state, emit a compensating edit). Route hard gates (money, permissions) through a normal request instead.
+- Runnable: the [`synced-canvas-yjs` / `synced-canvas-automerge`](https://github.com/mertdogar/super-line/tree/main/examples) examples (with a live state + patch debug panel).
+
 ## Typed error handling
 
 ```ts

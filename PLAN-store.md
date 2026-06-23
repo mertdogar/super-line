@@ -213,6 +213,23 @@ listener routing, reconnect backoff, the logical-connection model.
 Slices 1–7 ship the primitive + LWW + observability + React **inside super-line**; slice 8 is the CRDT
 binding in the super-store repo; slice 9 is docs/examples. Slices are independently shippable.
 
+## 9b. Built — deviations from the plan (2026-06-23)
+
+All nine slices shipped on branch `feat/store` (306 tests green). Three things landed differently:
+
+- **`store` is a method, not a property.** `srv.store(name)` / `client.store(name)` (returning a handle),
+  not `srv.store.scene` — a `Record<string, …>` property trips `noUncheckedIndexedAccess` (possibly-undefined)
+  at every call site. The method mirrors `room(name)` / `forRole(role)` and throws `NOT_FOUND` for an
+  unconfigured name.
+- **The CRDT pair is `@super-line/store-sync`, in *this* repo** (factories `syncStoreServer` /
+  `syncStoreClient`) — not `@super-store/super-line` in the super-store repo. Decided once
+  `@super-store/store` was published to npm: the binding deps the published engine + the workspace
+  `@super-line/core` (where the store types live), so it builds with no cross-repo release coupling; Yjs
+  stays confined to this one optional package.
+- **Slice 9's example uses the LWW store** (`examples/store`, a permissioned note). The CRDT collab-canvas
+  re-expression is left as follow-up; `store-sync`'s convergence (incl. concurrent per-field merge) is
+  covered by its package tests.
+
 ## 9. Open items (logged in `CONTEXT.md`; not blocking the interface)
 
 - **Durable persistence for `relay` replicas.** In-memory `relay` replicas are per-node/ephemeral; durable

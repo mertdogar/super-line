@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import type { IncomingMessage, Server } from 'node:http'
+import type { Server } from 'node:http'
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { demo, type Cursor, type Todo } from './contract.js'
 
 const PORT = Number(process.env.PORT ?? 3000)
@@ -33,11 +34,9 @@ let todoSeq = 0
 let colorSeq = 0
 
 const srv = createSuperLineServer(demo, {
-  server,
-  path: '/ws',
-  authenticate: (req: IncomingMessage) => {
-    const url = new URL(req.url ?? '/', 'http://localhost')
-    const name = requireName(url.searchParams.get('name'))
+  transports: [webSocketServerTransport({ server, path: '/ws' })],
+  authenticate: (h) => {
+    const name = requireName(h.query.name)
     const color = PALETTE[colorSeq++ % PALETTE.length]!
     return { role: 'user' as const, ctx: { id: randomUUID(), name, color } }
   },

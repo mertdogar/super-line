@@ -15,7 +15,9 @@ Three live cards, each a different super-line wire pattern:
 ```ts
 const app = new Hono()
 const server = serve({ fetch: app.fetch, port })   // returns the Node http.Server
-const srv = createSuperLineServer(demo, { server, path: '/ws' })  // attaches the 'upgrade' listener
+const srv = createSuperLineServer(demo, {
+  transports: [webSocketServerTransport({ server, path: '/ws' })], // attaches the 'upgrade' listener
+})
 ```
 
 A WebSocket upgrade fires Node's `'upgrade'` event, which **bypasses** Hono's `fetch`

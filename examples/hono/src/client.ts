@@ -1,4 +1,5 @@
 import { createSuperLineClient } from '@super-line/client'
+import { webSocketClientTransport } from '@super-line/transport-websocket'
 import { demo } from './contract.js'
 import type { Cursor, Todo } from './contract.js'
 import './styles.css'
@@ -25,7 +26,7 @@ function start(name: string): void {
   appEl.hidden = false
 
   const client = createSuperLineClient(demo, {
-    url: `ws://${location.host}/ws`,
+    transport: webSocketClientTransport({ url: `ws://${location.host}/ws` }),
     role: 'user',
     params: { name },
   })

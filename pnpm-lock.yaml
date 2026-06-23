@@ -147,6 +147,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
       hono:
         specifier: ^4.6.14
         version: 4.12.26

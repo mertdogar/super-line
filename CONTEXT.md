@@ -1,11 +1,23 @@
-# Context — super-line synced-state / CRDT integration
+# Context — super-line persisted-state (Store) + synced-state / CRDT
 
-A glossary of the domain language for the CRDT-backed synced-state feature. Terms only — no implementation details. Updated inline as decisions crystallise during design.
+A glossary of the domain language for super-line's persisted-state feature. Terms only — no implementation details. Updated inline as decisions crystallise during design.
 
 ## Glossary
 
+### Store
+Resolved 2026-06-23. The **foundational persisted-state primitive** of super-line, and a pluggable seam (like a Transport or an Adapter): an interface anyone can implement, with an in-memory implementation shipped first. A Store persists **Resources** and defines a single **consistency model** (how a write mutates a Resource's `data`). The CRDT **Shared Document** is *one* Store implementation (`data` = opaque CRDT bytes, merged) — not a separate feature. *"One plumbing, two consistency models":* a last-writer-wins `MemoryStore` and a merging `CrdtStore` are siblings behind the same interface. Distinct from a **Topic** (fire-and-forget broadcast, no state) and from per-connection **data** (scratch state lost on disconnect). (NB: "store" was previously used informally to mean the persistence `Map` in the synced-canvas examples, and `PresenceStore` in core — this promotes it to a first-class term; those usages must be disambiguated.)
+
+### Resource
+The unit a Store persists: `{ id: string, accessRules, data: JSON }`. `id` is a unique record id. `accessRules` gate which participants may read/write. `data` is the JSON payload (for a `CrdtStore`, opaque merge bytes). (Shape and identity of the accessRules key — see Open question on identity — still to resolve.)
+
+### Change
+Resolved 2026-06-23. What a Store emits when a Resource mutates, and the symmetric shape a write carries IN: `{ id, update, origin }`. `update` is a **store-defined opaque payload** — a CRDT delta for a `CrdtStore`, the full JSON value for a last-writer-wins store. super-line **never parses `update`** (relays it like transport/adapter bytes; base64 under the JSON serializer). `origin` is the writer id used for **echo-break** (don't bounce a writer's own change back into its replica). Mirrors the opaque-relay pattern already in `docs/guide/synced-state.md`. NB: super-store's in-process callback is payload-less (`subscribe(() => void)` + re-read); the networked Store needs the payload + origin that callback lacks.
+
+### super-store (the CRDT engine, two layers down)
+A separate WIP library at `/Users/mertdogar/Workspace/personal/super-store` (`@super-store/store`): a single Yjs-backed reactive primitive `StoreValue<T>` (one value, `set`/`update`, payload-less `subscribe`+`getSnapshot`, opt-in undo, Yjs convergence). **Not** a super-line Store — no `id`/`accessRules`/collection/list/ACL/cross-node. It is the **engine a future `CrdtStore` implementation of super-line's Store interface will wrap** to hold one Resource's `data`. Layering: super-line `Store` → `CrdtStore` impl → `super-store StoreValue`.
+
 ### Shared Document
-A named, server-persisted, JSON-projectable state object that the server and one or more clients all read and write **concurrently**, merged via a CRDT. The unit of synchronisation. Distinct from a **Topic** (fire-and-forget broadcast, no state) and from per-connection **data** (scratch state lost on disconnect).
+A named, server-persisted, JSON-projectable state object that the server and one or more clients all read and write **concurrently**, merged via a CRDT. **Now framed as a CRDT Store implementation** (the merging consistency model), not a standalone primitive. The unit of synchronisation. Distinct from a **Topic** (fire-and-forget broadcast, no state) and from per-connection **data** (scratch state lost on disconnect).
 
 ### Co-writer
 A participant — the server *or* a client — permitted to mutate a Shared Document. In this design **both the server and clients are co-writers with equal write reach**: there is no partition, either party may mutate any field. (Resolved 2026-06-23: user confirmed both parties mutate anywhere in the state, no server-owned vs client-owned regions.)

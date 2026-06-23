@@ -47,6 +47,7 @@
 | ↔️ **Req/res** | Unary `await client.x()` with typed errors, timeout & `AbortSignal`. |
 | 📣 **Events & rooms** | Server-pushed events; server-controlled room broadcasts. |
 | 📡 **Topics** | Client-subscribed pub/sub streams, authorized server-side. |
+| 🗄️ **Stores** | Permissioned, real-time JSON documents — a pluggable persisted-state primitive (in-memory LWW or a CRDT) with per-client access rules and a reactive client handle. |
 | 🚌 **Cluster event bus** | `server.publish` / `server.subscribe` on a shared topic — cluster-wide pub/sub to server listeners (every node, local echo) and subscribed clients at once. |
 | 📨 **Server→client req/res** | `await srv.toConn(id).request(...)` — ask a client and await a typed reply, across nodes. |
 | 🛰️ **Presence & introspection** | `srv.local.*` (sync) + `srv.cluster.*` (counts, topology, `isOnline`) backed by a Redis registry. |
@@ -181,7 +182,7 @@ See [Introspection & presence](https://mertdogar.github.io/super-line/guide/intr
 The full docs live at **[mertdogar.github.io/super-line](https://mertdogar.github.io/super-line/)**:
 
 - **Start here** — [Getting started](https://mertdogar.github.io/super-line/guide/getting-started) · [The contract](https://mertdogar.github.io/super-line/guide/the-contract) (roles, direction & the five flavors)
-- **Guides** — [Requests](https://mertdogar.github.io/super-line/guide/requests) · [Events & rooms](https://mertdogar.github.io/super-line/guide/events-rooms) · [Topics](https://mertdogar.github.io/super-line/guide/topics) · [Roles & auth](https://mertdogar.github.io/super-line/guide/roles-auth) · [Middleware & lifecycle](https://mertdogar.github.io/super-line/guide/middleware-lifecycle) · [Error handling](https://mertdogar.github.io/super-line/guide/errors) · [Reconnection & delivery](https://mertdogar.github.io/super-line/guide/reconnection-delivery) · [Serialization](https://mertdogar.github.io/super-line/guide/serialization) · [Scaling & adapters](https://mertdogar.github.io/super-line/guide/scaling-adapters) · [React](https://mertdogar.github.io/super-line/guide/react) · [Testing](https://mertdogar.github.io/super-line/guide/testing)
+- **Guides** — [Requests](https://mertdogar.github.io/super-line/guide/requests) · [Events & rooms](https://mertdogar.github.io/super-line/guide/events-rooms) · [Topics](https://mertdogar.github.io/super-line/guide/topics) · [Stores](https://mertdogar.github.io/super-line/guide/store) · [Roles & auth](https://mertdogar.github.io/super-line/guide/roles-auth) · [Middleware & lifecycle](https://mertdogar.github.io/super-line/guide/middleware-lifecycle) · [Error handling](https://mertdogar.github.io/super-line/guide/errors) · [Reconnection & delivery](https://mertdogar.github.io/super-line/guide/reconnection-delivery) · [Serialization](https://mertdogar.github.io/super-line/guide/serialization) · [Scaling & adapters](https://mertdogar.github.io/super-line/guide/scaling-adapters) · [React](https://mertdogar.github.io/super-line/guide/react) · [Testing](https://mertdogar.github.io/super-line/guide/testing)
 - **[API reference](https://mertdogar.github.io/super-line/reference/)** — generated from source: every export, option, and type across the five packages.
 
 ## Examples

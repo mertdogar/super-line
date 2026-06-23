@@ -55,8 +55,11 @@ export default defineConfig({
           ],
         },
         {
-          text: 'Patterns',
-          items: [{ text: 'Synced state (CRDT)', link: '/guide/synced-state' }],
+          text: 'Persisted state',
+          items: [
+            { text: 'Stores', link: '/guide/store' },
+            { text: 'Synced state (CRDT)', link: '/guide/synced-state' },
+          ],
         },
         {
           text: 'Server',

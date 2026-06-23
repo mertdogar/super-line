@@ -1,0 +1,19 @@
+{
+  "name": "@super-line/example-store",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@super-line/client": "workspace:*",
+    "@super-line/core": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "@super-line/store-memory": "workspace:*",
+    "@super-line/transport-websocket": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

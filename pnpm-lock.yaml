@@ -619,6 +619,28 @@ importers:
         specifier: ^4.19.2
         version: 4.22.4
 
+  examples/store:
+    dependencies:
+      '@super-line/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@super-line/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@super-line/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      '@super-line/store-memory':
+        specifier: workspace:*
+        version: link:../../packages/store-memory
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
+
   examples/synced-canvas-automerge:
     dependencies:
       '@automerge/automerge':

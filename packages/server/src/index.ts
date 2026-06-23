@@ -20,6 +20,15 @@ import {
   type ReqFrame,
   type EvtFrame,
   type PubFrame,
+  type SOpenFrame,
+  type SCloseFrame,
+  type SWriteFrame,
+  type SReadFrame,
+  type SChangeFrame,
+  type ServerStore,
+  type Resource,
+  type AccessRules,
+  type Perms,
   type EventData,
   type RoleOf,
   type Events,
@@ -64,6 +73,8 @@ const CONN = 'c:' // personal channel per connection (targeted cross-node send)
 const USER = 'u:' // personal channel per user key (cross-node fan-out)
 const REPLY = 'reply:' // per-node channel carrying server→client request replies back to the origin
 const INSPECT = 'i:' // reserved fan-out channel for the inspector `events` topic
+const STORE = 's:' // per-Resource fan-out channel: `s:<name>:<id>`
+const SERVER_ORIGIN = 'server' // origin stamped on server co-writes (distinct from any client writer id)
 
 // Envelope carried on personal (c:/u:) channels — distinct from the raw frame fan-out of rooms/topics.
 type PersonalEnvelope =
@@ -206,6 +217,28 @@ export interface RoleLens<C extends Contract, R extends RoleOf<C>> {
   publish<T extends keyof RoleTopics<C, R>>(topic: T, data: EmitData<RoleTopics<C, R>[T]>): void
 }
 
+/**
+ * Server-side handle for one configured Store, reached via `srv.store.<name>`. The server is
+ * authoritative: it creates Resources, grants/revokes access, and may co-write. `data` is untyped
+ * (stores are off-contract — see ADR-0003); callers assert the shape.
+ */
+export interface ServerStoreHandle {
+  /** Create a Resource with initial data + access rules (deny-by-default for everyone unlisted). */
+  create(id: string, data: unknown, accessRules: AccessRules): Promise<void>
+  /** Read a Resource (data + accessRules), or undefined if absent. */
+  read(id: string): Promise<Resource | undefined>
+  /** Server co-write: replace the Resource's value (LWW), fanned out to subscribers with a `server` origin. */
+  write(id: string, data: unknown): Promise<void>
+  /** Grant a principal read/write on a Resource. */
+  grant(id: string, principal: string, perms: Perms): Promise<void>
+  /** Revoke a principal's access to a Resource entirely. */
+  revoke(id: string, principal: string): Promise<void>
+  /** Delete a Resource. */
+  delete(id: string): Promise<void>
+  /** All Resource ids in this store. */
+  list(): Promise<string[]>
+}
+
 /** Options for {@link createSuperLineServer}. */
 export interface SuperLineServerOptions<C extends Contract, A extends AuthResult<C>> {
   /** Client↔server transports to accept connections on (e.g. `webSocketServerTransport({ server })`). */
@@ -242,6 +275,12 @@ export interface SuperLineServerOptions<C extends Contract, A extends AuthResult
    * `superline.inspector.v1` subprotocol. **Default off; dev / trusted-network only.**
    */
   inspector?: boolean | { redact?: string[] }
+  /**
+   * Pluggable persisted-state Stores, keyed by name (`{ scene: crdtStoreServer(), config: memoryStoreServer() }`).
+   * Each is the server half of a Store pair; the client passes the matching client halves. Surfaced as
+   * `srv.store.<name>` and `client.store.<name>`. Stores are off-contract and untyped (ADR-0003).
+   */
+  stores?: Record<string, ServerStore>
   /** Called once per accepted connection. */
   onConnection?: (conn: Conn, ctx: CtxUnion<A>) => void
   /** Called when a connection closes, with the WebSocket close `code`. */
@@ -284,6 +323,8 @@ export interface SuperLineServer<C extends Contract, A extends AuthResult<C>> {
   ): () => void
   /** Lens for role-scoped sends, e.g. forRole('user').publish('feed', data). */
   forRole<R extends RoleOf<C>>(role: R): RoleLens<C, R>
+  /** Server-authoritative handle for a configured Store (`srv.store('scene').create(...)`). Throws `NOT_FOUND` if the name isn't configured. */
+  store(name: string): ServerStoreHandle
   close(): Promise<void>
 }
 
@@ -323,6 +364,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
   const inspectorRedact = new Set<string>(
     opts.inspector && typeof opts.inspector === 'object' ? opts.inspector.redact ?? [] : [],
   )
+  const storeMap = (opts.stores ?? {}) as Record<string, ServerStore>
   const conns = new Set<Conn>()
   const inspectorConns = new Set<Conn>() // read-only inspectors: kept out of conns/presence/heartbeat
   // local members per namespaced channel (rooms + topics share this registry)
@@ -743,7 +785,11 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     else if (frame.t === 'unsub') {
       const ns = topicNamespace(conn.role, frame.c)
       if (ns) leaveChannel(conn, TOPIC + ns + ':' + frame.c)
-    } else if (frame.t === 'sres') {
+    } else if (frame.t === 'sopen') await handleStoreOpen(conn, frame)
+    else if (frame.t === 'srd') await handleStoreRead(conn, frame)
+    else if (frame.t === 'swr') await handleStoreWrite(conn, frame)
+    else if (frame.t === 'sclose') handleStoreClose(conn, frame)
+    else if (frame.t === 'sres') {
       await handleClientReply(conn, frame.i, { ok: true, d: frame.d })
     } else if (frame.t === 'serr') {
       await handleClientReply(conn, frame.i, { ok: false, code: frame.code, m: frame.m, d: frame.d })
@@ -842,6 +888,73 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       }
       await joinChannel(conn, TOPIC + ns + ':' + frame.c) // await adapter.subscribe so ready == active
       conn.send({ t: 'res', i: frame.i, d: null })
+    })
+  }
+
+  // ---- Stores -------------------------------------------------------------
+  // ACL is enforced here (core); the Store persists + decides the consistency model and never sees `principal`.
+  // Fan-out reuses the channel machinery: subscribing a Resource joins `s:<name>:<id>`; a Change is published
+  // to that channel and delivered to members by the generic adapter.onMessage path. Echo-break is client-side
+  // (the client half skips its own `origin`), so no server-side origin-skip is needed.
+  function storeOrErr(conn: Conn, id: number, name: string): ServerStore | undefined {
+    const store = storeMap[name]
+    if (!store) conn.send({ t: 'err', i: id, code: 'NOT_FOUND', m: `Unknown store: ${name}` })
+    return store
+  }
+
+  async function handleStoreOpen(conn: Conn, frame: SOpenFrame): Promise<void> {
+    const store = storeOrErr(conn, frame.i, frame.n)
+    if (!store) return
+    await dispatchOp(conn, frame.i, { kind: 'subscribe', name: `store:${frame.n}/${frame.id}`, conn }, async () => {
+      const resource = await store.read(frame.id)
+      if (!resource) throw new SuperLineError('NOT_FOUND', `No resource: ${frame.n}/${frame.id}`)
+      const principal = conn.principal ?? conn.id
+      if (!resource.accessRules[principal]?.read)
+        throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}/${frame.id}`)
+      await joinChannel(conn, STORE + frame.n + ':' + frame.id)
+      conn.send({ t: 'res', i: frame.i, d: resource.data }) // catch-up snapshot
+    })
+  }
+
+  async function handleStoreRead(conn: Conn, frame: SReadFrame): Promise<void> {
+    const store = storeOrErr(conn, frame.i, frame.n)
+    if (!store) return
+    await dispatchOp(conn, frame.i, { kind: 'request', name: `store:${frame.n}/${frame.id}`, conn }, async () => {
+      const resource = await store.read(frame.id)
+      if (!resource) throw new SuperLineError('NOT_FOUND', `No resource: ${frame.n}/${frame.id}`)
+      const principal = conn.principal ?? conn.id
+      if (!resource.accessRules[principal]?.read)
+        throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}/${frame.id}`)
+      conn.send({ t: 'res', i: frame.i, d: resource.data })
+    })
+  }
+
+  async function handleStoreWrite(conn: Conn, frame: SWriteFrame): Promise<void> {
+    const store = storeOrErr(conn, frame.i, frame.n)
+    if (!store) return
+    await dispatchOp(conn, frame.i, { kind: 'request', name: `store:${frame.n}/${frame.id}`, conn }, async () => {
+      const resource = await store.read(frame.id)
+      if (!resource) throw new SuperLineError('NOT_FOUND', `No resource: ${frame.n}/${frame.id}`)
+      const principal = conn.principal ?? conn.id
+      if (!resource.accessRules[principal]?.write)
+        throw new SuperLineError('FORBIDDEN', `Write denied: ${frame.n}/${frame.id}`)
+      await store.apply({ id: frame.id, update: frame.u, origin: frame.o }) // → store.onChange → fan-out
+      conn.send({ t: 'res', i: frame.i, d: null })
+    })
+  }
+
+  function handleStoreClose(conn: Conn, frame: SCloseFrame): void {
+    if (storeMap[frame.n]) leaveChannel(conn, STORE + frame.n + ':' + frame.id)
+  }
+
+  // Each Store's onChange is core's single fan-out source: publish the Change to the Resource channel,
+  // delivered to subscribed conns by the generic adapter.onMessage path (loopback for the local node).
+  for (const [name, store] of Object.entries(storeMap)) {
+    store.onChange((change) => {
+      void adapter.publish(
+        STORE + name + ':' + change.id,
+        serializer.encode({ t: 'sch', n: name, id: change.id, u: change.update, o: change.origin } satisfies SChangeFrame),
+      )
     })
   }
 
@@ -975,6 +1088,43 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     })
   }
 
+  // server-authoritative per-store handles: create/grant/revoke are server-only; write is the LWW co-write
+  const storeApi: Record<string, ServerStoreHandle> = {}
+  for (const [name, store] of Object.entries(storeMap)) {
+    const readOrThrow = async (id: string): Promise<Resource> => {
+      const r = await store.read(id)
+      if (!r) throw new SuperLineError('NOT_FOUND', `No resource: ${name}/${id}`)
+      return r
+    }
+    storeApi[name] = {
+      async create(id, data, accessRules) {
+        await store.create(id, data, accessRules)
+      },
+      read(id) {
+        return Promise.resolve(store.read(id))
+      },
+      async write(id, data) {
+        await store.apply({ id, update: data, origin: SERVER_ORIGIN })
+      },
+      async grant(id, principal, perms) {
+        const r = await readOrThrow(id)
+        await store.setAccess(id, { ...r.accessRules, [principal]: perms })
+      },
+      async revoke(id, principal) {
+        const r = await readOrThrow(id)
+        const next = { ...r.accessRules }
+        delete next[principal]
+        await store.setAccess(id, next)
+      },
+      async delete(id) {
+        await store.delete(id)
+      },
+      list() {
+        return Promise.resolve(store.list())
+      },
+    }
+  }
+
   const api: SuperLineServer<C, A> = {
     nodeId: instanceId,
     nodeName,
@@ -1055,6 +1205,11 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
           publishTo(role, String(topic), data)
         },
       }
+    },
+    store(name) {
+      const handle = storeApi[name]
+      if (!handle) throw new SuperLineError('NOT_FOUND', `Store not configured: ${name}`)
+      return handle
     },
     async close() {
       if (closing) return

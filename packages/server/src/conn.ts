@@ -18,6 +18,8 @@ export class Conn<
   readonly channels = new Set<string>()
   /** Mutable per-connection scratch state, typed per role by the contract's `data` schema. */
   data: Data = {} as Data
+  /** The client↔server transport (wire) this connection was accepted on (set by the server at accept). */
+  transport?: string
 
   /** When this connection was accepted (`Date.now()`). */
   readonly connectedAt = Date.now()

@@ -42,6 +42,11 @@ export interface ConnDescriptor {
   userId?: string
   /** Room memberships (topics and node-local `lastPongAt` are not included). */
   rooms: string[]
+  /**
+   * The client↔server transport (wire) this connection was accepted on:
+   * `'websocket' | 'sse' | 'longpoll' | 'libp2p' | 'loopback'`. Absent on conns from older nodes.
+   */
+  transport?: string
   /** Extra fields contributed by the server's `describeConn` hook. */
   [extra: string]: unknown
 }

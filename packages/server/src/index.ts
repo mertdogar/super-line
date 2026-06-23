@@ -353,6 +353,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       connectedAt: conn.connectedAt,
       ...(userId !== undefined ? { userId } : {}),
       rooms,
+      ...(conn.transport !== undefined ? { transport: conn.transport } : {}),
       ...opts.describeConn?.(conn),
     }
   }
@@ -662,7 +663,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
   // Core owns the auth decision; each transport calls this at its native moment and rejects natively on throw.
   const authHook = async (handshake: Handshake): Promise<AuthOutcome> => {
     const auth = await opts.authenticate(handshake)
-    return { role: auth.role, ctx: auth.ctx }
+    return { role: auth.role, ctx: auth.ctx, transport: handshake.transport }
   }
 
   // A transport accepted (and authenticated) a connection — wire it up. Inspector conns
@@ -687,6 +688,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
             emitInspectorEvent({ type: 'msg.event', target: connId, name: event, data: safeSnapshot(data) })
         : undefined,
     )
+    conn.transport = auth.transport
     raw.onMessage((bytes) => {
       void onMessage(conn, bytes)
     })

@@ -41,8 +41,12 @@ export interface Handshake {
   raw: unknown
 }
 
-/** What `authenticate` returns. Reject by throwing — the transport then rejects in its native idiom. */
-export type AuthOutcome = { role: string; ctx: unknown }
+/**
+ * What `authenticate` returns. Reject by throwing — the transport then rejects in its native idiom.
+ * `transport` is injected by the server (from {@link Handshake.transport}); user `authenticate`
+ * callbacks return only `role` + `ctx`.
+ */
+export type AuthOutcome = { role: string; ctx: unknown; transport?: string }
 
 /**
  * Server side: the transport listens, authenticates each inbound connection at its

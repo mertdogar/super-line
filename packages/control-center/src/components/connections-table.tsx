@@ -2,6 +2,7 @@ import * as React from 'react'
 import type { ConnDescriptor } from '@super-line/core'
 import { formatDuration, formatTime } from '@/lib/events'
 import { roleColor } from '@/lib/topology'
+import { transportColor, transportLabel } from '@/lib/transport'
 import { cn } from '@/lib/utils'
 
 export function ConnectionsTable({
@@ -22,6 +23,7 @@ export function ConnectionsTable({
         <thead>
           <tr className="border-b bg-card/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
             <th className="px-3 py-2 font-medium">role</th>
+            <th className="px-3 py-2 font-medium">transport</th>
             <th className="px-3 py-2 font-medium">id</th>
             <th className="px-3 py-2 font-medium">user</th>
             <th className="px-3 py-2 font-medium">node</th>
@@ -43,6 +45,12 @@ export function ConnectionsTable({
                 <span className="inline-flex items-center gap-1.5">
                   <span className="h-2 w-2 rounded-full" style={{ background: roleColor(c.role) }} />
                   {c.role}
+                </span>
+              </td>
+              <td className="px-3 py-2">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full" style={{ background: transportColor(c.transport) }} />
+                  {transportLabel(c.transport)}
                 </span>
               </td>
               <td className="px-3 py-2 font-mono text-xs">{c.id.slice(0, 8)}</td>

@@ -1,4 +1,5 @@
 import type { ConnDescriptor, NodeStat, NodeView } from '@super-line/core'
+import { breakdownLabel } from './transport'
 
 // brand-adjacent palette; roles map to a stable color by hash
 const ROLE_COLORS = ['#22d3ee', '#a78bfa', '#f472b6', '#facc15', '#34d399', '#fb923c', '#60a5fa', '#f87171']
@@ -8,6 +9,9 @@ export function roleColor(role: string): string {
   for (let i = 0; i < role.length; i++) h = (h * 31 + role.charCodeAt(i)) >>> 0
   return ROLE_COLORS[h % ROLE_COLORS.length] ?? ROLE_COLORS[0]!
 }
+
+/** A single active highlight in the topology lens — one dimension at a time. */
+export type Highlight = { kind: 'room' | 'transport'; value: string }
 
 export interface GraphNode {
   id: string
@@ -20,6 +24,10 @@ export interface GraphNode {
   alive?: boolean
   connCount?: number
   rooms?: string[]
+  /** conn nodes: the raw wire id this connection uses. */
+  transport?: string
+  /** server nodes: per-node wire breakdown, e.g. `'3 ws / 2 http'`. */
+  breakdown?: string
 }
 
 export interface GraphEdge {
@@ -95,6 +103,7 @@ export function buildGraph(
       label: nodeName,
       alive: stat?.alive ?? true,
       connCount: stat?.connections ?? connsByNode.get(sid)?.length ?? 0,
+      breakdown: breakdownLabel(connsByNode.get(sid) ?? []),
     })
     if (showBus) edges.push({ id: `e-bus-${sid}`, source: sid, target: BUS_ID, kind: 'bus' })
 
@@ -110,6 +119,7 @@ export function buildGraph(
         role: c.role,
         userId: c.userId,
         rooms: c.rooms,
+        transport: c.transport,
       })
       edges.push({ id: `e-${c.id}`, source: c.id, target: sid, kind: 'conn' })
     })

@@ -18,7 +18,8 @@ import { LiveFeed } from '@/components/live-feed'
 import { SettingsPage } from '@/components/settings-page'
 import { ResourcesPage } from '@/components/resources-page'
 import { StatusDot } from '@/components/status-dot'
-import { roomsOf } from '@/lib/topology'
+import { roomsOf, type Highlight } from '@/lib/topology'
+import { transportsOf } from '@/lib/transport'
 import { cn } from '@/lib/utils'
 
 type View = 'topology' | 'connections' | 'contract' | 'feed' | 'settings' | 'resources'
@@ -88,7 +89,7 @@ export default function App(): React.JSX.Element {
   const [contract, setContract] = React.useState<InspectedContract | null>(null)
   const [nodeView, setNodeView] = React.useState<NodeView | null>(null)
   const [feed, setFeed] = React.useState<InspectorEvent[]>([])
-  const [highlightRoom, setHighlightRoom] = React.useState<string | null>(null)
+  const [highlight, setHighlight] = React.useState<Highlight | null>(null)
   const [selectedConnId, setSelectedConnId] = React.useState<string | null>(null)
 
   const connect = React.useCallback((next: string) => {
@@ -134,6 +135,7 @@ export default function App(): React.JSX.Element {
   const totalConns = topology.reduce((sum, n) => sum + n.connections, 0)
   const roles = React.useMemo(() => [...new Set(connections.map((c) => c.role))].sort(), [connections])
   const rooms = React.useMemo(() => roomsOf(connections), [connections])
+  const transports = React.useMemo(() => transportsOf(connections), [connections])
 
   const active = [...NAV, ...NAV_BOTTOM].find((n) => n.id === view)
   const count =
@@ -185,15 +187,16 @@ export default function App(): React.JSX.Element {
                   topology={topology}
                   connections={connections}
                   node={nodeView}
-                  highlightRoom={highlightRoom}
+                  highlight={highlight}
                 />
               </div>
               <RoomLens
                 roles={roles}
                 rooms={rooms}
                 topics={nodeView?.topics ?? []}
-                selected={highlightRoom}
-                onSelect={setHighlightRoom}
+                transports={transports}
+                selected={highlight}
+                onSelect={setHighlight}
               />
             </div>
           ) : (

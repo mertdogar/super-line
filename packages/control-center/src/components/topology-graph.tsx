@@ -2,7 +2,8 @@ import * as React from 'react'
 import { Background, Controls, ReactFlow, type Edge, type Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { ConnDescriptor, NodeStat, NodeView } from '@super-line/core'
-import { buildGraph, roleColor, type GraphNode } from '@/lib/topology'
+import { buildGraph, type GraphNode, type Highlight } from '@/lib/topology'
+import { transportColor, transportFamily } from '@/lib/transport'
 
 function labelFor(n: GraphNode): React.ReactNode {
   if (n.kind === 'bus') return 'Adapter · bus'
@@ -11,7 +12,8 @@ function labelFor(n: GraphNode): React.ReactNode {
       <div className="text-center leading-tight">
         <div className="font-semibold">{n.label}</div>
         <div className="text-[10px] opacity-70">
-          {n.connCount} conns{n.alive ? '' : ' · dead'}
+          {n.connCount} conns{n.breakdown ? ` · ${n.breakdown}` : ''}
+          {n.alive ? '' : ' · dead'}
         </div>
       </div>
     )
@@ -24,8 +26,13 @@ function labelFor(n: GraphNode): React.ReactNode {
   )
 }
 
-function styleFor(n: GraphNode, highlightRoom: string | null): React.CSSProperties {
-  const dim = highlightRoom !== null && n.kind === 'conn' && !n.rooms?.includes(highlightRoom)
+/** Does a conn node match the active highlight (by room membership or wire family)? */
+function matches(n: GraphNode, h: Highlight): boolean {
+  return h.kind === 'room' ? !!n.rooms?.includes(h.value) : transportFamily(n.transport) === h.value
+}
+
+function styleFor(n: GraphNode, highlight: Highlight | null): React.CSSProperties {
+  const dim = highlight !== null && n.kind === 'conn' && !matches(n, highlight)
   const base: React.CSSProperties = { fontSize: 11, opacity: dim ? 0.16 : 1, transition: 'opacity 120ms' }
   if (n.kind === 'bus') {
     return {
@@ -49,8 +56,8 @@ function styleFor(n: GraphNode, highlightRoom: string | null): React.CSSProperti
       minWidth: 96,
     }
   }
-  const color = roleColor(n.role ?? '')
-  const highlighted = highlightRoom !== null && n.rooms?.includes(highlightRoom)
+  const color = transportColor(n.transport)
+  const highlighted = highlight !== null && n.kind === 'conn' && matches(n, highlight)
   return {
     ...base,
     background: `${color}1f`,
@@ -66,12 +73,12 @@ export function TopologyGraph({
   topology,
   connections,
   node,
-  highlightRoom,
+  highlight,
 }: {
   topology: NodeStat[]
   connections: ConnDescriptor[]
   node: NodeView | null
-  highlightRoom: string | null
+  highlight: Highlight | null
 }): React.JSX.Element {
   const { nodes, edges, truncated } = React.useMemo(() => {
     const g = buildGraph(topology, connections, node)
@@ -79,7 +86,7 @@ export function TopologyGraph({
       id: n.id,
       position: { x: n.x, y: n.y },
       data: { label: labelFor(n) },
-      style: styleFor(n, highlightRoom),
+      style: styleFor(n, highlight),
       draggable: true,
       connectable: false,
       selectable: false,
@@ -95,7 +102,7 @@ export function TopologyGraph({
       },
     }))
     return { nodes, edges, truncated: g.truncated }
-  }, [topology, connections, node, highlightRoom])
+  }, [topology, connections, node, highlight])
 
   return (
     <div className="relative h-full w-full">

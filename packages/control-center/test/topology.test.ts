@@ -2,13 +2,20 @@ import { describe, expect, it } from 'vitest'
 import type { ConnDescriptor, NodeStat, NodeView } from '@super-line/core'
 import { BUS_ID, buildGraph, roomsOf } from '../src/lib/topology.js'
 
-const conn = (id: string, nodeId: string, role: string, rooms: string[] = []): ConnDescriptor => ({
+const conn = (
+  id: string,
+  nodeId: string,
+  role: string,
+  rooms: string[] = [],
+  transport?: string,
+): ConnDescriptor => ({
   id,
   role,
   nodeId,
   nodeName: nodeId,
   connectedAt: 0,
   rooms,
+  ...(transport !== undefined ? { transport } : {}),
 })
 
 describe('buildGraph', () => {
@@ -51,6 +58,21 @@ describe('buildGraph', () => {
     const g = buildGraph([{ nodeId: 'nodeA', nodeName: 'nodeA', connections: 510, rooms: 0, alive: true }], conns, null)
     expect(g.nodes.filter((n) => n.kind === 'conn')).toHaveLength(500)
     expect(g.truncated).toBe(10)
+  })
+
+  it('carries the wire on conn nodes and a per-node breakdown on server nodes', () => {
+    const topo: NodeStat[] = [{ nodeId: 'nodeA', nodeName: 'node-1', connections: 3, rooms: 0, alive: true }]
+    const conns = [
+      conn('c1', 'nodeA', 'user', [], 'websocket'),
+      conn('c2', 'nodeA', 'user', [], 'sse'),
+      conn('c3', 'nodeA', 'user', [], 'longpoll'),
+    ]
+    const g = buildGraph(topo, conns, null)
+
+    const connNodes = g.nodes.filter((n) => n.kind === 'conn')
+    expect(connNodes.map((n) => n.transport)).toEqual(['websocket', 'sse', 'longpoll'])
+    // sse + longpoll collapse to the http family → "1 ws / 2 http"
+    expect(g.nodes.find((n) => n.kind === 'server')?.breakdown).toBe('2 http / 1 ws')
   })
 
   it('roomsOf collects distinct rooms', () => {

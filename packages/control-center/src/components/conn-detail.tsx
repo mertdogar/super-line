@@ -2,6 +2,7 @@ import * as React from 'react'
 import type { ConnView } from '@super-line/core'
 import type { InspectorClient } from '@/lib/inspector-client'
 import { formatDuration, formatTime } from '@/lib/events'
+import { transportLabel } from '@/lib/transport'
 import { Json } from '@/components/json-view'
 import { Button } from '@/components/ui/button'
 
@@ -60,8 +61,8 @@ export function ConnDetail({
         {view ? (
           <>
             <p className="mt-1 text-xs text-muted-foreground">
-              {view.descriptor.nodeName} · connected {formatTime(view.descriptor.connectedAt)} ·{' '}
-              {formatDuration(view.descriptor.connectedAt)} ago
+              {view.descriptor.nodeName} · over {transportLabel(view.descriptor.transport)} · connected{' '}
+              {formatTime(view.descriptor.connectedAt)} · {formatDuration(view.descriptor.connectedAt)} ago
             </p>
             <Section title="descriptor">
               <Json data={view.descriptor} className="max-h-72" />

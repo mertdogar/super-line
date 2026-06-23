@@ -6,17 +6,17 @@ export default defineConfig({
   title: 'super-line',
   description:
     'End-to-end typesafe realtime for TypeScript — role-scoped contracts, req/res, rooms & topics from one contract, over WebSocket, HTTP, or libp2p.',
-  base: '/super-line/',
+  base: '/',
   cleanUrls: true,
   lastUpdated: true,
-  head: [['link', { rel: 'icon', href: '/super-line/mark.svg' }]],
+  head: [['link', { rel: 'icon', href: '/mark.svg' }]],
   markdown: {
     config(md) {
       md.use(copyOrDownloadAsMarkdownButtons)
     },
   },
   vite: {
-    plugins: [llmstxt({ domain: 'https://mertdogar.github.io' })],
+    plugins: [llmstxt({ domain: 'https://super-line.dogar.biz' })],
   },
   themeConfig: {
     logo: '/mark.svg',

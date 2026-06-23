@@ -1,5 +1,5 @@
 <!-- super-line agent guide (generic). Keep in sync with SKILL.md. -->
-<!-- Full docs + API reference: https://mertdogar.github.io/super-line/ -->
+<!-- Full docs + API reference: https://super-line.dogar.biz/ -->
 
 # super-line
 
@@ -111,7 +111,7 @@ throw new SuperLineError('FORBIDDEN', 'not a member')
 
 ---
 
-**Full guides + generated API reference:** <https://mertdogar.github.io/super-line/>
-- The contract model: <https://mertdogar.github.io/super-line/guide/the-contract>
-- API reference: <https://mertdogar.github.io/super-line/reference/>
-- Recipes (auth, rooms, presence, scaling, testing): the guides under <https://mertdogar.github.io/super-line/>
+**Full guides + generated API reference:** <https://super-line.dogar.biz/>
+- The contract model: <https://super-line.dogar.biz/guide/the-contract>
+- API reference: <https://super-line.dogar.biz/reference/>
+- Recipes (auth, rooms, presence, scaling, testing): the guides under <https://super-line.dogar.biz/>

@@ -7,7 +7,7 @@ description: Use when building realtime features with super-line — TypeScript/
 
 Typesafe WebSockets for TypeScript. **One contract is the single source of truth** — the server implements it, the client calls it, types flow end to end with no codegen.
 
-Human-facing docs (guides + full generated API reference): <https://mertdogar.github.io/super-line/>. This skill is the condensed, prescriptive version for agents. For machine-readable docs: append `.md` to any docs page URL for its raw markdown, fetch <https://mertdogar.github.io/super-line/llms.txt> for an index of every page, or <https://mertdogar.github.io/super-line/llms-full.txt> for the entire documentation in one file.
+Human-facing docs (guides + full generated API reference): <https://super-line.dogar.biz/>. This skill is the condensed, prescriptive version for agents. For machine-readable docs: append `.md` to any docs page URL for its raw markdown, fetch <https://super-line.dogar.biz/llms.txt> for an index of every page, or <https://super-line.dogar.biz/llms-full.txt> for the entire documentation in one file.
 
 ## Mental model — read this first
 

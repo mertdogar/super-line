@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-22d3ee?style=flat-square&labelColor=1a1d24)](LICENSE)
 [![Built with TypeScript](https://img.shields.io/badge/TypeScript-strict-22d3ee?style=flat-square&labelColor=1a1d24)](https://www.typescriptlang.org/)
 [![Standard Schema](https://img.shields.io/badge/Standard%20Schema-ready-22d3ee?style=flat-square&labelColor=1a1d24)](https://standardschema.dev)
-[![Docs](https://img.shields.io/badge/docs-mertdogar.github.io-22d3ee?style=flat-square&labelColor=1a1d24)](https://mertdogar.github.io/super-line/)
+[![Docs](https://img.shields.io/badge/docs-super--line.dogar.biz-22d3ee?style=flat-square&labelColor=1a1d24)](https://super-line.dogar.biz/)
 
 <br />
 
@@ -22,7 +22,7 @@
 
 **super-line** is a typesafe WebSocket library for TypeScript. You write **one contract**; the server implements it and the client calls it with full end-to-end type inference — no codegen. The contract is split by **direction** (`clientToServer` / `serverToClient`) and scoped by **role** — a `user` and an `agent` connect to the same server and each get their own typed surface, with a `shared` base in common. Requests, events, topics, rooms, and a cluster-wide event bus share one connection, and everything fans out across processes through a pluggable adapter (in-memory for one node, Redis for many).
 
-> 📖 **Full documentation: [mertdogar.github.io/super-line](https://mertdogar.github.io/super-line/)** — guides, the complete API reference, and runnable examples.
+> 📖 **Full documentation: [super-line.dogar.biz](https://super-line.dogar.biz/)** — guides, the complete API reference, and runnable examples.
 
 ## Contents
 
@@ -175,15 +175,15 @@ const { ok } = await srv.toConn(connId).request('confirm', { q: 'Deploy now?' })
 // client side: client.implement({ confirm: async ({ q }) => ({ ok: true }) })
 ```
 
-See [Introspection & presence](https://mertdogar.github.io/super-line/guide/introspection-and-presence) for the full surface.
+See [Introspection & presence](https://super-line.dogar.biz/guide/introspection-and-presence) for the full surface.
 
 ## Documentation
 
-The full docs live at **[mertdogar.github.io/super-line](https://mertdogar.github.io/super-line/)**:
+The full docs live at **[super-line.dogar.biz](https://super-line.dogar.biz/)**:
 
-- **Start here** — [Getting started](https://mertdogar.github.io/super-line/guide/getting-started) · [The contract](https://mertdogar.github.io/super-line/guide/the-contract) (roles, direction & the five flavors)
-- **Guides** — [Requests](https://mertdogar.github.io/super-line/guide/requests) · [Events & rooms](https://mertdogar.github.io/super-line/guide/events-rooms) · [Topics](https://mertdogar.github.io/super-line/guide/topics) · [Stores](https://mertdogar.github.io/super-line/guide/store) · [Synced state (CRDT)](https://mertdogar.github.io/super-line/guide/synced-state) · [Roles & auth](https://mertdogar.github.io/super-line/guide/roles-auth) · [Middleware & lifecycle](https://mertdogar.github.io/super-line/guide/middleware-lifecycle) · [Error handling](https://mertdogar.github.io/super-line/guide/errors) · [Reconnection & delivery](https://mertdogar.github.io/super-line/guide/reconnection-delivery) · [Serialization](https://mertdogar.github.io/super-line/guide/serialization) · [Scaling & adapters](https://mertdogar.github.io/super-line/guide/scaling-adapters) · [React](https://mertdogar.github.io/super-line/guide/react) · [Testing](https://mertdogar.github.io/super-line/guide/testing)
-- **[API reference](https://mertdogar.github.io/super-line/reference/)** — generated from source: every export, option, and type across the five packages.
+- **Start here** — [Getting started](https://super-line.dogar.biz/guide/getting-started) · [The contract](https://super-line.dogar.biz/guide/the-contract) (roles, direction & the five flavors)
+- **Guides** — [Requests](https://super-line.dogar.biz/guide/requests) · [Events & rooms](https://super-line.dogar.biz/guide/events-rooms) · [Topics](https://super-line.dogar.biz/guide/topics) · [Stores](https://super-line.dogar.biz/guide/store) · [Synced state (CRDT)](https://super-line.dogar.biz/guide/synced-state) · [Roles & auth](https://super-line.dogar.biz/guide/roles-auth) · [Middleware & lifecycle](https://super-line.dogar.biz/guide/middleware-lifecycle) · [Error handling](https://super-line.dogar.biz/guide/errors) · [Reconnection & delivery](https://super-line.dogar.biz/guide/reconnection-delivery) · [Serialization](https://super-line.dogar.biz/guide/serialization) · [Scaling & adapters](https://super-line.dogar.biz/guide/scaling-adapters) · [React](https://super-line.dogar.biz/guide/react) · [Testing](https://super-line.dogar.biz/guide/testing)
+- **[API reference](https://super-line.dogar.biz/reference/)** — generated from source: every export, option, and type across the five packages.
 
 ## Examples
 
@@ -229,7 +229,7 @@ cd examples/react-chat-cluster-zeromq && docker compose up --build
 cd examples/bus-cluster && docker compose up
 ```
 
-More on each: [examples on the docs site](https://mertdogar.github.io/super-line/examples/).
+More on each: [examples on the docs site](https://super-line.dogar.biz/examples/).
 
 ## Use with your AI agent
 
@@ -240,7 +240,7 @@ super-line ships an **agent guide** — the role + direction model, the interact
 npx degit mertdogar/super-line/skills/super-line .claude/skills/super-line
 ```
 
-For **Cursor, GitHub Copilot, and other agents** (one condensed file + where to put it), see the guide: **[Use with your AI agent](https://mertdogar.github.io/super-line/guide/ai-agents)**.
+For **Cursor, GitHub Copilot, and other agents** (one condensed file + where to put it), see the guide: **[Use with your AI agent](https://super-line.dogar.biz/guide/ai-agents)**.
 
 ## Comparison & FAQ
 
@@ -258,7 +258,7 @@ For **Cursor, GitHub Copilot, and other agents** (one condensed file + where to 
 | Multi-node | ✅ adapter | ✅ adapter | ❌ | ❌ |
 | Zero codegen | ✅ | ✅ | ✅ | n/a |
 
-**Why not Socket.IO?** Socket.IO splits its types into `ClientToServerEvents` / `ServerToClientEvents` / `InterServerEvents` interfaces you maintain by hand as **positional generics** (easy to swap), with no runtime validation. super-line keeps the same directional split but in **one shared object** (can't misorder, can't drift), validates inbound automatically, and adds something Socket.IO doesn't have: **per-role contracts**. More in the [comparison & FAQ](https://mertdogar.github.io/super-line/guide/comparison-faq).
+**Why not Socket.IO?** Socket.IO splits its types into `ClientToServerEvents` / `ServerToClientEvents` / `InterServerEvents` interfaces you maintain by hand as **positional generics** (easy to swap), with no runtime validation. super-line keeps the same directional split but in **one shared object** (can't misorder, can't drift), validates inbound automatically, and adds something Socket.IO doesn't have: **per-role contracts**. More in the [comparison & FAQ](https://super-line.dogar.biz/guide/comparison-faq).
 
 **Do I need Redis?** No — a single node uses the in-memory adapter. Add Redis only when you run more than one process.
 

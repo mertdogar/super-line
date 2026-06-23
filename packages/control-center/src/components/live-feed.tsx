@@ -18,6 +18,7 @@ const CATEGORIES: { id: FeedCategory; label: string }[] = [
   { id: 'lifecycle', label: 'Lifecycle' },
   { id: 'requests', label: 'Requests' },
   { id: 'events', label: 'Events' },
+  { id: 'stores', label: 'Store' },
 ]
 
 function WireChip({ event, resolver }: { event: InspectorEvent; resolver: FeedResolver }): React.JSX.Element | null {
@@ -88,7 +89,7 @@ export function LiveFeed({
   connections?: ConnDescriptor[]
 }): React.JSX.Element {
   const [active, setActive] = React.useState<Set<FeedCategory>>(
-    () => new Set<FeedCategory>(['lifecycle', 'requests', 'events']),
+    () => new Set<FeedCategory>(['lifecycle', 'requests', 'events', 'stores']),
   )
   const [paused, setPaused] = React.useState(false)
   const [frozen, setFrozen] = React.useState<InspectorEvent[]>([])

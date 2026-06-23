@@ -917,6 +917,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       if (!resource.accessRules[principal]?.read)
         throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}/${frame.id}`)
       await joinChannel(conn, STORE + frame.n + ':' + frame.id)
+      if (inspectorEnabled) emitInspectorEvent({ type: 'store.subscribe', connId: conn.id, store: frame.n, id: frame.id })
       conn.send({ t: 'res', i: frame.i, d: resource.data }) // catch-up snapshot
     })
   }
@@ -944,12 +945,23 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       if (!resource.accessRules[principal]?.write)
         throw new SuperLineError('FORBIDDEN', `Write denied: ${frame.n}/${frame.id}`)
       await store.apply({ id: frame.id, update: frame.u, origin: frame.o }) // → store.onChange → fan-out
+      if (inspectorEnabled)
+        emitInspectorEvent({
+          type: 'store.write',
+          store: frame.n,
+          id: frame.id,
+          origin: frame.o,
+          connId: conn.id,
+          data: safeSnapshot(frame.u),
+        })
       conn.send({ t: 'res', i: frame.i, d: null })
     })
   }
 
   function handleStoreClose(conn: Conn, frame: SCloseFrame): void {
-    if (storeMap[frame.n]) leaveChannel(conn, STORE + frame.n + ':' + frame.id)
+    if (!storeMap[frame.n]) return
+    leaveChannel(conn, STORE + frame.n + ':' + frame.id)
+    if (inspectorEnabled) emitInspectorEvent({ type: 'store.unsubscribe', connId: conn.id, store: frame.n, id: frame.id })
   }
 
   // Each Store's onChange is core's single fan-out source: publish the Change to the Resource channel,
@@ -1145,16 +1157,20 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       },
       async write(id, data) {
         await store.apply({ id, update: data, origin: SERVER_ORIGIN })
+        if (inspectorEnabled)
+          emitInspectorEvent({ type: 'store.write', store: name, id, origin: SERVER_ORIGIN, data: safeSnapshot(data) })
       },
       async grant(id, principal, perms) {
         const r = await readOrThrow(id)
         await store.setAccess(id, { ...r.accessRules, [principal]: perms })
+        if (inspectorEnabled) emitInspectorEvent({ type: 'store.grant', store: name, id, principal, perms })
       },
       async revoke(id, principal) {
         const r = await readOrThrow(id)
         const next = { ...r.accessRules }
         delete next[principal]
         await store.setAccess(id, next)
+        if (inspectorEnabled) emitInspectorEvent({ type: 'store.revoke', store: name, id, principal })
       },
       async delete(id) {
         await store.delete(id)

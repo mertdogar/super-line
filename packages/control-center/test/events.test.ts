@@ -125,6 +125,30 @@ describe('event helpers', () => {
     expect(eventColor('room.add')).toContain('violet')
     expect(eventColor('msg.request')).toContain('cyan')
     expect(eventColor('msg.broadcast')).toContain('sky')
+    expect(eventColor('store.write')).toContain('orange')
     expect(flavorColor('topic')).toMatch(/^#/)
+  })
+
+  it('handles store events (summary, category, payload, wire)', () => {
+    const resolver: FeedResolver = {
+      conn: (id) => (id === descriptor.id ? descriptor : undefined),
+      nodeName: () => 'node-1',
+    }
+    const write = { type: 'store.write', store: 'scene', id: 'd1', origin: 'w1', connId: descriptor.id, data: { v: 2 } } as const
+    expect(summarizeEvent(write, resolver)).toBe('scene/d1')
+    expect(eventPayload(write)).toEqual({ v: 2 })
+    expect(eventWire(write, resolver)).toMatchObject({ kind: 'one' }) // attributed to the writer's conn
+
+    const grant = { type: 'store.grant', store: 'scene', id: 'd1', principal: 'ada', perms: { read: true, write: false } } as const
+    expect(summarizeEvent(grant)).toBe('scene/d1 +ada')
+    expect(eventPayload(grant)).toEqual({ read: true, write: false })
+    expect(eventWire(grant)).toBeUndefined() // server-side, no wire
+
+    const sub = { type: 'store.subscribe', connId: descriptor.id, store: 'scene', id: 'd1' } as const
+    expect(summarizeEvent(sub, resolver)).toBe('ada (user) · scene/d1')
+
+    for (const t of ['store.write', 'store.grant', 'store.revoke', 'store.subscribe', 'store.unsubscribe'] as const) {
+      expect(eventCategory(t)).toBe('stores')
+    }
   })
 })

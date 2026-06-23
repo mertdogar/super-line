@@ -87,6 +87,12 @@ export type InspectorEvent =
   // server→client request and the client's reply
   | { type: 'msg.serverRequest'; target: string; name: string; input: unknown }
   | { type: 'msg.serverReply'; target: string; name: string; ok: boolean; output?: unknown; error?: MessageError }
+  // Store traffic: a write (client or server co-write), access changes, and subscribe lifecycle
+  | { type: 'store.write'; store: string; id: string; origin: string; connId?: string; data: unknown }
+  | { type: 'store.grant'; store: string; id: string; principal: string; perms: { read: boolean; write: boolean } }
+  | { type: 'store.revoke'; store: string; id: string; principal: string }
+  | { type: 'store.subscribe'; connId: string; store: string; id: string }
+  | { type: 'store.unsubscribe'; connId: string; store: string; id: string }
 
 // Passthrough Standard Schema: carries TS types for inference, no-op at runtime. The inspector
 // channel is library-owned and trusted, so validation is intentionally a no-op.

@@ -1,6 +1,6 @@
 import { SuperLineError } from '@super-line/core'
 import type { ClientStore, Resource, ResourceReplica, ServerStore, StoreChange } from '@super-line/core'
-import { StoreValue } from '@super-store/store'
+import { StoreValue, type StoreMode } from '@super-store/store'
 
 // A CRDT Store for super-line, backed by super-store's Yjs engine. The consistency model is *merge*:
 // concurrent writes to different fields converge instead of clobbering (the LWW store's failure mode).
@@ -8,7 +8,27 @@ import { StoreValue } from '@super-store/store'
 // are JSON objects (a Yjs doc root). super-store's sync surface — encodeState / applyUpdate / onUpdate —
 // does all the CRDT work; we just move bytes and map origins.
 
-type Doc = StoreValue<Record<string, unknown>>
+type Doc = StoreValue<Record<string, unknown>, StoreMode>
+
+/**
+ * Per-resource super-store config (mode + opaque paths). `"document"` makes the
+ * resource a recursive CRDT document (nested-field merge); `opaque` keeps named
+ * subtrees atomic (required for discriminated-union blobs). Supply the SAME
+ * resolver to {@link syncStoreServer} and {@link syncStoreClient} — ideally
+ * imported from one shared module — so both halves build each resource's
+ * `StoreValue` identically. That shared resolver is the config-drift mitigation:
+ * peers can't disagree on mode/opaque if they derive them from one source.
+ */
+export interface DocOptions {
+  mode?: 'shallow' | 'document'
+  opaque?: string[]
+}
+export interface SyncServerOptions {
+  resolveOptions?: (id: string) => DocOptions | undefined
+}
+export interface SyncClientOptions extends SyncServerOptions {
+  origin?: string
+}
 
 const b64 = (u: Uint8Array): string => {
   let s = ''
@@ -30,7 +50,7 @@ const SERVER_ORIGIN = 'server'
  * for a server co-write); every integrated update surfaces through `onChange` so super-line fans the delta
  * out. `clustering: 'relay'` — replicas converge across nodes via super-line's adapter relay.
  */
-export function syncStoreServer(): ServerStore {
+export function syncStoreServer(opts?: SyncServerOptions): ServerStore {
   interface Entry {
     sv: Doc
     accessRules: Resource['accessRules']
@@ -55,7 +75,7 @@ export function syncStoreServer(): ServerStore {
     },
     create(id, data, accessRules) {
       if (entries.has(id)) throw new SuperLineError('CONFLICT', `Resource already exists: ${id}`)
-      const sv = new StoreValue((data ?? {}) as Record<string, unknown>)
+      const sv = new StoreValue((data ?? {}) as Record<string, unknown>, opts?.resolveOptions?.(id))
       sv.encodeState() // force-bind before wiring so the initial-bind update isn't fanned as a change
       const off = sv.onUpdate((update) => {
         const origin = currentOrigin
@@ -96,14 +116,19 @@ export function syncStoreServer(): ServerStore {
 
 /** A CRDT local replica: a super-store `StoreValue`. Local writes produce a delta; remote changes merge. */
 class SyncReplica implements ResourceReplica {
-  private readonly sv: Doc = new StoreValue<Record<string, unknown>>({})
+  private readonly sv: Doc
   private pendingLocal: Uint8Array | null = null
   private readonly off: () => void
 
   constructor(
     private readonly id: string,
     private readonly origin: string,
+    options?: DocOptions,
   ) {
+    // Build the replica's StoreValue with the SAME mode/opaque as the server's
+    // (via the shared resolver), so document-mode resources merge field-level
+    // and the replica's own fresh writes don't collapse to opaque leaves.
+    this.sv = new StoreValue<Record<string, unknown>, StoreMode>({}, options)
     // capture the delta our own writes produce; remote merges (local === false) are ignored here
     this.off = this.sv.onUpdate((update, meta) => {
       if (meta.local) this.pendingLocal = update
@@ -146,12 +171,12 @@ class SyncReplica implements ResourceReplica {
 }
 
 /** The CRDT **client half**: each opened Resource is a reactive super-store doc that merges remote deltas. */
-export function syncStoreClient(opts?: { origin?: string }): ClientStore {
+export function syncStoreClient(opts?: SyncClientOptions): ClientStore {
   const origin = opts?.origin ?? randomId()
   return {
     origin,
     open(id) {
-      return new SyncReplica(id, origin)
+      return new SyncReplica(id, origin, opts?.resolveOptions?.(id))
     },
   }
 }

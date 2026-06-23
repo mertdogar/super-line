@@ -98,3 +98,60 @@ describe('store-sync (CRDT)', () => {
     expect((ha.getSnapshot() as Note).title).toBe('x') // untouched field survives (merge, not replace)
   })
 })
+
+// Document mode over the real wire — the consumer's actual scenario. The SAME
+// resolveOptions is supplied to both halves (one shared source → no config drift).
+type Scene = { el: { x: number; color: string } }
+const sceneOptions = { mode: 'document' as const }
+const resolveOptions = () => sceneOptions
+
+function setupDoc() {
+  const loop = createLoopbackTransport()
+  const srv = createSuperLineServer(contract, {
+    transports: [loop.server],
+    authenticate: (h) => ({ role: 'user' as const, ctx: { uid: h.query.uid } }),
+    identify: (conn) => (conn.ctx as { uid?: string }).uid,
+    stores: { docs: syncStoreServer({ resolveOptions }) },
+  })
+  const clients: Client[] = []
+  const makeClient = (uid: string): Client => {
+    const cl = createSuperLineClient(contract, {
+      transport: loop.client(),
+      role: 'user',
+      params: { uid },
+      stores: { docs: syncStoreClient({ resolveOptions }) },
+    })
+    clients.push(cl)
+    return cl
+  }
+  return { srv, makeClient, clients }
+}
+
+describe('store-sync (CRDT) — document mode', () => {
+  let env: ReturnType<typeof setupDoc>
+  beforeEach(() => {
+    env = setupDoc()
+  })
+  afterEach(async () => {
+    for (const c of env.clients) c.close()
+    await env.srv.close()
+  })
+
+  it('merges concurrent writes to different fields of the SAME nested object', async () => {
+    await env.srv.store('docs').create('scene', { el: { x: 1, color: 'red' } }, rules)
+    const ha = env.makeClient('alice').store('docs').open('scene')
+    const hb = env.makeClient('bob').store('docs').open('scene')
+    await Promise.all([ha.ready, hb.ready])
+
+    // The LWW failure mode shallow mode can't escape: both edit the SAME nested
+    // object, different fields. Document mode field-merges; neither is lost.
+    ha.update({ el: { x: 2 } })
+    hb.update({ el: { color: 'blue' } })
+
+    await waitFor(() => {
+      const a = ha.getSnapshot() as Scene
+      const b = hb.getSnapshot() as Scene
+      return a.el.x === 2 && a.el.color === 'blue' && b.el.x === 2 && b.el.color === 'blue'
+    })
+  })
+})

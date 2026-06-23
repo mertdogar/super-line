@@ -28,6 +28,6 @@
   },
   "dependencies": {
     "@super-line/core": "workspace:^",
-    "@super-store/store": "^0.2.0"
+    "@super-store/store": "^0.3.0"
   }
 }

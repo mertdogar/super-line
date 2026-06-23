@@ -376,6 +376,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
   const replyChannel = REPLY + instanceId
   let impl: Impl = {}
   let closing = false // close() is idempotent
+  let relaying = false // true while applying a relayed Store Change, so its onChange doesn't re-publish (echo loop)
 
   // server→client request bookkeeping (one counter, two roles a node can play)
   let nextSReq = 1
@@ -413,6 +414,10 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     }
     if (channel.startsWith(CONN) || channel.startsWith(USER)) {
       handlePersonal(channel, payload)
+      return
+    }
+    if (channel.startsWith(STORE)) {
+      handleStoreRelay(channel, payload)
       return
     }
     const set = members.get(channel)
@@ -948,14 +953,49 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
   }
 
   // Each Store's onChange is core's single fan-out source: publish the Change to the Resource channel,
-  // delivered to subscribed conns by the generic adapter.onMessage path (loopback for the local node).
+  // delivered to subscribed conns by the adapter (loopback for the local node, real fan-out cross-node).
+  // `relaying` suppresses re-publishing a Change that arrived FROM another node (would echo-loop).
   for (const [name, store] of Object.entries(storeMap)) {
     store.onChange((change) => {
+      if (relaying) return
       void adapter.publish(
         STORE + name + ':' + change.id,
-        serializer.encode({ t: 'sch', n: name, id: change.id, u: change.update, o: change.origin } satisfies SChangeFrame),
+        serializer.encode({
+          t: 'sch',
+          n: name,
+          id: change.id,
+          u: change.update,
+          o: change.origin,
+          nd: instanceId,
+        } satisfies SChangeFrame),
       )
     })
+  }
+
+  // A Change arriving on a Store channel from the adapter: forward it to local subscriber conns, and — for
+  // a `relay`-mode store that didn't originate it — apply it to the local replica so this node stays
+  // converged (a one-shot read / fresh open here reflects it). `self`-mode stores own their cross-node sync.
+  // NB: relay-mode stores must apply synchronously (apply → onChange before apply returns) for the guard.
+  function handleStoreRelay(channel: string, payload: string | Uint8Array): void {
+    const set = members.get(channel)
+    if (set) for (const conn of set) conn.sendRaw(payload)
+    let frame: SChangeFrame
+    try {
+      frame = serializer.decode(payload) as SChangeFrame
+    } catch {
+      return
+    }
+    if (frame.nd === instanceId) return // our own publish looped back; already applied locally
+    const store = storeMap[frame.n]
+    if (!store || store.clustering !== 'relay') return
+    relaying = true
+    try {
+      void store.apply({ id: frame.id, update: frame.u, origin: frame.o })
+    } catch {
+      // resource not present on this node yet (creates are node-local) — drop; it catches up on next open/read
+    } finally {
+      relaying = false
+    }
   }
 
   function room(name: string): Room<C> {

@@ -121,6 +121,7 @@ export interface SChangeFrame {
   id: string // resource id
   u: unknown // opaque update
   o: string // writer origin (echo-break)
+  nd?: string // origin NODE id; stamped for cross-node relay dedup, ignored by clients
 }
 export type ServerFrame =
   | ResFrame

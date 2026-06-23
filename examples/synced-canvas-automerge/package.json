@@ -1,0 +1,33 @@
+{
+  "name": "@super-line/example-synced-canvas-automerge",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c blue,green \"tsx src/server.ts\" \"vite\"",
+    "dev:server": "tsx src/server.ts",
+    "dev:web": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@automerge/automerge": "^2.2.8",
+    "@super-line/client": "workspace:*",
+    "@super-line/core": "workspace:*",
+    "@super-line/react": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "@super-line/transport-websocket": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "tsx": "^4.19.2",
+    "vite": "^5.4.11",
+    "vite-plugin-top-level-await": "^1.4.0",
+    "vite-plugin-wasm": "^3.3.0"
+  }
+}

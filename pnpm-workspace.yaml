@@ -3,6 +3,7 @@ packages:
   - examples/*
   - docs
 allowBuilds:
+  '@swc/core': true
   cpu-features: false
   esbuild: true
   protobufjs: false

@@ -67,8 +67,9 @@ export function syncStoreServer(): ServerStore {
       const e = get(change.id)
       currentOrigin = change.origin
       try {
-        if (typeof change.update === 'string') e.sv.applyUpdate(fromB64(change.update)) // a peer/relay delta
-        else e.sv.set(change.update as Record<string, unknown>) // a full value (server co-write)
+        if (typeof change.update === 'string')
+          e.sv.applyUpdate(fromB64(change.update)) // a peer/relay delta
+        else e.sv.update(change.update as Record<string, unknown>) // a server co-write: MERGE top-level keys (a co-writer contributes, it doesn't clobber the doc)
       } finally {
         currentOrigin = SERVER_ORIGIN
       }

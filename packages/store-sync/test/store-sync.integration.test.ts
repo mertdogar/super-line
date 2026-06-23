@@ -88,13 +88,13 @@ describe('store-sync (CRDT)', () => {
     expect((await env.srv.store('docs').read('d')) !== undefined).toBe(true) // canonical doc exists
   })
 
-  it('a server co-write merges into the doc and fans out', async () => {
+  it('a server co-write MERGES (partial), preserving untouched fields, and fans out', async () => {
     await env.srv.store('docs').create('d', { title: 'x' }, { alice: { read: true, write: true } })
     const ha = env.makeClient('alice').store('docs').open('d')
     await ha.ready
 
-    await env.srv.store('docs').write('d', { title: 'x', a: 9 })
+    await env.srv.store('docs').write('d', { a: 9 }) // partial co-write
     await waitFor(() => (ha.getSnapshot() as Note).a === 9)
-    expect((ha.getSnapshot() as Note).title).toBe('x')
+    expect((ha.getSnapshot() as Note).title).toBe('x') // untouched field survives (merge, not replace)
   })
 })

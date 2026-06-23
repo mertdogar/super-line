@@ -1,9 +1,63 @@
 import type { ConnDescriptor, InspectorEvent, MessageFlavor } from '@super-line/core'
+import { familyColor, familyShort, transportColor, transportLabel, type TransportFamily } from './transport'
 
 /** Resolves a connId / nodeId to friendly labels, so the feed shows names not hashes. */
 export interface FeedResolver {
   conn(connId: string): ConnDescriptor | undefined
   nodeName(nodeId: string): string
+  /** Wire-family breakdown of the connections currently in `room` (for broadcast attribution). */
+  roomWires?(room: string): { family: TransportFamily; count: number }[]
+}
+
+/** The wire(s) a feed row is attributable to: one wire (inbound rows) or a fan-out breakdown (broadcasts). */
+export type WireAttribution =
+  | { kind: 'one'; label: string; color: string }
+  | { kind: 'many'; parts: { short: string; count: number; color: string }[] }
+
+function wireOf(transport: string | undefined): WireAttribution {
+  return { kind: 'one', label: transportLabel(transport), color: transportColor(transport) }
+}
+
+function connWire(connId: string, r?: FeedResolver): WireAttribution | undefined {
+  const d = r?.conn(connId)
+  return d ? wireOf(d.transport) : undefined // no chip when the conn is unknown/already purged
+}
+
+/**
+ * The wire a feed row is attributable to, or `undefined` when it isn't. Inbound rows
+ * (request/response, lifecycle, directed event) resolve to one wire via their connId; a broadcast
+ * resolves to its room members' wires. `msg.publish` (topic subs aren't in the descriptor) and
+ * `msg.serverRequest`/`serverReply` (the node↔node adapter axis, not a client wire) are intentionally
+ * left unattributed.
+ */
+export function eventWire(event: InspectorEvent, r?: FeedResolver): WireAttribution | undefined {
+  switch (event.type) {
+    case 'connect':
+      return wireOf(event.descriptor.transport)
+    case 'disconnect':
+    case 'room.add':
+    case 'room.remove':
+    case 'topic.sub':
+    case 'topic.unsub':
+    case 'msg.request':
+    case 'msg.response':
+      return connWire(event.connId, r)
+    case 'msg.event':
+      return connWire(event.target, r)
+    case 'msg.broadcast': {
+      const wires = r?.roomWires?.(event.room) ?? []
+      return wires.length
+        ? {
+            kind: 'many',
+            parts: wires.map((w) => ({ short: familyShort(w.family), count: w.count, color: familyColor(w.family) })),
+          }
+        : undefined
+    }
+    case 'msg.publish':
+    case 'msg.serverRequest':
+    case 'msg.serverReply':
+      return undefined
+  }
 }
 
 function nameOf(role: string, id: string, userId?: string): string {

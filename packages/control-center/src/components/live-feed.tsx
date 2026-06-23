@@ -5,10 +5,12 @@ import {
   eventCategory,
   eventColor,
   eventPayload,
+  eventWire,
   summarizeEvent,
   type FeedCategory,
   type FeedResolver,
 } from '@/lib/events'
+import { transportsOf } from '@/lib/transport'
 import { Json } from '@/components/json-view'
 import { cn } from '@/lib/utils'
 
@@ -17,6 +19,29 @@ const CATEGORIES: { id: FeedCategory; label: string }[] = [
   { id: 'requests', label: 'Requests' },
   { id: 'events', label: 'Events' },
 ]
+
+function WireChip({ event, resolver }: { event: InspectorEvent; resolver: FeedResolver }): React.JSX.Element | null {
+  const wire = eventWire(event, resolver)
+  if (!wire) return null
+  if (wire.kind === 'one') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+        <span className="h-1.5 w-1.5 rounded-full" style={{ background: wire.color }} />
+        {wire.label}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground">
+      {wire.parts.map((p) => (
+        <span key={p.short} className="inline-flex items-center gap-0.5">
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: p.color }} />
+          {p.short}×{p.count}
+        </span>
+      ))}
+    </span>
+  )
+}
 
 function FeedRow({ event, resolver }: { event: InspectorEvent; resolver: FeedResolver }): React.JSX.Element {
   const [open, setOpen] = React.useState(false)
@@ -37,14 +62,14 @@ function FeedRow({ event, resolver }: { event: InspectorEvent; resolver: FeedRes
         <span className={cn('h-2 w-2 shrink-0 rounded-full', eventColor(event.type))} />
         <span className="w-28 shrink-0 font-mono text-xs text-muted-foreground">{event.type}</span>
         <span className="truncate font-mono text-xs">{summarizeEvent(event, resolver)}</span>
-        {hasPayload ? (
-          <ChevronRight
-            className={cn(
-              'ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
-              open && 'rotate-90',
-            )}
-          />
-        ) : null}
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          <WireChip event={event} resolver={resolver} />
+          {hasPayload ? (
+            <ChevronRight
+              className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform', open && 'rotate-90')}
+            />
+          ) : null}
+        </span>
       </button>
       {open && hasPayload ? (
         <div className="px-2.5 pb-2">
@@ -88,6 +113,7 @@ export function LiveFeed({
     return {
       conn: (id) => byId.get(id),
       nodeName: (nodeId) => nodeNames.get(nodeId) ?? nodeId.slice(0, 8),
+      roomWires: (room) => transportsOf(connections.filter((c) => c.rooms.includes(room))),
     }
   }, [connections])
 

@@ -4,9 +4,11 @@ import {
   eventCategory,
   eventColor,
   eventPayload,
+  eventWire,
   flavorColor,
   formatDuration,
   summarizeEvent,
+  type FeedResolver,
 } from '../src/lib/events.js'
 
 const descriptor: ConnDescriptor = {
@@ -66,6 +68,46 @@ describe('event helpers', () => {
     expect(summarizeEvent({ type: 'msg.broadcast', room: 'lobby', name: 'message', data: {} })).toBe('lobby ⇒ message')
     expect(summarizeEvent({ type: 'msg.publish', topic: 'presence', data: {} })).toBe('presence')
     expect(eventPayload({ type: 'connect', descriptor })).toBeUndefined() // lifecycle: nothing to expand
+  })
+
+  it('attributes feed rows to a wire (and leaves the unattributable ones blank)', () => {
+    const libp2pConn: ConnDescriptor = { ...descriptor, id: 'p2p1', transport: 'libp2p' }
+    const resolver: FeedResolver = {
+      conn: (id) => (id === libp2pConn.id ? libp2pConn : undefined),
+      nodeName: () => 'node-1',
+      roomWires: (room) =>
+        room === 'lobby'
+          ? [
+              { family: 'websocket', count: 3 },
+              { family: 'http', count: 2 },
+            ]
+          : [],
+    }
+
+    // inbound request → the originating conn's wire
+    expect(eventWire({ type: 'msg.request', connId: 'p2p1', role: 'user', name: 'send', input: {} }, resolver)).toEqual({
+      kind: 'one',
+      label: 'libp2p',
+      color: expect.stringMatching(/^#/),
+    })
+    // connect → the descriptor's wire, sub-mode preserved
+    expect(eventWire({ type: 'connect', descriptor: { ...descriptor, transport: 'sse' } })).toMatchObject({
+      kind: 'one',
+      label: 'HTTP · SSE',
+    })
+    // broadcast → the room members' wire breakdown
+    expect(eventWire({ type: 'msg.broadcast', room: 'lobby', name: 'message', data: {} }, resolver)).toEqual({
+      kind: 'many',
+      parts: [
+        { short: 'ws', count: 3, color: expect.stringMatching(/^#/) },
+        { short: 'http', count: 2, color: expect.stringMatching(/^#/) },
+      ],
+    })
+    // unknown conn → no chip
+    expect(eventWire({ type: 'msg.request', connId: 'gone', role: 'user', name: 'send', input: {} }, resolver)).toBeUndefined()
+    // publish (topic subs unknown) + serverRequest/serverReply (adapter axis) → intentionally unattributed
+    expect(eventWire({ type: 'msg.publish', topic: 'presence', data: {} }, resolver)).toBeUndefined()
+    expect(eventWire({ type: 'msg.serverRequest', target: 'node2', name: 'sync', input: {} }, resolver)).toBeUndefined()
   })
 
   it('buckets events into feed categories', () => {

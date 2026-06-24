@@ -61,6 +61,17 @@ pnpm --filter @super-line/example-synced-canvas-automerge dev   # http://localho
 
 Demonstrates: [synced state (CRDT)](/guide/synced-state), [events & rooms](/guide/events-rooms), [requests](/guide/requests).
 
+## ai-canvas — a server-side AI agent as a co-writer
+
+The [synced-canvas](#synced-canvas-roll-your-own-crdt-no-store-seam) board rebuilt on the [CRDT Store](/guide/synced-state) (`@super-line/store-sync` in `document` mode), with a **server-side LLM agent that co-edits the same board**. Type a prompt ("add three blue squares in a row, then delete the red one") — a single `agentEdit` request opens a [reactive co-writer](/guide/store#a-reactive-server-side-co-writer) (`srv.store('scene').open(id)`), reads the live board (`getSnapshot`), and drives it with four tools mapped onto Store primitives — `update` to add/move/recolor, `delete(path)` to remove. The agent's edits fan out to every tab and **merge** with your concurrent drags (document-mode CRDT), so you can keep editing while it works. Built with the [AI SDK](https://ai-sdk.dev) over the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway); the board itself is a fully working collaborative canvas even without a key. Open two windows (`?name=ada`, `?name=bob`) — server and web bind `0.0.0.0`, so a phone on the same network can join too.
+
+```bash
+cp examples/ai-canvas/.env.example examples/ai-canvas/.env   # set AI_GATEWAY_API_KEY
+pnpm --filter @super-line/example-ai-canvas dev   # http://localhost:5373
+```
+
+Demonstrates: [the reactive server-side co-writer](/guide/store#a-reactive-server-side-co-writer), [synced state (CRDT)](/guide/synced-state), [stores](/guide/store), [React hooks](/guide/react).
+
 ## hono — one server for HTTP + WebSockets
 
 super-line attached to a [Hono](https://hono.dev) app (`@hono/node-server`) on **one process, one port**: Hono serves the built frontend and REST routes while super-line owns the WebSocket bus, both on the same Node `http.Server` (the `{ server }` option — no library changes). Three live cards — a server-uptime [topic](/guide/topics), shared todos (req/res + a topic), and shared cursors whose identity is assigned server-side into `ctx` — plus a `POST /api/todos` **REST→WS bridge**: `curl` a todo in and watch it appear in every open tab. The bridge route and the WS upgrade share one auth rule. Open a few tabs and move your mouse.

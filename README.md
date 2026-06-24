@@ -205,6 +205,10 @@ pnpm --filter @super-line/example-advanced-chat-app dev   # http://localhost:517
 pnpm --filter @super-line/example-synced-canvas-yjs dev         # Yjs        · http://localhost:5173
 pnpm --filter @super-line/example-synced-canvas-automerge dev   # Automerge  · http://localhost:5173
 
+# AI co-writer canvas — a server-side LLM agent co-edits the same CRDT board as you, via
+# srv.store('scene').open(id) (reactive read + update + surgical delete). Needs an AI Gateway key:
+pnpm --filter @super-line/example-ai-canvas dev   # http://localhost:5373 (set AI_GATEWAY_API_KEY)
+
 # Hono (HTTP) + super-line (WS) on ONE port — uptime topic, shared todos, live cursors + a curl→WS bridge:
 pnpm --filter @super-line/example-hono build && pnpm --filter @super-line/example-hono start   # http://localhost:3000
 

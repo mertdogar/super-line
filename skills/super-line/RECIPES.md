@@ -332,7 +332,7 @@ h.close()
 - **Off-contract + unknown** — `data` is never schema-validated; assert the shape (`open<T>`). Route hard typed gates through a request (ADR-0003).
 - **Merge vs delete** — `update`/`write` merge top-level keys (never remove one); `delete(path)` is the only key removal. On the CRDT store it's surgical and merge-safe; use `set` only for a whole-document replace.
 - **In-process actor?** Use the server co-writer (`srv.store(ns).open(id)`), not a loopback client — reactive reads + delete, server-authoritative, no grant.
-- Runnable: the [`store`](https://github.com/mertdogar/super-line/tree/main/examples/store) (LWW) and [`store-sync-json`](https://github.com/mertdogar/super-line/tree/main/examples/store-sync-json) (CRDT) examples.
+- Runnable: the [`store`](https://github.com/mertdogar/super-line/tree/main/examples/store) (LWW) and [`store-sync-json`](https://github.com/mertdogar/super-line/tree/main/examples/store-sync-json) (CRDT) examples; [`ai-canvas`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas) is the agent co-writer end-to-end — a server-side LLM edits a shared canvas via `open(id)` (`update` + `delete(path)`), merging with users' concurrent edits.
 
 ## Synced state with a CRDT (Yjs / Automerge) — roll your own
 

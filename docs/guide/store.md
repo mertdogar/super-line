@@ -168,6 +168,11 @@ Center attribution. `update` and `write` **merge** top-level keys, so they can a
 never remove one — `delete(path)` is the only server-side key removal. On the CRDT store, that delete
 is surgical and merges with concurrent edits to other keys; see [Synced state](./synced-state).
 
+The [`ai-canvas` example](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas) is a
+full showcase: a server-side LLM agent co-edits a shared canvas through `open(id)` — reading the live
+board and driving it with tools mapped onto `update` (add/move/recolor) and `delete(path)` (remove),
+merging with users' concurrent edits.
+
 - **Cross-node.** Each Store declares a clustering mode. `relay` (both stores that ship) is node-local:
   super-line relays every change across nodes over the [adapter](./scaling-adapters) and converges each
   node's replica — no extra wiring. A `self` store owns a shared backend (Redis/Postgres) and handles

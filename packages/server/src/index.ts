@@ -26,6 +26,7 @@ import {
   type SReadFrame,
   type SChangeFrame,
   type ServerStore,
+  type ServerReplica,
   type Resource,
   type AccessRules,
   type Perms,
@@ -237,6 +238,13 @@ export interface ServerStoreHandle {
   delete(id: string): Promise<void>
   /** All Resource ids in this store. */
   list(): Promise<string[]>
+  /**
+   * Open a reactive in-process co-writer over a Resource's canonical state — the server half's mirror of
+   * `client.store(name).open(id)`. Reactive reads, merging `update`, and surgical `delete(path)` (the only
+   * way to remove a key server-side), all server-authoritative and fanned out to subscribers. `origin`
+   * (default `"server"`) tags its Changes for inspector attribution. Throws if the store has no `open`.
+   */
+  open(id: string, opts?: { origin?: string }): ServerReplica
 }
 
 /** Options for {@link createSuperLineServer}. */
@@ -1177,6 +1185,31 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       },
       list() {
         return Promise.resolve(store.list())
+      },
+      open(id, openOpts) {
+        if (!store.open)
+          throw new SuperLineError('UNSUPPORTED', `Store ${name} does not support reactive open()`)
+        const replica = store.open(id, openOpts)
+        if (!inspectorEnabled) return replica
+        // Surface server co-writes in the inspector (reusing store.write), attributed to this handle's origin.
+        const origin = openOpts?.origin ?? SERVER_ORIGIN
+        const emit = (data: unknown): void =>
+          emitInspectorEvent({ type: 'store.write', store: name, id, origin, data: safeSnapshot(data) })
+        return {
+          ...replica,
+          set: (d) => {
+            replica.set(d)
+            emit(d)
+          },
+          update: (p) => {
+            replica.update(p)
+            emit(p)
+          },
+          delete: (path) => {
+            replica.delete(path)
+            emit({ delete: path })
+          },
+        }
       },
     }
   }

@@ -140,3 +140,44 @@ describe('sqliteStoreServer (LWW)', () => {
     void s.close?.()
   })
 })
+
+describe('sqliteStoreServer (LWW) — server-side open() replica', () => {
+  it('getSnapshot reads persisted canonical state', async () => {
+    const s = sqliteStoreServer({ file: dbFile() })
+    await s.create('a', { n: 1 }, rules)
+    expect(s.open!('a').getSnapshot()).toEqual({ n: 1 })
+    void s.close?.()
+  })
+
+  it('set/update/delete co-write durably and fan out through onChange', async () => {
+    const s = sqliteStoreServer({ file: dbFile() })
+    await s.create('a', { keep: 1, drop: 2 }, rules)
+    const seen: StoreChange[] = []
+    s.onChange((c) => seen.push(c))
+    const h = s.open!('a', { origin: 'agent' })
+
+    h.update({ keep: 9 })
+    h.delete(['drop'])
+
+    expect((await s.read('a'))?.data).toEqual({ keep: 9 }) // persisted: merged then key removed
+    expect(seen.map((c) => c.origin)).toEqual(['agent', 'agent'])
+    void s.close?.()
+  })
+
+  it('subscribe fires for THIS id only; close releases it', async () => {
+    const s = sqliteStoreServer({ file: dbFile() })
+    await s.create('a', { n: 0 }, rules)
+    await s.create('b', { n: 0 }, rules)
+    const h = s.open!('a')
+    const cb = vi.fn()
+    h.subscribe(cb)
+    await s.apply({ id: 'b', update: { n: 1 }, origin: 'w' })
+    expect(cb).not.toHaveBeenCalled()
+    await s.apply({ id: 'a', update: { n: 1 }, origin: 'w' })
+    expect(cb).toHaveBeenCalledTimes(1)
+    h.close()
+    await s.apply({ id: 'a', update: { n: 2 }, origin: 'w' })
+    expect(cb).toHaveBeenCalledTimes(1)
+    void s.close?.()
+  })
+})

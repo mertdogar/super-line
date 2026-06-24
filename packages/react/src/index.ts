@@ -115,13 +115,18 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
 
   /**
    * Open a Store Resource and track it reactively: returns its latest `data` (`undefined` until the
-   * catch-up snapshot arrives) plus `set`/`update` to write through. `data` is untyped — stores are
+   * catch-up snapshot arrives) plus `set`/`update`/`delete` to write through. `data` is untyped — stores are
    * off-contract (ADR-0003) — so pass `T` to assert its shape. The handle is closed on unmount.
    */
   function useResource<T = unknown>(
     name: string,
     id: string,
-  ): { data: T | undefined; set: (value: T) => void; update: (partial: Partial<T>) => void } {
+  ): {
+    data: T | undefined
+    set: (value: T) => void
+    update: (partial: Partial<T>) => void
+    delete: (path: (string | number)[]) => void
+  } {
     const client = useClient()
     const [data, setData] = useState<T>()
     const handleRef = useRef<ResourceHandle | undefined>(undefined)
@@ -138,7 +143,8 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     }, [client, name, id])
     const set = useCallback((value: T) => handleRef.current?.set(value), [])
     const update = useCallback((partial: Partial<T>) => handleRef.current?.update(partial), [])
-    return { data, set, update }
+    const del = useCallback((path: (string | number)[]) => handleRef.current?.delete(path), [])
+    return { data, set, update, delete: del }
   }
 
   return { Provider, useClient, useEvent, useSubscription, useRequest, useResource }

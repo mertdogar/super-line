@@ -1,6 +1,6 @@
 {
   "name": "@super-line/react",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "description": "React hooks for super-line — useRequest, useEvent, useSubscription.",
   "license": "MIT",

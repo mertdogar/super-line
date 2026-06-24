@@ -1,5 +1,5 @@
-import { SuperLineError } from '@super-line/core'
-import type { ClientStore, Resource, ResourceReplica, ServerStore, StoreChange } from '@super-line/core'
+import { SuperLineError, removeAtPath } from '@super-line/core'
+import type { ClientStore, Resource, ResourceReplica, ServerReplica, ServerStore, StoreChange } from '@super-line/core'
 import { StoreValue, type StoreMode } from '@super-store/store'
 
 // A CRDT Store for super-line, backed by super-store's Yjs engine. The consistency model is *merge*:
@@ -94,6 +94,41 @@ export function syncStoreServer(opts?: SyncServerOptions): ServerStore {
         currentOrigin = SERVER_ORIGIN
       }
     },
+    open(id, openOpts) {
+      const e = get(id)
+      const origin = openOpts?.origin ?? SERVER_ORIGIN
+      const subs = new Set<() => void>()
+      // Mutate the canonical doc with this replica's origin so onUpdate stamps it onto the fanned-out Change.
+      // Synchronous (no await in the gap) so the origin can't bleed across an interleaved apply.
+      const withOrigin = (fn: () => void): void => {
+        currentOrigin = origin
+        try {
+          fn()
+        } finally {
+          currentOrigin = SERVER_ORIGIN
+        }
+      }
+      return {
+        getSnapshot: () => e.sv.getSnapshot(),
+        subscribe: (cb) => {
+          const off = e.sv.subscribe(cb)
+          subs.add(off)
+          return () => {
+            off()
+            subs.delete(off)
+          }
+        },
+        set: (data) => withOrigin(() => e.sv.set(data as Record<string, unknown>)),
+        update: (partial) => withOrigin(() => e.sv.update(partial as Record<string, unknown>)),
+        // Surgical key removal: read live canonical state, drop the path, set() (diff-and-patch) — the only
+        // delete-capable surface (update MERGES, so it can never remove a key). Atomic in-process.
+        delete: (path) => withOrigin(() => e.sv.set(removeAtPath(e.sv.getSnapshot(), path) as Record<string, unknown>)),
+        close: () => {
+          for (const off of subs) off()
+          subs.clear()
+        },
+      } satisfies ServerReplica
+    },
     setAccess(id, accessRules) {
       get(id).accessRules = accessRules
     },
@@ -158,6 +193,14 @@ class SyncReplica implements ResourceReplica {
   update(partial: unknown): StoreChange | null {
     this.pendingLocal = null
     return this.take(this.sv.update(partial as Record<string, unknown>))
+  }
+
+  // Surgical key removal: drop the path from a clone of the current value and `set` it (diff-and-patch), so
+  // only the removed key is rewritten — concurrent peer edits to sibling keys still merge. The lone delete-
+  // capable surface (`update` merges, so it can never remove a key).
+  delete(path: (string | number)[]): StoreChange | null {
+    this.pendingLocal = null
+    return this.take(this.sv.set(removeAtPath(this.sv.getSnapshot(), path) as Record<string, unknown>))
   }
 
   applyRemote(change: StoreChange): void {

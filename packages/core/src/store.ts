@@ -11,6 +11,28 @@
 
 type Awaitable<T> = T | Promise<T>
 
+/**
+ * Return a structural clone of `root` with the value at `path` removed — the surgical-delete primitive shared
+ * by every Store's replica halves. Clones only along the path (not a deep clone): fed to a diff-and-patch
+ * `set`, only the removed key is rewritten, so concurrent edits to sibling keys still merge. Never mutates
+ * `root` (the live snapshot must stay intact). `path === []` returns `root` unchanged.
+ */
+export const removeAtPath = (root: unknown, path: (string | number)[]): unknown => {
+  if (path.length === 0) return root
+  if (typeof root !== 'object' || root === null) return root
+  const [head, ...rest] = path
+  if (Array.isArray(root)) {
+    const next = root.slice()
+    if (rest.length === 0) next.splice(Number(head), 1)
+    else next[Number(head)] = removeAtPath(next[Number(head)], rest)
+    return next
+  }
+  const next: Record<string, unknown> = { ...(root as Record<string, unknown>) }
+  if (rest.length === 0) delete next[head as string]
+  else next[head as string] = removeAtPath(next[head as string], rest)
+  return next
+}
+
 /** The ACL identity a Resource's access is keyed by (`identify(conn) ?? conn.id`). */
 export type Principal = string
 
@@ -69,6 +91,13 @@ export interface ServerStore {
   list(): Awaitable<string[]>
   /** Subscribe to every applied mutation — the single fan-out source. Returns an unsubscribe fn. */
   onChange(cb: (change: StoreChange) => void): () => void
+  /**
+   * Open a reactive in-process replica over a Resource's canonical state — the server-side co-writer.
+   * Optional; stores opt in (those that don't, surface as "reactive open not supported"). Mutations made
+   * through it fan out via {@link ServerStore.onChange} exactly like {@link ServerStore.apply}. `origin`
+   * (default `"server"`) is stamped on its fan-out Changes for echo-break + inspector attribution.
+   */
+  open?(id: string, opts?: { origin?: string }): ServerReplica
   /** Release any resources held by the store. */
   close?(): Awaitable<void>
 }
@@ -96,6 +125,25 @@ export interface ResourceReplica {
   subscribe(cb: () => void): () => void
   set(data: unknown): StoreChange | null
   update(partial: unknown): StoreChange | null
+  /** Remove the value at `path` (a surgical key removal that merges, unlike a full-doc `set`). */
+  delete(path: (string | number)[]): StoreChange | null
   applyRemote(change: StoreChange): void
   seed(snapshot: unknown): void
+}
+
+/**
+ * A reactive **server-side** replica over one Resource's canonical state — the server half's mirror of
+ * {@link ResourceReplica}, simpler because the server mutates canonical state directly: there is no wire to
+ * send up (no return Change to forward) and no second copy to reconcile (no `applyRemote`/`seed`). `set`/
+ * `update`/`delete` mutate canonical state in place and fan out through {@link ServerStore.onChange}; reads
+ * are live and `subscribe` reflects every applied mutation (local co-writes AND relayed remote Changes).
+ * Returned by {@link ServerStore.open}; surfaced to apps as `srv.store(name).open(id)`.
+ */
+export interface ServerReplica {
+  getSnapshot(): unknown
+  subscribe(cb: () => void): () => void
+  set(data: unknown): void
+  update(partial: unknown): void
+  delete(path: (string | number)[]): void
+  close(): void
 }

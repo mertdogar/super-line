@@ -1,8 +1,11 @@
-import { SuperLineError } from '@super-line/core'
-import type { ClientStore, Resource, ResourceReplica, ServerStore, StoreChange } from '@super-line/core'
+import { SuperLineError, removeAtPath } from '@super-line/core'
+import type { ClientStore, Resource, ResourceReplica, ServerReplica, ServerStore, StoreChange } from '@super-line/core'
 
 /** A per-writer id (origin). Not security-sensitive — just needs to be unique per client instance. */
 const randomId = (): string => Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+
+/** Default origin stamped on a server-side co-write (matches the server's `srv.store(ns).write`). */
+const SERVER_ORIGIN = 'server'
 
 /**
  * The in-memory, last-writer-wins **server half**. Holds Resources in a `Map`; a write replaces the
@@ -19,6 +22,13 @@ export function memoryStoreServer(): ServerStore {
     return r
   }
 
+  // Single mutation path: swap the LWW value (the update IS the full new value) and fan out. Used by both
+  // `apply` (relayed/client writes) and the server-side replica's set/update/delete co-writes.
+  const commit = (change: StoreChange): void => {
+    get(change.id).data = change.update
+    for (const cb of listeners) cb(change)
+  }
+
   return {
     clustering: 'relay',
     read(id) {
@@ -29,9 +39,41 @@ export function memoryStoreServer(): ServerStore {
       resources.set(id, { id, accessRules, data })
     },
     apply(change) {
-      const r = get(change.id)
-      r.data = change.update // LWW: the update IS the full new value
-      for (const cb of listeners) cb(change) // single fan-out source
+      commit(change) // LWW replace + single fan-out source
+    },
+    open(id, openOpts) {
+      get(id) // NOT_FOUND if absent
+      const origin = openOpts?.origin ?? SERVER_ORIGIN
+      const subs = new Set<() => void>()
+      const snap = (): unknown => resources.get(id)?.data
+      return {
+        getSnapshot: snap,
+        subscribe: (cb) => {
+          const wrap = (c: StoreChange): void => {
+            if (c.id === id) cb()
+          }
+          listeners.add(wrap)
+          const off = (): void => void listeners.delete(wrap)
+          subs.add(off)
+          return () => {
+            off()
+            subs.delete(off)
+          }
+        },
+        // LWW: every write replaces the whole value. delete/update must build a NEW value (read returns the
+        // LIVE object + commit swaps by reference), so the prior snapshot is never mutated in place.
+        set: (data) => commit({ id, update: data, origin }),
+        update: (partial) => {
+          const cur = snap()
+          const base = typeof cur === 'object' && cur !== null ? (cur as object) : {}
+          commit({ id, update: { ...base, ...(partial as object) }, origin })
+        },
+        delete: (path) => commit({ id, update: removeAtPath(snap(), path), origin }),
+        close: () => {
+          for (const off of subs) off()
+          subs.clear()
+        },
+      } satisfies ServerReplica
     },
     setAccess(id, accessRules) {
       get(id).accessRules = accessRules
@@ -87,6 +129,12 @@ class LwwReplica implements ResourceReplica {
   update(partial: unknown): StoreChange | null {
     const base = typeof this.value === 'object' && this.value !== null ? this.value : {}
     return this.set({ ...base, ...(partial as object) })
+  }
+
+  // Drop the value at `path` and replace (LWW). `removeAtPath` returns a fresh value, so `set`'s identity
+  // guard sees a change and the prior snapshot is never mutated in place.
+  delete(path: (string | number)[]): StoreChange | null {
+    return this.set(removeAtPath(this.value, path))
   }
 
   applyRemote(change: StoreChange): void {

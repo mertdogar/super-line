@@ -198,6 +198,56 @@ describe('store — wire (ACL + catch-up + fan-out)', () => {
     alice.close()
   })
 
+  it('a server open(id, {origin}) co-write fans out stamped with that custom origin', async () => {
+    await env.srv.store('docs').create('o1', { v: 0 }, { alice: { read: true, write: true } })
+    const alice = rawClient(env.transport, 'alice')
+    await alice.opened
+    await alice.req({ t: 'sopen', n: 'docs', id: 'o1' })
+
+    const h = env.srv.store('docs').open('o1', { origin: 'agent:42' })
+    h.set({ v: 7 })
+    await flush()
+
+    expect(alice.changes().find((f) => f.id === 'o1')).toMatchObject({ t: 'sch', id: 'o1', u: { v: 7 }, o: 'agent:42' })
+    h.close()
+    alice.close()
+  })
+
+  it('a server open(id).delete(path) fans out the key removal', async () => {
+    await env.srv.store('docs').create('o2', { keep: 1, drop: 2 }, { alice: { read: true, write: true } })
+    const alice = rawClient(env.transport, 'alice')
+    await alice.opened
+    await alice.req({ t: 'sopen', n: 'docs', id: 'o2' })
+
+    const h = env.srv.store('docs').open('o2')
+    h.delete(['drop'])
+    await flush()
+
+    expect(alice.changes().find((f) => f.id === 'o2')).toMatchObject({ t: 'sch', id: 'o2', u: { keep: 1 } })
+    h.close()
+    alice.close()
+  })
+
+  it('open on a store without reactive open() throws', () => {
+    const bare = {
+      clustering: 'relay' as const,
+      read: () => ({ id: 'x', accessRules: {}, data: {} }),
+      create: () => {},
+      apply: () => {},
+      setAccess: () => {},
+      delete: () => {},
+      list: () => [],
+      onChange: () => () => {},
+    }
+    const srv2 = createSuperLineServer(contract, {
+      transports: [createLoopbackTransport().server],
+      authenticate: (h) => ({ role: 'user' as const, ctx: { uid: h.query.uid } }),
+      stores: { bare },
+    })
+    expect(() => srv2.store('bare').open('x')).toThrow(/does not support reactive open/)
+    void srv2.close()
+  })
+
   it('grant lets a previously-denied principal open', async () => {
     await env.srv.store('docs').create('d6', { v: 1 }, { alice: { read: true, write: true } })
     const dave = rawClient(env.transport, 'dave')

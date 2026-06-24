@@ -89,4 +89,19 @@ describe('react hooks', () => {
     })
     await waitFor(() => expect(result.current.data).toEqual({ v: 2 }))
   })
+
+  it('useResource exposes delete(path) for surgical key removal', async () => {
+    const { client, srv } = await boot()
+    await srv.store('docs').create('d2', { keep: 1, drop: 2 }, { tester: { read: true, write: true } })
+
+    const { result } = renderHook(() => useResource<{ keep: number; drop?: number }>('docs', 'd2'), {
+      wrapper: wrapper(client),
+    })
+    await waitFor(() => expect(result.current.data).toEqual({ keep: 1, drop: 2 }))
+
+    await act(async () => {
+      result.current.delete(['drop'])
+    })
+    await waitFor(() => expect(result.current.data).toEqual({ keep: 1 }))
+  })
 })

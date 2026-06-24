@@ -155,3 +155,154 @@ describe('store-sync (CRDT) — document mode', () => {
     })
   })
 })
+
+// Design A — the server half can open a reactive in-process replica over canonical state,
+// symmetric to the client's open(id). It is the delete-capable, reactive server co-writer.
+describe('store-sync (CRDT) — server-side ServerReplica (Design A)', () => {
+  let env: ReturnType<typeof setupDoc>
+  beforeEach(() => {
+    env = setupDoc()
+  })
+  afterEach(async () => {
+    for (const c of env.clients) c.close()
+    await env.srv.close()
+  })
+
+  it('open(id) gives a server-side handle that reads canonical state', async () => {
+    await env.srv.store('docs').create('scene', { el: { x: 1, color: 'red' } }, rules)
+    const h = env.srv.store('docs').open('scene')
+    expect((h.getSnapshot() as Scene).el.x).toBe(1)
+    h.close()
+  })
+
+  it('delete(path) removes a key and fans out the removal to a client', async () => {
+    await env.srv.store('docs').create('scene', { elements: { e1: { x: 1 }, e2: { x: 2 } } }, rules)
+    const cl = env.makeClient('alice').store('docs').open('scene')
+    await cl.ready
+    const agent = env.srv.store('docs').open('scene')
+
+    agent.delete(['elements', 'e1'])
+
+    await waitFor(() => (cl.getSnapshot() as { elements: Record<string, unknown> }).elements.e1 === undefined)
+    expect((cl.getSnapshot() as { elements: Record<string, unknown> }).elements.e2).toEqual({ x: 2 })
+    agent.close()
+  })
+
+  it('a server delete MERGES with a concurrent client edit to a sibling key (no clobber)', async () => {
+    await env.srv.store('docs').create('scene', { elements: { e1: { x: 1 }, e2: { x: 2 } } }, rules)
+    const cl = env.makeClient('alice').store('docs').open('scene')
+    await cl.ready
+    const agent = env.srv.store('docs').open('scene')
+
+    // concurrent: client edits e2.x, agent deletes e1 — the surgical delete must not clobber e2's edit
+    cl.update({ elements: { e2: { x: 99 } } })
+    agent.delete(['elements', 'e1'])
+
+    type Els = { elements: Record<string, { x: number } | undefined> }
+    await waitFor(() => {
+      const s = cl.getSnapshot() as Els
+      return s.elements.e1 === undefined && s.elements.e2?.x === 99
+    })
+    expect((env.srv.store('docs').open('scene').getSnapshot() as Els).elements.e2?.x).toBe(99) // canonical too
+    agent.close()
+  })
+
+  it('subscribe reactively reflects a client write (the read side)', async () => {
+    await env.srv.store('docs').create('scene', { el: { x: 1, color: 'red' } }, rules)
+    const agent = env.srv.store('docs').open('scene')
+    let fired = 0
+    agent.subscribe(() => fired++)
+    const cl = env.makeClient('alice').store('docs').open('scene')
+    await cl.ready
+
+    cl.update({ el: { x: 7 } })
+
+    await waitFor(() => (agent.getSnapshot() as Scene).el.x === 7)
+    expect(fired).toBeGreaterThan(0)
+    expect((agent.getSnapshot() as Scene).el.color).toBe('red') // merge, not replace
+    agent.close()
+  })
+
+  it('update co-writes (merge) and fans out, preserving untouched fields', async () => {
+    await env.srv.store('docs').create('scene', { el: { x: 1, color: 'red' } }, rules)
+    const cl = env.makeClient('alice').store('docs').open('scene')
+    await cl.ready
+    const agent = env.srv.store('docs').open('scene')
+
+    agent.update({ el: { x: 5 } })
+
+    await waitFor(() => (cl.getSnapshot() as Scene).el.x === 5)
+    expect((cl.getSnapshot() as Scene).el.color).toBe('red') // untouched field survives
+    agent.close()
+  })
+
+  it('close() releases the handle listener; sibling handles + canonical state stay live', async () => {
+    await env.srv.store('docs').create('scene', { el: { x: 0, color: 'red' } }, rules)
+    const a = env.srv.store('docs').open('scene')
+    const b = env.srv.store('docs').open('scene')
+    let aFired = 0
+    let bFired = 0
+    a.subscribe(() => aFired++)
+    b.subscribe(() => bFired++)
+    const cl = env.makeClient('alice').store('docs').open('scene')
+    await cl.ready
+
+    cl.update({ el: { x: 1 } })
+    await waitFor(() => (b.getSnapshot() as Scene).el.x === 1)
+    const aBeforeClose = aFired
+
+    a.close()
+    cl.update({ el: { x: 2 } })
+    await waitFor(() => (b.getSnapshot() as Scene).el.x === 2)
+
+    expect(aFired).toBe(aBeforeClose) // a's listener released — no further notifications
+    expect(bFired).toBeGreaterThan(0) // b still live
+    expect((b.getSnapshot() as Scene).el.x).toBe(2) // canonical state intact, b reads it
+    b.close()
+  })
+})
+
+// R4 — the CLIENT replica gets the same surgical delete(path), so a browser mirror can remove an element
+// without the full-document `set` that clobbers a concurrent peer's edit to other elements.
+describe('store-sync (CRDT) — client delete(path) (R4)', () => {
+  let env: ReturnType<typeof setupDoc>
+  beforeEach(() => {
+    env = setupDoc()
+  })
+  afterEach(async () => {
+    for (const c of env.clients) c.close()
+    await env.srv.close()
+  })
+
+  it('removes a key locally and propagates the removal to a peer', async () => {
+    await env.srv.store('docs').create('scene', { elements: { e1: { x: 1 }, e2: { x: 2 } } }, rules)
+    const ha = env.makeClient('alice').store('docs').open('scene')
+    const hb = env.makeClient('bob').store('docs').open('scene')
+    await Promise.all([ha.ready, hb.ready])
+
+    ha.delete(['elements', 'e1'])
+
+    type Els = { elements: Record<string, unknown> }
+    expect((ha.getSnapshot() as Els).elements.e1).toBeUndefined() // optimistic local removal
+    await waitFor(() => (hb.getSnapshot() as Els).elements.e1 === undefined)
+    expect((hb.getSnapshot() as Els).elements.e2).toEqual({ x: 2 })
+  })
+
+  it('a client delete MERGES with a concurrent peer edit to a sibling key (no clobber)', async () => {
+    await env.srv.store('docs').create('scene', { elements: { e1: { x: 1 }, e2: { x: 2 } } }, rules)
+    const ha = env.makeClient('alice').store('docs').open('scene')
+    const hb = env.makeClient('bob').store('docs').open('scene')
+    await Promise.all([ha.ready, hb.ready])
+
+    // bob edits e2 while alice deletes e1 — the surgical delete must not clobber bob's edit
+    hb.update({ elements: { e2: { x: 99 } } })
+    ha.delete(['elements', 'e1'])
+
+    type Els = { elements: Record<string, { x: number } | undefined> }
+    await waitFor(() => {
+      const a = ha.getSnapshot() as Els
+      const b = hb.getSnapshot() as Els
+      return a.elements.e1 === undefined && a.elements.e2?.x === 99 && b.elements.e1 === undefined && b.elements.e2?.x === 99
+    })
+  })
+})

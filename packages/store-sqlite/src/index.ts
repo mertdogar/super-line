@@ -1,6 +1,9 @@
 import Database from 'better-sqlite3'
-import { SuperLineError } from '@super-line/core'
+import { SuperLineError, removeAtPath } from '@super-line/core'
 import type { AccessRules, Resource, ServerStore, StoreChange } from '@super-line/core'
+
+/** Default origin stamped on a server-side co-write (matches the server's `srv.store(ns).write`). */
+const SERVER_ORIGIN = 'server'
 
 /** Options for {@link sqliteStoreServer}. */
 export interface SqliteStoreOptions {
@@ -43,6 +46,18 @@ export function sqliteStoreServer(opts: SqliteStoreOptions): ServerStore {
 
   const listeners = new Set<(change: StoreChange) => void>()
 
+  const readData = (id: string): unknown => {
+    const row = stmt.get.get(id) as Row | undefined
+    return row ? JSON.parse(row.data) : undefined
+  }
+  // Single mutation path: persist the replaced LWW value and fan out. Shared by `apply` (relayed/client
+  // writes) and the server-side replica's set/update/delete co-writes.
+  const commit = (change: StoreChange): void => {
+    const res = stmt.setData.run(JSON.stringify(change.update ?? null), change.id)
+    if (res.changes === 0) throw new SuperLineError('NOT_FOUND', `No resource: ${change.id}`)
+    for (const cb of listeners) cb(change)
+  }
+
   return {
     clustering: 'relay',
     read(id): Resource | undefined {
@@ -55,9 +70,38 @@ export function sqliteStoreServer(opts: SqliteStoreOptions): ServerStore {
       stmt.insert.run(id, JSON.stringify(data ?? null), JSON.stringify(accessRules))
     },
     apply(change) {
-      const res = stmt.setData.run(JSON.stringify(change.update ?? null), change.id)
-      if (res.changes === 0) throw new SuperLineError('NOT_FOUND', `No resource: ${change.id}`)
-      for (const cb of listeners) cb(change) // single fan-out source
+      commit(change) // LWW replace + single fan-out source
+    },
+    open(id, openOpts) {
+      if (!stmt.has.get(id)) throw new SuperLineError('NOT_FOUND', `No resource: ${id}`)
+      const origin = openOpts?.origin ?? SERVER_ORIGIN
+      const subs = new Set<() => void>()
+      return {
+        getSnapshot: () => readData(id),
+        subscribe: (cb) => {
+          const wrap = (c: StoreChange): void => {
+            if (c.id === id) cb()
+          }
+          listeners.add(wrap)
+          const off = (): void => void listeners.delete(wrap)
+          subs.add(off)
+          return () => {
+            off()
+            subs.delete(off)
+          }
+        },
+        set: (data) => commit({ id, update: data, origin }),
+        update: (partial) => {
+          const base = readData(id)
+          const merged = typeof base === 'object' && base !== null ? { ...(base as object), ...(partial as object) } : partial
+          commit({ id, update: merged, origin })
+        },
+        delete: (path) => commit({ id, update: removeAtPath(readData(id), path), origin }),
+        close: () => {
+          for (const off of subs) off()
+          subs.clear()
+        },
+      }
     },
     setAccess(id, accessRules) {
       const res = stmt.setAccess.run(JSON.stringify(accessRules), id)

@@ -57,6 +57,8 @@ export type {
 } from './inspector.js'
 
 export { PROTOCOL } from './wire.js'
+
+export { removeAtPath } from './store.js'
 export type {
   Frame,
   ClientFrame,
@@ -89,6 +91,7 @@ export type {
   ServerStore,
   ClientStore,
   ResourceReplica,
+  ServerReplica,
 } from './store.js'
 
 export type {

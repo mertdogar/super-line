@@ -1,6 +1,6 @@
 {
   "name": "@super-line/client",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "description": "Typesafe WebSocket client for super-line — typed calls, events, topics, auto-reconnect.",
   "license": "MIT",

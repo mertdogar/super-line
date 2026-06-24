@@ -103,6 +103,8 @@ export interface ResourceHandle {
   set(data: unknown): void
   /** Merge a partial update; the Change is sent to the server. */
   update(partial: unknown): void
+  /** Surgically remove the value at `path` (key removal that merges, unlike a full-doc `set`); sent to the server. */
+  delete(path: (string | number)[]): void
   /** Resolves once the catch-up snapshot has been applied; rejects if the open is denied. */
   readonly ready: Promise<void>
   /** Stop receiving changes and tell the server to unsubscribe. */
@@ -238,7 +240,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     settled: boolean
   }
   const openResources = new Map<string, OpenEntry>()
-  const openKey = (store: string, id: string): string => store + ' ' + id
+  const openKey = (store: string, id: string): string => store + '\u0000' + id
 
   // resolve contract defs from this role's effective surface (shared ∪ role)
   function reqDef(method: string): RequestDef | undefined {
@@ -570,6 +572,10 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       },
       update: (partial) => {
         const change = replica.update(partial)
+        if (change) sendStoreWrite(store, change)
+      },
+      delete: (path) => {
+        const change = replica.delete(path)
         if (change) sendStoreWrite(store, change)
       },
       ready: entry.ready.promise,

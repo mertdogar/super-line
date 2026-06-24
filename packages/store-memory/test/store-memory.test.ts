@@ -79,6 +79,57 @@ describe('memoryStoreServer (LWW)', () => {
   })
 })
 
+describe('memoryStoreServer (LWW) — server-side open() replica', () => {
+  it('getSnapshot reads canonical state live', async () => {
+    const s = memoryStoreServer()
+    await s.create('a', { n: 1 }, rules)
+    expect(s.open!('a').getSnapshot()).toEqual({ n: 1 })
+  })
+
+  it('set co-writes (replace) and fans out through onChange with the origin', async () => {
+    const s = memoryStoreServer()
+    await s.create('a', { n: 1 }, rules)
+    const seen: StoreChange[] = []
+    s.onChange((c) => seen.push(c))
+    s.open!('a', { origin: 'agent' }).set({ n: 2 })
+    expect((await s.read('a'))?.data).toEqual({ n: 2 })
+    expect(seen).toEqual([{ id: 'a', update: { n: 2 }, origin: 'agent' }])
+  })
+
+  it('update merges (shallow) and fans out', async () => {
+    const s = memoryStoreServer()
+    await s.create('a', { a: 1, b: 2 }, rules)
+    s.open!('a').update({ b: 3 })
+    expect((await s.read('a'))?.data).toEqual({ a: 1, b: 3 })
+  })
+
+  it('delete(path) removes a key WITHOUT mutating the prior snapshot in place (clobber-safe)', async () => {
+    const s = memoryStoreServer()
+    await s.create('a', { keep: 1, drop: 2 }, rules)
+    const h = s.open!('a')
+    const before = h.getSnapshot() // the live canonical object
+    h.delete(['drop'])
+    expect(h.getSnapshot()).toEqual({ keep: 1 })
+    expect(before).toEqual({ keep: 1, drop: 2 }) // prior snapshot untouched — a fresh value was set
+  })
+
+  it('subscribe fires for THIS id only; close releases it', async () => {
+    const s = memoryStoreServer()
+    await s.create('a', { n: 0 }, rules)
+    await s.create('b', { n: 0 }, rules)
+    const h = s.open!('a')
+    const cb = vi.fn()
+    h.subscribe(cb)
+    await s.apply({ id: 'b', update: { n: 1 }, origin: 'w' }) // other id — no fire
+    expect(cb).not.toHaveBeenCalled()
+    await s.apply({ id: 'a', update: { n: 1 }, origin: 'w' }) // this id — fires
+    expect(cb).toHaveBeenCalledTimes(1)
+    h.close()
+    await s.apply({ id: 'a', update: { n: 2 }, origin: 'w' }) // released
+    expect(cb).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('memoryStoreClient (LWW)', () => {
   it('distinct client instances get distinct origins', () => {
     expect(memoryStoreClient().origin).not.toBe(memoryStoreClient().origin)

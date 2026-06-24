@@ -1123,8 +1123,8 @@ importers:
         specifier: workspace:^
         version: link:../core
       '@super-store/store':
-        specifier: ^0.2.0
-        version: 0.2.0
+        specifier: ^0.3.0
+        version: 0.3.0
 
   packages/transport-http:
     dependencies:
@@ -2516,8 +2516,8 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@super-store/store@0.2.0':
-    resolution: {integrity: sha512-s5iVVBrKPP2Fw8yBVgKBrRSbgPo73u6oec5qji8jEQAnwm36s1JwERzGkPX5iyTd4s3sOwbEAc8L7h+u6E3uig==}
+  '@super-store/store@0.3.0':
+    resolution: {integrity: sha512-G7bVy9sZc9wRUX7cbqa6qBzQFkUvm5Mecrs+E9iqvsKgQeJ+JXSbH7Xtec2WuxdltJsczRVbuaSfe4Q6MijWkA==}
     engines: {node: '>=18'}
 
   '@swc/core-darwin-arm64@1.15.41':
@@ -6720,7 +6720,7 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@super-store/store@0.2.0':
+  '@super-store/store@0.3.0':
     dependencies:
       yjs: 13.6.31
 

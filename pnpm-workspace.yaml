@@ -10,4 +10,4 @@ allowBuilds:
   ssh2: false
   zeromq: true
 minimumReleaseAgeExclude:
-  - '@super-store/store@0.2.0'
+  - '@super-store/store'

@@ -3,7 +3,7 @@
 
 # super-line
 
-Typesafe WebSockets for TypeScript. **One contract is the single source of truth** — the server implements it, the client calls it, types flow end to end with no codegen. Use this guide when working with `@super-line/*` (`core` / `server` / `client` / `adapter-redis` / `react`). Not for socket.io, ws, or tRPC.
+Typesafe WebSockets for TypeScript. **One contract is the single source of truth** — the server implements it, the client calls it, types flow end to end with no codegen. Use this guide when working with `@super-line/*` (`core` / `server` / `client` / `adapter-redis` / `react` / `store-memory` / `store-sync` / `store-sqlite`). Not for socket.io, ws, or tRPC.
 
 ## Mental model
 
@@ -41,6 +41,7 @@ export const api = defineContract({
 | **room** | server API (`srv.room`) | server controls membership | broadcast a shared event to a group |
 | **server→client request** | `serverToClient: { input, output }` | server (awaits one reply) | asking a client: confirm, sync |
 | **cluster event bus** | **shared** topic (`serverToClient: { payload, subscribe: true }`) | anyone (`server.publish`); servers `server.subscribe`, clients `client.subscribe` | cluster-wide pub/sub: gossip, fleet tallies + a client stream from one declaration |
+| **store** | **off-contract** (`stores:` pair) | server creates + grants; client `open`s a Resource | permissioned real-time JSON docs (LWW / CRDT / SQLite), agent co-writers |
 
 ## Quick reference
 
@@ -61,7 +62,9 @@ export const api = defineContract({
 | Heartbeat / per-conn state / backpressure | `heartbeat: { interval, maxMissed }` · `data:` schema in a role → typed `conn.data` · `backpressure: { maxBufferedBytes, onExceed }` |
 | Client call/listen/subscribe | `await client.send(input)` · `client.on('event', cb)` · `client.subscribe('feed', cb)` (await `.ready`) |
 | Multi-node | pass `adapter: createRedisAdapter('redis://…')` to every server |
-| React | `createSuperLineHooks<typeof api, 'user'>()` → `Provider` / `useRequest` / `useEvent` / `useSubscription` |
+| React | `createSuperLineHooks<typeof api, 'user'>()` → `Provider` / `useRequest` / `useEvent` / `useSubscription` / `useResource` |
+| Store | configure `stores: { docs: memoryStoreServer() }` (or `syncStoreServer()` CRDT / `sqliteStoreServer({ file })`) + matching client half; server `srv.store('docs').create/grant/write/open`; client `client.store('docs').open(id)` → reactive `{ getSnapshot, subscribe, set, update, delete(path), ready, close }` |
+| Store co-writer | `srv.store('docs').open(id, { origin? })` → reactive in-process handle (`update`/`set`/`delete(path)`); the **only** way to delete a key server-side. React: `useResource<T>('docs', id)` |
 
 ## Rules
 
@@ -72,6 +75,7 @@ export const api = defineContract({
 - **ALWAYS** treat delivery as **at-most-once**: offline clients miss messages. Make handlers idempotent; re-run join flows after reconnect.
 - **ALWAYS** add `@super-line/adapter-redis` before running more than one server process, or rooms/topics/the cluster event bus only fan out within one node.
 - **ALWAYS** self-exclude on the bus (`if (from === srv.nodeId) return`) when you don't want to react to your own publish — `server.subscribe` has **local echo**.
+- **ALWAYS** treat a **Store as off-contract**: `data` is `unknown`, not schema-validated; assert the shape and route hard typed gates through a request. Stores are **deny-by-default** — `grant` a principal first. For an in-process actor (AI agent, bot), co-write via `srv.store(ns).open(id)` (reactive reads + the only server-side key `delete(path)`), not a loopback client.
 - **NEVER** trust client input — the server validates inbound automatically; keep schemas tight, don't bypass.
 
 ## Pitfalls
@@ -88,6 +92,7 @@ export const api = defineContract({
 - **Don't conflate the bus with EVENTS.** `conn.emit` / `room.broadcast` / `toConn(id).emit` / `toUser(id).emit` are server-*chosen* pushes (no client opt-in, no server-side subscribe). The bus is **opt-in** pub/sub on a shared topic. Both exist — events when the server picks recipients, the bus when subscribers opt in.
 - **JSON loses `Date`.** Use `z.coerce.date()` or a `superjson` serializer on **both** ends.
 - **The client is a proxy, not awaitable** — `await client.someRequest(...)`, never `await client`.
+- **A Store `write`/`update` MERGES — it can't delete a key.** To remove a key, `delete(path)` (client handle, or `srv.store(ns).open(id)` server-side). On the CRDT store it's surgical and merges with concurrent edits; a full-document `set` would clobber them. Store writes are optimistic + fire-and-forget (rejection → `onStoreError`, no rollback).
 
 ## ❌ → ✅
 

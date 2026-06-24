@@ -47,7 +47,7 @@
 | ↔️ **Req/res** | Unary `await client.x()` with typed errors, timeout & `AbortSignal`. |
 | 📣 **Events & rooms** | Server-pushed events; server-controlled room broadcasts. |
 | 📡 **Topics** | Client-subscribed pub/sub streams, authorized server-side. |
-| 🗄️ **Stores** | Permissioned, real-time JSON documents — a pluggable persisted-state primitive (in-memory LWW or a CRDT) with per-client access rules and a reactive client handle. |
+| 🗄️ **Stores** | Permissioned, real-time JSON documents — a pluggable persisted-state primitive (in-memory LWW or a CRDT) with per-client access rules, a reactive client handle, and a reactive in-process server co-writer (`srv.store(ns).open(id)`) that reads, merges, and surgically deletes. |
 | 🚌 **Cluster event bus** | `server.publish` / `server.subscribe` on a shared topic — cluster-wide pub/sub to server listeners (every node, local echo) and subscribed clients at once. |
 | 📨 **Server→client req/res** | `await srv.toConn(id).request(...)` — ask a client and await a typed reply, across nodes. |
 | 🛰️ **Presence & introspection** | `srv.local.*` (sync) + `srv.cluster.*` (counts, topology, `isOnline`) backed by a Redis registry. |
@@ -293,7 +293,7 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 
 ## Status
 
-Pre-1.0. **Implemented:** role-scoped contracts, req/res, events, rooms, topics, the cluster event bus (`server.publish`/`server.subscribe`), auth, reconnect, middleware, in-memory + Redis adapters, React hooks. **Not yet:** fire-and-forget client→server signals (every client→server is req/res today), mutable per-connection state, NATS adapter, wildcard/retained topics, session resume/replay, parameterized-topic type inference (topics are typed by exact contract key for now), backpressure safeguards.
+Pre-1.0. **Implemented:** role-scoped contracts, req/res, events, rooms, topics, Stores (LWW + CRDT, with a reactive server-side co-writer), the cluster event bus (`server.publish`/`server.subscribe`), auth, reconnect, middleware, in-memory + Redis adapters, React hooks. **Not yet:** fire-and-forget client→server signals (every client→server is req/res today), mutable per-connection state, NATS adapter, wildcard/retained topics, session resume/replay, parameterized-topic type inference (topics are typed by exact contract key for now), backpressure safeguards.
 
 ## License
 

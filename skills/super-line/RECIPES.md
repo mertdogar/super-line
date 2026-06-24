@@ -283,9 +283,60 @@ const srv = createSuperLineServer(api, { transports: [webSocketServerTransport({
 // every server process gets an adapter pointing at the same Redis; rooms, topics, AND the cluster event bus fan out across nodes.
 ```
 
-## Synced state with a CRDT (Yjs / Automerge)
+## Stores (permissioned real-time documents)
 
-super-line has no built-in shared-document type, but it's an ideal transport for one: keep a CRDT doc per room and relay **opaque** update bytes (base64-wrapped, so they ride the default JSON serializer). The **server holds the canonical doc** — so it persists state and can be a **co-writer** — and the doc's update observer is the single fan-out point. An `origin` tag marks who wrote each update so clients can break the echo.
+A **Store** is the built-in, off-contract persisted-state seam: named, permissioned JSON Resources `{ id, accessRules, data }` with a reactive client handle, a server-side co-writer, and a pluggable backend (in-memory LWW, a merging CRDT, or durable SQLite). Configure a server + client **pair** under matching keys.
+
+```ts
+// server — pick a backend per name; everything else is identical
+import { memoryStoreServer } from '@super-line/store-memory'      // LWW (default)
+// import { syncStoreServer } from '@super-line/store-sync'       // CRDT (merging) — one-line swap
+// import { sqliteStoreServer } from '@super-line/store-sqlite'   // durable LWW
+const srv = createSuperLineServer(api, {
+  transports: [webSocketServerTransport({ server })],
+  authenticate: (h) => ({ role: 'user' as const, ctx: { uid: h.query.uid } }),
+  identify: (conn) => conn.ctx.uid,                                // the ACL principal
+  stores: { docs: memoryStoreServer() },
+})
+// server-authoritative lifecycle (NO client wire for these); deny-by-default
+await srv.store('docs').create('note-1', { title: 'Draft', body: '' }, { alice: { read: true, write: true } })
+await srv.store('docs').grant('note-1', 'bob', { read: true, write: false })   // open access at runtime
+```
+
+```ts
+// client — the matching half under the same key
+import { memoryStoreClient } from '@super-line/store-memory'
+const client = createSuperLineClient(api, {
+  transport: webSocketClientTransport({ url }), role: 'user', params: { uid: 'alice' },
+  stores: { docs: memoryStoreClient() },
+  onStoreError: (err, { store, id }) => console.warn('write denied', store, id, err),  // optimistic: no rollback
+})
+const note = client.store('docs').open<{ title: string; body: string }>('note-1')
+await note.ready                              // getSnapshot() is undefined until catch-up
+note.subscribe(() => render(note.getSnapshot()))
+note.update({ title: 'Shipping plan' })       // optimistic + fanned to other subscribers
+note.delete(['body'])                         // surgical key removal (merges; a full `set` would clobber a peer)
+note.close()
+```
+
+```ts
+// server-side co-writer — for an IN-PROCESS AI agent / bot / validator. NOT a loopback client:
+const h = srv.store('docs').open('note-1', { origin: 'agent:42' })
+h.subscribe(() => render(h.getSnapshot()))    // reactive reads — sees clients' edits live
+h.update({ title: 'Curated' })                // merge a co-write
+h.delete(['body'])                            // the ONLY way to delete a key server-side (write/update merge)
+h.close()
+```
+
+- **One plumbing, two consistency models** — swap the `memory*` pair for `syncStoreServer()`/`syncStoreClient()` to go from last-writer-wins to a **merging CRDT** (concurrent edits to different fields converge). Nothing else changes; for document-mode merge pass the SAME `resolveOptions` to both halves.
+- **Off-contract + unknown** — `data` is never schema-validated; assert the shape (`open<T>`). Route hard typed gates through a request (ADR-0003).
+- **Merge vs delete** — `update`/`write` merge top-level keys (never remove one); `delete(path)` is the only key removal. On the CRDT store it's surgical and merge-safe; use `set` only for a whole-document replace.
+- **In-process actor?** Use the server co-writer (`srv.store(ns).open(id)`), not a loopback client — reactive reads + delete, server-authoritative, no grant.
+- Runnable: the [`store`](https://github.com/mertdogar/super-line/tree/main/examples/store) (LWW) and [`store-sync-json`](https://github.com/mertdogar/super-line/tree/main/examples/store-sync-json) (CRDT) examples.
+
+## Synced state with a CRDT (Yjs / Automerge) — roll your own
+
+For most apps, prefer the built-in **Store** seam above — `store-sync` is exactly this CRDT relay, batteries-included. Roll your own only when you need to **own the wire** (custom rooms, your own message shapes, no Store abstraction). super-line has no built-in shared-document type, but it's an ideal transport for one: keep a CRDT doc per room and relay **opaque** update bytes (base64-wrapped, so they ride the default JSON serializer). The **server holds the canonical doc** — so it persists state and can be a **co-writer** — and the doc's update observer is the single fan-out point. An `origin` tag marks who wrote each update so clients can break the echo.
 
 ```ts
 // contract.ts — carries opaque base64 CRDT bytes

@@ -68,6 +68,33 @@ as eventually-consistent last-word correction; route anything that needs a hard 
 permissions) through a normal [request](./requests). (See ADR-0003.)
 :::
 
+### A reactive in-process co-writer
+
+`write` is fire-and-forget, and a merge can only **add or change** keys — it can't express a key
+*removal*. For a server-side co-writer that reads the live merged document and edits it over time — an
+AI agent driving the same scene as a browser user, say — open a reactive handle instead. It runs
+in-process over the canonical document, so it reads reactively and writes without a transport:
+
+```ts
+const scene = srv.store('docs').open('plan', { origin: 'agent:42' })
+
+scene.subscribe(render) // sees the user's merged edits, live — the reactive read side
+scene.update({ priority: 5 }) // merge a field
+scene.delete(['draft']) // remove a key — merges with concurrent edits to other keys
+scene.close()
+```
+
+`delete(path)` is the only way to remove a key from a CRDT document, since `update` and `write` merge.
+It's **surgical**: it removes just that key, so a concurrent edit to a *different* key still survives
+the merge — the same convergence guarantee as any other edit. Because the handle reads and writes the
+canonical document in-process, a delete is atomic and never clobbers a concurrent edit. (Across nodes a
+`relay` store resolves a delete last-writer-wins, like every write — see [Scaling](./scaling-adapters).)
+
+The same `delete(path)` is on the **client** handle, so a browser can remove one element without a
+full-document `set` — which would otherwise clobber a peer's concurrent edits to other elements. Reach
+for `update` to add or change, `delete(path)` to remove, and `set` only for a genuine whole-document
+replace.
+
 ## Catch-up & reconnect
 
 `open(id)` seeds the replica from the server's current canonical state — the full CRDT document, sent

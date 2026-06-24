@@ -111,6 +111,7 @@ console.log(note.getSnapshot()) // { title: 'Draft', body: '' }
 const off = note.subscribe(() => render(note.getSnapshot()))
 note.update({ title: 'Shipping plan' }) // optimistic locally, fanned to other subscribers
 note.set({ title: 'Reset', body: '' }) // replace the whole value
+note.delete(['body']) // surgically remove a key by path (merges, unlike a full-value set)
 off()
 note.close() // drops the server subscription when the last handle for this id closes
 ```
@@ -138,11 +139,34 @@ In React, [`useResource`](./react) wraps all of this — open, subscribe, write-
 unmount:
 
 ```tsx
-const { data, set, update } = useResource<Note>('docs', 'note-1')
-// data is undefined until catch-up; set replaces, update merges a partial
+const { data, set, update, delete: remove } = useResource<Note>('docs', 'note-1')
+// data is undefined until catch-up; set replaces, update merges a partial, delete removes a key by path
 ```
 
-## Scaling & observability
+## A reactive server-side co-writer
+
+`write` is the one-shot server co-write. When a server-side actor needs to **read reactively and edit
+over time** — an AI agent, a moderation bot, a validator, a scheduled job — open a reactive handle with
+`srv.store(name).open(id)`. It's the server-half mirror of the client's `open(id)`: it runs in-process
+over the canonical state, so it's server-authoritative (no ACL) and needs no transport.
+
+```ts
+const note = srv.store('docs').open('note-1', { origin: 'agent:42' }) // origin tags its writes
+
+note.getSnapshot()                    // the live canonical value
+const off = note.subscribe(redraw)    // fires on every client edit — the reactive read side
+note.update({ title: 'Curated' })     // merge a co-write
+note.delete(['body'])                 // remove a key — the only way to delete server-side (see below)
+note.set({ title: 'Reset', body: '' }) // replace the whole value
+off()
+note.close()                          // release the subscription
+```
+
+Both stores that ship support `open`. Its `set` / `update` / `delete` fan out to subscribers exactly
+like a client write, and `origin` (default `"server"`) tags each change for echo-break and Control
+Center attribution. `update` and `write` **merge** top-level keys, so they can add or change a key but
+never remove one — `delete(path)` is the only server-side key removal. On the CRDT store, that delete
+is surgical and merges with concurrent edits to other keys; see [Synced state](./synced-state).
 
 - **Cross-node.** Each Store declares a clustering mode. `relay` (both stores that ship) is node-local:
   super-line relays every change across nodes over the [adapter](./scaling-adapters) and converges each

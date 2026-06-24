@@ -81,6 +81,7 @@ interface SuperLineServerOptions<C, A> {
   describeConn?: (conn) => Record<string, unknown>  // extra fields merged into the cluster descriptor (ctx never auto-serialized)
   heartbeat?: { interval?: number; maxMissed?: number } | false  // default { interval: 30_000 }; maxMissed -> reap
   inspector?: boolean                          // gate msg.* telemetry; also pass inspector:true to webSocketServerTransport
+  stores?: Record<string, ServerStore>         // configured Stores, keyed by name (match the client). See Stores below.
 }
 // path + backpressure now live on the transport: webSocketServerTransport({ server, path, backpressure })
 // The Backpressure type lives in @super-line/transport-websocket (no longer in @super-line/server).
@@ -102,6 +103,7 @@ interface SuperLineServer<C, A> {
   // targeted cross-node send (no registry lookup on the delivery path)
   toConn(id: string): ConnTarget<C>                                  // one connection, any node
   toUser(userId: string): UserTarget<C>                              // all of a user's connections, any node
+  store(name: string): ServerStoreHandle                             // configured Store (off-contract); throws NOT_FOUND if unconfigured. See Stores below.
   close(): Promise<void>                                              // idempotent; closes conns + cleans registry + adapter + ws
 }
 
@@ -192,6 +194,8 @@ interface SuperLineClientOptions<C, R> {
   reconnectBaseMs?: number                      // default 500
   reconnectMaxMs?: number                       // default 30000
   reconnectFactor?: number                      // default 2
+  stores?: Record<string, ClientStore>         // client halves of the Store pairs, keyed to match the server
+  onStoreError?: (error, info: { store: string; id: string }) => void   // a rejected store write (e.g. FORBIDDEN)
 }
 // url + a custom WebSocket impl now live on the transport: webSocketClientTransport({ url, WebSocket }).
 // Other transports (HTTP/SSE, libp2p) are available — see the Transports guide.
@@ -203,6 +207,7 @@ type SuperLineClient<C, R> = {
   on<E extends keyof Events<C, R>>(event: E, handler: (data) => void): () => void   // returns unsubscribe
   subscribe<T extends keyof Topics<C, R>>(topic: T, handler: (data) => void): Subscription
   implement(handlers: { [K in keyof ServerRequests<C, R>]?: (input) => Awaitable<output> }): void  // answer server→client requests; throw SuperLineError for typed failure
+  store(name: string): ClientStoreHandle           // configured Store; throws NOT_FOUND if unconfigured. See Stores below.
   close(): void
   readonly connected: boolean
   readonly role: R
@@ -240,6 +245,73 @@ createSuperLineHooks<C, R extends keyof C['roles']>(): {
     data?; error?: unknown; isLoading: boolean
     call: (input) => Promise<output>
   }
+  useResource<T>(name: string, id: string): {       // open a Store Resource; closes on unmount
+    data: T | undefined                              // undefined until catch-up
+    set: (value: T) => void                          // replace
+    update: (partial: Partial<T>) => void            // merge
+    delete: (path: (string | number)[]) => void      // surgical key removal
+  }
 }
 ```
 Create the client once (e.g. `useState(() => createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user' }))`, `webSocketClientTransport` from `@super-line/transport-websocket`), wrap with `<Provider client={client}>`, then use the hooks inside.
+
+## Stores (@super-line/store-memory · @super-line/store-sync · @super-line/store-sqlite)
+
+A Store is super-line's **off-contract** persisted-state seam: named, permissioned JSON Resources `{ id, accessRules, data }`. Configure a server + client pair under matching `stores:` keys. `data` is `unknown` end-to-end (not schema-validated). ACL is **deny-by-default**, keyed by the principal (`identify(conn) ?? conn.id`).
+
+```ts
+// each store package ships a server + client half:
+memoryStoreServer(): ServerStore                                   // LWW, in-memory (default)
+memoryStoreClient(opts?: { origin?: string }): ClientStore
+syncStoreServer(opts?: { resolveOptions?: (id) => { mode?: 'shallow' | 'document'; opaque?: string[] } }): ServerStore  // CRDT (Yjs)
+syncStoreClient(opts?: { origin?; resolveOptions? }): ClientStore  // pass the SAME resolveOptions to BOTH halves (no config drift)
+sqliteStoreServer(opts: { file: string; table?: string }): ServerStore  // durable LWW (better-sqlite3); pair with memoryStoreClient()
+
+// SERVER — srv.store(name): server-authoritative; create/grant/revoke/delete have NO client wire
+interface ServerStoreHandle {
+  create(id, data, accessRules: Record<Principal, { read: boolean; write: boolean }>): Promise<void>
+  read(id): Promise<Resource | undefined>            // admin read, bypasses ACL
+  write(id, data): Promise<void>                      // one-shot co-write; LWW replace / CRDT MERGE; origin 'server'
+  grant(id, principal, { read, write }): Promise<void>
+  revoke(id, principal): Promise<void>
+  delete(id): Promise<void>                           // remove the WHOLE Resource
+  list(): Promise<string[]>
+  open(id, opts?: { origin?: string }): ServerReplica // reactive in-process co-writer ↓
+}
+// reactive co-writer over canonical state — server-authoritative, no transport, no ACL:
+interface ServerReplica {
+  getSnapshot(): unknown
+  subscribe(cb: () => void): () => void               // fires on every applied change, incl. client edits (the reactive read side)
+  set(data): void                                     // replace
+  update(partial): void                               // MERGE top-level keys
+  delete(path: (string | number)[]): void             // remove a key — the ONLY server-side key removal; atomic in-process
+  close(): void
+}
+
+// CLIENT — client.store(name):
+interface ClientStoreHandle {
+  open(id): ResourceHandle                            // reactive: catch-up snapshot + live changes + write-through
+  read(id): Promise<unknown>                          // one-shot
+  write(id, data): Promise<void>                      // one-shot
+}
+interface ResourceHandle {
+  getSnapshot(): unknown                              // undefined until `ready`
+  subscribe(cb: () => void): () => void
+  set(data): void                                     // optimistic + fire-and-forget (rejection → onStoreError, no rollback)
+  update(partial): void
+  delete(path: (string | number)[]): void            // surgical key removal (merges on CRDT, unlike a full-doc set)
+  readonly ready: Promise<void>                       // resolves after catch-up; rejects FORBIDDEN/NOT_FOUND
+  close(): void                                       // drops the server subscription when the last handle for this id closes
+}
+// core types: Resource<T> { id, accessRules: AccessRules, data: T }; AccessRules = Record<Principal, Perms>;
+//   Perms { read, write }; Principal = string; StoreChange { id, update, origin }; ServerStore / ClientStore / ServerReplica / ResourceReplica.
+//   removeAtPath(root, path: (string|number)[]): unknown — structural-clone delete helper, exported from core; used by both halves.
+```
+
+Notes:
+- **Off-contract + unknown.** `data` is never schema-validated (a CRDT delta can't be); pass a type to `open<T>` / `useResource<T>` and assert it. Route hard typed gates through a request (ADR-0003).
+- **Deny-by-default.** `grant` a principal before it can read/write. Server-side ops (`create`/`grant`/`open`/`write`) are server-authoritative and bypass ACL.
+- **Merge vs delete.** `update`/`write` MERGE and can't remove a key; `delete(path)` is the only key removal. On the CRDT store it's surgical — a concurrent edit to another key survives; a full-document `set` would clobber it.
+- **In-process co-writer.** `srv.store(ns).open(id)` is the right tool for a server-side AI agent / bot: reactive reads + delete, no loopback client and no grant. `origin` (default `'server'`) tags writes for echo-break + Control Center.
+- **Clustering.** Both shipped stores are `relay` (node-local; super-line relays changes across nodes). Reads/deletes are atomic in-process; across nodes they resolve last-writer-wins.
+- React: `useResource<T>(name, id)` wraps open + subscribe + write-through + unmount-close (see above).

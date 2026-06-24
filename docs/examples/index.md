@@ -20,6 +20,16 @@ A live React chat (Vite + a WS server). Open two browser tabs to chat in real ti
 pnpm --filter @super-line/example-react-chat dev   # http://localhost:5173
 ```
 
+## advanced-chat-app — a Slack-like app, persisted to SQLite
+
+A polished Slack clone (Vite + React 19 + Tailwind v4 + shadcn/ui, using the [shadcn-chat](https://shadcn-chat.vercel.app) blocks): a channel sidebar with **live unread badges**, presence, typing indicators, and a create-channel button. Channels and message history live in a [Store](/guide/store) and are **persisted to SQLite** via [`@super-line/store-sqlite`](/guide/store) — so the workspace survives a server restart and streams live to every client. The server is the sole writer (`createChannel`/`send` requests); clients read the channel index and per-channel message Resources with [`useResource`](/guide/react). Open two windows (`?name=ada`, `?name=bob`).
+
+```bash
+pnpm --filter @super-line/example-advanced-chat-app dev   # http://localhost:5173
+```
+
+Demonstrates: [stores](/guide/store) + durable persistence, [requests](/guide/requests), [topics](/guide/topics), [React hooks](/guide/react).
+
 ## store — a permissioned document store
 
 A scripted, single-process demo of the [Store](/guide/store) primitive on the in-memory LWW backend. The server creates a permissioned note and assigns per-user access; two users open it and one's write reaches the other live; a read-only user is denied a write (`FORBIDDEN`); a third user can't open the doc until the server grants access at runtime; and the server co-writes the document.

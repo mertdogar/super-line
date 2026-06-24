@@ -4,5 +4,5 @@
     "noEmit": true
   },
   "include": ["packages/*/src", "packages/*/test", "examples/*/src"],
-  "exclude": ["packages/control-center"]
+  "exclude": ["packages/control-center", "examples/advanced-chat-app"]
 }

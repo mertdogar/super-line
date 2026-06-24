@@ -196,6 +196,10 @@ pnpm --filter @super-line/example-chat start
 # Browser React chat (Vite + WS server; open two tabs to chat live):
 pnpm --filter @super-line/example-react-chat dev   # http://localhost:5173
 
+# Slack-like chat (Vite + React 19 + shadcn) — channels, presence, typing, unread badges, with
+# channels + history persisted to SQLite via store-sqlite (survives a server restart):
+pnpm --filter @super-line/example-advanced-chat-app dev   # http://localhost:5173
+
 # Collaborative canvas — synced JSON state over super-line, backed by a CRDT (open two tabs;
 # server is a co-writer, with a live state + patch debug panel). Run one at a time:
 pnpm --filter @super-line/example-synced-canvas-yjs dev         # Yjs        · http://localhost:5173

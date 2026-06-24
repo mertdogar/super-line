@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node", "vite/client"],
+    "noEmit": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@super-line/core": ["../../packages/core/src/index.ts"],
+      "@super-line/client": ["../../packages/client/src/index.ts"],
+      "@super-line/react": ["../../packages/react/src/index.ts"],
+      "@super-line/server": ["../../packages/server/src/index.ts"],
+      "@super-line/store-memory": ["../../packages/store-memory/src/index.ts"],
+      "@super-line/store-sqlite": ["../../packages/store-sqlite/src/index.ts"],
+      "@super-line/transport-websocket": ["../../packages/transport-websocket/src/index.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

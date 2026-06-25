@@ -1,6 +1,6 @@
 {
   "name": "@super-line/server",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "description": "Typesafe WebSocket server for super-line — rooms, topics, middleware, pluggable adapters.",
   "license": "MIT",

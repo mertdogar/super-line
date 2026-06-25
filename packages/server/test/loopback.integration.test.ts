@@ -88,6 +88,25 @@ describe('super-line over the loopback transport', () => {
     expect(got).toEqual([42])
   })
 
+  it('constructs without a `process` global (browser-safe)', () => {
+    // Models a browser: no `process`. The server reads
+    // process.env.SUPER_LINE_NODE_NAME for an optional node name and must not throw.
+    const g = globalThis as Record<string, unknown>
+    const saved = g.process
+    delete g.process
+    try {
+      const loopback = createLoopbackTransport()
+      const srv = createSuperLineServer(contract, {
+        transports: [loopback.server],
+        authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      })
+      cleanups.push(() => srv.close())
+      expect(srv.nodeId).toBeTruthy()
+    } finally {
+      g.process = saved
+    }
+  })
+
   it('answers heartbeat pings so the server records liveness', async () => {
     const loopback = createLoopbackTransport()
     const srv = createSuperLineServer(contract, {

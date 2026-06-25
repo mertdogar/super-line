@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import {
   jsonSerializer,
   validate,
@@ -56,6 +55,10 @@ import { createInMemoryAdapter } from './memory-adapter.js'
 
 export { Conn, resolvePrincipal } from './conn.js'
 export { MemoryBus, createInMemoryAdapter } from './memory-adapter.js'
+
+// Web Crypto UUID — available in every browser and Node 19+. Keeps the server
+// runnable in-browser (e.g. a loopback-transport demo) with no node:crypto import.
+const randomUUID = (): string => globalThis.crypto.randomUUID()
 
 type Awaitable<T> = T | Promise<T>
 
@@ -382,7 +385,8 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
   // server-side bus subscribers per topic channel (parallel to `members` which holds conns)
   const busListeners = new Map<string, Set<(data: unknown, meta: BusMeta) => void>>()
   const instanceId = randomUUID() // identifies this node; lets the bus drop its own looped-back echo
-  const nodeName = opts.nodeName ?? process.env.SUPER_LINE_NODE_NAME ?? instanceId.slice(0, 8)
+  const envNodeName = typeof process !== 'undefined' ? process.env.SUPER_LINE_NODE_NAME : undefined
+  const nodeName = opts.nodeName ?? envNodeName ?? instanceId.slice(0, 8)
   const replyChannel = REPLY + instanceId
   let impl: Impl = {}
   let closing = false // close() is idempotent

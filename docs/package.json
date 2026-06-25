@@ -9,6 +9,13 @@
     "build": "pnpm api && vitepress build",
     "preview": "vitepress preview"
   },
+  "dependencies": {
+    "@super-line/client": "workspace:*",
+    "@super-line/core": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "@super-line/transport-loopback": "workspace:*",
+    "zod": "^3.24.1"
+  },
   "devDependencies": {
     "typedoc": "^0.28.0",
     "typedoc-plugin-markdown": "^4.12.0",

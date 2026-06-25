@@ -17,6 +17,16 @@ export default defineConfig({
   },
   vite: {
     plugins: [llmstxt({ domain: 'https://super-line.dogar.biz' })],
+    build: {
+      // The ClusterDemo runs a real super-line server in-browser. The server's
+      // getContract() (inspector-only, never called here) lazily pulls the
+      // optional standard-json schema converters for non-zod schema libs. Mark
+      // those leaf deps external so Rollup doesn't try to resolve them — the code
+      // path never executes in the demo.
+      rollupOptions: {
+        external: ['@valibot/to-json-schema', 'effect', 'sury', 'arktype', '@sinclair/typebox'],
+      },
+    },
   },
   themeConfig: {
     logo: '/mark.svg',

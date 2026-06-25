@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 import { withBase } from 'vitepress'
+import ClusterDemo from './ClusterDemo.vue'
 
 /* Hand-highlighted snippets. Code is the hero, so highlighting is tuned to the
    brand: strings carry the cyan accent, keywords a single soft-violet secondary,
@@ -42,23 +43,6 @@ const lawCode = `srv.<span class="f">implement</span>({
     },
   },
 })`
-
-const busCode = `<span class="k">const</span> srv = <span class="f">createSuperLineServer</span>(bus, {
-  server,
-  adapter: <span class="f">createRedisAdapter</span>(url), <span class="c">// one line → a cluster</span>
-})
-
-srv.<span class="f">subscribe</span>(<span class="s">'bump'</span>, (b, { from }) => {
-  <span class="k">if</span> (from === srv.nodeId) <span class="k">return</span> <span class="c">// local echo, no hop</span>
-  tally[b.node] += <span class="n">1</span> <span class="c">// converge cluster state</span>
-})
-srv.<span class="f">publish</span>(<span class="s">'bump'</span>, { node: NODE }) <span class="c">// reaches every node</span>`
-
-const busOut = [
-  { node: 'node-1', txt: 'bump node-1 (origin self)', tally: 'total 4', self: true },
-  { node: 'node-2', txt: 'bump node-1 (origin a1b2c3d4)', tally: 'total 4', self: false },
-  { node: 'client', txt: '← cluster total 6', tally: '{ n1:2, n2:2, n3:2 }', self: false },
-]
 
 /* ── transports: same code, any wire ─────────────────────────────────
    One client, one call — only the `transport:` line changes between wires.
@@ -469,43 +453,8 @@ onBeforeUnmount(() => {
 
     <!-- ░░ IT WORKS ON ONE NODE — THEN YOU ADD A SECOND ░░ -->
     <section class="sl-sec sl-sec--alt">
-      <div class="sl-shell sl-split sl-split--rev">
-        <div class="sl-split__copy reveal">
-          <h2>It works on one node. Then you add a second.</h2>
-          <p>
-            Two instances behind a load balancer, and a message published on
-            node&nbsp;A never reaches the client on node&nbsp;B. The usual fix is
-            a pub/sub backbone you wire by hand, plus code to tell your own
-            events from your peers'.
-          </p>
-          <p class="sl-fix">
-            Pass an adapter. The same <code>publish</code> now fires in-process
-            subscribers with no network hop <em>and</em> every other node across
-            the backbone — <code>meta.from</code> tells you where each event came
-            from. Redis ships today, and the adapter is just an interface — so
-            libp2p, ZeroMQ, or your own drops in.
-          </p>
-          <p class="sl-real">
-            Real: <code>examples/bus-cluster</code> — three nodes converge a
-            shared tally purely over the bus.
-          </p>
-        </div>
-        <div class="sl-split__code reveal">
-          <div class="sl-win">
-            <div class="sl-win__bar">
-              <span class="sl-win__dot" /><span class="sl-win__dot" /><span class="sl-win__dot" />
-              <span class="sl-win__name">node.ts</span>
-            </div>
-            <pre class="sl-pre"><code v-html="busCode" /></pre>
-          </div>
-          <div class="sl-term" aria-label="Cluster output: three nodes converging a shared tally">
-            <div v-for="(l, i) in busOut" :key="i" class="sl-term__line">
-              <span class="sl-term__tag" :class="{ 'is-client': l.node === 'client' }">{{ l.node }}</span>
-              <span class="sl-term__txt">{{ l.txt }}</span>
-              <span class="sl-term__tally" :class="{ 'is-self': l.self }">{{ l.tally }}</span>
-            </div>
-          </div>
-        </div>
+      <div class="sl-shell reveal">
+        <ClusterDemo />
       </div>
     </section>
 

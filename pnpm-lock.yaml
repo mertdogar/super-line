@@ -25,6 +25,22 @@ importers:
         version: 2.1.9(@types/node@22.19.21)(jsdom@25.0.1)(lightningcss@1.32.0)
 
   docs:
+    dependencies:
+      '@super-line/client':
+        specifier: workspace:*
+        version: link:../packages/client
+      '@super-line/core':
+        specifier: workspace:*
+        version: link:../packages/core
+      '@super-line/server':
+        specifier: workspace:*
+        version: link:../packages/server
+      '@super-line/transport-loopback':
+        specifier: workspace:*
+        version: link:../packages/transport-loopback
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
     devDependencies:
       typedoc:
         specifier: ^0.28.0

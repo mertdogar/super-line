@@ -10,7 +10,9 @@ const PORT = Number(process.env.PORT ?? 8796)
 const server = http.createServer()
 
 const srv = createSuperLineServer(api, {
-  transports: [webSocketServerTransport({ server })],
+  transports: [webSocketServerTransport({ server, inspector: true })],
+  // Surface traffic + store values to the Control Center (dev/trusted only).
+  inspector: true,
   // the handshake `name` becomes the ACL principal (stable across reconnects)
   authenticate: (h) => {
     const name = h.query.name?.trim()

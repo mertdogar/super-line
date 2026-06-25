@@ -7,6 +7,8 @@ import {
   type InspectorEvent,
   type NodeStat,
   type NodeView,
+  type StoreInfo,
+  type StoreResourceView,
 } from '@super-line/core'
 
 export type InspectorStatus = 'connecting' | 'open' | 'closed'
@@ -18,6 +20,9 @@ export interface InspectorClient {
   listConnections(): Promise<ConnDescriptor[]>
   getNode(): Promise<NodeView>
   getConn(id: string): Promise<ConnView>
+  listStores(): Promise<StoreInfo[]>
+  listResources(store: string): Promise<string[]>
+  readResource(store: string, id: string): Promise<StoreResourceView>
   /** Subscribe to live topology events. Returns an unsubscribe fn. */
   onEvent(cb: (event: InspectorEvent) => void): () => void
   /** Observe connection status (called immediately with the current status). Returns an unsubscribe fn. */
@@ -123,6 +128,9 @@ export function createInspector(opts: InspectorOptions): InspectorClient {
     listConnections: () => request<ConnDescriptor[]>('listConnections'),
     getNode: () => request<NodeView>('getNode'),
     getConn: (id) => request<ConnView>('getConn', { id }),
+    listStores: () => request<StoreInfo[]>('listStores'),
+    listResources: (store) => request<string[]>('listResources', { store }),
+    readResource: (store, id) => request<StoreResourceView>('readResource', { store, id }),
     onEvent(cb) {
       eventCbs.add(cb)
       return () => eventCbs.delete(cb)

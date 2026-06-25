@@ -31,6 +31,7 @@ export function memoryStoreServer(): ServerStore {
 
   return {
     clustering: 'relay',
+    model: 'lww',
     read(id) {
       return resources.get(id)
     },

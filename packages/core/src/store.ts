@@ -77,6 +77,8 @@ export interface ServerStore {
    * or `self` (the store owns a shared backend and core fans only to local subscribers).
    */
   readonly clustering: 'relay' | 'self'
+  /** Consistency model, surfaced to the inspector for display. Optional; omit if a backend has no clean label. */
+  readonly model?: 'lww' | 'crdt'
   /** Current snapshot of a Resource (for catch-up on subscribe), or undefined if absent. */
   read(id: string): Awaitable<Resource | undefined>
   /** Create a Resource with initial data + access rules (server-authoritative). */

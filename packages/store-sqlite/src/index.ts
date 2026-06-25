@@ -60,6 +60,7 @@ export function sqliteStoreServer(opts: SqliteStoreOptions): ServerStore {
 
   return {
     clustering: 'relay',
+    model: 'lww',
     read(id): Resource | undefined {
       const row = stmt.get.get(id) as Row | undefined
       if (!row) return undefined

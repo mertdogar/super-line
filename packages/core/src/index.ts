@@ -53,6 +53,8 @@ export type {
   NodeView,
   ConnView,
   InspectorEvent,
+  StoreInfo,
+  StoreResourceView,
   SchemaConverter,
 } from './inspector.js'
 

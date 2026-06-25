@@ -1,0 +1,39 @@
+name: ai-canvas
+
+# A single ai-canvas node (CRDT scene Store + AI co-writer) plus the Control Center.
+# The browser dials the node's WebSocket port (8796) DIRECTLY — both the app and the
+# Control Center — so there is no transport proxy; Caddy only serves the static SPA.
+#
+# The AI agent needs AI_GATEWAY_API_KEY + MODEL. Copy .env.example → .env and fill them in
+# (compose auto-loads .env for the substitutions below). The board itself works without them.
+services:
+  node:
+    build:
+      context: ../..
+      dockerfile: examples/ai-canvas/Dockerfile
+    image: super-line-ai-canvas:dev
+    environment:
+      PORT: '8796'
+      AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
+      MODEL: ${MODEL:-anthropic/claude-haiku-4.5}
+    # the browser (app + Control Center) dials this WS port directly
+    ports: ['8796:8796']
+
+  # Caddy serves the built SPA on :8200.
+  web:
+    build:
+      context: ../..
+      dockerfile: examples/ai-canvas/Dockerfile.web
+    image: super-line-ai-canvas-web:dev
+    ports: ['8200:8200']
+    volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']
+    depends_on: [node]
+
+  # The Control Center webapp on :8201; the browser connects it back to ws://localhost:8796.
+  control-center:
+    build:
+      context: ../..
+      dockerfile: examples/ai-canvas/Dockerfile.control-center
+    image: super-line-ai-canvas-cc:dev
+    ports: ['8201:8201']
+    depends_on: [node]

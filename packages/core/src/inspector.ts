@@ -57,6 +57,18 @@ export interface ConnView {
   ctxAvailable: boolean
 }
 
+/** A configured Store — what `listStores` returns. `model` is the backend's declared consistency model, if any. */
+export interface StoreInfo {
+  name: string
+  model?: 'lww' | 'crdt'
+}
+
+/** A Resource's current value — what `readResource` returns. Materialized + safe-serialized server-side. */
+export interface StoreResourceView {
+  data: unknown
+  accessRules: Record<string, { read: boolean; write: boolean }>
+}
+
 /** A failed response/reply, carried on `msg.response` / `msg.serverReply`. */
 export interface MessageError {
   code: string
@@ -87,7 +99,9 @@ export type InspectorEvent =
   // server→client request and the client's reply
   | { type: 'msg.serverRequest'; target: string; name: string; input: unknown }
   | { type: 'msg.serverReply'; target: string; name: string; ok: boolean; output?: unknown; error?: MessageError }
-  // Store traffic: a write (client or server co-write), access changes, and subscribe lifecycle
+  // Store traffic: lifecycle (create/delete), a write (client or server co-write), access changes, subscribe
+  | { type: 'store.create'; store: string; id: string }
+  | { type: 'store.delete'; store: string; id: string }
   | { type: 'store.write'; store: string; id: string; origin: string; connId?: string; data: unknown }
   | { type: 'store.grant'; store: string; id: string; principal: string; perms: { read: boolean; write: boolean } }
   | { type: 'store.revoke'; store: string; id: string; principal: string }
@@ -120,6 +134,9 @@ export const InspectorContract = defineContract({
         listConnections: { input: s<void>(), output: s<ConnDescriptor[]>() },
         getNode: { input: s<void>(), output: s<NodeView>() },
         getConn: { input: s<{ id: string }>(), output: s<ConnView>() },
+        listStores: { input: s<void>(), output: s<StoreInfo[]>() },
+        listResources: { input: s<{ store: string }>(), output: s<string[]>() },
+        readResource: { input: s<{ store: string; id: string }>(), output: s<StoreResourceView>() },
       },
       serverToClient: {
         events: { payload: s<InspectorEvent>(), subscribe: true },

@@ -12,6 +12,8 @@ import {
   type InspectedContract,
   type ConnView,
   type InspectorEvent,
+  type StoreInfo,
+  type StoreResourceView,
   type ServerTransport,
   type RawConn,
   type Handshake,
@@ -713,6 +715,27 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       if (!remote) throw new SuperLineError('NOT_FOUND', `Unknown connection: ${id}`)
       return { descriptor: remote, ctxAvailable: false } satisfies ConnView
     },
+    listStores: async () =>
+      Object.entries(storeMap).map(([name, store]) => ({ name, model: store.model })) satisfies StoreInfo[],
+    listResources: async (input) => {
+      const store = storeMap[(input as { store: string }).store]
+      if (!store) throw new SuperLineError('NOT_FOUND', `Unknown store: ${(input as { store: string }).store}`)
+      return store.list()
+    },
+    readResource: async (input) => {
+      const { store: name, id } = input as { store: string; id: string }
+      const store = storeMap[name]
+      if (!store) throw new SuperLineError('NOT_FOUND', `Unknown store: ${name}`)
+      const resource = await store.read(id) // ACL bypassed — inspector is a trusted observer
+      if (!resource) throw new SuperLineError('NOT_FOUND', `No resource: ${name}/${id}`)
+      let data = resource.data
+      if (store.open) {
+        const replica = store.open(id) // materialize a readable snapshot (LWW: plain; CRDT: decoded)
+        data = replica.getSnapshot()
+        replica.close()
+      }
+      return { data: safeSnapshot(data), accessRules: resource.accessRules } satisfies StoreResourceView
+    },
   }
 
   // Core owns the auth decision; each transport calls this at its native moment and rejects natively on throw.
@@ -1159,6 +1182,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     storeApi[name] = {
       async create(id, data, accessRules) {
         await store.create(id, data, accessRules)
+        if (inspectorEnabled) emitInspectorEvent({ type: 'store.create', store: name, id })
       },
       read(id) {
         return Promise.resolve(store.read(id))
@@ -1182,6 +1206,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       },
       async delete(id) {
         await store.delete(id)
+        if (inspectorEnabled) emitInspectorEvent({ type: 'store.delete', store: name, id })
       },
       list() {
         return Promise.resolve(store.list())

@@ -62,6 +62,8 @@ export function eventWire(event: InspectorEvent, r?: FeedResolver): WireAttribut
       return connWire(event.connId, r)
     case 'store.write':
       return event.connId ? connWire(event.connId, r) : undefined
+    case 'store.create':
+    case 'store.delete':
     case 'store.grant':
     case 'store.revoke':
       return undefined
@@ -108,6 +110,10 @@ export function summarizeEvent(event: InspectorEvent, r?: FeedResolver): string 
       return `→ ${who(event.target, r)} · ${event.name}`
     case 'msg.serverReply':
       return `← ${who(event.target, r)} · ${event.name} · ${event.ok ? 'ok' : event.error?.code ?? 'error'}`
+    case 'store.create':
+      return `+ ${event.store}/${event.id}`
+    case 'store.delete':
+      return `− ${event.store}/${event.id}`
     case 'store.write':
       return `${event.store}/${event.id}`
     case 'store.grant':

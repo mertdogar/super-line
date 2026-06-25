@@ -68,6 +68,7 @@ export function syncStoreServer(opts?: SyncServerOptions): ServerStore {
 
   return {
     clustering: 'relay',
+    model: 'crdt',
     read(id) {
       const e = entries.get(id)
       if (!e) return undefined

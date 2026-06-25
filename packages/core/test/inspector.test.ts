@@ -86,6 +86,9 @@ describe('InspectorContract', () => {
       'getNode',
       'getTopology',
       'listConnections',
+      'listResources',
+      'listStores',
+      'readResource',
     ])
   })
 

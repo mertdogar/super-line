@@ -1,0 +1,144 @@
+:root {
+  font-family: system-ui, -apple-system, sans-serif;
+  color-scheme: light dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: #0f1115;
+  color: #e6e6e6;
+}
+
+.join {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 300px;
+  padding: 24px;
+  background: #1a1d24;
+  border-radius: 12px;
+}
+
+.join h1 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.join label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #9aa0aa;
+}
+
+input {
+  padding: 8px 10px;
+  border: 1px solid #2c313a;
+  border-radius: 8px;
+  background: #11141a;
+  color: inherit;
+  font-size: 14px;
+}
+
+button {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #22d3ee;
+  color: #0f1115;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.status {
+  padding: 24px 28px;
+  background: #1a1d24;
+  border-radius: 12px;
+  font-size: 14px;
+  color: #9aa0aa;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  width: 460px;
+  height: 600px;
+  background: #1a1d24;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.chat header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 14px 16px;
+  border-bottom: 1px solid #2c313a;
+}
+
+.chat header span {
+  font-size: 12px;
+  color: #9aa0aa;
+}
+
+.chat header .wire {
+  color: #22d3ee;
+}
+
+.messages {
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  padding: 12px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.messages li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 80%;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: #232831;
+  align-self: flex-start;
+}
+
+.messages li.mine {
+  align-self: flex-end;
+  background: #0e3a44;
+}
+
+.messages .from {
+  font-size: 11px;
+  color: #9aa0aa;
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #2c313a;
+}
+
+.composer input {
+  flex: 1;
+}

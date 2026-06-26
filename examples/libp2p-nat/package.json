@@ -1,0 +1,46 @@
+{
+  "name": "@super-line/example-libp2p-nat",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "relay": "tsx src/relay.ts",
+    "server": "tsx src/server.ts",
+    "probe": "tsx src/probe.ts",
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@super-line/adapter-libp2p": "workspace:*",
+    "@super-line/client": "workspace:*",
+    "@super-line/core": "workspace:*",
+    "@super-line/react": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "@super-line/transport-libp2p": "workspace:*",
+    "@super-line/transport-websocket": "workspace:*",
+    "@chainsafe/libp2p-noise": "^17.0.0",
+    "@chainsafe/libp2p-yamux": "^8.0.1",
+    "@libp2p/circuit-relay-v2": "^4.2.7",
+    "@libp2p/crypto": "^5.1.20",
+    "@libp2p/dcutr": "^3.0.22",
+    "@libp2p/gossipsub": "^16.0.3",
+    "@libp2p/identify": "^4.1.8",
+    "@libp2p/peer-id": "^6.0.11",
+    "@libp2p/pubsub-peer-discovery": "^12.0.0",
+    "@libp2p/webrtc": "^6.0.25",
+    "@libp2p/websockets": "^10.1.15",
+    "@multiformats/multiaddr": "^13.0.3",
+    "libp2p": "^3.3.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11"
+  }
+}

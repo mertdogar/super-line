@@ -1,0 +1,49 @@
+name: libp2p-nat
+
+# Everything is a normal Node process. The relay is the ONE public node; the two chat servers sit
+# "behind NAT" (their libp2p nodes advertise only /p2p-circuit + /webrtc), and browser clients —
+# genuinely outside the container network — reach them over WebRTC, signalled through the relay.
+x-img: &img
+  build:
+    context: ../..
+    dockerfile: examples/libp2p-nat/Dockerfile
+  image: super-line-libp2p-nat:dev
+
+services:
+  # The public rendezvous/relay: circuit-relay-v2 + gossipsub. Its WS port is published so browsers
+  # outside the docker network can dial it (the only entry point — a deliberate single point of failure).
+  relay:
+    <<: *img
+    command: ['pnpm', '--filter', '@super-line/example-libp2p-nat', 'relay']
+    ports: ['9000:9000']
+
+  # Two chat servers behind NAT. Same image; differ only by NODE_NAME. node-1 also exposes a
+  # WebSocket inspector port for the Control Center (cluster-wide telemetry, so one gateway is enough).
+  node-1:
+    <<: *img
+    environment: { NODE_NAME: node-1, RELAY_HOST: relay, SERVER_NODES: 'node-1,node-2', INSPECTOR_PORT: '7400' }
+    ports: ['7400:7400']
+    depends_on: [relay]
+
+  node-2:
+    <<: *img
+    environment: { NODE_NAME: node-2, RELAY_HOST: relay, SERVER_NODES: 'node-1,node-2' }
+    depends_on: [relay]
+
+  # Static SPA on :8080. Built with the relay's *published* address baked in.
+  web:
+    build:
+      context: ../..
+      dockerfile: examples/libp2p-nat/Dockerfile.web
+    image: super-line-libp2p-nat-web:dev
+    ports: ['8080:80']
+    depends_on: [relay]
+
+  # Control Center on :8091 — open it to watch transports (webrtc vs circuit) and the cluster topology.
+  control-center:
+    build:
+      context: ../..
+      dockerfile: examples/libp2p-nat/Dockerfile.control-center
+    image: super-line-libp2p-nat-cc:dev
+    ports: ['8091:8091']
+    depends_on: [node-1]

@@ -1,0 +1,17 @@
+# Stage 1 — build the Control Center SPA from workspace source (its vite config resolves
+# @super-line/* to src, so no publish step is needed).
+FROM node:24-slim AS build
+RUN corepack enable
+WORKDIR /app
+COPY . .
+RUN pnpm install --frozen-lockfile --filter "@super-line/control-center..."
+RUN pnpm --filter @super-line/control-center build
+
+# Stage 2 — serve the built SPA with the package's own bin (Node builtins only). The browser opens
+# :8091 and connects back to node-1's published inspector port at ws://localhost:7400.
+FROM node:24-slim
+WORKDIR /app
+COPY --from=build /app/packages/control-center/dist ./dist
+COPY --from=build /app/packages/control-center/bin ./bin
+EXPOSE 8091
+CMD ["node", "bin/control-center.js", "--url", "ws://localhost:7400", "--port", "8091", "--no-open"]

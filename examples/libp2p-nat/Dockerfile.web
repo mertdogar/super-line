@@ -1,0 +1,14 @@
+# Stage 1 — build the SPA from workspace source. vite resolves @super-line/* to src (see
+# vite.config.ts) and bakes in the relay multiaddr + public server PeerIds. RELAY_HOST=127.0.0.1
+# because the BROWSER reaches the relay via its published port on the host, not the docker DNS name.
+FROM node:24-slim AS build
+RUN corepack enable
+WORKDIR /app
+COPY . .
+RUN pnpm install --frozen-lockfile --filter "@super-line/example-libp2p-nat..."
+RUN RELAY_HOST=127.0.0.1 pnpm --filter @super-line/example-libp2p-nat build
+
+# Stage 2 — Caddy serves the static bundle on :80 (default config, no proxy needed: clients connect
+# to the servers over libp2p/webrtc through the relay, not through this server).
+FROM caddy:2
+COPY --from=build /app/examples/libp2p-nat/dist /usr/share/caddy

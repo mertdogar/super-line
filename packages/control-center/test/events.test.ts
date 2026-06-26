@@ -1,18 +1,36 @@
 import { describe, expect, it } from 'vitest'
 import type { ConnDescriptor, InspectorEnvelope, InspectorEvent } from '@super-line/core'
 import {
+  barFraction,
+  emptyFilters,
   eventCategory,
   eventColor,
   eventPayload,
   eventWire,
+  eventWireFamilies,
+  filtersActive,
   flavorColor,
   formatBytes,
   formatDuration,
+  latencyColor,
+  sizeColor,
+  latencyMsToSlider,
   latencyOf,
+  latencySliderToMs,
+  matchesFilters,
+  MAX_LATENCY_MS,
+  MAX_SIZE_BYTES,
   requestTimes,
+  sizeBytesToSlider,
+  sizeSliderToBytes,
+  sliderToLatencyFilter,
+  sliderToSizeFilter,
   summarizeEvent,
+  windowAnchor,
   type FeedResolver,
+  type RowMatch,
 } from '../src/lib/events.js'
+import type { TransportFamily } from '../src/lib/transport.js'
 
 const envelope = (event: InspectorEvent, ts: number, byteSize?: number): InspectorEnvelope => ({
   event,
@@ -52,6 +70,28 @@ describe('event helpers', () => {
     expect(
       summarizeEvent({ type: 'disconnect', connId: 'gone', nodeId: 'node1234', userId: 'grace' }, resolver),
     ).toBe('grace on node-1')
+  })
+
+  it('heatmap colors bucket latency and size by absolute magnitude', () => {
+    // latency: <10 green, 10–30 lime, 30–100 yellow, 100–500 orange, ≥500 red (boundaries are band starts)
+    expect(latencyColor(5)).toBe('#4ade80')
+    expect(latencyColor(10)).toBe('#a3e635')
+    expect(latencyColor(50)).toBe('#facc15')
+    expect(latencyColor(300)).toBe('#fb923c')
+    expect(latencyColor(500)).toBe('#f87171')
+    expect(latencyColor(9999)).toBe('#f87171')
+    // size: <512 / 4K / 32K / 256K
+    expect(sizeColor(100)).toBe('#4ade80')
+    expect(sizeColor(512)).toBe('#a3e635')
+    expect(sizeColor(10_000)).toBe('#facc15')
+    expect(sizeColor(100_000)).toBe('#fb923c')
+    expect(sizeColor(1_000_000)).toBe('#f87171')
+  })
+
+  it('barFraction clamps to 0..1 and guards an empty/zero max', () => {
+    expect(barFraction(50, 200)).toBe(0.25)
+    expect(barFraction(300, 200)).toBe(1) // clamp over
+    expect(barFraction(50, 0)).toBe(0) // no in-view max → no fill (no divide-by-zero)
   })
 
   it('formats byte sizes, em-dash for no payload', () => {
@@ -137,6 +177,7 @@ describe('event helpers', () => {
       kind: 'one',
       label: 'libp2p',
       color: expect.stringMatching(/^#/),
+      family: 'libp2p',
     })
     // connect → the descriptor's wire, sub-mode preserved
     expect(eventWire({ type: 'connect', descriptor: { ...descriptor, transport: 'sse' } })).toMatchObject({
@@ -147,8 +188,8 @@ describe('event helpers', () => {
     expect(eventWire({ type: 'msg.broadcast', room: 'lobby', name: 'message', data: {} }, resolver)).toEqual({
       kind: 'many',
       parts: [
-        { short: 'ws', count: 3, color: expect.stringMatching(/^#/) },
-        { short: 'http', count: 2, color: expect.stringMatching(/^#/) },
+        { short: 'ws', count: 3, color: expect.stringMatching(/^#/), family: 'websocket' },
+        { short: 'http', count: 2, color: expect.stringMatching(/^#/), family: 'http' },
       ],
     })
     // unknown conn → no chip
@@ -198,5 +239,157 @@ describe('event helpers', () => {
     for (const t of ['store.write', 'store.grant', 'store.revoke', 'store.subscribe', 'store.unsubscribe'] as const) {
       expect(eventCategory(t)).toBe('stores')
     }
+  })
+})
+
+describe('feed filters', () => {
+  const anchor = 1_000_000
+  const row = (over: Partial<RowMatch> = {}): RowMatch => ({
+    summary: '',
+    families: [],
+    nowAnchor: anchor,
+    ...over,
+  })
+  const connectEnv = envelope({ type: 'connect', descriptor }, anchor)
+  const reqEnv = envelope(
+    { type: 'msg.request', connId: descriptor.id, role: 'user', name: 'send', input: {}, reqId: 1 },
+    anchor,
+  )
+
+  it('maps the latency slider log-wise and inverts cleanly', () => {
+    expect(latencySliderToMs(0)).toBe(1) // far-left ≈ "no minimum"
+    expect(latencySliderToMs(1)).toBeCloseTo(MAX_LATENCY_MS, 0) // 10 min
+    expect(latencySliderToMs(0.5)).toBeGreaterThan(700) // mid-track is sub-second, not 5 minutes
+    expect(latencySliderToMs(0.5)).toBeLessThan(1000)
+    expect(latencyMsToSlider(MAX_LATENCY_MS)).toBeCloseTo(1)
+    expect(latencyMsToSlider(1000)).toBeCloseTo(Math.log10(1000) / Math.log10(MAX_LATENCY_MS))
+  })
+
+  it('latency slider position round-trips stably across the low end (no rounding collapse)', () => {
+    // regression: rounding ms in the mapping made positions 1..30 all collapse to position 0
+    for (const pos of [0, 1, 5, 30, 250, 500, 1000]) {
+      const ms = latencySliderToMs(pos / 1000)
+      expect(Math.round(latencyMsToSlider(ms) * 1000)).toBe(pos)
+    }
+  })
+
+  it('sliderToLatencyFilter: full span = off, any narrowing = a range', () => {
+    expect(sliderToLatencyFilter(0, 1000)).toBeNull() // untouched = filter disengaged
+    expect(sliderToLatencyFilter(1, 1000)).not.toBeNull() // nudging the min thumb engages it
+    expect(sliderToLatencyFilter(0, 999)).not.toBeNull()
+    const r = sliderToLatencyFilter(0, 500)!
+    expect(r[0]).toBeLessThan(r[1])
+  })
+
+  it('size slider maps log-wise (bytes) and full span = off', () => {
+    expect(sizeSliderToBytes(0)).toBe(1)
+    expect(sizeSliderToBytes(1)).toBeCloseTo(MAX_SIZE_BYTES, 0)
+    for (const pos of [0, 1, 30, 500, 1000]) {
+      expect(Math.round(sizeBytesToSlider(sizeSliderToBytes(pos / 1000)) * 1000)).toBe(pos) // stable round-trip
+    }
+    expect(sliderToSizeFilter(0, 1000)).toBeNull()
+    expect(sliderToSizeFilter(0, 800)).not.toBeNull()
+  })
+
+  it('empty filters pass everything; AND across dimensions', () => {
+    const f = emptyFilters()
+    expect(matchesFilters(connectEnv, f, row())).toBe(true)
+    expect(matchesFilters(reqEnv, f, row())).toBe(true)
+  })
+
+  it('text filter matches event type + summary, case-insensitively', () => {
+    expect(matchesFilters(reqEnv, { ...emptyFilters(), text: 'send' }, row({ summary: 'ada → send' }))).toBe(true)
+    expect(matchesFilters(connectEnv, { ...emptyFilters(), text: 'send' }, row({ summary: 'ada on n1' }))).toBe(false)
+    expect(matchesFilters(connectEnv, { ...emptyFilters(), text: 'CONNECT' }, row())).toBe(true) // matches type, any case
+  })
+
+  it('filtersActive flags any engaged dimension', () => {
+    expect(filtersActive(emptyFilters())).toBe(false)
+    expect(filtersActive({ ...emptyFilters(), text: 'x' })).toBe(true)
+    expect(filtersActive({ ...emptyFilters(), types: new Set(['msg.request']) })).toBe(true)
+    expect(filtersActive({ ...emptyFilters(), wires: new Set<TransportFamily>(['websocket']) })).toBe(true)
+    expect(filtersActive({ ...emptyFilters(), windowMs: 60_000 })).toBe(true)
+    expect(filtersActive({ ...emptyFilters(), latency: [0, 100] })).toBe(true)
+    expect(filtersActive({ ...emptyFilters(), size: [0, 100] })).toBe(true)
+  })
+
+  it('type/node filters restrict to the selected set (empty = all)', () => {
+    expect(matchesFilters(connectEnv, { ...emptyFilters(), types: new Set(['msg.request']) }, row())).toBe(false)
+    expect(matchesFilters(reqEnv, { ...emptyFilters(), types: new Set(['msg.request']) }, row())).toBe(true)
+    expect(matchesFilters(connectEnv, { ...emptyFilters(), nodes: new Set(['other']) }, row())).toBe(false)
+    expect(matchesFilters(connectEnv, { ...emptyFilters(), nodes: new Set([descriptor.nodeId]) }, row())).toBe(true)
+  })
+
+  it('wire filter restricts: rows without a wire family drop when engaged', () => {
+    const f = { ...emptyFilters(), wires: new Set<TransportFamily>(['websocket']) }
+    expect(matchesFilters(reqEnv, f, row({ families: ['websocket'] }))).toBe(true)
+    expect(matchesFilters(reqEnv, f, row({ families: ['libp2p'] }))).toBe(false)
+    expect(matchesFilters(reqEnv, f, row({ families: [] }))).toBe(false) // no-wire row dropped
+  })
+
+  it('latency filter restricts to in-range latency-bearing rows', () => {
+    const f = { ...emptyFilters(), latency: [50, 500] as [number, number] }
+    expect(matchesFilters(reqEnv, f, row({ latency: 120 }))).toBe(true)
+    expect(matchesFilters(reqEnv, f, row({ latency: 10 }))).toBe(false) // below range
+    expect(matchesFilters(reqEnv, f, row({ latency: undefined }))).toBe(false) // no latency → dropped
+  })
+
+  it('size filter restricts to in-range rows that have a payload (byteSize)', () => {
+    const f = { ...emptyFilters(), size: [100, 1000] as [number, number] }
+    const sized = envelope({ type: 'connect', descriptor }, anchor, 500) // byteSize 500
+    const small = envelope({ type: 'connect', descriptor }, anchor, 20) // byteSize 20, below range
+    const noPayload = envelope({ type: 'connect', descriptor }, anchor) // byteSize undefined
+    expect(matchesFilters(sized, f, row())).toBe(true)
+    expect(matchesFilters(small, f, row())).toBe(false)
+    expect(matchesFilters(noPayload, f, row())).toBe(false) // no payload → dropped when engaged
+  })
+
+  it('time window measures back from the anchor', () => {
+    const f = { ...emptyFilters(), windowMs: 1000 }
+    const fresh = envelope({ type: 'connect', descriptor }, anchor - 500)
+    const stale = envelope({ type: 'connect', descriptor }, anchor - 5000)
+    expect(matchesFilters(fresh, f, row())).toBe(true)
+    expect(matchesFilters(stale, f, row())).toBe(false)
+  })
+
+  it('windowAnchor: live measures from wall-clock now, paused from freeze time', () => {
+    expect(windowAnchor(false, 123, 999)).toBe(999) // live → now
+    expect(windowAnchor(true, 123, 999)).toBe(123) // paused → freeze time
+    expect(windowAnchor(true, null, 999)).toBe(999) // paused before any freeze → now
+  })
+
+  it('live "last 15s" drops stale events even when they are the newest in the buffer', () => {
+    // regression: anchoring to the newest event's ts surfaced hours-old events under a 15s window
+    const now = 5_000_000
+    const f = { ...emptyFilters(), windowMs: 15_000 }
+    const stale = envelope({ type: 'connect', descriptor }, now - 2 * 3_600_000) // 2h old, newest in buffer
+    const recent = envelope({ type: 'connect', descriptor }, now - 5_000) // 5s old
+    const liveAnchor = windowAnchor(false, null, now)
+    expect(matchesFilters(stale, f, row({ nowAnchor: liveAnchor }))).toBe(false)
+    expect(matchesFilters(recent, f, row({ nowAnchor: liveAnchor }))).toBe(true)
+  })
+
+  it('eventWireFamilies returns [] for unattributable events and the family otherwise', () => {
+    const resolver: FeedResolver = {
+      conn: (id) => (id === descriptor.id ? { ...descriptor, transport: 'websocket' } : undefined),
+      nodeName: () => 'n',
+    }
+    expect(eventWireFamilies({ type: 'msg.publish', topic: 't', data: {} })).toEqual([])
+    expect(
+      eventWireFamilies(
+        { type: 'msg.request', connId: descriptor.id, role: 'user', name: 'x', input: {}, reqId: 1 },
+        resolver,
+      ),
+    ).toEqual(['websocket'])
+
+    // broadcast (kind: 'many') → every family in the room's breakdown
+    const broadcastResolver: FeedResolver = {
+      conn: () => undefined,
+      nodeName: () => 'n',
+      roomWires: (r) => (r === 'lobby' ? [{ family: 'websocket', count: 2 }, { family: 'http', count: 1 }] : []),
+    }
+    expect(
+      eventWireFamilies({ type: 'msg.broadcast', room: 'lobby', name: 'm', data: {} }, broadcastResolver),
+    ).toEqual(['websocket', 'http'])
   })
 })

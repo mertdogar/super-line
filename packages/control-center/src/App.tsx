@@ -217,7 +217,7 @@ export default function App(): React.JSX.Element {
                   <p className="text-sm text-muted-foreground">No contract.</p>
                 ))}
               {view === 'stores' && <StoresExplorer client={client} />}
-              {view === 'feed' && <LiveFeed events={feed} connections={connections} />}
+              {view === 'feed' && <LiveFeed events={feed} connections={connections} topology={topology} />}
               {view === 'settings' && <SettingsPage url={url} status={status} onConnect={connect} />}
               {view === 'resources' && <ResourcesPage />}
             </div>

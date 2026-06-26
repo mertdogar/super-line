@@ -5,7 +5,14 @@
   "description": "Control Center — a debugging webapp for inspecting a running super-line platform.",
   "license": "MIT",
   "author": "Mert",
-  "keywords": ["websocket", "super-line", "debugging", "inspector", "devtools", "realtime"],
+  "keywords": [
+    "websocket",
+    "super-line",
+    "debugging",
+    "inspector",
+    "devtools",
+    "realtime"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mertdogar/super-line.git",
@@ -13,10 +20,19 @@
   },
   "homepage": "https://mertdogar.github.io/super-line/",
   "bugs": "https://github.com/mertdogar/super-line/issues",
-  "engines": { "node": ">=18" },
-  "bin": { "control-center": "./bin/control-center.js" },
-  "files": ["dist", "bin"],
-  "publishConfig": { "access": "public" },
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "control-center": "./bin/control-center.js"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -25,6 +41,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
+    "@radix-ui/react-slider": "^1.4.1",
     "@super-line/client": "workspace:*",
     "@super-line/core": "workspace:*",
     "@super-line/server": "workspace:*",

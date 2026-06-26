@@ -1,5 +1,12 @@
 import type { ConnDescriptor, InspectorEnvelope, InspectorEvent, MessageFlavor } from '@super-line/core'
-import { familyColor, familyShort, transportColor, transportLabel, type TransportFamily } from './transport'
+import {
+  familyColor,
+  familyShort,
+  transportColor,
+  transportFamily,
+  transportLabel,
+  type TransportFamily,
+} from './transport'
 
 export { eventPayload } from '@super-line/core'
 
@@ -13,11 +20,16 @@ export interface FeedResolver {
 
 /** The wire(s) a feed row is attributable to: one wire (inbound rows) or a fan-out breakdown (broadcasts). */
 export type WireAttribution =
-  | { kind: 'one'; label: string; color: string }
-  | { kind: 'many'; parts: { short: string; count: number; color: string }[] }
+  | { kind: 'one'; label: string; color: string; family: TransportFamily }
+  | { kind: 'many'; parts: { short: string; count: number; color: string; family: TransportFamily }[] }
 
 function wireOf(transport: string | undefined): WireAttribution {
-  return { kind: 'one', label: transportLabel(transport), color: transportColor(transport) }
+  return {
+    kind: 'one',
+    label: transportLabel(transport),
+    color: transportColor(transport),
+    family: transportFamily(transport),
+  }
 }
 
 function connWire(connId: string, r?: FeedResolver): WireAttribution | undefined {
@@ -51,7 +63,12 @@ export function eventWire(event: InspectorEvent, r?: FeedResolver): WireAttribut
       return wires.length
         ? {
             kind: 'many',
-            parts: wires.map((w) => ({ short: familyShort(w.family), count: w.count, color: familyColor(w.family) })),
+            parts: wires.map((w) => ({
+              short: familyShort(w.family),
+              count: w.count,
+              color: familyColor(w.family),
+              family: w.family,
+            })),
           }
         : undefined
     }
@@ -180,6 +197,40 @@ export function formatDuration(ms: number, now: number = Date.now()): string {
   return `${d}d ${h % 24}h`
 }
 
+/** A heatmap band: applies to values strictly below `max`; the last band (max=Infinity) catches the rest. */
+type HeatBand = { max: number; color: string }
+
+// dark-theme-legible green→red ramp (same family as the event dots)
+const LATENCY_BANDS: HeatBand[] = [
+  { max: 10, color: '#4ade80' },
+  { max: 30, color: '#a3e635' },
+  { max: 100, color: '#facc15' },
+  { max: 500, color: '#fb923c' },
+  { max: Infinity, color: '#f87171' },
+]
+const SIZE_BANDS: HeatBand[] = [
+  { max: 512, color: '#4ade80' },
+  { max: 4096, color: '#a3e635' },
+  { max: 32_768, color: '#facc15' },
+  { max: 262_144, color: '#fb923c' },
+  { max: Infinity, color: '#f87171' },
+]
+function bandColor(bands: HeatBand[], v: number): string {
+  return (bands.find((b) => v < b.max) ?? bands[bands.length - 1]!).color
+}
+/** Heatmap color for a round-trip latency (ms): green (fast) → red (slow). */
+export function latencyColor(ms: number): string {
+  return bandColor(LATENCY_BANDS, ms)
+}
+/** Heatmap color for a payload size (bytes): green (small) → red (fat). */
+export function sizeColor(bytes: number): string {
+  return bandColor(SIZE_BANDS, bytes)
+}
+/** Bar fill fraction (0..1) of a value against the in-view max; 0 when max is 0/absent. */
+export function barFraction(value: number, max: number): number {
+  return max > 0 ? Math.max(0, Math.min(1, value / max)) : 0
+}
+
 /** Human byte size, e.g. "512 B", "1.2 KB". Em-dash for events with no payload. */
 export function formatBytes(n?: number): string {
   if (n === undefined) return '—'
@@ -220,4 +271,154 @@ export function latencyOf(en: InspectorEnvelope, reqTimes: Map<string, number>):
   const k = pairKey(en.event)
   const t0 = k === undefined ? undefined : reqTimes.get(k)
   return t0 === undefined ? undefined : Math.max(0, en.ts - t0)
+}
+
+/** The wire families a row is attributable to ([] when none — publish/server-axis/store-admin). */
+export function eventWireFamilies(event: InspectorEvent, r?: FeedResolver): TransportFamily[] {
+  const w = eventWire(event, r)
+  if (!w) return []
+  return w.kind === 'one' ? [w.family] : w.parts.map((p) => p.family)
+}
+
+/** Every event type, for the grouped type filter. Grouped by `eventCategory` in the UI. */
+export const ALL_EVENT_TYPES: InspectorEvent['type'][] = [
+  'connect',
+  'disconnect',
+  'room.add',
+  'room.remove',
+  'topic.sub',
+  'topic.unsub',
+  'msg.request',
+  'msg.response',
+  'msg.event',
+  'msg.broadcast',
+  'msg.publish',
+  'msg.serverRequest',
+  'msg.serverReply',
+  'store.create',
+  'store.delete',
+  'store.write',
+  'store.grant',
+  'store.revoke',
+  'store.subscribe',
+  'store.unsubscribe',
+]
+
+/** The relative trailing-window presets for the time filter (null = All). */
+export const TIME_WINDOWS: { label: string; ms: number | null }[] = [
+  { label: '15s', ms: 15_000 },
+  { label: '1m', ms: 60_000 },
+  { label: '5m', ms: 300_000 },
+  { label: 'All', ms: null },
+]
+
+export const MAX_LATENCY_MS = 600_000 // 10 minutes
+const LOG_MAX = Math.log10(MAX_LATENCY_MS)
+/**
+ * Map a 0..1 slider position to ms on a log scale (so sub-second gets most of the track).
+ * Returns an exact value (no rounding) so the position↔ms round-trip is stable — rounding here
+ * would collapse the low end (positions 1–30 all → 1ms → back to position 0).
+ */
+export function latencySliderToMs(pos: number): number {
+  return Math.pow(10, pos * LOG_MAX)
+}
+/** Inverse of {@link latencySliderToMs}: ms to a 0..1 slider position. */
+export function latencyMsToSlider(ms: number): number {
+  return ms <= 1 ? 0 : Math.min(1, Math.log10(ms) / LOG_MAX)
+}
+/**
+ * Map a dual-thumb slider's 0..1000 positions to a latency filter range, or null (off) when the
+ * thumbs span the full track. The single source of truth for "full span = filter disengaged".
+ */
+export function sliderToLatencyFilter(aPos: number, bPos: number): [number, number] | null {
+  if (aPos <= 0 && bPos >= 1000) return null
+  return [latencySliderToMs(aPos / 1000), latencySliderToMs(bPos / 1000)]
+}
+
+export const MAX_SIZE_BYTES = 10_485_760 // 10 MiB
+const LOG_MAX_SIZE = Math.log10(MAX_SIZE_BYTES)
+/** Map a 0..1 slider position to bytes on a log scale (payloads cluster small, span orders of magnitude). */
+export function sizeSliderToBytes(pos: number): number {
+  return Math.pow(10, pos * LOG_MAX_SIZE)
+}
+/** Inverse of {@link sizeSliderToBytes}: bytes to a 0..1 slider position. */
+export function sizeBytesToSlider(bytes: number): number {
+  return bytes <= 1 ? 0 : Math.min(1, Math.log10(bytes) / LOG_MAX_SIZE)
+}
+/** Dual-thumb 0..1000 positions to a size filter range, or null (off) when the thumbs span the track. */
+export function sliderToSizeFilter(aPos: number, bPos: number): [number, number] | null {
+  if (aPos <= 0 && bPos >= 1000) return null
+  return [sizeSliderToBytes(aPos / 1000), sizeSliderToBytes(bPos / 1000)]
+}
+
+/**
+ * The live-feed filter state. Each multi-select is "selected, empty = all (off)". The three restrict
+ * dimensions (`wires`, `latency`, `size`) drop rows lacking that attribute only when they're engaged.
+ */
+export interface FeedFilters {
+  text: string
+  types: Set<string>
+  nodes: Set<string>
+  wires: Set<TransportFamily>
+  windowMs: number | null
+  latency: [number, number] | null
+  size: [number, number] | null
+}
+
+export function emptyFilters(): FeedFilters {
+  return { text: '', types: new Set(), nodes: new Set(), wires: new Set(), windowMs: null, latency: null, size: null }
+}
+
+/** Whether any filter is engaged (drives the Reset affordance + count badge). */
+export function filtersActive(f: FeedFilters): boolean {
+  return (
+    f.text !== '' ||
+    f.types.size > 0 ||
+    f.nodes.size > 0 ||
+    f.wires.size > 0 ||
+    f.windowMs !== null ||
+    f.latency !== null ||
+    f.size !== null
+  )
+}
+
+/**
+ * The instant the relative time window is measured back from: wall-clock now while live (so "last
+ * 15s" means the last 15 real seconds), or the moment of pause while frozen (so a paused window
+ * doesn't drain as real time passes).
+ */
+export function windowAnchor(paused: boolean, frozenAt: number | null, now: number): number {
+  return paused && frozenAt !== null ? frozenAt : now
+}
+
+/** Per-row data the predicate needs, precomputed once by the caller. */
+export interface RowMatch {
+  summary: string
+  latency?: number
+  families: TransportFamily[]
+  nowAnchor: number // see windowAnchor — wall-clock now (live) or freeze time (paused)
+}
+
+/** True if an envelope passes every engaged filter (AND across dimensions, OR within a multi-select). */
+export function matchesFilters(en: InspectorEnvelope, f: FeedFilters, row: RowMatch): boolean {
+  if (f.text) {
+    const q = f.text.toLowerCase()
+    if (!`${en.event.type} ${row.summary}`.toLowerCase().includes(q)) return false
+  }
+  if (f.types.size > 0 && !f.types.has(en.event.type)) return false
+  if (f.nodes.size > 0 && !f.nodes.has(en.originNodeId)) return false
+  if (f.wires.size > 0) {
+    if (row.families.length === 0) return false // restrict: no-wire rows drop when the filter is engaged
+    if (!row.families.some((fam) => f.wires.has(fam))) return false
+  }
+  if (f.windowMs !== null && en.ts < row.nowAnchor - f.windowMs) return false
+  if (f.latency) {
+    if (row.latency === undefined) return false // restrict: only latency-bearing rows
+    if (row.latency < f.latency[0] || row.latency > f.latency[1]) return false
+  }
+  if (f.size) {
+    if (en.byteSize === undefined) return false // restrict: only rows with a payload
+    if (en.byteSize < f.size[0] || en.byteSize > f.size[1]) return false
+  }
+  return true
 }

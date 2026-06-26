@@ -1,5 +1,5 @@
 import * as React from 'react'
-import type { InspectorEvent, StoreInfo, StoreResourceView } from '@super-line/core'
+import type { StoreInfo, StoreResourceView } from '@super-line/core'
 import type { InspectorClient } from '@/lib/inspector-client'
 import { Badge } from '@/components/ui/badge'
 import { Json } from '@/components/json-view'
@@ -52,7 +52,7 @@ export function StoresExplorer({ client }: { client: InspectorClient | null }): 
 
   React.useEffect(() => {
     if (!client) return
-    return client.onEvent((e: InspectorEvent) => {
+    return client.onEvent(({ event: e }) => {
       if (!('store' in e) || e.store !== sel.current.store) return
       if (e.type === 'store.create' || e.type === 'store.delete') loadResources(e.store)
       else if ('id' in e && e.id === sel.current.id) loadValue(e.store, e.id)

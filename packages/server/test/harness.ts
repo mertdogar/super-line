@@ -71,13 +71,24 @@ export interface InspectorEventLike {
   data?: unknown
   ok?: boolean
   error?: { code: string; message: string }
+  reqId?: number
+}
+
+export interface InspectorEnvelopeLike {
+  event: InspectorEventLike
+  ts: number
+  byteSize?: number
+  originNodeId: string
 }
 
 export interface Inspector {
   protocol: string
   request: (m: string, d?: unknown) => Promise<unknown>
   subscribeEvents: () => Promise<void>
+  /** Unwrapped events (envelope `.event`), back-compat for assertions on event fields. */
   events: InspectorEventLike[]
+  /** Full inspection records, for assertions on envelope metadata (ts/byteSize/originNodeId). */
+  envelopes: InspectorEnvelopeLike[]
   close: () => void
 }
 
@@ -90,6 +101,7 @@ export function connectInspector(url: string): Promise<Inspector> {
     let id = 1
     const waiters = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void }>()
     const events: InspectorEventLike[] = []
+    const envelopes: InspectorEnvelopeLike[] = []
     ws.on('message', (data) => {
       const frame = jsonSerializer.decode(data as Buffer) as {
         t: string
@@ -99,7 +111,9 @@ export function connectInspector(url: string): Promise<Inspector> {
         code?: string
       }
       if (frame.t === 'pub' && frame.c === 'events') {
-        events.push(frame.d as InspectorEventLike)
+        const env = frame.d as InspectorEnvelopeLike
+        envelopes.push(env)
+        events.push(env.event)
         return
       }
       const w = waiters.get(frame.i)
@@ -120,6 +134,7 @@ export function connectInspector(url: string): Promise<Inspector> {
         request: (m, d) => sendFrame({ t: 'req', m, d }),
         subscribeEvents: () => sendFrame({ t: 'sub', c: 'events' }).then(() => undefined),
         events,
+        envelopes,
         close: () => ws.close(),
       }),
     )

@@ -42,6 +42,7 @@ export type {
 export {
   InspectorContract,
   classifyContract,
+  eventPayload,
   INSPECTOR_SUBPROTOCOL,
   INSPECTOR_ROLE,
 } from './inspector.js'
@@ -53,6 +54,7 @@ export type {
   NodeView,
   ConnView,
   InspectorEvent,
+  InspectorEnvelope,
   StoreInfo,
   StoreResourceView,
   SchemaConverter,

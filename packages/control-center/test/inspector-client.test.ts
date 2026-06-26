@@ -85,7 +85,7 @@ describe('inspector client', () => {
     await insp.getNode() // flush: ensures the events subscribe frame was processed first (in-order)
 
     const types: string[] = []
-    insp.onEvent((e) => types.push(e.type))
+    insp.onEvent((en) => types.push(en.event.type))
 
     const user = createSuperLineClient(contract, { transport: webSocketClientTransport({ url }), role: 'user' })
     cleanups.push(() => user.close())

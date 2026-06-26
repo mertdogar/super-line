@@ -4,7 +4,7 @@ import {
   type ConnDescriptor,
   type ConnView,
   type InspectedContract,
-  type InspectorEvent,
+  type InspectorEnvelope,
   type NodeStat,
   type NodeView,
   type StoreInfo,
@@ -23,8 +23,8 @@ export interface InspectorClient {
   listStores(): Promise<StoreInfo[]>
   listResources(store: string): Promise<string[]>
   readResource(store: string, id: string): Promise<StoreResourceView>
-  /** Subscribe to live topology events. Returns an unsubscribe fn. */
-  onEvent(cb: (event: InspectorEvent) => void): () => void
+  /** Subscribe to live inspection records. Returns an unsubscribe fn. */
+  onEvent(cb: (env: InspectorEnvelope) => void): () => void
   /** Observe connection status (called immediately with the current status). Returns an unsubscribe fn. */
   onStatus(cb: (status: InspectorStatus) => void): () => void
   close(): void
@@ -51,7 +51,7 @@ export function createInspector(opts: InspectorOptions): InspectorClient {
   const WS: typeof WebSocket = resolved
   const reconnect = opts.reconnect ?? true
 
-  const eventCbs = new Set<(event: InspectorEvent) => void>()
+  const eventCbs = new Set<(env: InspectorEnvelope) => void>()
   const statusCbs = new Set<(status: InspectorStatus) => void>()
   const waiters = new Map<number, Waiter>()
   let ws: WebSocket
@@ -97,7 +97,7 @@ export function createInspector(opts: InspectorOptions): InspectorClient {
       return
     }
     if (frame.t === 'pub' && frame.c === 'events') {
-      for (const cb of eventCbs) cb(frame.d as InspectorEvent)
+      for (const cb of eventCbs) cb(frame.d as InspectorEnvelope)
       return
     }
     if (frame.i === undefined) return

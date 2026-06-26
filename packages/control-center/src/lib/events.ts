@@ -1,5 +1,7 @@
-import type { ConnDescriptor, InspectorEvent, MessageFlavor } from '@super-line/core'
+import type { ConnDescriptor, InspectorEnvelope, InspectorEvent, MessageFlavor } from '@super-line/core'
 import { familyColor, familyShort, transportColor, transportLabel, type TransportFamily } from './transport'
+
+export { eventPayload } from '@super-line/core'
 
 /** Resolves a connId / nodeId to friendly labels, so the feed shows names not hashes. */
 export interface FeedResolver {
@@ -137,28 +139,6 @@ export function eventCategory(type: InspectorEvent['type']): FeedCategory {
   return 'lifecycle'
 }
 
-/** The inspectable payload of a message event (input/output/data), or undefined for lifecycle events. */
-export function eventPayload(event: InspectorEvent): unknown {
-  switch (event.type) {
-    case 'msg.request':
-    case 'msg.serverRequest':
-      return event.input
-    case 'msg.response':
-    case 'msg.serverReply':
-      return event.ok ? event.output : event.error
-    case 'msg.event':
-    case 'msg.broadcast':
-    case 'msg.publish':
-      return event.data
-    case 'store.write':
-      return event.data
-    case 'store.grant':
-      return event.perms
-    default:
-      return undefined
-  }
-}
-
 /** Tailwind text/bg accent class for an event type (feed dot). */
 export function eventColor(type: InspectorEvent['type']): string {
   if (type === 'connect') return 'bg-primary'
@@ -198,4 +178,46 @@ export function formatDuration(ms: number, now: number = Date.now()): string {
   if (h < 24) return `${h}h ${m % 60}m`
   const d = Math.floor(h / 24)
   return `${d}d ${h % 24}h`
+}
+
+/** Human byte size, e.g. "512 B", "1.2 KB". Em-dash for events with no payload. */
+export function formatBytes(n?: number): string {
+  if (n === undefined) return '—'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** Correlation key pairing a response/reply with its request, or undefined for unpaired events. */
+function pairKey(event: InspectorEvent): string | undefined {
+  switch (event.type) {
+    case 'msg.request':
+    case 'msg.response':
+      return `c:${event.connId}:${event.reqId}`
+    case 'msg.serverRequest':
+    case 'msg.serverReply':
+      return `s:${event.target}:${event.reqId}`
+    default:
+      return undefined
+  }
+}
+
+/** Emit times of the request/serverRequest envelopes in `envs`, keyed for pairing. */
+export function requestTimes(envs: InspectorEnvelope[]): Map<string, number> {
+  const m = new Map<string, number>()
+  for (const en of envs) {
+    if (en.event.type === 'msg.request' || en.event.type === 'msg.serverRequest') {
+      const k = pairKey(en.event)
+      if (k) m.set(k, en.ts)
+    }
+  }
+  return m
+}
+
+/** Round-trip ms for a response/reply envelope, or undefined if its request isn't in `reqTimes`. */
+export function latencyOf(en: InspectorEnvelope, reqTimes: Map<string, number>): number | undefined {
+  if (en.event.type !== 'msg.response' && en.event.type !== 'msg.serverReply') return undefined
+  const k = pairKey(en.event)
+  const t0 = k === undefined ? undefined : reqTimes.get(k)
+  return t0 === undefined ? undefined : Math.max(0, en.ts - t0)
 }

@@ -3,7 +3,7 @@ import { Boxes, Database, FileText, LibraryBig, Network, Radio, Settings } from 
 import type {
   ConnDescriptor,
   InspectedContract,
-  InspectorEvent,
+  InspectorEnvelope,
   NodeStat,
   NodeView,
 } from '@super-line/core'
@@ -90,7 +90,7 @@ export default function App(): React.JSX.Element {
   const [connections, setConnections] = React.useState<ConnDescriptor[]>([])
   const [contract, setContract] = React.useState<InspectedContract | null>(null)
   const [nodeView, setNodeView] = React.useState<NodeView | null>(null)
-  const [feed, setFeed] = React.useState<InspectorEvent[]>([])
+  const [feed, setFeed] = React.useState<InspectorEnvelope[]>([])
   const [highlight, setHighlight] = React.useState<Highlight | null>(null)
   const [selectedConnId, setSelectedConnId] = React.useState<string | null>(null)
 

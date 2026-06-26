@@ -88,17 +88,18 @@ export type InspectorEvent =
   | { type: 'room.remove'; connId: string; room: string }
   | { type: 'topic.sub'; connId: string; topic: string }
   | { type: 'topic.unsub'; connId: string; topic: string }
-  // client→server request and its response (input/output redacted)
-  | { type: 'msg.request'; connId: string; role: string; name: string; input: unknown }
-  | { type: 'msg.response'; connId: string; name: string; ok: boolean; output?: unknown; error?: MessageError }
+  // client→server request and its response (input/output redacted). `reqId` is the per-connection
+  // frame id, so the Control Center can pair a response with its request to compute latency.
+  | { type: 'msg.request'; connId: string; role: string; name: string; input: unknown; reqId: number }
+  | { type: 'msg.response'; connId: string; name: string; ok: boolean; output?: unknown; error?: MessageError; reqId: number }
   // server→client event to a single connection (conn.emit / toConn().emit)
   | { type: 'msg.event'; target: string; name: string; data: unknown }
   // room.broadcast and topic publish
   | { type: 'msg.broadcast'; room: string; name: string; data: unknown }
   | { type: 'msg.publish'; topic: string; data: unknown }
-  // server→client request and the client's reply
-  | { type: 'msg.serverRequest'; target: string; name: string; input: unknown }
-  | { type: 'msg.serverReply'; target: string; name: string; ok: boolean; output?: unknown; error?: MessageError }
+  // server→client request and the client's reply. `reqId` pairs reply↔request, as above.
+  | { type: 'msg.serverRequest'; target: string; name: string; input: unknown; reqId: number }
+  | { type: 'msg.serverReply'; target: string; name: string; ok: boolean; output?: unknown; error?: MessageError; reqId: number }
   // Store traffic: lifecycle (create/delete), a write (client or server co-write), access changes, subscribe
   | { type: 'store.create'; store: string; id: string }
   | { type: 'store.delete'; store: string; id: string }
@@ -107,6 +108,44 @@ export type InspectorEvent =
   | { type: 'store.revoke'; store: string; id: string; principal: string }
   | { type: 'store.subscribe'; connId: string; store: string; id: string }
   | { type: 'store.unsubscribe'; connId: string; store: string; id: string }
+
+/**
+ * Cross-cutting metadata about one inspection record, wrapping the {@link InspectorEvent} it
+ * describes. The event stays a pure "what happened" union; the envelope carries when the origin
+ * node emitted it, how big the (redacted) payload snapshot was, and which node emitted it. This is
+ * what travels on the inspector `events` topic.
+ */
+export interface InspectorEnvelope {
+  event: InspectorEvent
+  /** Origin-node emit time (epoch ms). */
+  ts: number
+  /** Encoded byte size of the redacted payload snapshot; absent for events with no payload. */
+  byteSize?: number
+  /** Id of the node that emitted the event. */
+  originNodeId: string
+}
+
+/** The inspectable payload of an event (input/output/data/perms), or undefined for events with none. */
+export function eventPayload(event: InspectorEvent): unknown {
+  switch (event.type) {
+    case 'msg.request':
+    case 'msg.serverRequest':
+      return event.input
+    case 'msg.response':
+    case 'msg.serverReply':
+      return event.ok ? event.output : event.error
+    case 'msg.event':
+    case 'msg.broadcast':
+    case 'msg.publish':
+      return event.data
+    case 'store.write':
+      return event.data
+    case 'store.grant':
+      return event.perms
+    default:
+      return undefined
+  }
+}
 
 // Passthrough Standard Schema: carries TS types for inference, no-op at runtime. The inspector
 // channel is library-owned and trusted, so validation is intentionally a no-op.
@@ -139,7 +178,7 @@ export const InspectorContract = defineContract({
         readResource: { input: s<{ store: string; id: string }>(), output: s<StoreResourceView>() },
       },
       serverToClient: {
-        events: { payload: s<InspectorEvent>(), subscribe: true },
+        events: { payload: s<InspectorEnvelope>(), subscribe: true },
       },
     },
   },

@@ -1,15 +1,25 @@
 import { describe, expect, it } from 'vitest'
-import type { ConnDescriptor } from '@super-line/core'
+import type { ConnDescriptor, InspectorEnvelope, InspectorEvent } from '@super-line/core'
 import {
   eventCategory,
   eventColor,
   eventPayload,
   eventWire,
   flavorColor,
+  formatBytes,
   formatDuration,
+  latencyOf,
+  requestTimes,
   summarizeEvent,
   type FeedResolver,
 } from '../src/lib/events.js'
+
+const envelope = (event: InspectorEvent, ts: number, byteSize?: number): InspectorEnvelope => ({
+  event,
+  ts,
+  byteSize,
+  originNodeId: 'node1234',
+})
 
 const descriptor: ConnDescriptor = {
   id: 'abcdef1234',
@@ -44,6 +54,32 @@ describe('event helpers', () => {
     ).toBe('grace on node-1')
   })
 
+  it('formats byte sizes, em-dash for no payload', () => {
+    expect(formatBytes(undefined)).toBe('—')
+    expect(formatBytes(512)).toBe('512 B')
+    expect(formatBytes(2048)).toBe('2.0 KB')
+    expect(formatBytes(3 * 1024 * 1024)).toBe('3.0 MB')
+  })
+
+  it('pairs responses to requests by reqId, even with same-name concurrency', () => {
+    const c = 'conn1'
+    const envs: InspectorEnvelope[] = [
+      // two overlapping same-name requests, distinguished only by reqId
+      envelope({ type: 'msg.request', connId: c, role: 'user', name: 'echo', input: {}, reqId: 1 }, 100),
+      envelope({ type: 'msg.request', connId: c, role: 'user', name: 'echo', input: {}, reqId: 2 }, 150),
+      envelope({ type: 'msg.response', connId: c, name: 'echo', ok: true, reqId: 2 }, 210),
+      envelope({ type: 'msg.response', connId: c, name: 'echo', ok: true, reqId: 1 }, 200),
+    ]
+    const reqTimes = requestTimes(envs)
+    expect(latencyOf(envs[3]!, reqTimes)).toBe(100) // reqId 1: 200 − 100
+    expect(latencyOf(envs[2]!, reqTimes)).toBe(60) // reqId 2: 210 − 150, not cross-paired
+    expect(latencyOf(envs[0]!, reqTimes)).toBeUndefined() // a request row has no latency
+
+    // a response whose request isn't in the window → unknown latency
+    const orphan = envelope({ type: 'msg.response', connId: c, name: 'echo', ok: true, reqId: 9 }, 300)
+    expect(latencyOf(orphan, requestTimes([orphan]))).toBeUndefined()
+  })
+
   it('formats elapsed durations compactly', () => {
     const now = 1_000_000_000
     expect(formatDuration(now - 5_000, now)).toBe('5s')
@@ -57,11 +93,11 @@ describe('event helpers', () => {
       conn: (id: string) => (id === descriptor.id ? descriptor : undefined),
       nodeName: () => 'node-1',
     }
-    const req = { type: 'msg.request', connId: descriptor.id, role: 'user', name: 'send', input: { text: 'hi' } } as const
+    const req = { type: 'msg.request', connId: descriptor.id, role: 'user', name: 'send', input: { text: 'hi' }, reqId: 1 } as const
     expect(summarizeEvent(req, resolver)).toBe('ada (user) → send')
     expect(eventPayload(req)).toEqual({ text: 'hi' })
 
-    const res = { type: 'msg.response', connId: descriptor.id, name: 'send', ok: false, error: { code: 'BOOM', message: 'x' } } as const
+    const res = { type: 'msg.response', connId: descriptor.id, name: 'send', ok: false, error: { code: 'BOOM', message: 'x' }, reqId: 1 } as const
     expect(summarizeEvent(res, resolver)).toContain('BOOM')
     expect(eventPayload(res)).toEqual({ code: 'BOOM', message: 'x' })
 
@@ -85,7 +121,7 @@ describe('event helpers', () => {
     }
 
     // inbound request → the originating conn's wire
-    expect(eventWire({ type: 'msg.request', connId: 'p2p1', role: 'user', name: 'send', input: {} }, resolver)).toEqual({
+    expect(eventWire({ type: 'msg.request', connId: 'p2p1', role: 'user', name: 'send', input: {}, reqId: 1 }, resolver)).toEqual({
       kind: 'one',
       label: 'libp2p',
       color: expect.stringMatching(/^#/),
@@ -104,10 +140,10 @@ describe('event helpers', () => {
       ],
     })
     // unknown conn → no chip
-    expect(eventWire({ type: 'msg.request', connId: 'gone', role: 'user', name: 'send', input: {} }, resolver)).toBeUndefined()
+    expect(eventWire({ type: 'msg.request', connId: 'gone', role: 'user', name: 'send', input: {}, reqId: 1 }, resolver)).toBeUndefined()
     // publish (topic subs unknown) + serverRequest/serverReply (adapter axis) → intentionally unattributed
     expect(eventWire({ type: 'msg.publish', topic: 'presence', data: {} }, resolver)).toBeUndefined()
-    expect(eventWire({ type: 'msg.serverRequest', target: 'node2', name: 'sync', input: {} }, resolver)).toBeUndefined()
+    expect(eventWire({ type: 'msg.serverRequest', target: 'node2', name: 'sync', input: {}, reqId: 1 }, resolver)).toBeUndefined()
   })
 
   it('buckets events into feed categories', () => {

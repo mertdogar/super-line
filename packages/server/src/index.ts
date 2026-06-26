@@ -4,6 +4,7 @@ import {
   SuperLineError,
   INSPECTOR_ROLE,
   classifyContract,
+  eventPayload,
   type Adapter,
   type Serializer,
   type Schema,
@@ -11,6 +12,7 @@ import {
   type InspectedContract,
   type ConnView,
   type InspectorEvent,
+  type InspectorEnvelope,
   type StoreInfo,
   type StoreResourceView,
   type ServerTransport,
@@ -79,6 +81,12 @@ const CONN = 'c:' // personal channel per connection (targeted cross-node send)
 const USER = 'u:' // personal channel per user key (cross-node fan-out)
 const REPLY = 'reply:' // per-node channel carrying server→client request replies back to the origin
 const INSPECT = 'i:' // reserved fan-out channel for the inspector `events` topic
+
+const inspectorEncoder = new TextEncoder()
+/** Byte length of an encoded value, whether the serializer produced a string or bytes. */
+function encodedByteSize(encoded: string | Uint8Array): number {
+  return typeof encoded === 'string' ? inspectorEncoder.encode(encoded).length : encoded.byteLength
+}
 const STORE = 's:' // per-Resource fan-out channel: `s:<name>:<id>`
 const SERVER_ORIGIN = 'server' // origin stamped on server co-writes (distinct from any client writer id)
 
@@ -509,13 +517,14 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     if (inspectorEnabled)
       emitInspectorEvent(
         env.ok
-          ? { type: 'msg.serverReply', target: conn.id, name: r.name, ok: true, output: safeSnapshot(env.d) }
+          ? { type: 'msg.serverReply', target: conn.id, name: r.name, ok: true, output: safeSnapshot(env.d), reqId: r.corrId }
           : {
               type: 'msg.serverReply',
               target: conn.id,
               name: r.name,
               ok: false,
               error: { code: env.code, message: env.m },
+              reqId: r.corrId,
             },
       )
     void adapter.publish(REPLY + r.origin, serializer.encode(env))
@@ -543,10 +552,18 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     hbTimer.unref?.()
   }
 
-  // publish a live topology event to subscribed inspectors (fans out cluster-wide via the adapter)
+  // publish a live topology event to subscribed inspectors (fans out cluster-wide via the adapter).
+  // ts/byteSize/originNodeId are stamped here, the single choke point — call sites stay metadata-free.
   function emitInspectorEvent(event: InspectorEvent): void {
     if (!inspectorEnabled) return
-    void adapter.publish(INSPECT + 'events', serializer.encode({ t: 'pub', c: 'events', d: event }))
+    const payload = eventPayload(event)
+    const envelope: InspectorEnvelope = {
+      event,
+      ts: Date.now(),
+      originNodeId: instanceId,
+      byteSize: payload === undefined ? undefined : encodedByteSize(serializer.encode(payload)),
+    }
+    void adapter.publish(INSPECT + 'events', serializer.encode({ t: 'pub', c: 'events', d: envelope }))
   }
 
   function joinChannel(conn: Conn, channel: string): void | Promise<void> {
@@ -880,6 +897,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
           name: info.name,
           ok: false,
           error: { code: e.code, message: e.message },
+          reqId: id,
         })
     }
   }
@@ -901,6 +919,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
           role: conn.role,
           name: frame.m,
           input: safeSnapshot(input),
+          reqId: frame.i,
         })
       const output = await handler(input, conn.ctx, conn)
       if (inspectorEnabled)
@@ -910,6 +929,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
           name: frame.m,
           ok: true,
           output: safeSnapshot(output),
+          reqId: frame.i,
         })
       conn.send({ t: 'res', i: frame.i, d: output })
     })
@@ -1169,7 +1189,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
         { once: true },
       )
       if (inspectorEnabled)
-        emitInspectorEvent({ type: 'msg.serverRequest', target: id, name, input: safeSnapshot(input) })
+        emitInspectorEvent({ type: 'msg.serverRequest', target: id, name, input: safeSnapshot(input), reqId })
       const env: PersonalEnvelope = { p: 'req', o: instanceId, i: reqId, m: name, d: input }
       void adapter.publish(CONN + id, serializer.encode(env))
     })

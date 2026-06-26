@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { defineContract, INSPECTOR_SUBPROTOCOL } from '@super-line/core'
 import type { InspectedContract, Schema } from '@super-line/core'
 import { MemoryBus, createInMemoryAdapter } from '@super-line/server'
-import { connectInspector, createHarness, waitFor } from './harness.js'
+import { connectInspector, createHarness, tick, waitFor } from './harness.js'
 
 const contract = defineContract({
   roles: {
@@ -368,6 +368,61 @@ describe('inspector message events (T3.2)', () => {
     await waitFor(() => insp.events.some((e) => e.type === 'msg.response' && e.ok === false))
     const errRes = insp.events.find((e) => e.type === 'msg.response' && e.ok === false)
     expect(errRes?.name).toBe('boom')
+    insp.close()
+  })
+
+  it('wraps every event in an envelope with ts, originNodeId, and payload-only byteSize', async () => {
+    const { srv, url } = await h.server(msgContract, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      inspector: true,
+    })
+    srv.implement({
+      user: { echo: async () => ({ ok: true }), boom: async () => {} },
+    })
+
+    const insp = await connectInspector(url)
+    await insp.subscribeEvents()
+    const u = h.client(msgContract, { url, role: 'user' })
+    await u.echo({ text: 'hi', secret: 's3cr3t' })
+
+    await waitFor(() => insp.envelopes.some((en) => en.event.type === 'connect'))
+    await waitFor(() => insp.envelopes.some((en) => en.event.type === 'msg.request'))
+
+    const connect = insp.envelopes.find((en) => en.event.type === 'connect')!
+    expect(typeof connect.ts).toBe('number')
+    expect(connect.originNodeId).toBe(srv.nodeId)
+    expect(connect.byteSize).toBeUndefined() // lifecycle event carries no payload
+
+    const req = insp.envelopes.find((en) => en.event.type === 'msg.request')!
+    expect(req.byteSize).toBeGreaterThan(0) // request input has a payload, so it's sized
+    u.close()
+    insp.close()
+  })
+
+  it('tags request/response with a reqId so concurrent same-name calls pair unambiguously', async () => {
+    const { srv, url } = await h.server(msgContract, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      inspector: true,
+    })
+    // a tiny delay keeps both echoes in flight at once, exercising the concurrency case
+    srv.implement({
+      user: { echo: async () => (await tick(20), { ok: true }), boom: async () => {} },
+    })
+
+    const insp = await connectInspector(url)
+    await insp.subscribeEvents()
+    const u = h.client(msgContract, { url, role: 'user' })
+    await Promise.all([u.echo({ text: 'a', secret: 'x' }), u.echo({ text: 'b', secret: 'y' })])
+
+    await waitFor(() => insp.events.filter((e) => e.type === 'msg.response').length === 2)
+    const reqIds = insp.events.filter((e) => e.type === 'msg.request').map((e) => e.reqId)
+    expect(new Set(reqIds).size).toBe(2) // two in-flight same-name requests got distinct ids
+
+    // every response pairs back to a request by reqId
+    for (const res of insp.events.filter((e) => e.type === 'msg.response')) {
+      expect(reqIds).toContain(res.reqId)
+    }
+    u.close()
     insp.close()
   })
 })

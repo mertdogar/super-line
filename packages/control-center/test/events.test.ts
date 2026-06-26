@@ -80,6 +80,18 @@ describe('event helpers', () => {
     expect(latencyOf(orphan, requestTimes([orphan]))).toBeUndefined()
   })
 
+  it('pairs the server→client direction by target+reqId, not crossing the client reqId space', () => {
+    const envs: InspectorEnvelope[] = [
+      // server→client request to a conn, plus a client→server request that happens to reuse reqId 1
+      envelope({ type: 'msg.serverRequest', target: 'connX', name: 'sync', input: {}, reqId: 1 }, 100),
+      envelope({ type: 'msg.request', connId: 'connX', role: 'user', name: 'echo', input: {}, reqId: 1 }, 120),
+      envelope({ type: 'msg.serverReply', target: 'connX', name: 'sync', ok: true, reqId: 1 }, 175),
+    ]
+    const reqTimes = requestTimes(envs)
+    // serverReply pairs to the serverRequest (s:connX:1 = ts 100), not the client request (c:connX:1 = ts 120)
+    expect(latencyOf(envs[2]!, reqTimes)).toBe(75)
+  })
+
   it('formats elapsed durations compactly', () => {
     const now = 1_000_000_000
     expect(formatDuration(now - 5_000, now)).toBe('5s')

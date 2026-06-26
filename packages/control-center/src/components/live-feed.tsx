@@ -171,9 +171,27 @@ export function LiveFeed({
       else next.add(id)
       return next
     })
+  // sorting only makes sense on a frozen view (live order is newest-first), so a sort click also pauses.
   // desc → asc → off; clicking a new column starts at desc (size-desc is the headline use)
-  const onSort = (col: SortCol): void =>
+  const onSort = (col: SortCol): void => {
+    if (!paused) {
+      setFrozen(events)
+      setPaused(true)
+    }
     setSort((prev) => (prev?.col !== col ? { col, dir: 'desc' } : prev.dir === 'desc' ? { col, dir: 'asc' } : null))
+  }
+
+  // stable per-event key: index keys would mis-bind row expansion state when events prepend
+  const keys = React.useRef(new WeakMap<InspectorEnvelope, number>())
+  const nextKey = React.useRef(0)
+  const keyOf = (en: InspectorEnvelope): number => {
+    let k = keys.current.get(en)
+    if (k === undefined) {
+      k = nextKey.current++
+      keys.current.set(en, k)
+    }
+    return k
+  }
 
   const resolver = React.useMemo<FeedResolver>(() => {
     const byId = new Map(connections.map((c) => [c.id, c]))
@@ -194,7 +212,7 @@ export function LiveFeed({
     .filter((en) => active.has(eventCategory(en.event.type)))
     .map((en) => ({ en, summary: summarizeEvent(en.event, resolver), latency: latencyOf(en, reqTimes) }))
     .filter((r) => !q || `${r.en.event.type} ${r.summary}`.toLowerCase().includes(q))
-  if (sort) {
+  if (sort && paused) {
     const val = (r: (typeof rows)[number]): number =>
       sort.col === 'time' ? r.en.ts : sort.col === 'size' ? r.en.byteSize ?? -1 : r.latency ?? -1
     rows.sort((a, b) => (val(a) - val(b)) * (sort.dir === 'asc' ? 1 : -1))
@@ -254,8 +272,8 @@ export function LiveFeed({
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
-                <FeedRow key={i} env={r.en} resolver={resolver} summary={r.summary} latency={r.latency} />
+              {rows.map((r) => (
+                <FeedRow key={keyOf(r.en)} env={r.en} resolver={resolver} summary={r.summary} latency={r.latency} />
               ))}
             </tbody>
           </table>

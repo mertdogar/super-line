@@ -304,6 +304,8 @@ describe('inspector events topic (slice 5)', () => {
     await waitFor(() => insp.events.some((e) => e.type === 'connect'))
     const connectEv = insp.events.find((e) => e.type === 'connect')
     expect(connectEv?.descriptor?.nodeId).toBe(nodeB.srv.nodeId) // event originated on B
+    // the envelope's originNodeId is the emitting (origin) node, not the receiving inspector's node
+    expect(insp.envelopes.find((en) => en.event.type === 'connect')?.originNodeId).toBe(nodeB.srv.nodeId)
     insp.close()
   })
 })
@@ -422,6 +424,62 @@ describe('inspector message events (T3.2)', () => {
     for (const res of insp.events.filter((e) => e.type === 'msg.response')) {
       expect(reqIds).toContain(res.reqId)
     }
+    u.close()
+    insp.close()
+  })
+
+  it('byteSize measures the redacted snapshot, not the raw payload', async () => {
+    const big = 'x'.repeat(5000)
+    const { srv, url } = await h.server(msgContract, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      inspector: { redact: ['secret'] },
+    })
+    srv.implement({ user: { echo: async () => ({ ok: true }), boom: async () => {} } })
+    const insp = await connectInspector(url)
+    await insp.subscribeEvents()
+    const u = h.client(msgContract, { url, role: 'user' })
+    await u.echo({ text: 'hi', secret: big })
+
+    await waitFor(() => insp.envelopes.some((en) => en.event.type === 'msg.request'))
+    const req = insp.envelopes.find((en) => en.event.type === 'msg.request')!
+    // the 5000-char secret is redacted to '[Redacted]', so the sized snapshot is tiny, not ~5KB
+    expect(req.byteSize).toBeGreaterThan(0)
+    expect(req.byteSize).toBeLessThan(big.length)
+    u.close()
+    insp.close()
+  })
+})
+
+const srvReqContract = defineContract({
+  shared: {
+    clientToServer: { hello: { input: z.object({}), output: z.object({ ok: z.boolean() }) } },
+    serverToClient: { confirm: { input: z.object({ q: z.string() }), output: z.object({ ok: z.boolean() }) } },
+  },
+  roles: { user: {} },
+})
+
+describe('inspector server→client request pairing', () => {
+  it('tags serverRequest and serverReply with a shared reqId', async () => {
+    const { srv, url } = await h.server(srvReqContract, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      inspector: true,
+    })
+    srv.implement({ shared: { hello: async () => ({ ok: true }) }, user: {} })
+
+    const insp = await connectInspector(url)
+    await insp.subscribeEvents()
+    const u = h.client(srvReqContract, { url, role: 'user' })
+    u.implement({ confirm: async ({ q }) => ({ ok: q === 'go' }) })
+    await u.hello({})
+    await waitFor(() => srv.local.connections.length === 1)
+    const id = srv.local.connections[0]!.id
+    await srv.toConn(id).request('confirm', { q: 'go' })
+
+    await waitFor(() => insp.events.some((e) => e.type === 'msg.serverReply'))
+    const sreq = insp.events.find((e) => e.type === 'msg.serverRequest')!
+    const srep = insp.events.find((e) => e.type === 'msg.serverReply')!
+    expect(typeof sreq.reqId).toBe('number')
+    expect(srep.reqId).toBe(sreq.reqId) // shared id → the CC can pair reply to request for latency
     u.close()
     insp.close()
   })

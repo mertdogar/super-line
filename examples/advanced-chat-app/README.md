@@ -22,6 +22,19 @@ Open a second window as a different user (`?name=bob`) to see live messages, pre
 The workspace persists to `examples/advanced-chat-app/chat.db` (gitignored) — **stop and restart
 the server and your channels + history are still there.** Delete `chat.db` to reset.
 
+### Inspect live traffic (Control Center)
+
+The server enables the inspector channel (`inspector: true`), so you can watch every request,
+response, event and store write in real time with the [Control Center](../../packages/control-center):
+
+```bash
+pnpm --filter @super-line/example-advanced-chat-app inspector
+```
+
+It builds the Control Center, serves it on http://localhost:7777 and opens it pointed at this
+server (`ws://localhost:8790`). Run it alongside `dev` and chat in the app to see the live feed,
+then try the type/node/wire/time/latency/size filters and the size + latency magnitude bars.
+
 ## How it works
 
 **The store is the read-model; requests are the writes.** Channels and messages are *off-contract*

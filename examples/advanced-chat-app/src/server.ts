@@ -38,8 +38,10 @@ const nameOf = (conn: Conn) => (conn.ctx as Ctx).name
 const server = http.createServer()
 
 const srv = createSuperLineServer(chat, {
-  transports: [webSocketServerTransport({ server })],
+  transports: [webSocketServerTransport({ server, inspector: true })],
   stores: { chat: sqliteStoreServer({ file: DB_FILE }) },
+  nodeName: 'chat', // friendly name in the Control Center
+  inspector: true, // expose the inspector channel so `pnpm inspector` (Control Center) can attach
   authenticate: (h) => {
     const name = h.query.name?.trim()
     if (!name) throw new Error('name is required')

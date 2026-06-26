@@ -7,6 +7,7 @@
     "dev": "concurrently -k -n server,web -c magenta,green \"tsx src/server.ts\" \"vite\"",
     "dev:server": "tsx src/server.ts",
     "dev:web": "vite",
+    "inspector": "pnpm --filter @super-line/control-center build && node ../../packages/control-center/bin/control-center.js --url ws://localhost:8790",
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

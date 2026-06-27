@@ -16,6 +16,7 @@ import { libp2pServerTransport } from '@super-line/transport-libp2p'
 import { createLibp2pAdapter, type PubSubLibp2p } from '@super-line/adapter-libp2p'
 import { chat } from './contract.js'
 import { keyFor, relayMultiaddr, serverPeerIdSet, DISCOVERY_TOPIC } from './keys.js'
+import { ICE_SERVERS } from './ice.js'
 
 // One chat node "behind NAT": its libp2p node advertises ONLY /p2p-circuit + /webrtc — no directly
 // dialable address — so discovery, signaling, and first contact are all forced through the relay.
@@ -32,7 +33,7 @@ const knownServers = await serverPeerIdSet(SERVER_NODES) // role-filter: only me
 const node = (await createLibp2p({
   privateKey: await keyFor(NODE), // stable identity → stable node name in the Control Center
   addresses: { listen: ['/p2p-circuit', '/webrtc'] },
-  transports: [webSockets(), webRTC(), circuitRelayTransport()],
+  transports: [webSockets(), webRTC({ rtcConfiguration: { iceServers: ICE_SERVERS } }), circuitRelayTransport()],
   connectionEncrypters: [noise()],
   streamMuxers: [yamux()],
   connectionGater: { denyDialMultiaddr: () => false },

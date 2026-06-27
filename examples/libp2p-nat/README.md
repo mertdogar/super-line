@@ -49,6 +49,10 @@ pnpm probe                       # optional: a headless client that proves the p
 - **NAT is a libp2p-config fact**, not docker plumbing: servers never advertise a dialable address,
   so discovery, first contact and SDP signalling are *forced* through the relay. The actual data
   path is a direct WebRTC connection. (libp2p WebRTC has no data-relay fallback — direct or nothing.)
+- **STUN makes it cross real NATs.** WebRTC is given public STUN servers (`src/ice.ts`) so each peer
+  discovers its hole-punchable public address — that's what lets a phone on cellular reach a server
+  behind a home router. Without it only host candidates are gathered (fine on one LAN, not across
+  networks). Genuinely *symmetric* NATs still need a TURN relay, which this example doesn't run.
 - **Discovery is `@libp2p/pubsub-peer-discovery`** over the gossipsub mesh the adapter already runs.
   The relay bridges the discovery topic; servers find each other, browsers find a server. Because
   pubsub carries no role info, peers are role-filtered against a **known-server set** (servers have

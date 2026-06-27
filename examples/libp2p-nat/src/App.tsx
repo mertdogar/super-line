@@ -13,6 +13,7 @@ import { createSuperLineClient, type SuperLineClient } from '@super-line/client'
 import { libp2pClientTransport } from '@super-line/transport-libp2p'
 import { createSuperLineHooks } from '@super-line/react'
 import { chat } from './contract.js'
+import { ICE_SERVERS } from './ice.js'
 
 // Injected at build time by vite.config.ts (deterministic relay addr + public server PeerIds — no
 // private keys ever reach the browser). The relay is the one fixed public node; servers are found
@@ -36,7 +37,7 @@ interface Message {
 // it over webrtc — exactly the path the headless probe proved.
 async function connect(name: string): Promise<{ client: SuperLineClient<typeof chat, 'user'>; node: Awaited<ReturnType<typeof createLibp2p>> }> {
   const node = await createLibp2p({
-    transports: [webSockets(), webRTC(), circuitRelayTransport()],
+    transports: [webSockets(), webRTC({ rtcConfiguration: { iceServers: ICE_SERVERS } }), circuitRelayTransport()],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
     connectionGater: { denyDialMultiaddr: () => false },

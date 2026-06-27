@@ -12,6 +12,7 @@ import { createSuperLineClient } from '@super-line/client'
 import { libp2pClientTransport } from '@super-line/transport-libp2p'
 import { chat } from './contract.js'
 import { relayMultiaddr, serverPeerIdSet, DISCOVERY_TOPIC } from './keys.js'
+import { ICE_SERVERS } from './ice.js'
 
 // Headless stand-in for the React browser client (verifies the path without a browser):
 // bootstrap to the relay → discover a SERVER via pubsub → dial it over webrtc → chat.
@@ -21,7 +22,7 @@ const relayAddr = relayMultiaddr(RELAY_HOST)
 const knownServers = await serverPeerIdSet(SERVER_NODES)
 
 const node = await createLibp2p({
-  transports: [webSockets(), webRTC(), circuitRelayTransport()],
+  transports: [webSockets(), webRTC({ rtcConfiguration: { iceServers: ICE_SERVERS } }), circuitRelayTransport()],
   connectionEncrypters: [noise()],
   streamMuxers: [yamux()],
   connectionGater: { denyDialMultiaddr: () => false },

@@ -25,6 +25,7 @@
       "@super-line/store-memory": ["./packages/store-memory/src/index.ts"],
       "@super-line/store-sqlite": ["./packages/store-sqlite/src/index.ts"],
       "@super-line/store-sync": ["./packages/store-sync/src/index.ts"],
+      "@super-line/store-sync-libsql": ["./packages/store-sync-libsql/src/index.ts"],
       "@super-line/transport-websocket": ["./packages/transport-websocket/src/index.ts"],
       "@super-line/transport-loopback": ["./packages/transport-loopback/src/index.ts"],
       "@super-line/transport-http": ["./packages/transport-http/src/index.ts"],

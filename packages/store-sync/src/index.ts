@@ -212,6 +212,10 @@ class SyncReplica implements ResourceReplica {
   seed(snapshot: unknown): void {
     if (typeof snapshot === 'string') this.sv.applyUpdate(fromB64(snapshot)) // catch-up = full Yjs state
   }
+
+  applyDelete(): void {
+    this.sv.emitChange()
+  }
 }
 
 /** The CRDT **client half**: each opened Resource is a reactive super-store doc that merges remote deltas. */

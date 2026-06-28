@@ -123,6 +123,13 @@ export interface SChangeFrame {
   o: string // writer origin (echo-break)
   nd?: string // origin NODE id; stamped for cross-node relay dedup, ignored by clients
 }
+// a server→client Store delete push (fan-out of a delete on a Resource the client subscribes to)
+export interface SDeleteFrame {
+  t: 'sdel'
+  n: string // store name
+  id: string // resource id
+  nd?: string // origin NODE id; stamped for cross-node relay dedup, ignored by clients
+}
 export type ServerFrame =
   | ResFrame
   | ErrFrame
@@ -130,6 +137,7 @@ export type ServerFrame =
   | PubFrame
   | SReqFrame
   | SChangeFrame
+  | SDeleteFrame
   | PingFrame
   | PongFrame
 

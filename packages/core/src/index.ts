@@ -82,6 +82,7 @@ export type {
   SWriteFrame,
   SReadFrame,
   SChangeFrame,
+  SDeleteFrame,
   PingFrame,
   PongFrame,
 } from './wire.js'

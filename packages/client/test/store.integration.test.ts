@@ -94,6 +94,20 @@ describe('client store', () => {
     expect(() => env.makeClient('alice').store('nope')).toThrow(/not configured/)
   })
 
+  it('a subscribed handle flips deleted=true and fires subscribe when the server deletes', async () => {
+    await env.srv.store('docs').create('ddel', { v: 1 }, { alice: { read: true, write: true } })
+    const h = env.makeClient('alice').store('docs').open('ddel')
+    await h.ready
+    expect(h.deleted).toBe(false)
+    let fired = 0
+    h.subscribe(() => fired++)
+
+    await env.srv.store('docs').delete('ddel')
+
+    await waitFor(() => h.deleted)
+    expect(fired).toBeGreaterThan(0)
+  })
+
   it('re-snapshots an open Resource after a reconnect', async () => {
     await env.srv.store('docs').create('d5', { v: 1 }, { alice: { read: true, write: true } })
     const h = env.makeClient('alice').store('docs').open('d5')

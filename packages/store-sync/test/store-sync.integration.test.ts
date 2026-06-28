@@ -2,7 +2,7 @@ import { defineContract } from '@super-line/core'
 import { createSuperLineClient, type SuperLineClient } from '@super-line/client'
 import { createSuperLineServer } from '@super-line/server'
 import { createLoopbackTransport } from '@super-line/transport-loopback'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { syncStoreClient, syncStoreServer } from '../src/index.js'
 
 const contract = defineContract({ roles: { user: { clientToServer: {} } } })
@@ -304,5 +304,15 @@ describe('store-sync (CRDT) — client delete(path) (R4)', () => {
       const b = hb.getSnapshot() as Els
       return a.elements.e1 === undefined && a.elements.e2?.x === 99 && b.elements.e1 === undefined && b.elements.e2?.x === 99
     })
+  })
+})
+
+describe('store-sync (CRDT) — replica applyDelete', () => {
+  it('notifies subscribers (so the handle re-reads deleted)', () => {
+    const r = syncStoreClient().open('a')
+    const cb = vi.fn()
+    r.subscribe(cb)
+    r.applyDelete()
+    expect(cb).toHaveBeenCalledTimes(1)
   })
 })

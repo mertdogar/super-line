@@ -90,6 +90,20 @@ describe('react hooks', () => {
     await waitFor(() => expect(result.current.data).toEqual({ v: 2 }))
   })
 
+  it('useResource surfaces deleted=true when the server removes the resource', async () => {
+    const { client, srv } = await boot()
+    await srv.store('docs').create('ddel', { v: 1 }, { tester: { read: true, write: true } })
+
+    const { result } = renderHook(() => useResource<{ v: number }>('docs', 'ddel'), { wrapper: wrapper(client) })
+    await waitFor(() => expect(result.current.data).toEqual({ v: 1 }))
+    expect(result.current.deleted).toBe(false)
+
+    await act(async () => {
+      await srv.store('docs').delete('ddel')
+    })
+    await waitFor(() => expect(result.current.deleted).toBe(true))
+  })
+
   it('useResource exposes delete(path) for surgical key removal', async () => {
     const { client, srv } = await boot()
     await srv.store('docs').create('d2', { keep: 1, drop: 2 }, { tester: { read: true, write: true } })

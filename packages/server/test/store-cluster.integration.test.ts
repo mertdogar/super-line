@@ -1,4 +1,11 @@
-import { defineContract, type ClientTransport, type ServerStore } from '@super-line/core'
+import {
+  defineContract,
+  jsonSerializer,
+  type ClientTransport,
+  type ServerFrame,
+  type SDeleteFrame,
+  type ServerStore,
+} from '@super-line/core'
 import { createSuperLineClient } from '@super-line/client'
 import { MemoryBus, createInMemoryAdapter, createSuperLineServer } from '@super-line/server'
 import { memoryStoreClient, memoryStoreServer } from '@super-line/store-memory'
@@ -67,6 +74,43 @@ describe('store — cross-node', () => {
 
     await waitFor(() => eq(hb.getSnapshot(), { v: 1 })) // fan-out reaches B's subscriber
     expect((await b.srv.store('docs').read('d'))?.data).toEqual({ v: 1 }) // B's replica converged (relay-apply)
+  })
+
+  it('a delete on node A fans out: node B drops its replica and a subscribed conn on B gets sdel', async () => {
+    const { a, b } = twoNodes(() => memoryStoreServer())
+    await a.srv.store('docs').create('d', { v: 0 }, rules)
+    await b.srv.store('docs').create('d', { v: 0 }, rules)
+
+    // tap B's wire to observe the raw sdel frame the subscribed conn receives
+    const frames: ServerFrame[] = []
+    const spy: ClientTransport = {
+      connect: (params, hooks) =>
+        b.transport.connect(params, {
+          ...hooks,
+          onMessage(bytes) {
+            try {
+              frames.push(jsonSerializer.decode(bytes) as ServerFrame)
+            } catch {
+              /* ignore non-frame bytes */
+            }
+            hooks.onMessage(bytes)
+          },
+        }),
+    }
+    const clientB = createSuperLineClient(contract, {
+      transport: spy,
+      role: 'user',
+      params: { uid: 'bob' },
+      stores: { docs: memoryStoreClient() },
+    })
+    cleanups.push(() => clientB.close())
+    const hb = clientB.store('docs').open('d')
+    await hb.ready
+
+    await a.srv.store('docs').delete('d')
+
+    await waitFor(() => frames.some((f) => f.t === 'sdel' && (f as SDeleteFrame).id === 'd'))
+    expect(await b.srv.store('docs').read('d')).toBeUndefined() // B's replica dropped (relay delete)
   })
 
   it('a self-mode store is not relay-applied (it owns its own cross-node sync)', async () => {

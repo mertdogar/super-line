@@ -143,6 +143,10 @@ class LwwReplica implements ResourceReplica {
     this.value = change.update // LWW replace
     this.notify()
   }
+
+  applyDelete(): void {
+    this.notify()
+  }
 }
 
 /**

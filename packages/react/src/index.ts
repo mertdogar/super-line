@@ -123,18 +123,24 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     id: string,
   ): {
     data: T | undefined
+    deleted: boolean
     set: (value: T) => void
     update: (partial: Partial<T>) => void
     delete: (path: (string | number)[]) => void
   } {
     const client = useClient()
     const [data, setData] = useState<T>()
+    const [deleted, setDeleted] = useState(false)
     const handleRef = useRef<ResourceHandle | undefined>(undefined)
     useEffect(() => {
       const handle = client.store(name).open(id)
       handleRef.current = handle
       setData(handle.getSnapshot() as T | undefined) // reset to the fresh handle's state on id/name change
-      const unsub = handle.subscribe(() => setData(handle.getSnapshot() as T | undefined))
+      setDeleted(handle.deleted)
+      const unsub = handle.subscribe(() => {
+        setData(handle.getSnapshot() as T | undefined)
+        setDeleted(handle.deleted)
+      })
       return () => {
         unsub()
         handle.close()
@@ -144,7 +150,7 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     const set = useCallback((value: T) => handleRef.current?.set(value), [])
     const update = useCallback((partial: Partial<T>) => handleRef.current?.update(partial), [])
     const del = useCallback((path: (string | number)[]) => handleRef.current?.delete(path), [])
-    return { data, set, update, delete: del }
+    return { data, deleted, set, update, delete: del }
   }
 
   return { Provider, useClient, useEvent, useSubscription, useRequest, useResource }

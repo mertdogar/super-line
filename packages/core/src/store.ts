@@ -131,6 +131,8 @@ export interface ResourceReplica {
   delete(path: (string | number)[]): StoreChange | null
   applyRemote(change: StoreChange): void
   seed(snapshot: unknown): void
+  /** Mark this Resource deleted (server fan-out of a `delete`) + notify subscribers, so consumers re-read. */
+  applyDelete(): void
 }
 
 /**

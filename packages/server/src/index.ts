@@ -28,6 +28,7 @@ import {
   type SWriteFrame,
   type SReadFrame,
   type SChangeFrame,
+  type SDeleteFrame,
   type ServerStore,
   type ServerReplica,
   type Resource,
@@ -1046,15 +1047,19 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
   function handleStoreRelay(channel: string, payload: string | Uint8Array): void {
     const set = members.get(channel)
     if (set) for (const conn of set) conn.sendRaw(payload)
-    let frame: SChangeFrame
+    let frame: SChangeFrame | SDeleteFrame
     try {
-      frame = serializer.decode(payload) as SChangeFrame
+      frame = serializer.decode(payload) as SChangeFrame | SDeleteFrame
     } catch {
       return
     }
     if (frame.nd === instanceId) return // our own publish looped back; already applied locally
     const store = storeMap[frame.n]
     if (!store || store.clustering !== 'relay') return
+    if (frame.t === 'sdel') {
+      void store.delete(frame.id) // idempotent: drops the local replica so this node stays converged
+      return
+    }
     relaying = true
     try {
       void store.apply({ id: frame.id, update: frame.u, origin: frame.o })
@@ -1230,6 +1235,10 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       },
       async delete(id) {
         await store.delete(id)
+        void adapter.publish(
+          STORE + name + ':' + id,
+          serializer.encode({ t: 'sdel', n: name, id, nd: instanceId } satisfies SDeleteFrame),
+        )
         if (inspectorEnabled) emitInspectorEvent({ type: 'store.delete', store: name, id })
       },
       list() {

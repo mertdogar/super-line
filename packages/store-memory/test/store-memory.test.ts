@@ -200,4 +200,13 @@ describe('memoryStoreClient (LWW)', () => {
     expect(r.getSnapshot()).toEqual({ n: 1 })
     expect(cb).not.toHaveBeenCalled()
   })
+
+  it('applyDelete notifies subscribers (so the handle re-reads deleted)', () => {
+    const r = memoryStoreClient().open('a')
+    r.seed({ n: 1 })
+    const cb = vi.fn()
+    r.subscribe(cb)
+    r.applyDelete()
+    expect(cb).toHaveBeenCalledTimes(1)
+  })
 })

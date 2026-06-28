@@ -107,6 +107,8 @@ export interface ResourceHandle {
   delete(path: (string | number)[]): void
   /** Resolves once the catch-up snapshot has been applied; rejects if the open is denied. */
   readonly ready: Promise<void>
+  /** True once the server fans out a delete for this Resource (a `subscribe` fires; re-read this + the snapshot). */
+  readonly deleted: boolean
   /** Stop receiving changes and tell the server to unsubscribe. */
   close(): void
 }
@@ -238,6 +240,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     replicas: Set<ResourceReplica>
     ready: Deferred
     settled: boolean
+    deleted: boolean
   }
   const openResources = new Map<string, OpenEntry>()
   const openKey = (store: string, id: string): string => store + '\u0000' + id
@@ -368,6 +371,12 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       if (entry) {
         const change = { id: frame.id, update: frame.u, origin: frame.o }
         for (const replica of entry.replicas) replica.applyRemote(change) // own-origin merges are no-ops
+      }
+    } else if (frame.t === 'sdel') {
+      const entry = openResources.get(openKey(frame.n, frame.id))
+      if (entry) {
+        entry.deleted = true
+        for (const replica of entry.replicas) replica.applyDelete() // notify so handles/hooks re-read `deleted`
       }
     }
   }
@@ -558,7 +567,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     const key = openKey(store, id)
     let entry = openResources.get(key)
     if (!entry) {
-      entry = { store, id, replicas: new Set(), ready: deferred(), settled: false }
+      entry = { store, id, replicas: new Set(), ready: deferred(), settled: false, deleted: false }
       openResources.set(key, entry)
     }
     entry.replicas.add(replica)
@@ -579,6 +588,9 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
         if (change) sendStoreWrite(store, change)
       },
       ready: entry.ready.promise,
+      get deleted() {
+        return entry.deleted
+      },
       close: () => {
         const e = openResources.get(key)
         if (!e) return

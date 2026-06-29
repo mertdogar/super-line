@@ -37,7 +37,6 @@ services:
     command: pnpm --filter @super-line/example-store-pglite server
     environment:
       PORT: '8801'
-      P2P_PORT: '9001'
       NODE_NAME: node-1
       PG_URL: postgres://postgres:password@postgres:5432/electric
       ELECTRIC_URL: http://electric:3000/v1/shape
@@ -54,7 +53,6 @@ services:
     command: pnpm --filter @super-line/example-store-pglite server
     environment:
       PORT: '8801'
-      P2P_PORT: '9001'
       NODE_NAME: node-2
       PG_URL: postgres://postgres:password@postgres:5432/electric
       ELECTRIC_URL: http://electric:3000/v1/shape

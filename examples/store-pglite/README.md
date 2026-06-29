@@ -13,7 +13,7 @@ independent planes**:
      in-memory PGlite + electricSync ◀────────┘ (one-way, read-only → local replica)
      live.changes() → fan to LOCAL subscribers
 
-  COORDINATION plane (libp2p):  node-1 ⇄ node-2  broker-less gossipsub mesh
+  COORDINATION plane (libp2p):  node-1 ⇄ node-2  broker-less gossipsub mesh, peers auto-found via mDNS
      carries presence + inspector (NOT the store) so the Control Center sees the whole cluster
 ```
 
@@ -25,6 +25,9 @@ independent planes**:
 - **The store never touches the adapter** (the `self` fan-out is local + Electric). The broker-less
   **libp2p adapter** is a *separate* plane that carries presence/inspector/rooms/topics — here it exists
   only so the Control Center can visualize the whole cluster. No extra container: the nodes peer directly.
+- **Every node runs identical code with no cluster-size knowledge** — no node list, no bootstrap, no
+  pre-computed peer IDs. Peers find each other over **mDNS** on the shared network; the server just dials
+  what mDNS discovers. Add a node-3 and it joins the mesh with zero code or config change.
 
 ## Run
 
@@ -58,5 +61,7 @@ traffic (writes, subscribes, deletes) from both nodes.
 - The local PGlite replica is **in-memory** (ephemeral) — it re-syncs from Electric on boot.
 - Electric runs in `ELECTRIC_INSECURE` mode here for local dev only.
 - The store also runs unchanged against a real managed Postgres — point `PG_URL`/`ELECTRIC_URL` at it.
-- The libp2p adapter derives **deterministic per-node keys** from the node name (demo only, so each node can
-  compute the others' peer IDs with no registry). A real deployment persists keys: `identity: { path }`.
+- Peer discovery is **mDNS** (multicast on the shared network). It needs a network that passes multicast —
+  Docker's compose bridge does; many cloud/k8s networks don't. There, swap `mdns()` for a discovery that
+  doesn't need multicast — e.g. `bootstrap` to one pinned seed + `@libp2p/pubsub-peer-discovery` (see
+  `examples/libp2p-nat`), still without hardcoding the cluster size.

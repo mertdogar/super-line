@@ -1,41 +1,49 @@
 import http from 'node:http'
-import { generateKeyPairFromSeed } from '@libp2p/crypto/keys'
-import { peerIdFromPrivateKey } from '@libp2p/peer-id'
+import { createLibp2p } from 'libp2p'
+import { tcp } from '@libp2p/tcp'
+import { noise } from '@chainsafe/libp2p-noise'
+import { yamux } from '@chainsafe/libp2p-yamux'
+import { identify } from '@libp2p/identify'
+import { gossipsub } from '@libp2p/gossipsub'
+import { mdns } from '@libp2p/mdns'
 import { createSuperLineServer } from '@super-line/server'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
-import { createLibp2pAdapter } from '@super-line/adapter-libp2p'
+import { createLibp2pAdapter, type PubSubLibp2p } from '@super-line/adapter-libp2p'
 import { pgliteStoreServer } from '@super-line/store-pglite'
 import { contract } from './contract.js'
 
 // One cluster node. compose boots node-1 + node-2 from the same image, differing only by env.
 const PORT = Number(process.env.PORT ?? 8801)
 const NODE = process.env.NODE_NAME ?? `node-${PORT}`
-const P2P_PORT = Number(process.env.P2P_PORT ?? 9001)
 const PG_URL = process.env.PG_URL ?? 'postgres://postgres:password@localhost:54321/electric'
 const ELECTRIC_URL = process.env.ELECTRIC_URL ?? 'http://localhost:3000/v1/shape'
-const NODES = ['node-1', 'node-2']
 
 // Writes + strong reads hit the central Postgres; this node's in-memory PGlite replica mirrors the
 // `resources` table via Electric and drives live fan-out to LOCAL subscribers (clustering: 'self').
 const store = await pgliteStoreServer({ pgUrl: PG_URL, electricUrl: ELECTRIC_URL })
 
 // The STORE needs no adapter — Electric is its cross-node bus. This broker-less libp2p adapter is a
-// SEPARATE plane: it carries presence + inspector + rooms/topics so the Control Center can see the whole
-// cluster (the self-store's fan-out never touches the adapter). No extra container — nodes peer directly.
-// DEMO ONLY: derive a deterministic Ed25519 key per node name so each can compute the others' peer IDs and
-// build the bootstrap list with no registry. A real deployment persists keys via identity:{ path }.
-function seedFor(name: string): Uint8Array {
-  const seed = new Uint8Array(32)
-  new TextEncoder().encodeInto(name, seed)
-  return seed
-}
-const keyFor = (name: string) => generateKeyPairFromSeed('Ed25519', seedFor(name))
-const myKey = await keyFor(NODE)
-const bootstrap = await Promise.all(
-  NODES.filter((n) => n !== NODE).map(
-    async (n) => `/dns4/${n}/tcp/${P2P_PORT}/p2p/${peerIdFromPrivateKey(await keyFor(n)).toString()}`,
-  ),
-)
+// SEPARATE plane carrying presence + inspector so the Control Center sees the whole cluster (the
+// self-store's fan-out never touches the adapter). No extra container, and NO cluster-size knowledge:
+// every node runs IDENTICAL code and discovers its peers over mDNS on the shared network — no NODES
+// list, no bootstrap, no peer IDs to pre-compute. Ephemeral identity/port: mDNS advertises whatever it gets.
+const node = (await createLibp2p({
+  addresses: { listen: ['/ip4/0.0.0.0/tcp/0'] },
+  transports: [tcp()],
+  connectionEncrypters: [noise()],
+  streamMuxers: [yamux()],
+  peerDiscovery: [mdns()],
+  services: {
+    identify: identify(),
+    pubsub: gossipsub({ allowPublishToZeroTopicPeers: true }),
+  },
+})) as unknown as PubSubLibp2p
+// mDNS only emits discovery — it does NOT auto-dial (unlike bootstrap). Dial discovered peers so the
+// gossipsub mesh (and presence/inspector fan-out) actually forms. Re-dials to a live peer are no-ops.
+node.addEventListener('peer:discovery', (e) => {
+  console.log(`[${NODE}] mDNS discovered peer ${e.detail.id.toString().slice(-8)}`)
+  void node.dial(e.detail.multiaddrs).catch(() => {})
+})
 
 const server = http.createServer()
 const srv = createSuperLineServer(contract, {
@@ -43,7 +51,7 @@ const srv = createSuperLineServer(contract, {
   transports: [webSocketServerTransport({ server, inspector: true })],
   authenticate: () => ({ role: 'user' as const, ctx: {} }),
   identify: () => 'demo', // shared principal: every client reads/writes the same room
-  adapter: await createLibp2pAdapter({ identity: myKey, listen: [`/ip4/0.0.0.0/tcp/${P2P_PORT}`], bootstrap }),
+  adapter: await createLibp2pAdapter({ node }), // reuse the BYO node for server↔server fan-out
   stores: { docs: store },
   inspector: true, // read-only Control Center channel at /inspect (dev/trusted-network only)
 })
@@ -57,4 +65,4 @@ try {
   console.log(`[${NODE}] room already exists`)
 }
 
-server.listen(PORT, () => console.log(`[${NODE}] up on :${PORT} (p2p :${P2P_PORT}, ${bootstrap.length} peers) — electric=${ELECTRIC_URL}`))
+server.listen(PORT, () => console.log(`[${NODE}] up on :${PORT} — peers via mDNS, electric=${ELECTRIC_URL}`))

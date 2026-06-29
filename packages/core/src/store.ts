@@ -94,6 +94,14 @@ export interface ServerStore {
   /** Subscribe to every applied mutation — the single fan-out source. Returns an unsubscribe fn. */
   onChange(cb: (change: StoreChange) => void): () => void
   /**
+   * Subscribe to Resource deletions — the delete-side mirror of {@link ServerStore.onChange}, for
+   * `self`-clustering stores whose backend owns cross-node propagation (e.g. an Electric-synced local
+   * replica firing a `live.changes` delete). Core fans each id to LOCAL subscribers as an `sdel`. Optional;
+   * `relay` stores omit it (core fans their deletes over the adapter from `server.store(n).delete`).
+   * Returns an unsubscribe fn.
+   */
+  onDelete?(cb: (id: string) => void): () => void
+  /**
    * Open a reactive in-process replica over a Resource's canonical state — the server-side co-writer.
    * Optional; stores opt in (those that don't, surface as "reactive open not supported"). Mutations made
    * through it fan out via {@link ServerStore.onChange} exactly like {@link ServerStore.apply}. `origin`

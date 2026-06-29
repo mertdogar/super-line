@@ -1020,24 +1020,37 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     if (inspectorEnabled) emitInspectorEvent({ type: 'store.unsubscribe', connId: conn.id, store: frame.n, id: frame.id })
   }
 
-  // Each Store's onChange is core's single fan-out source: publish the Change to the Resource channel,
-  // delivered to subscribed conns by the adapter (loopback for the local node, real fan-out cross-node).
-  // `relaying` suppresses re-publishing a Change that arrived FROM another node (would echo-loop).
+  // Each Store's onChange is core's single fan-out source. A `relay` store has no shared backend, so core
+  // publishes its Change over the adapter (loopback locally, real fan-out cross-node); `relaying` suppresses
+  // re-publishing a Change that arrived FROM another node (echo-loop). A `self` store owns its own cross-node
+  // sync (its backend fans changes to every node), so core delivers to LOCAL subscribers ONLY — publishing
+  // over the adapter would double-deliver against the store's own propagation.
   for (const [name, store] of Object.entries(storeMap)) {
+    const isSelf = store.clustering === 'self'
     store.onChange((change) => {
+      const channel = STORE + name + ':' + change.id
+      if (isSelf) {
+        const set = members.get(channel)
+        if (!set) return
+        const payload = serializer.encode({ t: 'sch', n: name, id: change.id, u: change.update, o: change.origin } satisfies SChangeFrame)
+        for (const conn of set) conn.sendRaw(payload)
+        return
+      }
       if (relaying) return
       void adapter.publish(
-        STORE + name + ':' + change.id,
-        serializer.encode({
-          t: 'sch',
-          n: name,
-          id: change.id,
-          u: change.update,
-          o: change.origin,
-          nd: instanceId,
-        } satisfies SChangeFrame),
+        channel,
+        serializer.encode({ t: 'sch', n: name, id: change.id, u: change.update, o: change.origin, nd: instanceId } satisfies SChangeFrame),
       )
     })
+    // A self store surfaces deletes through onDelete (its backend signals the delete on every node); fan it to
+    // LOCAL subscribers as sdel. relay stores omit onDelete — their deletes fan over the adapter (storeApi.delete).
+    if (isSelf)
+      store.onDelete?.((id) => {
+        const set = members.get(STORE + name + ':' + id)
+        if (!set) return
+        const payload = serializer.encode({ t: 'sdel', n: name, id } satisfies SDeleteFrame)
+        for (const conn of set) conn.sendRaw(payload)
+      })
   }
 
   // A Change arriving on a Store channel from the adapter: forward it to local subscriber conns, and — for
@@ -1235,10 +1248,12 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       },
       async delete(id) {
         await store.delete(id)
-        void adapter.publish(
-          STORE + name + ':' + id,
-          serializer.encode({ t: 'sdel', n: name, id, nd: instanceId } satisfies SDeleteFrame),
-        )
+        // self stores fan their own deletes (backend → onDelete → local subscribers); relay stores fan over the adapter
+        if (store.clustering !== 'self')
+          void adapter.publish(
+            STORE + name + ':' + id,
+            serializer.encode({ t: 'sdel', n: name, id, nd: instanceId } satisfies SDeleteFrame),
+          )
         if (inspectorEnabled) emitInspectorEvent({ type: 'store.delete', store: name, id })
       },
       list() {

@@ -1,0 +1,91 @@
+name: ai-canvas-pglite
+
+# A 2-node super-line cluster: a collaborative AI canvas on the @super-line/store-sync-pglite CRDT store.
+# The store's cross-node bus is Postgres + Electric (an append-only Yjs op-log) — NO super-line adapter.
+# The broker-less libp2p mesh is a SEPARATE plane (presence + inspector) so the Control Center sees the
+# whole cluster; the store never touches it. The browser dials a node's WS port directly (8801 / 8802);
+# ?node=2 picks node-2 so two windows on two nodes CRDT-converge through Electric.
+#
+# The AI agent needs AI_GATEWAY_API_KEY + MODEL. Copy .env.example → .env and fill them in (compose
+# auto-loads .env for the substitutions below). The board itself works without them.
+
+# Both nodes are the same image; they differ only by env (PORT / NODE_NAME).
+x-node: &node
+  build:
+    context: ../..
+    dockerfile: examples/ai-canvas-pglite/Dockerfile
+  image: super-line-ai-canvas-pglite:dev
+  healthcheck:
+    test: ['CMD', 'node', '-e', "require('net').connect(8801,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+    interval: 2s
+    timeout: 3s
+    retries: 30
+  depends_on: [electric]
+
+x-node-env: &node-env
+  PG_URL: postgres://postgres:password@postgres:5432/electric
+  ELECTRIC_URL: http://electric:3000/v1/shape
+  AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
+  MODEL: ${MODEL:-anthropic/claude-haiku-4.5}
+
+services:
+  # Central Postgres — the op-log + strong ACL. wal_level=logical so Electric can replicate.
+  postgres:
+    image: postgres:16
+    ports: ['5432:5432']
+    environment:
+      POSTGRES_DB: electric
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    command: [-c, listen_addresses=*, -c, wal_level=logical]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d electric']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  # Electric — streams the op-log + meta tables out as HTTP shapes to each node's local PGlite replica.
+  electric:
+    image: electricsql/electric
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/electric?sslmode=disable
+      ELECTRIC_INSECURE: 'true'
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  node-1:
+    <<: *node
+    environment:
+      <<: *node-env
+      PORT: '8801'
+      NODE_NAME: node-1
+    ports: ['8801:8801'] # the browser (?node=1, default) dials this WS port directly
+
+  node-2:
+    <<: *node
+    environment:
+      <<: *node-env
+      PORT: '8801'
+      NODE_NAME: node-2
+    ports: ['8802:8801'] # the browser (?node=2) dials this WS port directly
+
+  # Caddy serves the built SPA on :8200. No transport proxy: the browser dials the node WS ports directly.
+  web:
+    build:
+      context: ../..
+      dockerfile: examples/ai-canvas-pglite/Dockerfile.web
+    image: super-line-ai-canvas-pglite-web:dev
+    ports: ['8200:8200']
+    volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']
+    depends_on: [node-1, node-2]
+
+  # Control Center on :8201. The browser connects it back to node-1's inspector at ws://localhost:8801; the
+  # libp2p presence mesh means the Topology view shows the WHOLE cluster (node-1 + node-2 + every connection).
+  control-center:
+    build:
+      context: ../..
+      dockerfile: examples/ai-canvas-pglite/Dockerfile.control-center
+    image: super-line-ai-canvas-pglite-cc:dev
+    ports: ['8201:8201']
+    depends_on:
+      node-1: { condition: service_healthy }

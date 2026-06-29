@@ -18,6 +18,7 @@ export default defineConfig({
       '@super-line/store-pglite': src('packages/store-pglite/src/index.ts'),
       '@super-line/store-sync': src('packages/store-sync/src/index.ts'),
       '@super-line/store-sync-libsql': src('packages/store-sync-libsql/src/index.ts'),
+      '@super-line/store-sync-pglite': src('packages/store-sync-pglite/src/index.ts'),
       '@super-line/transport-websocket': src('packages/transport-websocket/src/index.ts'),
       '@super-line/transport-loopback': src('packages/transport-loopback/src/index.ts'),
       '@super-line/transport-http': src('packages/transport-http/src/index.ts'),

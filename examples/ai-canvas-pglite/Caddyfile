@@ -1,0 +1,9 @@
+# Single entry point on :8200. Serves the built SPA only — there is no transport proxying here:
+# the browser dials the node's WebSocket port (8796) directly (see App.tsx WS_URL), and the
+# Control Center connects there too via the inspector subprotocol.
+:8200 {
+	root * /srv
+	encode gzip
+	try_files {path} /index.html
+	file_server
+}

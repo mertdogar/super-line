@@ -7,7 +7,7 @@ const RESOURCES = [
     icon: Sparkles,
     title: 'super-line',
     href: 'https://mertdogar.github.io/super-line/',
-    blurb: 'The home page — what super-line is and why typesafe WebSockets.',
+    blurb: 'The home page — what super-line is and why a strictly-typed realtime data bus.',
   },
   {
     icon: BookOpen,

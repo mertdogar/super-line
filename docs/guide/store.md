@@ -6,15 +6,24 @@ Resources, grants and revokes per-client access, and validates every read and wr
 **reactive handle** that catches up to the current value and stays live.
 
 Like a [transport](./transports), a Store is **pluggable** and ships as a **server + client pair** you
-pass at construction. Two implementations ship today — *one plumbing, two consistency models*:
+pass at construction. **Six stores ship today**, varying along two axes — the **consistency model**
+(last-writer-wins vs a merging CRDT) and **durability + clustering** (where state lives, and how a change
+crosses nodes):
 
-- **`@super-line/store-memory`** — last-writer-wins, in-memory, zero-dependency. The default.
-- [**`@super-line/store-sync`**](./synced-state) — a merging **CRDT** Store (Yjs via
-  [super-store](https://github.com/mertdogar/super-store)). Concurrent writes to different fields
-  converge instead of clobbering — for true multiplayer.
+| Package | Model | Durability | Clustering | Client pair |
+|---|---|---|---|---|
+| **`@super-line/store-memory`** | LWW | in-memory | relay | `memoryStoreClient()` |
+| [**`@super-line/store-sync`**](./synced-state) | CRDT | in-memory | relay | `syncStoreClient()` |
+| **`@super-line/store-sqlite`** | LWW | SQLite (better-sqlite3, WAL) | relay | `memoryStoreClient()` |
+| [**`@super-line/store-sync-libsql`**](./synced-state) | CRDT | libsql / Turso / sqld | relay | `syncStoreClient()` |
+| **`@super-line/store-pglite`** | LWW | central Postgres + Electric→PGlite | **self** | `memoryStoreClient()` |
+| **`@super-line/store-sync-pglite`** | CRDT | central Postgres op-log + Electric→PGlite | **self** | `syncStoreClient()` |
 
-Both expose the same `…StoreServer()` / `…StoreClient()` pair, so switching consistency models is a
-one-line swap — the wire, ACLs, fan-out, and client handle are identical.
+Every store exposes the same `…StoreServer()` / `…StoreClient()` pair, so switching consistency model,
+durability, or clustering is a one-line swap — the wire, ACLs, fan-out, and client handle are identical. A
+**LWW** server pairs with `memoryStoreClient()`; a **CRDT** server pairs with `syncStoreClient()`. The
+**relay** vs **self** clustering distinction has its own [section below](#clustering-relay-vs-self). See
+[**Choosing a store**](./choosing-a-store) for the full decision matrix.
 
 ::: tip Off-contract by design
 Unlike requests, events, and topics, a Store is **not** declared in `defineContract`, and its `data`
@@ -59,6 +68,24 @@ configured on that side. To go collaborative, swap the pair for the CRDT one; no
 import { syncStoreServer } from '@super-line/store-sync' // server: stores: { docs: syncStoreServer() }
 import { syncStoreClient } from '@super-line/store-sync' // client: stores: { docs: syncStoreClient() }
 ```
+
+To make it **durable**, swap only the server half for a backend that persists — the client half is
+unchanged (LWW keeps `memoryStoreClient()`, CRDT keeps `syncStoreClient()`):
+
+```ts
+// LWW → durable SQLite (better-sqlite3, WAL). `table?` lets several stores share one file.
+import { sqliteStoreServer } from '@super-line/store-sqlite'
+// server: stores: { docs: sqliteStoreServer({ file: 'data.db' }) }
+
+// CRDT → durable libsql/Turso/sqld. Async factory — it rehydrates every Resource before resolving.
+import { libsqlSyncStore } from '@super-line/store-sync-libsql'
+// server: stores: { docs: await libsqlSyncStore({ url: 'libsql://…', authToken }) }
+```
+
+`libsqlSyncStore` is an **async factory**: it rehydrates each Resource from libsql (history-preserving
+`applyUpdate`) before returning a ready store, then snapshots each Resource's CRDT state on a debounce
+(`debounceMs`, default 250ms). As with any CRDT pair, pass the same `resolveOptions` to both halves so the
+per-Resource doc modes match — see [Synced state](./synced-state).
 
 ## Server-authoritative access
 
@@ -162,26 +189,84 @@ off()
 note.close()                          // release the subscription
 ```
 
-Both stores that ship support `open`. Its `set` / `update` / `delete` fan out to subscribers exactly
-like a client write, and `origin` (default `"server"`) tags each change for echo-break and Control
-Center attribution. `update` and `write` **merge** top-level keys, so they can add or change a key but
-never remove one — `delete(path)` is the only server-side key removal. On the CRDT store, that delete
-is surgical and merges with concurrent edits to other keys; see [Synced state](./synced-state).
+Every store supports `open` except **`store-pglite`** (its LWW self backend can't serve a synchronous
+snapshot from the async driver; its CRDT sibling `store-sync-pglite` does, over its in-memory doc). Its
+`set` / `update` / `delete` fan out to subscribers exactly like a client write, and `origin` (default
+`"server"`) tags each change for echo-break and Control Center attribution. `update` and `write` **merge**
+top-level keys, so they can add or change a key but never remove one — `delete(path)` is the only
+server-side key removal. On a CRDT store, that delete is surgical and merges with concurrent edits to
+other keys; see [Synced state](./synced-state).
 
 The [`ai-canvas` example](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas) is a
 full showcase: a server-side LLM agent co-edits a shared canvas through `open(id)` — reading the live
 board and driving it with tools mapped onto `update` (add/move/recolor) and `delete(path)` (remove),
 merging with users' concurrent edits.
 
-- **Cross-node.** Each Store declares a clustering mode. `relay` (both stores that ship) is node-local:
-  super-line relays every change across nodes over the [adapter](./scaling-adapters) and converges each
-  node's replica — no extra wiring. A `self` store owns a shared backend (Redis/Postgres) and handles
-  its own cross-node sync; super-line stays out of it. Echo-break — a writer never re-applies its own
-  change — is automatic in both modes.
-- **Control Center.** With `inspector: true`, store traffic surfaces as `store.write` / `store.grant` /
-  `store.revoke` / `store.subscribe` events under the **Store** filter. The write payload — the only one
-  carrying arbitrary user data — is safe-snapshotted and `inspector.redact`-masked like every other
-  message. (See [Control Center](./control-center).)
+## Clustering: relay vs self
+
+Every Store declares a **clustering mode** that decides how a change on one node reaches the others.
+Echo-break — a writer never re-applies its own change — is automatic in both.
+
+**`relay`** — store-memory, store-sync, store-sqlite, store-sync-libsql. Each node keeps its own replica;
+super-line relays every applied Change across nodes over the [server↔server adapter](./scaling-adapters)
+and converges each replica. No extra wiring — if you already run an adapter for events and topics, relay
+stores ride the same bus.
+
+**`self`** — store-pglite, store-sync-pglite. The store owns a shared backend and its own cross-node sync,
+so it needs **no adapter at all**. `pgliteStoreServer` writes to a central **Postgres** (the source of
+truth for writes, strong reads, and ACL) and mirrors that table into each node's in-memory **PGlite**
+replica over **Electric** (one-way, read-only). The replica's `live.changes` feed becomes
+`ServerStore.onChange` / `onDelete`, which core fans to that node's local subscribers. A write
+round-trips central PG → Electric → every node's `live.changes`, and an `origin` column carries
+echo-break through the trip — so Postgres + Electric *is* the fan-out infra, with nothing for super-line's
+adapter to do.
+
+```ts
+import { pgliteStoreServer } from '@super-line/store-pglite'
+
+// server — no adapter needed
+stores: {
+  docs: await pgliteStoreServer({
+    pgUrl: 'postgres://…',                         // central source of truth
+    electricUrl: 'http://localhost:3000/v1/shape', // streams the table into this node's replica
+  }),
+}
+// client: stores: { docs: memoryStoreClient() } — LWW, same client half as store-memory
+```
+
+`store-sync-pglite` is the CRDT sibling. Because Electric ships whole rows (which can't merge), it syncs
+an append-only Yjs **op-log** (`<table>_updates`) instead — every delta is an immutable INSERT that
+Electric streams to every node, each folding it into an in-memory super-store doc (`compact` bounds the
+log; `onError` surfaces a failed background append). That live in-memory doc is also what lets this self
+store support [`open()` / `ServerReplica`](#a-reactive-server-side-co-writer). Pair it with
+`syncStoreClient()`.
+
+## Deleting Resources
+
+`srv.store(name).delete(id)` removes a Resource everywhere. The backend drops it, then the delete fans
+**cluster-wide**: a `relay` store publishes a wire `sdel` frame (`SDeleteFrame`) over the
+adapter; a `self` store's backend signals the delete on every node (surfaced through `ServerStore.onDelete`,
+the delete-side mirror of `onChange`). Either way, each node pushes `sdel` to the clients subscribed to
+that Resource. (This is whole-Resource removal — to drop a single *key* and keep the Resource, use
+`delete(path)` on a [handle](#a-reactive-server-side-co-writer).)
+
+On the client, an open handle exposes a **`deleted`** flag, so a deletion is observable instead of a silent
+empty snapshot:
+
+```ts
+const note = client.store('docs').open('note-1')
+note.subscribe(() => {
+  if (note.deleted) showGone() // the Resource was deleted server-side
+  else render(note.getSnapshot())
+})
+```
+
+In React, [`useResource`](./react) surfaces the same signal:
+
+```tsx
+const { data, deleted } = useResource<Note>('docs', 'note-1')
+if (deleted) return <Gone />
+```
 
 ## Run it
 

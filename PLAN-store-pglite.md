@@ -161,7 +161,9 @@ Versions: `core` + `server` minor bump; `store-pglite` `0.1.0`. **Ask before pub
 
 ## Status (as-built, 2026-06-29)
 
-**BUILT + verified, on branch `super-line-postgres-notify-store` (off main `dc59b02`). Not committed, not published.**
+**BUILT + verified; merged to `main` (= `origin/main`) and published** (`8600432`
+`feat(store-pglite): self-clustering store over Postgres + Electric`, `d48ff63` mDNS-discovery refactor;
+release `1d979b7`). `@super-line/store-pglite` now lives in `packages/store-pglite`.
 
 - `core`: added optional `ServerStore.onDelete?`.
 - `server`: `self` branch — onChange fans `sch` to local members only; `onDelete` fans `sdel` locally; `storeApi.delete` skips the adapter for `self`. Relay path untouched.

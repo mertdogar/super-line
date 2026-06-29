@@ -8,7 +8,8 @@ Realtime apps usually glue together hand-maintained event-name constants, untype
 
 - **Types on both ends** — the server's handlers and the client's calls are inferred from the same source, so they can't drift.
 - **Runtime validation** — the same schemas that type your payloads also validate them. The server rejects malformed input automatically.
-- **Five interaction flavors** over one connection — requests, events, topics, rooms, and node-to-node messaging.
+- **Interaction flavors** over one connection — requests, events, topics, and rooms. A shared topic also doubles as a cluster-wide event bus (`server.publish` / `server.subscribe`) so nodes converge without a separate messaging API. See [The cluster event bus](./cluster-event-bus).
+- **Synced state** — the contract can also declare durable, reactive Stores: a client reads and writes a Resource and the server — and every other node — sees it converge. See [Stores](./store).
 - **Any wire** — the same contract and the same code run over WebSocket, HTTP, or libp2p/WebRTC. The transport is one line; everything above it is identical. See [Transports](./transports).
 
 ## Two axes: direction and role

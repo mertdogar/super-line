@@ -95,12 +95,81 @@ full-document `set` — which would otherwise clobber a peer's concurrent edits 
 for `update` to add or change, `delete(path)` to remove, and `set` only for a genuine whole-document
 replace.
 
+## Deleting a whole Resource
+
+`delete(path)` removes a *key*. To drop the **entire Resource** — and tell every node and every tab it's
+gone — delete it on the server:
+
+```ts
+await srv.store('docs').delete('plan')
+```
+
+This fans an `sdel` frame out **cluster-wide** (over the [Adapter](./scaling-adapters) for a `relay`
+store, or the backend's own change feed for a [`self`](./choosing-a-store) store). Every open handle
+flips its `deleted` flag to `true` and notifies subscribers, so a consumer can tell "gone" apart from
+"empty document":
+
+```ts
+const h = client.store('docs').open('plan')
+h.subscribe(() => {
+  if (h.deleted) showTombstone()
+})
+```
+
+In React it's a field on the hook:
+
+```tsx
+const { data, deleted } = useResource('docs', 'plan')
+if (deleted) return <p>this doc was deleted</p>
+```
+
 ## Catch-up & reconnect
 
 `open(id)` seeds the replica from the server's current canonical state — the full CRDT document, sent
 once — then merges live deltas on top. On reconnect the handle **re-seeds automatically**. Like events
 and topics, live delivery is **at-most-once**: a client that was offline misses the deltas it didn't
 receive and recovers by re-snapshotting on reconnect (which the handle does for you).
+
+## Make it durable
+
+`syncStoreServer()` keeps the canonical CRDT documents in memory — restart the server and they're gone.
+For state that **survives a restart**, swap the server half for `@super-line/store-sync-libsql`, which
+snapshots every Resource to a [libsql](https://github.com/tursodatabase/libsql) database — a local file,
+[Turso](https://turso.tech) Cloud, or a self-hosted `sqld`:
+
+```bash
+npm install @super-line/store-sync-libsql
+```
+
+```ts
+// server — durable drop-in for syncStoreServer()
+import { libsqlSyncStore } from '@super-line/store-sync-libsql'
+
+stores: {
+  docs: await libsqlSyncStore({ url: 'file:docs.db' }), // local file
+  // or: await libsqlSyncStore({ url: 'libsql://your-db.turso.io', authToken: process.env.TURSO_TOKEN })
+}
+```
+
+The client stays `syncStoreClient()` — durability is a server-half concern, so the wire and the merge
+model are unchanged. `libsqlSyncStore` is an **async factory** (`await` it): on boot it rehydrates every
+Resource from the DB before the store is ready, replaying each saved document with a history-preserving
+`applyUpdate` — so the CRDT keeps converging across the restart instead of resetting to a fresh root.
+
+| option | default | what it does |
+| --- | --- | --- |
+| `url` | — | libsql URL: `file:x.db`, `:memory:`, `libsql://` (Turso) or `http(s)://` (sqld) |
+| `authToken` | — | auth token for Turso Cloud |
+| `table` | `'resources'` | the table this store owns (must match `/^[A-Za-z_]\w*$/`) |
+| `debounceMs` | `250` | coalesce rapid edits into one snapshot write |
+| `resolveOptions` | — | per-Resource `DocOptions` — **must match the client's** (the store-sync rule) |
+
+Persistence is **snapshot-per-resource**: each Resource is one row holding its full merged state,
+upserted off the hot path and debounced per id, so a burst of edits collapses into a single write. The
+`apply` hot path stays synchronous and relay-safe — persistence is just an extra `onChange` subscriber.
+
+For the full menu — LWW vs CRDT, memory vs SQLite vs libsql vs Postgres, `relay` vs `self` clustering —
+see [Choosing a store](./choosing-a-store).
 
 ## In React
 

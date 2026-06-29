@@ -134,7 +134,9 @@ Versions: new package `0.1.0`. No core/server/client bump (no change). **Ask bef
 
 ## Status (as-built, 2026-06-29)
 
-**BUILT + verified end-to-end, on branch `super-line-postgres-notify-store`. Not committed, not published.**
+**BUILT + verified end-to-end; merged to `main` (= `origin/main`) and published** (`ef0c922`
+`feat(store-sync-pglite): CRDT store over Postgres + Electric op-log`; release `1d979b7`).
+`@super-line/store-sync-pglite` now lives in `packages/store-sync-pglite`.
 
 - `@super-line/store-sync-pglite` `0.1.0`: `syncPgliteStoreServer({ pgUrl, electricUrl?, table?, db?, resolveOptions? })`
   — two tables (`<table>` meta + `<table>_updates` Yjs op-log), per-node in-memory super-store docs folded from

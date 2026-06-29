@@ -1,9 +1,14 @@
 # Transport refactor — migration notes (for the deferred docs/README/skill update)
 
-This file accumulates every user-visible change from the pluggable-transport work (`PLAN-transports.md`),
+This file accumulates every user-visible change from the pluggable-transport work,
 **one section per step**. At the end of the project we use it as the single checklist to update
 `docs/` guide prose, package `README.md`s, and `skills/super-line/`. Code (`@example` doc-comments,
 runnable `examples/`, tests) is migrated as each step lands; only narrative docs are deferred.
+
+> **Status (2026-06-29):** the deferred narrative doc-sweep below is being completed. The design doc this
+> file once cited (`PLAN-transports.md`) was never committed; the transports themselves shipped (all four
+> `transport-*` packages published). For the realistic libp2p/WebRTC deployment story see the
+> `examples/libp2p-nat` example.
 
 ---
 
@@ -177,7 +182,7 @@ const client = createSuperLineClient(contract, {
 - **Bring-your-own libp2p node.** The transport never creates/stops the node; the user configures it
   (`createLibp2p({ transports, connectionEncrypters: [noise()], streamMuxers: [yamux()] })`). For a browser→server
   WebRTC deployment the node uses `@libp2p/webrtc`; libp2p owns the signaling (we never write any) — see
-  `PLAN-transports.md §3` for the webrtc-direct / circuit-relay-v2 connectivity matrix.
+  the `examples/libp2p-nat` example for the webrtc-direct / circuit-relay-v2 connectivity matrix.
 - **Auth is the first stream frame** (libp2p has no HTTP headers/query): the client sends `{role, params}` as the
   first length-prefixed frame; the server reads it, builds the `Handshake` (`peer.id` = noise-verified PeerId,
   `peer.addr` = remote multiaddr), runs `authenticate`, and aborts the stream on reject. Same

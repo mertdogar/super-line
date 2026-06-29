@@ -254,3 +254,18 @@ All via root `pnpm test` (vitest), `pnpm typecheck`, `pnpm lint` (oxlint), `pnpm
 Embedded replicas (sync-on-catch-up-read); update-log + compaction; leader-persister; MVCC/`BEGIN
 CONCURRENT` (TursoDB); lazy-load (its sync-`open()` snag); a single-call deletion fan-out *authorization*
 model beyond today's server-authoritative `delete`.
+
+## As-built / Status (2026-06-29)
+
+**BUILT + merged to `main` (= `origin/main`); both packages published.** Both deliverables landed as
+described:
+
+- **Part A — deletion fan-out** (`2c8a46f`): `SDeleteFrame` (`'sdel'`) on the wire,
+  `ResourceReplica.applyDelete()`, server `storeApi.delete` publish + `handleStoreRelay` branch, client
+  `ResourceHandle.deleted`, react `useResource().deleted`. Super-line-wide — every relay store benefits.
+- **Part B — `@super-line/store-sync-libsql`** (`5b185a0`): async `libsqlSyncStore(opts)`, thin wrapper
+  over `syncStoreServer`, snapshot-per-resource debounced persist, history-preserving eager rehydrate.
+  Pairs with the unchanged `syncStoreClient`.
+
+Suite green through the TDD slices; the release commit (`1d979b7`) bumped + published the changed packages.
+Deferred items above remain deferred.

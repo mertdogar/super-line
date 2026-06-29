@@ -150,3 +150,11 @@ Slices 1→2 are protocol; 3–6 are CC-only and independently reviewable.
 - True wire-byte sizing (transport-layer change; rejected — see Known limitation).
 - Server-side latency measurement (decision 7 chose CC-side pairing).
 - Feed replay/backfill on reconnect — feed stays live-only, 200-cap.
+
+## As-built / Status (2026-06-29)
+
+**SHIPPED to `origin/main`** (`8618d65` `chore(release): core/server 0.7.1, control-center 0.7.0`,
+on the back of `5113c4a`/`8fd4cba`/`b4211db`). `InspectorEnvelope` (`ts`/`byteSize`/`originNodeId`) on the
+`events` topic, `reqId` correlation on the four message events, and the real `<table>` live feed with
+time/size/node/latency columns + text filter + sortable-while-paused headers all landed and are published
+(core/server 0.7.1, control-center 0.7.0). Out-of-scope items above remain deferred.

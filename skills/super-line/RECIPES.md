@@ -283,6 +283,66 @@ const srv = createSuperLineServer(api, { transports: [webSocketServerTransport({
 // every server process gets an adapter pointing at the same Redis; rooms, topics, AND the cluster event bus fan out across nodes.
 ```
 
+## Other adapters (libp2p · RabbitMQ · ZeroMQ)
+
+The `adapter:` slot is pluggable — same code, different fan-out infra. All factories are **async** (the connection/node is set up before the server starts). All ship a cluster presence directory by default (`presence: false` to disable). One-line swaps for the Redis line above:
+
+```ts
+// decentralized, broker-less — one shared gossipsub topic; bring your own node, or let it build one
+import { createLibp2pAdapter } from '@super-line/adapter-libp2p'      // npm i @super-line/adapter-libp2p
+const adapter = await createLibp2pAdapter({ bootstrap: ['/ip4/10.0.0.1/tcp/9001/p2p/12D3Koo…'], identity: { path: '.id' } })
+
+// broker-routed — channels become routing keys on one durable direct exchange
+import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'  // npm i @super-line/adapter-rabbitmq
+const adapter = await createRabbitmqAdapter('amqp://localhost:5672')
+
+// brokerless full-mesh — this node binds a PUB, connects a SUB to each peer's PUB
+import { createZeroMqAdapter } from '@super-line/adapter-zeromq'      // npm i @super-line/adapter-zeromq
+const adapter = await createZeroMqAdapter({ bind: 'tcp://0.0.0.0:5555', peers: ['tcp://10.0.0.2:5555'] })
+// (ZeroMQ also has mode:'proxy' for a central XSUB/XPUB forwarder — see createZeroMqProxy)
+
+const srv = createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate, adapter })
+```
+
+## Swap the client↔server transport (HTTP/SSE · libp2p · loopback)
+
+The WS default is just one `transports:`/`transport:` pairing — the server can mount several at once. `authenticate` gets a normalized `Handshake` regardless of transport (`h.transport` tells you which). Match the client transport to a server transport.
+
+```ts
+// HTTP — SSE (or long-poll) downstream + POST upstream; compose on the SAME http.Server as WS
+import { httpServerTransport } from '@super-line/transport-http'   // npm i @super-line/transport-http
+const srv = createSuperLineServer(api, {
+  transports: [webSocketServerTransport({ server }), httpServerTransport({ server })], // both, side by side
+  authenticate,
+})
+
+import { httpClientTransport } from '@super-line/transport-http'
+// Node has no global EventSource: pass one for SSE, or use mode:'longpoll' (fetch-only, works everywhere)
+import { EventSource } from 'eventsource'
+const client = createSuperLineClient(api, { transport: httpClientTransport({ url: 'http://localhost:3000', EventSource }), role: 'user' })
+// browser: httpClientTransport({ url }) — global EventSource is already present
+```
+
+```ts
+// libp2p — bring your own started node on both ends; the server handles a protocol stream per connection
+import { libp2pServerTransport } from '@super-line/transport-libp2p'  // npm i @super-line/transport-libp2p
+const srv = createSuperLineServer(api, { transports: [libp2pServerTransport({ node: serverNode })], authenticate })
+
+import { libp2pClientTransport } from '@super-line/transport-libp2p'
+const client = createSuperLineClient(api, {
+  transport: libp2pClientTransport({ node: clientNode, multiaddr: serverNode.getMultiaddrs() }),
+  role: 'user',
+})
+```
+
+```ts
+// loopback — in-memory, no socket; both ends in one process (tests, or proving the transport isn't WS-shaped)
+import { createLoopbackTransport } from '@super-line/transport-loopback'  // npm i @super-line/transport-loopback
+const loopback = createLoopbackTransport()
+const srv = createSuperLineServer(api, { transports: [loopback.server], authenticate })
+const client = createSuperLineClient(api, { transport: loopback.client(), role: 'user' })
+```
+
 ## Stores (permissioned real-time documents)
 
 A **Store** is the built-in, off-contract persisted-state seam: named, permissioned JSON Resources `{ id, accessRules, data }` with a reactive client handle, a server-side co-writer, and a pluggable backend (in-memory LWW, a merging CRDT, or durable SQLite). Configure a server + client **pair** under matching keys.
@@ -333,6 +393,68 @@ h.close()
 - **Merge vs delete** — `update`/`write` merge top-level keys (never remove one); `delete(path)` is the only key removal. On the CRDT store it's surgical and merge-safe; use `set` only for a whole-document replace.
 - **In-process actor?** Use the server co-writer (`srv.store(ns).open(id)`), not a loopback client — reactive reads + delete, server-authoritative, no grant.
 - Runnable: the [`store`](https://github.com/mertdogar/super-line/tree/main/examples/store) (LWW) and [`store-sync-json`](https://github.com/mertdogar/super-line/tree/main/examples/store-sync-json) (CRDT) examples; [`ai-canvas`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas) is the agent co-writer end-to-end — a server-side LLM edits a shared canvas via `open(id)` (`update` + `delete(path)`), merging with users' concurrent edits.
+
+## Durable CRDT store (libsql / Turso)
+
+Same `syncStoreServer` CRDT merge engine as `store-sync`, snapshotted per Resource to libsql so state survives a restart. The factory is **async** — it rehydrates every Resource (history-preserving) before returning. Client half is the plain `syncStoreClient()`.
+
+```ts
+// server — npm i @super-line/store-sync-libsql
+import { libsqlSyncStore } from '@super-line/store-sync-libsql'
+const srv = createSuperLineServer(api, {
+  transports: [webSocketServerTransport({ server })], authenticate, identify: (c) => c.ctx.uid,
+  stores: {
+    docs: await libsqlSyncStore({                       // ASYNC — await it
+      url: 'libsql://my-db.turso.io', authToken: process.env.TURSO_TOKEN, // or url:'file:store.db' / ':memory:'
+      // table: 'resources', debounceMs: 250,           // coalesce rapid edits into one snapshot write
+      // resolveOptions: (id) => ({ mode: 'document' }), // MUST match the client's (the store-sync rule)
+    }),
+  },
+})
+// client — the SAME CRDT half as store-sync (durability is a server-side concern)
+import { syncStoreClient } from '@super-line/store-sync'
+const client = createSuperLineClient(api, { transport, role: 'user', params: { uid: 'alice' }, stores: { docs: syncStoreClient() } })
+```
+
+## Self-clustering store (central Postgres + Electric — no adapter)
+
+`store-pglite` / `store-sync-pglite` set `clustering: 'self'`: writes hit a central Postgres, ElectricSQL streams the table to each node's in-memory PGlite replica, and `live.changes` drives `onChange`/`onDelete`. The store owns its own cross-node sync, so **no `adapter:` is needed** for these Resources to fan out across nodes.
+
+```ts
+// LWW — npm i @super-line/store-pglite ; pair with memoryStoreClient()
+import { pgliteStoreServer } from '@super-line/store-pglite'
+const srv = createSuperLineServer(api, {                 // note: no adapter
+  transports: [webSocketServerTransport({ server })], authenticate, identify: (c) => c.ctx.uid,
+  stores: {
+    docs: await pgliteStoreServer({
+      pgUrl: 'postgres://localhost:5432/app',            // source of truth (writes + strong reads + ACL)
+      electricUrl: 'http://localhost:3000/v1/shape',     // Electric shape endpoint streaming the table in
+    }),
+  },
+})
+
+// CRDT sibling — npm i @super-line/store-sync-pglite ; pair with syncStoreClient(); supports open()→ServerReplica
+import { syncPgliteStoreServer } from '@super-line/store-sync-pglite'
+const docs = await syncPgliteStoreServer({ pgUrl, electricUrl, resolveOptions: (id) => ({ mode: 'document' }) })
+const replica = srv.store('docs').open('note-1')         // reactive in-process co-writer (CRDT op-log under the hood)
+```
+
+## Observe deletion on the client (the `deleted` flag)
+
+`srv.store(ns).delete(id)` fans a deletion cluster-wide (wire `sdel`); every open client handle flips `deleted: true` and fires its `subscribe` so the UI can re-read. Works on any backend, any node.
+
+```ts
+// server — authoritative deletion (no client wire for this)
+await srv.store('docs').delete('note-1')      // fans out everywhere; ServerStore.onDelete also fires server-side
+
+// client (vanilla)
+const note = client.store('docs').open('note-1')
+note.subscribe(() => { if (note.deleted) showTombstone(); else render(note.getSnapshot()) })
+
+// React
+const { data, deleted } = useResource('docs', 'note-1')
+if (deleted) return <Tombstone />
+```
 
 ## Synced state with a CRDT (Yjs / Automerge) — roll your own
 
@@ -415,6 +537,24 @@ catch (e) {
 - Make handlers **idempotent**; after a reconnect the client auto-re-subscribes topics but must **re-run room joins**.
 - In-flight requests reject `DISCONNECTED` on drop; calls during reconnect are queued and flushed.
 - A 401 looks like any drop over the WS API, so a bad-credential client retries forever unless you set `reconnect: false`.
+
+## Control Center (live inspector)
+
+The read-only inspector is **server-authoritative and off by default**. Turn it on in **two** places — server opts (gates the `msg.*` telemetry) and the WS transport (negotiates the `superline.inspector.v1` subprotocol) — then point the dashboard at the node. Dev / trusted-network only.
+
+```ts
+const srv = createSuperLineServer(api, {
+  transports: [webSocketServerTransport({ server, inspector: true })], // negotiate the inspector subprotocol
+  authenticate,
+  inspector: { redact: ['token', 'password'] },                         // true, or mask ctx/data keys in telemetry
+})
+```
+
+```bash
+npx @super-line/control-center --url ws://localhost:3000   # opens the SPA; --url seeds the default connection
+```
+
+Telemetry fans out cluster-wide over the adapter, so one dashboard sees every node's traffic (requests · events · broadcasts · publishes), live topology, and presence.
 
 ## Testing
 
@@ -699,6 +839,7 @@ it('useRequest performs a typed call and exposes state', async () => {
 ### Tips
 
 - **Close the client before the server** — an open connection blocks `server.close()` (the harness handles this via `unshift`).
+- **Skip the socket entirely** — for pure logic tests, swap the WS pair for `createLoopbackTransport()` (in-memory, no port): pass `loopback.server` to `transports:` and `loopback.client()` to `transport:`. Same handshake + frames, no `http.Server`.
 - **Return `role` as a literal** from `authenticate` (`role: 'user' as const`) so it's inferred as the role key, not widened to `string`.
 - `backoffDelay` is a **pure function** — unit-test it directly (no timers or sockets): `expect(backoffDelay(0, opts)).toBeLessThanOrEqual(opts.maxMs)`.
 - Prefer a small `reconnectBaseMs` + `waitFor` over fake timers — `vi.useFakeTimers()` is brittle alongside real sockets (real I/O isn't faked).

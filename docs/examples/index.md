@@ -72,6 +72,31 @@ pnpm --filter @super-line/example-ai-canvas dev   # http://localhost:5373
 
 Demonstrates: [the reactive server-side co-writer](/guide/store#a-reactive-server-side-co-writer), [synced state (CRDT)](/guide/synced-state), [stores](/guide/store), [React hooks](/guide/react).
 
+## ai-canvas-pglite — the AI canvas, re-clustered over Postgres + Electric
+
+The [ai-canvas](#ai-canvas-a-server-side-ai-agent-as-a-co-writer) board re-clustered across **two nodes** on the [`@super-line/store-sync-pglite`](/guide/choosing-a-store) **CRDT** store. Same UX — drag shapes, ask a server-side AI agent ("add three blue circles in a row, then delete the red one") — but CRDT convergence rides **central Postgres + Electric**, not super-line's adapter. Every write appends an opaque Yjs delta to an append-only op-log in Postgres; Electric streams it to each node's in-memory PGlite replica, which folds the deltas and fans them to its local tabs. Concurrent edits to *different* shapes merge across nodes (`clustering: 'self'`). A separate broker-less libp2p mesh carries presence/inspector so the Control Center sees the whole cluster. Needs Docker; the board works without an AI Gateway key (only the agent request needs one).
+
+```bash
+cp examples/ai-canvas-pglite/.env.example examples/ai-canvas-pglite/.env   # set AI_GATEWAY_API_KEY
+docker compose -f examples/ai-canvas-pglite/docker-compose.yml up --build
+```
+
+Open `http://localhost:8200` (node-1) and `http://localhost:8200/?node=2` (node-2); Control Center at `http://localhost:8201`.
+
+Demonstrates: [synced state (CRDT)](/guide/synced-state), [the reactive server-side co-writer](/guide/store#a-reactive-server-side-co-writer), [choosing a store](/guide/choosing-a-store).
+
+## store-pglite — a self-clustering store over Postgres + Electric
+
+A cluster where the **store owns its cross-node sync** (`clustering: 'self'`) — the store needs **no super-line adapter**; central Postgres + Electric is its only fan-out. Writes, strong reads, and ACL go to Postgres via `postgres.js`; each node keeps an in-memory PGlite replica that Electric streams to, and `live.changes` fans changes to that node's local clients only. A write round-trips `node → Postgres → Electric → every node's replica`. Every node runs identical code with **no cluster-size knowledge** — peers find each other over mDNS, so adding a node-3 needs zero config. A separate broker-less libp2p mesh carries presence/inspector so the Control Center sees the whole cluster. Needs Docker.
+
+```bash
+cd examples/store-pglite && docker compose up --build
+```
+
+Watch `writer@node-1 → set count=N` and `reader@node-2 ← room count=N` cross nodes through Electric; Control Center at `http://localhost:8081`.
+
+Demonstrates: [stores](/guide/store), [choosing a store](/guide/choosing-a-store), [scaling & adapters](/guide/scaling-adapters).
+
 ## hono — one server for HTTP + WebSockets
 
 super-line attached to a [Hono](https://hono.dev) app (`@hono/node-server`) on **one process, one port**: Hono serves the built frontend and REST routes while super-line owns the WebSocket bus, both on the same Node `http.Server` (the `{ server }` option — no library changes). Three live cards — a server-uptime [topic](/guide/topics), shared todos (req/res + a topic), and shared cursors whose identity is assigned server-side into `ctx` — plus a `POST /api/todos` **REST→WS bridge**: `curl` a todo in and watch it appear in every open tab. The bridge route and the WS upgrade share one auth rule. Open a few tabs and move your mouse.
@@ -82,6 +107,28 @@ pnpm --filter @super-line/example-hono start   # http://localhost:3000
 ```
 
 Demonstrates: [topics](/guide/topics), [requests](/guide/requests), [middleware & lifecycle](/guide/middleware-lifecycle), composing with an HTTP framework.
+
+## transports — same app, any wire
+
+The headline of pluggable transports: **one contract, one server, identical client code — over WebSocket, HTTP (SSE), and libp2p at once.** A single server mounts all three server transports; three clients call the exact same `echo` with only the transport line differing, and one server push fans out to every wire. Same handlers, same validation, same rooms/topics — the transport is just the pipe, swappable per deployment without touching application code.
+
+```bash
+pnpm --filter @super-line/example-transports start
+```
+
+Demonstrates: [transports](/guide/transports), [the HTTP transport](/guide/transport-http), [the libp2p transport](/guide/transport-libp2p).
+
+## react-chat-transports — the browser app with a live transport dial
+
+A React chat with a transport dropdown: flip between **WebSocket**, **HTTP (SSE)**, and **libp2p** live in the browser. The contract, handlers, hooks, and UI are identical — only the client transport line changes, and each message shows the wire it arrived on (the server stamps `h.transport` into `ctx`). Single node by design: this is the *client*-transport axis, not server↔server fan-out (for that, see the `react-chat-cluster-*` examples). Needs Docker (or run the server + SPA locally).
+
+```bash
+cd examples/react-chat-transports && docker compose up --build
+```
+
+Chat at `http://localhost:8100`, Control Center at `http://localhost:8101`.
+
+Demonstrates: [transports](/guide/transports), [React hooks](/guide/react), [the HTTP transport](/guide/transport-http).
 
 ## auth — roles as an authorization boundary
 
@@ -135,6 +182,26 @@ See [`examples/scaling/README.md`](https://github.com/mertdogar/super-line/tree/
 
 Demonstrates: [scaling & adapters](/guide/scaling-adapters), [the cluster event bus](/guide/cluster-event-bus).
 
+## scaling-rabbitmq — the same cluster over RabbitMQ
+
+[`scaling`](#scaling-a-real-multi-node-cluster) with **RabbitMQ** as the substrate instead of Redis (via [`@super-line/adapter-rabbitmq`](/guide/adapter-rabbitmq)): RabbitMQ + a Caddy load balancer + 3 nodes + 6 client containers. Channels become routing keys on a `direct` exchange, so the broker selectively routes each message only to the nodes that subscribed. Same room/topic/cluster-event-bus fan-out across processes; the only structural change is the (async) adapter factory. The RabbitMQ management UI is at `http://localhost:15672` (`superline` / `superline`). Needs Docker.
+
+```bash
+cd examples/scaling-rabbitmq && docker compose up
+```
+
+Demonstrates: [scaling & adapters](/guide/scaling-adapters), [the RabbitMQ adapter](/guide/adapter-rabbitmq), [the cluster event bus](/guide/cluster-event-bus).
+
+## scaling-zeromq — the same cluster, brokerless over ZeroMQ
+
+[`scaling`](#scaling-a-real-multi-node-cluster) with **no Redis** — the nodes peer directly over a [ZeroMQ](https://zeromq.org) mesh via [`@super-line/adapter-zeromq`](/guide/adapter-zeromq). One shared mesh fans out all three flows (room broadcast, topic, and `stats` over the cluster event bus). Discovery is just **plain DNS names** on the compose network — no broker, no peer IDs, no registry; ZeroMQ's `connect` is lazy and auto-reconnecting, so nodes start in any order. Mesh mode suits a handful of nodes; for a larger fleet run a forwarder (`npx super-line-zeromq-proxy`). Needs Docker.
+
+```bash
+cd examples/scaling-zeromq && docker compose up
+```
+
+Demonstrates: [scaling & adapters](/guide/scaling-adapters), [the ZeroMQ adapter](/guide/adapter-zeromq), [the cluster event bus](/guide/cluster-event-bus).
+
 ## react-chat-cluster — the browser app, across two servers
 
 [`react-chat`](#react-chat-browser-app) behind a real cluster via Docker Compose: **Redis + 2 server nodes + a Caddy** that serves the built SPA *and* round-robins `/ws` across the nodes. Open `http://localhost:8080` in several tabs — each lands on a different node (shown in the header), yet messages cross servers via a `room.broadcast` over the Redis adapter, and the online count is cluster-wide via `cluster.room(...)`. Needs Docker.
@@ -156,3 +223,39 @@ cd examples/react-chat-cluster-libp2p && docker compose up --build
 ```
 
 Demonstrates: [React hooks](/guide/react), [scaling & adapters](/guide/adapter-libp2p), [introspection & presence](/guide/introspection-and-presence).
+
+## react-chat-cluster-rabbitmq — the same cluster over RabbitMQ
+
+[`react-chat-cluster`](#react-chat-cluster-the-browser-app-across-two-servers) with **RabbitMQ** as the broker (via [`@super-line/adapter-rabbitmq`](/guide/adapter-rabbitmq)) instead of Redis — same React SPA, same Control Center. A single Caddy serves the SPA and `round_robin`s `/ws` across two nodes; messages cross process boundaries through the broker, and the cluster-wide online count comes from the adapter's **gossip-replicated** presence directory (eventually consistent — RabbitMQ has no shared key-value store). The only structural change from the Redis variant is the (async) adapter line. Ports are offset so all three cluster variants run at once. Needs Docker.
+
+```bash
+cd examples/react-chat-cluster-rabbitmq && docker compose up --build
+```
+
+App at `http://localhost:8100`, Control Center at `http://localhost:8101`; RabbitMQ management UI at `http://localhost:15673`.
+
+Demonstrates: [React hooks](/guide/react), [the RabbitMQ adapter](/guide/adapter-rabbitmq), [introspection & presence](/guide/introspection-and-presence).
+
+## react-chat-cluster-zeromq — delete your broker
+
+[`react-chat-cluster`](#react-chat-cluster-the-browser-app-across-two-servers) with **Redis deleted** — same React app, same Control Center, same behavior, but **no broker service** in the stack. Three nodes peer directly over a [ZeroMQ](https://zeromq.org) mesh (via [`@super-line/adapter-zeromq`](/guide/adapter-zeromq)), so a message typed in a tab on node-1 still reaches a tab on node-3. The only code change is the adapter line; discovery is just DNS names on the compose network. The Control Center is the best way to *see* the brokerless mesh — no broker box in the topology, the three nodes peering directly. Needs Docker.
+
+```bash
+cd examples/react-chat-cluster-zeromq && docker compose up --build
+```
+
+App at `http://localhost:8080`, Control Center at `http://localhost:8081`.
+
+Demonstrates: [React hooks](/guide/react), [the ZeroMQ adapter](/guide/adapter-zeromq), [introspection & presence](/guide/introspection-and-presence).
+
+## libp2p-nat — servers behind NAT, browsers over WebRTC
+
+A chat cluster where the **servers aren't directly reachable** — their libp2p nodes advertise *only* a `/p2p-circuit` reservation and `/webrtc`. Browser clients, sitting outside the network entirely, reach them over **WebRTC**, signalled through one small public relay that also lets the servers discover and mesh with each other. One libp2p node per server feeds both the libp2p **transport** (browser↔server) and the libp2p **adapter** (server↔server); STUN (`src/ice.ts`) is what lets WebRTC cross real NATs (a phone on cellular reaching a server behind a home router). Reuses the [`react-chat-cluster-libp2p`](#react-chat-cluster-libp2p-the-same-cluster-no-broker) contract and UI nearly unchanged — only the connectivity differs. Needs Docker.
+
+```bash
+cd examples/libp2p-nat && docker compose up --build
+```
+
+Chat at `http://localhost:8080`, Control Center at `http://localhost:8091`.
+
+Demonstrates: [the libp2p transport](/guide/transport-libp2p), [the libp2p adapter](/guide/adapter-libp2p), [scaling & adapters](/guide/scaling-adapters).

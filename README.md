@@ -5,7 +5,7 @@
   <img alt="super-line" src="assets/logo-light.svg" width="340">
 </picture>
 
-### End-to-end typesafe WebSockets — role-scoped contracts, req/res, rooms & topics
+### Strictly-typed realtime data bus — one contract for requests · events · subscriptions · synced state
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-22d3ee?style=flat-square&labelColor=1a1d24)](LICENSE)
 [![Built with TypeScript](https://img.shields.io/badge/TypeScript-strict-22d3ee?style=flat-square&labelColor=1a1d24)](https://www.typescriptlang.org/)
@@ -20,7 +20,7 @@
 
 <br />
 
-**super-line** is a typesafe WebSocket library for TypeScript. You write **one contract**; the server implements it and the client calls it with full end-to-end type inference — no codegen. The contract is split by **direction** (`clientToServer` / `serverToClient`) and scoped by **role** — a `user` and an `agent` connect to the same server and each get their own typed surface, with a `shared` base in common. Requests, events, topics, rooms, and a cluster-wide event bus share one connection, and everything fans out across processes through a pluggable adapter (in-memory for one node, Redis for many).
+**super-line** is a strictly-typed realtime data bus for TypeScript. You write **one contract**; the server implements it and the client calls it with full end-to-end type inference — no codegen. The contract is split by **direction** (`clientToServer` / `serverToClient`) and scoped by **role** — a `user` and an `agent` connect to the same server and each get their own typed surface, with a `shared` base in common. Requests, events, topics, rooms, synced state, and a cluster-wide event bus share one connection — over a **pluggable transport** (WebSocket by default; HTTP/SSE, libp2p and loopback also ship) — and everything fans out across processes through a pluggable **adapter** (in-memory for one node; Redis, RabbitMQ, ZeroMQ or libp2p for many).
 
 > 📖 **Full documentation: [super-line.dogar.biz](https://super-line.dogar.biz/)** — guides, the complete API reference, and runnable examples.
 
@@ -47,7 +47,8 @@
 | ↔️ **Req/res** | Unary `await client.x()` with typed errors, timeout & `AbortSignal`. |
 | 📣 **Events & rooms** | Server-pushed events; server-controlled room broadcasts. |
 | 📡 **Topics** | Client-subscribed pub/sub streams, authorized server-side. |
-| 🗄️ **Stores** | Permissioned, real-time JSON documents — a pluggable persisted-state primitive (in-memory LWW or a CRDT) with per-client access rules, a reactive client handle, and a reactive in-process server co-writer (`srv.store(ns).open(id)`) that reads, merges, and surgically deletes. |
+| 🗄️ **Stores** | Permissioned, real-time JSON documents — a pluggable persisted-state primitive with per-client access rules, a reactive client handle, and a reactive in-process server co-writer (`srv.store(ns).open(id)`) that reads, merges, and surgically deletes. **Six backends:** LWW or CRDT × in-memory · durable (SQLite, libsql/Turso) · self-clustering (Postgres + Electric). |
+| 🧹 **Cluster-wide delete** | `srv.store(ns).delete(id)` fans a deletion across every node (wire `sdel`); observe it via `ServerStore.onDelete`, the client `ResourceHandle.deleted` flag, and React `useResource().deleted`. |
 | 🚌 **Cluster event bus** | `server.publish` / `server.subscribe` on a shared topic — cluster-wide pub/sub to server listeners (every node, local echo) and subscribed clients at once. |
 | 📨 **Server→client req/res** | `await srv.toConn(id).request(...)` — ask a client and await a typed reply, across nodes. |
 | 🛰️ **Presence & introspection** | `srv.local.*` (sync) + `srv.cluster.*` (counts, topology, `isOnline`) backed by a Redis registry. |
@@ -60,15 +61,31 @@
 ## Install
 
 ```bash
-pnpm add @super-line/core @super-line/server @super-line/client zod
-# optional
-pnpm add @super-line/adapter-redis   # multi-node fan-out (central broker)
-pnpm add @super-line/adapter-zeromq  # multi-node fan-out (brokerless mesh / forwarder)
-pnpm add @super-line/adapter-libp2p  # multi-node fan-out (decentralized gossip, broker-less)
-pnpm add @super-line/react           # React hooks
+pnpm add @super-line/core @super-line/server @super-line/client @super-line/transport-websocket zod
+
+# other client↔server transports (WebSocket is the default above)
+pnpm add @super-line/transport-http      # HTTP/SSE + long-poll
+pnpm add @super-line/transport-libp2p    # libp2p / WebRTC (bring-your-own node)
+pnpm add @super-line/transport-loopback  # in-memory, for tests
+
+# server↔server fan-out adapters (only needed for >1 node)
+pnpm add @super-line/adapter-redis     # central broker
+pnpm add @super-line/adapter-rabbitmq  # AMQP broker
+pnpm add @super-line/adapter-zeromq    # brokerless mesh / forwarder
+pnpm add @super-line/adapter-libp2p    # decentralized gossip, broker-less
+
+# stores — permissioned, real-time documents (pick a backend; pair with its client store)
+pnpm add @super-line/store-memory       # LWW · in-memory · relay
+pnpm add @super-line/store-sync         # CRDT · in-memory · relay
+pnpm add @super-line/store-sqlite       # LWW · durable (better-sqlite3) · relay
+pnpm add @super-line/store-sync-libsql  # CRDT · durable (libsql/Turso) · relay
+pnpm add @super-line/store-pglite       # LWW · self-clustering (Postgres + Electric)
+pnpm add @super-line/store-sync-pglite  # CRDT · self-clustering (Postgres + Electric)
+
+pnpm add @super-line/react             # React hooks
 ```
 
-Requirements: **Node 18+** (server). The client uses the global `WebSocket` (browsers, and Node 22+); on older Node, pass `{ WebSocket }`.
+Requirements: **Node 18+** (server). The WebSocket client uses the global `WebSocket` (browsers, and Node 22+); on older Node, pass `webSocketClientTransport({ url, WebSocket })`.
 
 ## Quickstart
 
@@ -107,13 +124,14 @@ export const chat = defineContract({
 ```ts
 import http from 'node:http'
 import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { chat } from './contract'
 
 const server = http.createServer() // or pass your Express/Fastify http.Server
 const srv = createSuperLineServer(chat, {
-  server,
-  authenticate: (req) => {
-    const name = new URL(req.url!, 'http://x').searchParams.get('name')
+  transports: [webSocketServerTransport({ server })],
+  authenticate: (h) => {
+    const name = h.query.name // the Handshake: { transport, headers, query, peer?, raw }
     if (!name) throw new Error('unauthorized') // throw -> 401 at the upgrade, no socket
     return { role: 'user' as const, ctx: { name } } // role + ctx; ctx in every handler
   },
@@ -142,12 +160,13 @@ server.listen(3000)
 
 ```ts
 import { createSuperLineClient } from '@super-line/client'
+import { webSocketClientTransport } from '@super-line/transport-websocket'
 import { chat } from './contract'
 
 const client = createSuperLineClient(chat, {
-  url: 'ws://localhost:3000',
+  transport: webSocketClientTransport({ url: 'ws://localhost:3000' }),
   role: 'user',                 // narrows the surface to shared ∪ user; sent to authenticate to verify
-  params: { name: 'ada' },     // -> ?name=ada, read in authenticate
+  params: { name: 'ada' },     // -> ?name=ada, read as h.query.name in authenticate
 })
 
 client.on('message', (m) => console.log(`${m.from}: ${m.text}`)) // typed
@@ -164,7 +183,11 @@ client.close()
 
 ```ts
 // server: identify connections so the cluster view + toUser can find them
-createSuperLineServer(chat, { server, authenticate, identify: (conn) => conn.ctx.userId })
+createSuperLineServer(chat, {
+  transports: [webSocketServerTransport({ server })],
+  authenticate,
+  identify: (conn) => conn.ctx.userId,
+})
 
 await srv.cluster.count()                 // total connections cluster-wide
 await srv.isOnline('u42')                 // connected on any node?
@@ -212,6 +235,9 @@ pnpm --filter @super-line/example-ai-canvas dev   # http://localhost:5373 (set A
 # Hono (HTTP) + super-line (WS) on ONE port — uptime topic, shared todos, live cursors + a curl→WS bridge:
 pnpm --filter @super-line/example-hono build && pnpm --filter @super-line/example-hono start   # http://localhost:3000
 
+# One contract over THREE transports at once — WS + HTTP + libp2p, three clients, identical results:
+pnpm --filter @super-line/example-transports start
+
 # Token auth with roles (admin-only `secret`; user gets NOT_FOUND):
 pnpm --filter @super-line/example-auth start
 
@@ -227,11 +253,29 @@ cd examples/scaling && docker compose up
 # Same cluster, decentralized: 3 nodes peer over libp2p — NO broker (needs Docker):
 cd examples/scaling-libp2p && docker compose up
 
+# Chat servers behind NAT: browsers reach them over WebRTC via one public circuit-relay-v2 relay (needs Docker):
+cd examples/libp2p-nat && docker compose up
+
 # Brokerless cluster: 3 nodes peer over a ZeroMQ mesh, NO broker (needs Docker):
 cd examples/scaling-zeromq && docker compose up
 
+# Cluster over a RabbitMQ broker: 3 nodes fan out via adapter-rabbitmq (needs Docker):
+cd examples/scaling-rabbitmq && docker compose up
+
 # "Delete your broker": the react-chat-cluster with Redis removed, on a ZeroMQ mesh (needs Docker):
 cd examples/react-chat-cluster-zeromq && docker compose up --build
+
+# Same react-chat-cluster on a RabbitMQ (AMQP) broker via adapter-rabbitmq (needs Docker):
+cd examples/react-chat-cluster-rabbitmq && docker compose up --build
+
+# React chat with a live transport dial — switch WebSocket / HTTP / libp2p at runtime (needs Docker):
+cd examples/react-chat-transports && docker compose up --build
+
+# Self-clustering store, NO adapter: central Postgres + per-node Electric→PGlite replica (needs Docker):
+cd examples/store-pglite && docker compose up
+
+# AI co-writer canvas on a self-clustering CRDT store (Postgres + Electric). Needs an AI Gateway key:
+cd examples/ai-canvas-pglite && docker compose up   # set AI_GATEWAY_API_KEY
 
 # Bus across a cluster: Redis + Caddy + 3 nodes converge a shared tally over the event bus (needs Docker):
 cd examples/bus-cluster && docker compose up
@@ -286,18 +330,32 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 
 | Package | Purpose |
 | --- | --- |
-| [`@super-line/core`](packages/core) | `defineContract` (roles + direction), validation, wire protocol, `Serializer` / `Adapter` interfaces, `SuperLineError` |
-| [`@super-line/server`](packages/server) | `createSuperLineServer` over `ws`: role-keyed `implement`, rooms, topics, `forRole`, the cluster event bus (`publish`/`subscribe`), server→client requests (`toConn`/`toUser`), local + cluster introspection, heartbeat, middleware, in-memory adapter |
-| [`@super-line/client`](packages/client) | `createSuperLineClient` (role-scoped surface, reconnect, typed calls, `on` / `subscribe`) |
+| [`@super-line/core`](packages/core) | `defineContract` (roles + direction), validation, wire protocol, the `Serializer` / `Adapter` / transport (`RawConn`·`ServerTransport`·`ClientTransport`·`Handshake`) / store (`ServerStore`·`ServerReplica`·`SDeleteFrame`) interfaces, `SuperLineError` |
+| [`@super-line/server`](packages/server) | `createSuperLineServer` over any transport: role-keyed `implement`, rooms, topics, `forRole`, the cluster event bus (`publish`/`subscribe`), server→client requests (`toConn`/`toUser`), the in-process store co-writer (`srv.store(ns).open(id)`), local + cluster introspection, heartbeat, middleware, in-memory adapter |
+| [`@super-line/client`](packages/client) | `createSuperLineClient` (role-scoped surface, reconnect, typed calls, `on` / `subscribe`, the store handle `store(ns).open(id)` with `set`/`update`/`delete`/`deleted`) |
+| [`@super-line/react`](packages/react) | `createSuperLineHooks<C, Role>` → `useRequest` / `useEvent` / `useSubscription` / `useResource` |
+| [`@super-line/control-center`](packages/control-center) | Debugging webapp (`npx`): live topology, contract, roles & per-conn ctx/state, transport/wire, `msg.*` live feed |
+| **Transports** — client↔server wire ||
+| [`@super-line/transport-websocket`](packages/transport-websocket) | Default WebSocket transport: HTTP upgrade, 401 rejection, inspector subprotocol, backpressure (`webSocketServerTransport`/`webSocketClientTransport`) |
+| [`@super-line/transport-http`](packages/transport-http) | HTTP transport — SSE or long-poll downstream + POST upstream (`httpServerTransport`/`httpClientTransport`) |
+| [`@super-line/transport-libp2p`](packages/transport-libp2p) | libp2p / WebRTC transport over a libp2p stream, bring-your-own node (`libp2pServerTransport`/`libp2pClientTransport`) |
+| [`@super-line/transport-loopback`](packages/transport-loopback) | In-memory transport (no socket) — for tests (`createLoopbackTransport`) |
+| **Adapters** — server↔server fan-out ||
 | [`@super-line/adapter-redis`](packages/adapter-redis) | Redis Pub/Sub adapter for multi-node fan-out (central broker) |
+| [`@super-line/adapter-rabbitmq`](packages/adapter-rabbitmq) | RabbitMQ (AMQP) adapter for multi-node fan-out |
 | [`@super-line/adapter-zeromq`](packages/adapter-zeromq) | ZeroMQ adapter for multi-node fan-out — brokerless mesh or a lightweight forwarder, with gossip presence |
 | [`@super-line/adapter-libp2p`](packages/adapter-libp2p) | Decentralized, broker-less libp2p (gossipsub) adapter — fan-out + presence, no broker |
-| [`@super-line/react`](packages/react) | `createSuperLineHooks<C, Role>` → `useRequest` / `useEvent` / `useSubscription` |
-| [`@super-line/control-center`](packages/control-center) | Debugging webapp (`npx`): live topology, contract, roles & per-conn ctx/state |
+| **Stores** — permissioned, real-time documents ||
+| [`@super-line/store-memory`](packages/store-memory) | LWW · in-memory · relay — the default store pair (`memoryStoreServer`/`memoryStoreClient`) |
+| [`@super-line/store-sync`](packages/store-sync) | CRDT (Yjs/super-store) · in-memory · relay (`syncStoreServer`/`syncStoreClient`) |
+| [`@super-line/store-sqlite`](packages/store-sqlite) | LWW · durable (better-sqlite3 WAL) · relay (`sqliteStoreServer`; pair with `memoryStoreClient`) |
+| [`@super-line/store-sync-libsql`](packages/store-sync-libsql) | CRDT · durable (libsql/Turso/sqld) · relay — async `libsqlSyncStore`; snapshot-per-resource, history-preserving rehydrate |
+| [`@super-line/store-pglite`](packages/store-pglite) | LWW · self-clustering (central Postgres + per-node Electric→PGlite, **no adapter**) (`pgliteStoreServer`) |
+| [`@super-line/store-sync-pglite`](packages/store-sync-pglite) | CRDT · self-clustering (Postgres op-log + Electric→PGlite, **no adapter**) (`syncPgliteStoreServer`) |
 
 ## Status
 
-Pre-1.0. **Implemented:** role-scoped contracts, req/res, events, rooms, topics, Stores (LWW + CRDT, with a reactive server-side co-writer), the cluster event bus (`server.publish`/`server.subscribe`), auth, reconnect, middleware, in-memory + Redis adapters, React hooks. **Not yet:** fire-and-forget client→server signals (every client→server is req/res today), mutable per-connection state, NATS adapter, wildcard/retained topics, session resume/replay, parameterized-topic type inference (topics are typed by exact contract key for now), backpressure safeguards.
+Pre-1.0. **Implemented:** role-scoped contracts, req/res, events, rooms, topics, Stores (LWW + CRDT across in-memory, durable SQLite / libsql-Turso, and self-clustering Postgres+Electric backends — with a reactive server-side co-writer and cluster-wide deletion fan-out), the cluster event bus (`server.publish`/`server.subscribe`), pluggable client↔server transports (WebSocket · HTTP/SSE · libp2p · loopback), auth, reconnect, middleware, in-memory + Redis + RabbitMQ + ZeroMQ + libp2p adapters, React hooks. **Not yet:** fire-and-forget client→server signals (every client→server is req/res today), mutable per-connection state, NATS adapter, wildcard/retained topics, session resume/replay, parameterized-topic type inference (topics are typed by exact contract key for now), backpressure safeguards.
 
 ## License
 

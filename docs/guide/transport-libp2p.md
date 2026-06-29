@@ -39,6 +39,8 @@ createSuperLineClient(contract, {
 
 For **browser WebRTC**, the client node uses `@libp2p/webrtc` (`webRTCDirect()` for a publicly UDP-reachable server, or `webRTC()` relayed through a `circuit-relay-v2` node behind NAT); the server node advertises the matching multiaddr. libp2p performs the SDP/ICE handshake — super-line never touches it.
 
+The realistic deployment — **servers behind NAT, browsers on the open internet** — is the [`libp2p-nat`](https://github.com/mertdogar/super-line/tree/main/examples/libp2p-nat) example: server nodes advertise *only* a `/p2p-circuit` reservation and `/webrtc` (never a dialable address), browsers reach them by WebRTC signalled through one public `circuit-relay-v2` node, with public **STUN** servers (`src/ice.ts`) so the data channel hole-punches across real NATs. Serving the page over HTTPS? Point the browser at the relay over `wss` (`RELAY_WSS_HOST`) so a plain `ws://` relay isn't blocked as mixed content.
+
 ## Auth is the first frame
 
 libp2p has no HTTP headers or query string, so credentials ride the **first stream frame**: the client sends `{ role, params }`, and `authenticate` receives a Handshake with `transport: 'libp2p'`, `query: { role, ...params }`, and `peer: { id, addr }` — where `peer.id` is the **noise-verified PeerId**:

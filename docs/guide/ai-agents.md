@@ -25,7 +25,7 @@ Cursor reads rules from `.cursor/rules/*.mdc`. Fetch the condensed guide and pre
 
 ```bash
 mkdir -p .cursor/rules
-{ printf -- '---\ndescription: super-line — typesafe WebSocket contracts (roles + direction)\nalwaysApply: true\n---\n\n'
+{ printf -- '---\ndescription: super-line — strictly-typed realtime data bus contracts (roles + direction)\nalwaysApply: true\n---\n\n'
   curl -fsSL https://raw.githubusercontent.com/mertdogar/super-line/main/skills/super-line/AGENTS.md
 } > .cursor/rules/super-line.mdc
 ```

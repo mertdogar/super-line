@@ -224,14 +224,46 @@ Client behavior:
 - In-flight requests reject `DISCONNECTED` on drop; calls made while reconnecting are queued and flushed.
 - At-most-once: messages sent while offline are not replayed.
 
-## @super-line/adapter-redis
+## Transports (client↔server wire — pluggable)
+
+Pass to `transports: [...]` (server) / `transport:` (client). WebSocket is the default; the others are drop-in alternatives. `RawConn`/`ServerTransport`/`ClientTransport`/`Handshake`/`AuthOutcome` are core types.
 
 ```ts
+// @super-line/transport-websocket — default
+webSocketServerTransport(opts?: { server?; path?; backpressure?; inspector?: boolean }): ServerTransport
+webSocketClientTransport(opts: { url: string; WebSocket?: typeof WebSocket }): ClientTransport
+wsServerRawConn(ws, backpressure?): RawConn        // adopt a raw ws (e.g. attach to an existing server)
+
+// @super-line/transport-http — SSE downstream + POST upstream, or long-poll; mounts on an http.Server
+httpServerTransport(opts: { server: http.Server; basePath?; sessionTimeout?; keepalive?; pollTimeout?; maxBodyBytes?; cors?: { origin? } }): ServerTransport
+httpClientTransport(opts: { url: string; basePath?; mode?: 'sse' | 'longpoll'; EventSource?; fetch? }): ClientTransport
+
+// @super-line/transport-libp2p — BYO started libp2p node (transport + noise + yamux); see the libp2p-nat example
+libp2pServerTransport(opts: { node: Libp2p; protocol?: string }): ServerTransport
+libp2pClientTransport(opts: { node: Libp2p; multiaddr: Multiaddr | Multiaddr[] | PeerId; protocol?: string; dialTimeoutMs?: number }): ClientTransport
+
+// @super-line/transport-loopback — in-memory, zero-dependency, for tests
+createLoopbackTransport(): { server: ServerTransport; client(): ClientTransport }
+```
+
+## Adapters (server↔server fan-out — pluggable)
+
+```ts
+// @super-line/adapter-redis
 createRedisAdapter(options?: { url?: string; presenceTtlMs?: number } | string): Adapter
 // createRedisAdapter('redis://localhost:6379')  — pass to every server's `adapter`
 // presenceTtlMs (default 90_000): node liveness key TTL, refreshed by the heartbeat; must exceed heartbeat interval
+
+// @super-line/adapter-libp2p — broker-less gossipsub mesh (BYO node OR a built-in one); presence via gossip
+createLibp2pAdapter(opts?: { node?; topic?; ... }): Promise<Adapter & { node }>
+
+// @super-line/adapter-rabbitmq — one durable `direct` exchange; per-node exclusive queue
+createRabbitmqAdapter(opts?: { url?; connection?; exchange?; queuePrefix?; presence? } | string): Promise<Adapter & { connection }>
+
+// @super-line/adapter-zeromq — brokerless mesh / central proxy / BYO sockets
+createZeroMqAdapter(opts: { bind; peers? } | { mode: 'proxy'; frontendUrl; backendUrl } | { pub; sub }): Promise<Adapter>
 ```
-Redis Pub/Sub (two connections) + a presence store. At-most-once. Run more than one server process? Every server needs an adapter pointing at the same Redis. Carries rooms, topics (including cluster-bus `server.publish`/`server.subscribe`), targeted `toConn`/`toUser` sends, server→client request replies, AND the cluster presence registry.
+Redis: Pub/Sub (two connections) + a presence store. All adapters are at-most-once. Run more than one server process? Every server needs an adapter (the SAME backend). They carry rooms, topics (including cluster-bus `server.publish`/`server.subscribe`), targeted `toConn`/`toUser` sends, server→client request replies, store-Change/`sdel` relay for `relay` stores, AND the cluster presence registry (redis/libp2p/rabbitmq/zeromq all ship a `PresenceStore`).
 
 ## @super-line/react
 
@@ -247,6 +279,7 @@ createSuperLineHooks<C, R extends keyof C['roles']>(): {
   }
   useResource<T>(name: string, id: string): {       // open a Store Resource; closes on unmount
     data: T | undefined                              // undefined until catch-up
+    deleted: boolean                                 // true once the server fans out a delete for this Resource
     set: (value: T) => void                          // replace
     update: (partial: Partial<T>) => void            // merge
     delete: (path: (string | number)[]) => void      // surgical key removal
@@ -255,17 +288,36 @@ createSuperLineHooks<C, R extends keyof C['roles']>(): {
 ```
 Create the client once (e.g. `useState(() => createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user' }))`, `webSocketClientTransport` from `@super-line/transport-websocket`), wrap with `<Provider client={client}>`, then use the hooks inside.
 
-## Stores (@super-line/store-memory · @super-line/store-sync · @super-line/store-sqlite)
+## Stores (6: store-memory · store-sync · store-sqlite · store-sync-libsql · store-pglite · store-sync-pglite)
 
 A Store is super-line's **off-contract** persisted-state seam: named, permissioned JSON Resources `{ id, accessRules, data }`. Configure a server + client pair under matching `stores:` keys. `data` is `unknown` end-to-end (not schema-validated). ACL is **deny-by-default**, keyed by the principal (`identify(conn) ?? conn.id`).
 
+Each `ServerStore` declares two static traits the inspector surfaces: `model: 'lww' | 'crdt'` (replace vs merge) and `clustering: 'relay' | 'self'`. **`relay`** = the store does no networking; core relays its Changes/deletes across nodes over the server↔server Adapter (so >1 node needs an adapter). **`self`** = the store owns a shared backend + a per-node replica and fans only to LOCAL subscribers — it needs **NO adapter** (it IS the fan-out). Match model on both halves: LWW server ↔ `memoryStoreClient`, CRDT server ↔ `syncStoreClient`.
+
+| package | model | durability | clustering | client half |
+|---|---|---|---|---|
+| store-memory | lww | in-memory | relay | `memoryStoreClient` |
+| store-sync | crdt (Yjs) | in-memory | relay | `syncStoreClient` |
+| store-sqlite | lww | better-sqlite3 (WAL) | relay | `memoryStoreClient` |
+| store-sync-libsql | crdt (Yjs) | libsql / Turso / sqld | relay | `syncStoreClient` |
+| store-pglite | lww | Postgres + Electric→PGlite | **self** | `memoryStoreClient` |
+| store-sync-pglite | crdt (Yjs op-log) | Postgres + Electric→PGlite | **self** | `syncStoreClient` |
+
 ```ts
-// each store package ships a server + client half:
+// each store package ships a server (and, for relay LWW/CRDT, a client) half:
 memoryStoreServer(): ServerStore                                   // LWW, in-memory (default)
 memoryStoreClient(opts?: { origin?: string }): ClientStore
 syncStoreServer(opts?: { resolveOptions?: (id) => { mode?: 'shallow' | 'document'; opaque?: string[] } }): ServerStore  // CRDT (Yjs)
 syncStoreClient(opts?: { origin?; resolveOptions? }): ClientStore  // pass the SAME resolveOptions to BOTH halves (no config drift)
 sqliteStoreServer(opts: { file: string; table?: string }): ServerStore  // durable LWW (better-sqlite3); pair with memoryStoreClient()
+
+// durable CRDT — ASYNC factory (rehydrates every Resource before returning); pair with syncStoreClient()
+await libsqlSyncStore(opts: { url: string; authToken?: string; table?: string; debounceMs?: number; resolveOptions? }): Promise<ServerStore>
+//   url: file:x.db | :memory: | libsql:// (Turso) | http(s):// (sqld). snapshot-per-resource (debounced), history-preserving rehydrate.
+
+// self-clustering — NO adapter; central Postgres + per-node Electric→PGlite replica. ASYNC factories.
+await pgliteStoreServer(opts: { pgUrl: string; electricUrl?: string; table?: string; db?: PGliteWithLive }): Promise<ServerStore>   // LWW; pair with memoryStoreClient()
+await syncPgliteStoreServer(opts: { pgUrl; electricUrl?; table?; db?; resolveOptions?; compact?: false | { everyNUpdates?; debounceMs? }; onError? }): Promise<ServerStore>  // CRDT op-log; open()→ServerReplica; pair with syncStoreClient()
 
 // SERVER — srv.store(name): server-authoritative; create/grant/revoke/delete have NO client wire
 interface ServerStoreHandle {
@@ -301,8 +353,15 @@ interface ResourceHandle {
   update(partial): void
   delete(path: (string | number)[]): void            // surgical key removal (merges on CRDT, unlike a full-doc set)
   readonly ready: Promise<void>                       // resolves after catch-up; rejects FORBIDDEN/NOT_FOUND
+  readonly deleted: boolean                           // true once the server fans out a delete for this id (a subscribe fires; re-read this + snapshot)
   close(): void                                       // drops the server subscription when the last handle for this id closes
 }
+// ServerStore (core) declares: readonly clustering: 'relay' | 'self'; readonly model?: 'lww' | 'crdt';
+//   read/create/apply/setAccess/delete/list/onChange + optional onDelete?(cb: (id) => void) and open?(id, { origin? }).
+//   onDelete is the delete-side mirror of onChange — `self` stores fire it from their backend's delete feed; core fans
+//   each id to LOCAL subscribers. `relay` stores omit onDelete (core fans their deletes over the adapter from srv.store(n).delete).
+// Deletion fan-out: srv.store(ns).delete(id) propagates cluster-wide as the wire SDeleteFrame ('sdel': { t:'sdel', n: store, id, nd?: origin node });
+//   subscribed clients flip ResourceHandle.deleted / useResource().deleted true and fire their subscribe.
 // core types: Resource<T> { id, accessRules: AccessRules, data: T }; AccessRules = Record<Principal, Perms>;
 //   Perms { read, write }; Principal = string; StoreChange { id, update, origin }; ServerStore / ClientStore / ServerReplica / ResourceReplica.
 //   removeAtPath(root, path: (string|number)[]): unknown — structural-clone delete helper, exported from core; used by both halves.
@@ -313,5 +372,6 @@ Notes:
 - **Deny-by-default.** `grant` a principal before it can read/write. Server-side ops (`create`/`grant`/`open`/`write`) are server-authoritative and bypass ACL.
 - **Merge vs delete.** `update`/`write` MERGE and can't remove a key; `delete(path)` is the only key removal. On the CRDT store it's surgical — a concurrent edit to another key survives; a full-document `set` would clobber it.
 - **In-process co-writer.** `srv.store(ns).open(id)` is the right tool for a server-side AI agent / bot: reactive reads + delete, no loopback client and no grant. `origin` (default `'server'`) tags writes for echo-break + Control Center.
-- **Clustering.** Both shipped stores are `relay` (node-local; super-line relays changes across nodes). Reads/deletes are atomic in-process; across nodes they resolve last-writer-wins.
-- React: `useResource<T>(name, id)` wraps open + subscribe + write-through + unmount-close (see above).
+- **Clustering.** `relay` stores (memory, sync, sqlite, sync-libsql) are node-local — super-line relays their Changes across nodes over the **Adapter** (so >1 node needs one). `self` stores (pglite, sync-pglite) own a central Postgres + per-node Electric→PGlite replica and fan only to local subscribers — they need **NO adapter**. For LWW, cross-node writes resolve last-writer-wins; CRDT stores merge.
+- **Deletion fan-out.** `srv.store(ns).delete(id)` removes the whole Resource and propagates cluster-wide as an `sdel` frame: subscribers see `ResourceHandle.deleted` / `useResource().deleted` go `true` (a `subscribe` fires). Without it a deleted Resource just reads as a silent empty snapshot. Distinct from `delete(path)`, which is a surgical key removal within a Resource.
+- React: `useResource<T>(name, id)` wraps open + subscribe + write-through + unmount-close, and exposes `deleted` (see above).

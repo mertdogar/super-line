@@ -47,7 +47,7 @@ The 13-feature soup is gone: each feature becomes *evidence inside a section*, o
 
 ## Adapters — stay neutral (user steer, 2026-06-20)
 
-Do **not** center Redis. The adapter is a pluggable interface: **in-memory + Redis ship today; libp2p is built (branch, not published); ZeroMQ is planned.** Frame the cross-node story as "pass an adapter / a pub/sub backbone," name Redis as *an* option, and say "libp2p, ZeroMQ, or your own drops in." Never claim libp2p/ZeroMQ are available now.
+Do **not** center Redis. The adapter is a pluggable interface: **the in-memory default plus Redis, libp2p, RabbitMQ, and ZeroMQ all ship and publish today** (`@super-line/adapter-{redis,libp2p,rabbitmq,zeromq}`). Frame the cross-node story as "pass an adapter / a pub/sub backbone," name Redis as *an* option, and say "libp2p, RabbitMQ, ZeroMQ, or your own drops in."
 
 ## Comparison lanes
 
@@ -60,6 +60,15 @@ Keep Socket.IO / tRPC / raw `ws`, **add the distributed-emitter lane** (`demitte
 - **introduction (`Why super-line`)** — the deep argument: the assembly tax in depth, the three opinions, the comparison reasoning. No install/quickstart.
 
 Same hero copy and section titles across all three; only depth changes.
+
+## Successor pillars (added 2026-06-29)
+
+Two subsystems landed after this brief and now share the spotlight. Fold each into the proof arc in the same evidence-mode voice (recognizable pain → one-line fix → real example); neither replaces the hero.
+
+- **Pluggable client↔server transports.** WebSocket is the *default*, never the identity — do not write "WebSocket library." The server takes `transports: [...]`, the client a `transport:`; `authenticate` receives a normalized `Handshake`. WS ships as `@super-line/transport-websocket`; HTTP-SSE/long-poll, libp2p (bring-your-own node), and an in-memory loopback (for tests) ship alongside. Same contract, swap the wire. Real: `examples/transports`, `examples/react-chat-transports`.
+- **Stores — persisted + synced state (the fourth pattern).** Beyond requests · events · subscriptions, super-line now persists server-authoritative state addressed by `name.id`: opened as a reactive `ResourceHandle` client-side (`set`/`update`/`delete` + a `deleted` signal) and a `ServerReplica` server-side (`srv.store(ns).open(id)`). Two consistency models (LWW · CRDT) × two clustering modes — **`relay`** (node-local replicas; changes fan out over the Adapter) vs **`self`** (a central backend + per-node replica; no Adapter). Six backends ship: in-memory (`store-memory` / `store-sync`), durable (`store-sqlite`, `store-sync-libsql` / Turso), and self-clustering (`store-pglite`, `store-sync-pglite` over Postgres + Electric). Deletes fan out cluster-wide (`srv.store(ns).delete(id)` → the `deleted` signal). Real: `examples/store`, `examples/advanced-chat-app`, `examples/ai-canvas-pglite`.
+
+This makes the on-the-wire pattern list **four** — requests · events · subscriptions · **synced state** — but the spotlight stays on the assembly-tax spine and the cluster bus; stores and transports are proof sections, not the headline.
 
 ## Side flag (not messaging — quick win)
 

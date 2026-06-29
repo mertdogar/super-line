@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "End-to-end typesafe WebSockets for TypeScript — req/res, rooms & topics from one contract.",
+  "description": "Strictly-typed realtime data bus for TypeScript — requests, events, subscriptions & synced state from one contract.",
   "license": "MIT",
   "author": "Mert",
   "keywords": ["websocket", "typesafe", "realtime", "rooms", "pubsub", "rpc", "typescript"],

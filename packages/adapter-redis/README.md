@@ -21,6 +21,8 @@ const srv = createSuperLineServer(api, {
 
 Point every server process at the same Redis. Without an adapter, a single node uses the built-in in-memory adapter — add this only when you scale out. At-most-once delivery; uses two connections (a subscriber connection can't run other commands).
 
+Cluster-wide store deletions (`sdel`) ride the same bus — a relay store's `delete()` on one node fans out over Redis so the resource clears on every node and every subscribed client.
+
 - 📖 Docs: <https://mertdogar.github.io/super-line/>
 - 📚 Guide: [scaling & adapters](https://mertdogar.github.io/super-line/guide/scaling-adapters)
 - 🧩 Source: <https://github.com/mertdogar/super-line>

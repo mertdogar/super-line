@@ -9,6 +9,8 @@ export default defineConfig({
   base: '/',
   cleanUrls: true,
   lastUpdated: true,
+  // PRODUCT.md is an internal brief — keep the file but don't build it as an orphan page.
+  srcExclude: ['PRODUCT.md'],
   head: [['link', { rel: 'icon', href: '/mark.svg' }]],
   markdown: {
     config(md) {
@@ -34,6 +36,23 @@ export default defineConfig({
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'Reference', link: '/reference/' },
       { text: 'Examples', link: '/examples/' },
+      {
+        text: 'Design notes',
+        items: [
+          {
+            text: 'ADR-0001: Automerge over Yjs (superseded)',
+            link: '/adr/0001-automerge-over-yjs-for-synced-scene-state',
+          },
+          {
+            text: 'ADR-0002: Yjs via super-store',
+            link: '/adr/0002-yjs-via-super-store-over-automerge',
+          },
+          {
+            text: 'ADR-0003: Stores are off-contract & untyped',
+            link: '/adr/0003-stores-are-off-contract-and-untyped',
+          },
+        ],
+      },
     ],
     sidebar: {
       '/guide/': [
@@ -67,6 +86,7 @@ export default defineConfig({
         {
           text: 'Persisted state',
           items: [
+            { text: 'Choosing a store', link: '/guide/choosing-a-store' },
             { text: 'Stores', link: '/guide/store' },
             { text: 'Synced state (CRDT)', link: '/guide/synced-state' },
           ],
@@ -109,6 +129,25 @@ export default defineConfig({
         },
       ],
       '/reference/': [{ text: 'Packages', items: typedocSidebar }],
+      '/adr/': [
+        {
+          text: 'Design notes (ADRs)',
+          items: [
+            {
+              text: 'ADR-0001: Automerge over Yjs (superseded)',
+              link: '/adr/0001-automerge-over-yjs-for-synced-scene-state',
+            },
+            {
+              text: 'ADR-0002: Yjs via super-store',
+              link: '/adr/0002-yjs-via-super-store-over-automerge',
+            },
+            {
+              text: 'ADR-0003: Stores are off-contract & untyped',
+              link: '/adr/0003-stores-are-off-contract-and-untyped',
+            },
+          ],
+        },
+      ],
     },
     search: { provider: 'local' },
     socialLinks: [{ icon: 'github', link: 'https://github.com/mertdogar/super-line' }],

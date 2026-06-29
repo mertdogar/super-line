@@ -3,7 +3,7 @@
 
 # super-line
 
-Typesafe WebSockets for TypeScript. **One contract is the single source of truth** — the server implements it, the client calls it, types flow end to end with no codegen. Use this guide when working with `@super-line/*` (`core` / `server` / `client` / `adapter-redis` / `react` / `store-memory` / `store-sync` / `store-sqlite`). Not for socket.io, ws, or tRPC.
+A strictly-typed realtime data bus for TypeScript — one contract for every pattern on the wire (requests · events · subscriptions · synced state). **One contract is the single source of truth** — the server implements it, the client calls it, types flow end to end with no codegen. WebSocket is just the default transport (HTTP/SSE, libp2p, and loopback are swappable). Use this guide when working with `@super-line/*` (`core` / `server` / `client` / `react` · adapters `adapter-redis` / `-libp2p` / `-rabbitmq` / `-zeromq` · transports `transport-websocket` / `-http` / `-libp2p` / `-loopback` · stores `store-memory` / `store-sync` / `store-sqlite` / `store-sync-libsql` / `store-pglite` / `store-sync-pglite`). Not for socket.io, ws, or tRPC.
 
 ## Mental model
 
@@ -28,7 +28,7 @@ export const api = defineContract({
 
 - A **connection has a role**, decided at the upgrade from auth, fixed for its life. Each role gets a different typed surface *and* a different `ctx`.
 - **Direction is the axis** (named keys, never positional generics). Per `serverToClient` entry: `{ payload }` = **event** (server push); `{ payload, subscribe: true }` = **topic** (client opts in). A **shared** topic also serves as a **cluster event bus channel** (`server.publish`/`server.subscribe`/`client.subscribe`). `clientToServer` entries are `{ input, output }` **requests**.
-- **Server**: `createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate })`, then `srv.implement({ shared, user, agent })`. WS transport from `@super-line/transport-websocket`; other transports (HTTP/SSE, libp2p) exist — see the Transports guide.
+- **Server**: `createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate })`, then `srv.implement({ shared, user, agent })`. WS transport from `@super-line/transport-websocket`; alternatives: `transport-http` (SSE/long-poll), `transport-libp2p` (libp2p/WebRTC, BYO node), `transport-loopback` (in-memory, for tests) — see the Transports guide.
 - **Client**: `createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user' })` → a typed proxy narrowed to that role's surface.
 
 ## The interaction flavors
@@ -61,10 +61,12 @@ export const api = defineContract({
 | Ask a client | `await srv.toConn(id).request('confirm', input, { timeout? })`; client: `client.implement({ confirm: async (input) => output })` |
 | Heartbeat / per-conn state / backpressure | `heartbeat: { interval, maxMissed }` · `data:` schema in a role → typed `conn.data` · `backpressure: { maxBufferedBytes, onExceed }` |
 | Client call/listen/subscribe | `await client.send(input)` · `client.on('event', cb)` · `client.subscribe('feed', cb)` (await `.ready`) |
-| Multi-node | pass `adapter: createRedisAdapter('redis://…')` to every server |
-| React | `createSuperLineHooks<typeof api, 'user'>()` → `Provider` / `useRequest` / `useEvent` / `useSubscription` / `useResource` |
-| Store | configure `stores: { docs: memoryStoreServer() }` (or `syncStoreServer()` CRDT / `sqliteStoreServer({ file })`) + matching client half; server `srv.store('docs').create/grant/write/open`; client `client.store('docs').open(id)` → reactive `{ getSnapshot, subscribe, set, update, delete(path), ready, close }` |
-| Store co-writer | `srv.store('docs').open(id, { origin? })` → reactive in-process handle (`update`/`set`/`delete(path)`); the **only** way to delete a key server-side. React: `useResource<T>('docs', id)` |
+| Multi-node | pass an `adapter:` to every server — `createRedisAdapter('redis://…')` (or `-libp2p` / `-rabbitmq` / `-zeromq`, each with a `scaling-*` example). A `clustering:'self'` store needs **none** |
+| Transport | server `transports: [webSocketServerTransport({ server })]` · client `transport: webSocketClientTransport({ url })`; swap in `http*Transport` (SSE/long-poll), `libp2p*Transport` (BYO node), or `loopback*Transport` (tests) |
+| Control Center | `webSocketServerTransport({ server, inspector: true })` + `createSuperLineServer(api, { …, inspector: true })` (or `{ redact: ['token'] }`), then `npx @super-line/control-center` → cluster-wide live feed of `msg.*` traffic + topology |
+| React | `createSuperLineHooks<typeof api, 'user'>()` → `Provider` / `useRequest` / `useEvent` / `useSubscription` / `useResource` (`{ data, deleted, set, update, delete }`) |
+| Store | `stores: { docs: <server-half> }` + matching client half. **Server halves — model · durability · clustering:** `memoryStoreServer()` LWW·mem·relay · `syncStoreServer()` CRDT·mem·relay · `sqliteStoreServer({ file })` LWW·durable·relay · `await libsqlSyncStore({ url, authToken? })` CRDT·durable(Turso/sqld)·relay · `await pgliteStoreServer({ pgUrl, electricUrl? })` LWW·**self** · `await syncPgliteStoreServer({ pgUrl, electricUrl? })` CRDT·**self** (libsql/pglite factories are async). **Client half by model:** `memoryStoreClient({ origin? })` (LWW) / `syncStoreClient({ resolveOptions?, origin? })` (CRDT). Server `srv.store('docs').create/grant/write/delete/open`; client `client.store('docs').open(id)` → `{ getSnapshot, subscribe, set, update, delete(path), deleted, ready, close }` |
+| Store co-writer | `srv.store('docs').open(id, { origin? })` → reactive in-process handle (`update`/`set`/`delete(path)`); the **only** way to delete a key server-side. `srv.store(ns).delete(id)` fans deletion cluster-wide (`ServerStore.onDelete`) |
 
 ## Rules
 
@@ -73,7 +75,7 @@ export const api = defineContract({
 - **ALWAYS** `throw new SuperLineError(code, msg, data?)` for expected failures — clients get the typed `code`. Unknown throws become `INTERNAL`.
 - **ALWAYS** gate private topic subscriptions with `authorizeSubscribe(topic, ctx, conn)` (return `false`/throw to deny).
 - **ALWAYS** treat delivery as **at-most-once**: offline clients miss messages. Make handlers idempotent; re-run join flows after reconnect.
-- **ALWAYS** add `@super-line/adapter-redis` before running more than one server process, or rooms/topics/the cluster event bus only fan out within one node.
+- **ALWAYS** add an adapter before running more than one server process — `@super-line/adapter-redis` (or `-libp2p` / `-rabbitmq` / `-zeromq`; Redis isn't the only choice) — or rooms/topics/the cluster event bus/**relay** stores only fan out within one node. A `clustering:'self'` store (`store-pglite`, `store-sync-pglite`) owns its own sync and needs **no** adapter.
 - **ALWAYS** self-exclude on the bus (`if (from === srv.nodeId) return`) when you don't want to react to your own publish — `server.subscribe` has **local echo**.
 - **ALWAYS** treat a **Store as off-contract**: `data` is `unknown`, not schema-validated; assert the shape and route hard typed gates through a request. Stores are **deny-by-default** — `grant` a principal first. For an in-process actor (AI agent, bot), co-write via `srv.store(ns).open(id)` (reactive reads + the only server-side key `delete(path)`), not a loopback client.
 - **NEVER** trust client input — the server validates inbound automatically; keep schemas tight, don't bypass.
@@ -93,6 +95,7 @@ export const api = defineContract({
 - **JSON loses `Date`.** Use `z.coerce.date()` or a `superjson` serializer on **both** ends.
 - **The client is a proxy, not awaitable** — `await client.someRequest(...)`, never `await client`.
 - **A Store `write`/`update` MERGES — it can't delete a key.** To remove a key, `delete(path)` (client handle, or `srv.store(ns).open(id)` server-side). On the CRDT store it's surgical and merges with concurrent edits; a full-document `set` would clobber them. Store writes are optimistic + fire-and-forget (rejection → `onStoreError`, no rollback).
+- **A DELETED Resource reads as a silent empty snapshot.** `srv.store(ns).delete(id)` fans a wire `SDeleteFrame` (`'sdel'`) cluster-wide (relay stores relay it via `ServerStore.onDelete`); subscribers re-read and see `{}`. To tell "deleted" from "empty", read `handle.deleted` (client `ResourceHandle`) / `useResource().deleted` (React) — not the data.
 
 ## ❌ → ✅
 

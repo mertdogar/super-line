@@ -73,6 +73,18 @@ The mechanism by which a server Co-writer enforces a rule on a Shared Document: 
 ### Order key (fractional index)
 A per-Element string that encodes [[Z-order]] independently of array position, sorted lexicographically at read time. A reorder is a single last-writer-wins write to one Element's order key, so concurrent moves can't duplicate/lose an element. Replaces "z-order = array index" because no CRDT has a safe native list-move.
 
+### ResourceHandle
+As-built 2026-06-29. The shipped name of the client-side [[Resource handle]], reached as `client.store(name).open(id)` (a method, not a property). Reactive surface — `getSnapshot` / `subscribe` / `set` / `update` / `delete` — plus a `deleted` boolean signal (see [[Deletion fan-out]]). The React mirror is `useResource(name, id)`, returning `{ data, deleted, set, update, delete }`.
+
+### ServerReplica
+As-built 2026-06-29. The **server-side** reactive replica over one Resource's canonical state — the server-half mirror of the client [[Resource handle]]. Reached as `srv.store(name).open(id)`; the server co-writer's seat at a Store. Surface: `getSnapshot` / `subscribe` / `set` / `update` / `delete`. Simpler than the client side because the server mutates canonical state directly (no wire send-up, no second copy to reconcile).
+
+### Deletion fan-out
+As-built 2026-06-29. The propagation of a Resource removal across the cluster. `srv.store(name).delete(id)` removes the Resource and fans the removal out as an `sdel` wire frame — to every subscribed client, and between `relay` nodes over the adapter (see [[Transport vs Adapter]]); a `self` store surfaces its backend deletes via `ServerStore.onDelete`. Consumers observe it as the [[ResourceHandle]] `deleted` boolean (React `useResource().deleted`). The delete-side mirror of a [[Change]].
+
+### Transport vs Adapter
+Two distinct pluggable seams, never conflated. A **Transport** carries client↔server bytes — the wire (WebSocket default; also HTTP-SSE, libp2p, loopback). An **Adapter** carries server↔server, node-to-node fan-out (Redis, libp2p, RabbitMQ, ZeroMQ). A `relay` store (see [[Clustering mode (relay | self)]]) rides the Adapter for cross-node sync; a `self` store owns its own central backend and needs no Adapter.
+
 ## Resolved (Store design, 2026-06-23)
 The Store-grilling session resolved the load-bearing architecture; each is a glossary term above. In short: [[Store]] is the foundational primitive (CRDT is one impl); [[Change]] is an opaque `{id,update,origin}` relayed symmetrically; a Store is a [[Store pair (server half / client half)]]; [[Principal (the ACL identity)]] = `identify ?? conn.id`; [[Origin (writer id)]] is a distinct per-writer id; the [[Store surface (off-contract, generic)]] is untyped (ADR-0003); [[Access control (accessRules)]] is server-authoritative, deny-by-default; [[Clustering mode (relay | self)]] is Store-declared; [[Named store]]s are independently-configured pairs; the client uses a [[Resource handle]]; [[Store inspector events]] give Control Center visibility; [[Packaging]] keeps Yjs in super-store. CRDT binding = Yjs via [[super-store]] (ADR-0002, supersedes ADR-0001).
 

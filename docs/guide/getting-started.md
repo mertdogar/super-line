@@ -22,6 +22,8 @@ Stand up a typed realtime round-trip from an empty folder. You write <strong>one
 
 The wire is **pluggable** — WebSocket by default, with HTTP (SSE / long-poll) and libp2p also available (see [Transports](./transports)). This guide uses WebSocket; everything above the transport line is identical on every wire.
 
+> **Node version.** Every package declares `engines.node >= 18`, so **Node 18+** is the baseline (on Node < 22 the client needs a `WebSocket` shim — see the note in step 5). The libp2p / NAT-traversal examples are the exception: they run on **Node 24+** because they rely on the global WebCrypto API.
+
 ## 1. Scaffold the project
 
 Create a folder and three source files. The contract is the one module **both** sides import — that's what keeps them in sync.

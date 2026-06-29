@@ -39,15 +39,15 @@ This serves the app on a local port and opens your browser. Change the endpoint 
 
 ### Topology
 
-A hub-and-spoke graph of the whole cluster. The `Adapter · bus` sits at the center (multi-node clusters only — nodes have no direct sockets, they coordinate through the bus), server nodes around it, and each connection around its owning node. Connections are colored by role; selecting a room highlights its members across every node. The graph updates on every live event.
+A hub-and-spoke graph of the whole cluster. The `Adapter · bus` sits at the center (multi-node clusters only — nodes have no direct sockets, they coordinate through the bus), server nodes around it, and each connection around its owning node. Connection nodes are colored by their **wire family** (WebSocket / HTTP / libp2p / loopback), and each server node labels its wire mix (e.g. `3 ws / 2 http`). A side lens lists roles as a color legend, the wire families in play with live counts, the rooms, and this node's topics — click a room or a wire family to highlight its connections across every node. The graph updates on every live event.
 
 ### Connections
 
-A table of every connection cluster-wide — role, id, user, owning node, rooms, and uptime.
+A table of every connection cluster-wide — role, **transport**, id, user, owning node, rooms, and uptime. The transport column is the **wire** each connection was accepted on, shown with a friendly label (`WebSocket`, `HTTP · SSE`, `HTTP · long-poll`, `libp2p`, `Loopback`) and color-keyed to the same wire-family palette as the topology graph — so a mixed-transport cluster is legible at a glance.
 
 <img src="/control-center/connections.png" alt="Control Center connections view — a table of every connection across the cluster with role, id, user, node, rooms, and connected time" class="sl-shot" />
 
-Click a row to open its descriptor plus a best-effort, **node-local** snapshot of `ctx` and `conn.data`. A connection owned by another node shows descriptor-only — point the Control Center at that node to read its `ctx`.
+Click a row to open its descriptor — including the wire it came in over — plus a best-effort, **node-local** snapshot of `ctx` and `conn.data`. A connection owned by another node shows descriptor-only — point the Control Center at that node to read its `ctx`.
 
 ### Contract
 
@@ -70,6 +70,10 @@ It also streams **message traffic** — `msg.request` / `msg.response` / `msg.br
 Point the Control Center at a different node. The inspector-connection URL is saved to your browser and reused next time; the status dot shows the live socket state.
 
 <img src="/control-center/settings.png" alt="Control Center settings — the inspector connection panel with a WebSocket URL field, reconnect button, and live status indicator" class="sl-shot" />
+
+### Resources
+
+A handful of jump-off cards — the home page, the documentation, the GitHub repo, and the `@super-line/*` packages on npm — so you can get from inspecting a cluster to the docs or source in one click.
 
 ## How it works
 

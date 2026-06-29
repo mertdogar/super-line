@@ -34,6 +34,7 @@
     "postgres": "^3.4.9"
   },
   "devDependencies": {
-    "@electric-sql/pglite-socket": "^0.2.6"
+    "@electric-sql/pglite-socket": "^0.2.6",
+    "testcontainers": "^10.13.2"
   }
 }

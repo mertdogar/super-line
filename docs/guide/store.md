@@ -17,7 +17,7 @@ crosses nodes):
 | **`@super-line/store-sqlite`** | LWW | SQLite (better-sqlite3, WAL) | relay | `memoryStoreClient()` |
 | [**`@super-line/store-sync-libsql`**](./synced-state) | CRDT | libsql / Turso / sqld | relay | `syncStoreClient()` |
 | **`@super-line/store-pglite`** | LWW | central Postgres + Electric→PGlite | **self** | `memoryStoreClient()` |
-| **`@super-line/store-sync-pglite`** | CRDT | central Postgres op-log + Electric→PGlite | **self** | `syncStoreClient()` |
+| [**`@super-line/store-sync-pglite`**](./store-sync-pglite) | CRDT | central Postgres op-log + Electric→PGlite | **self** | `syncStoreClient()` |
 
 Every store exposes the same `…StoreServer()` / `…StoreClient()` pair, so switching consistency model,
 durability, or clustering is a one-line swap — the wire, ACLs, fan-out, and client handle are identical. A

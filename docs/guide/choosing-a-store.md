@@ -26,7 +26,7 @@ store is mostly a one-line swap of the server half.
 | [`@super-line/store-sqlite`](./store) | LWW | SQLite file (better-sqlite3, WAL) | `relay` | `memoryStoreClient` |
 | [`@super-line/store-sync-libsql`](./synced-state) | CRDT | libsql / Turso / sqld | `relay` | `syncStoreClient` |
 | [`@super-line/store-pglite`](./store) | LWW | Postgres (central) + Electric→PGlite | `self` | `memoryStoreClient` |
-| [`@super-line/store-sync-pglite`](./synced-state) | CRDT | Postgres (central) + Electric→PGlite | `self` | `syncStoreClient` |
+| [`@super-line/store-sync-pglite`](./store-sync-pglite) | CRDT | Postgres (central) + Electric→PGlite | `self` | `syncStoreClient` |
 
 **Only the server half varies.** Durability and clustering are server-side concerns — the client never
 knows where state is persisted, only which consistency model it speaks. So there are just **two client

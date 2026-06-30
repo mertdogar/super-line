@@ -133,7 +133,9 @@ receive and recovers by re-snapshotting on reconnect (which the handle does for 
 ## Make it durable
 
 `syncStoreServer()` keeps the canonical CRDT documents in memory — restart the server and they're gone.
-For state that **survives a restart**, swap the server half for `@super-line/store-sync-libsql`, which
+For state that **survives a restart**, swap the server half for `@super-line/store-sync-libsql` (a `relay`
+store), or — to survive a restart *and* cluster across nodes with no message broker — for the `self`-clustering
+[`@super-line/store-sync-pglite`](./store-sync-pglite). The libsql route
 snapshots every Resource to a [libsql](https://github.com/tursodatabase/libsql) database — a local file,
 [Turso](https://turso.tech) Cloud, or a self-hosted `sqld`:
 

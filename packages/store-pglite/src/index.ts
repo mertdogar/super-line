@@ -53,13 +53,15 @@ export async function pgliteStoreServer(opts: PgliteStoreOptions): Promise<Serve
   // Central Postgres — writes + strong reads + ACL.
   const sql = postgres(opts.pgUrl, { prepare: false, onnotice: () => {} })
   // CREATE TABLE IF NOT EXISTS is not race-safe: N nodes booting together against the one shared Postgres
-  // (the intended clustering:'self' topology) can collide on the catalog insert. The duplicate-relation /
-  // catalog-unique error just means a peer won the race and the table now exists — swallow only those.
+  // (the intended clustering:'self' topology) can collide on the catalog insert. The loser sees one of three
+  // codes depending on which catalog it collided in: 42P07 (duplicate_table, pg_class), 23505 (unique_violation,
+  // a catalog index), or 42710 (duplicate_object, pg_type — the table's implicit row type). All three mean a peer
+  // won the race and the table now exists — swallow only those.
   try {
     await sql.unsafe(ddl)
   } catch (err) {
     const code = (err as { code?: string }).code
-    if (code !== '42P07' && code !== '23505') throw err
+    if (code !== '42P07' && code !== '23505' && code !== '42710') throw err
   }
   // `data` is opaque (unknown); sql.json serializes it to jsonb exactly once (passing pre-stringified text +
   // ::jsonb would double-encode). The cast just satisfies sql.json's strict JSONValue parameter type.

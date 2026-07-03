@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "api": "typedoc",
+    "api": "typedoc && node scripts/reference-index.mjs",
     "dev": "pnpm api && vitepress dev",
     "build": "pnpm api && vitepress build",
     "preview": "vitepress preview"

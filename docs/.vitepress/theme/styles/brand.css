@@ -117,6 +117,33 @@ samp {
   --sl-cyan-bright: #22d3ee;
 }
 
+/* ── Doc body: carry the brand past the landing page ──────────────
+   Guide/reference fenced code blocks join the home page's panel family
+   (same surface + border in dark, framed in light) instead of flat
+   stock-VitePress blocks. */
+.vp-doc div[class*='language-'] {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+}
+.dark .vp-doc div[class*='language-'] {
+  border-color: var(--sl-code-border);
+  --vp-code-block-bg: var(--sl-code-bg);
+}
+
+/* Prose measure: VitePress's 688px container runs ~90 characters a line —
+   past the 65–75 readability band. Inter's ch unit is wide (≈0.64em), so
+   58ch ≈ 75 real characters. Code blocks and tables keep the full width. */
+.vp-doc p,
+.vp-doc ul,
+.vp-doc ol {
+  max-width: 58ch;
+}
+
+/* Active sidebar item: weight joins cyan so color is never the only signal. */
+.VPSidebarItem.is-active > .item .text {
+  font-weight: 600;
+}
+
 /* The home renders through `layout: page`; strip VitePress's page padding so
    our sections can run full-bleed and own their own rhythm. */
 .VPPage:has(.sl-home) {
@@ -144,7 +171,7 @@ samp {
   font-size: 1.15rem;
   line-height: 1.6;
   color: var(--vp-c-text-2);
-  max-width: 62ch;
+  max-width: 58ch;
   margin: 0 0 1.15rem;
   text-wrap: pretty;
 }
@@ -153,8 +180,8 @@ samp {
   flex-wrap: wrap;
   gap: 0.45rem 1.25rem;
   margin: 0 0 1.4rem;
-  font-family: var(--vp-font-family-mono);
-  font-size: 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 500;
   color: var(--vp-c-text-2);
 }
 .vp-doc .sl-qs-meta span {

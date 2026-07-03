@@ -9,8 +9,8 @@ export default defineConfig({
   base: '/',
   cleanUrls: true,
   lastUpdated: true,
-  // PRODUCT.md is an internal brief — keep the file but don't build it as an orphan page.
-  srcExclude: ['PRODUCT.md'],
+  // PRODUCT.md and the ADRs are internal notes — keep the files, don't publish them.
+  srcExclude: ['PRODUCT.md', 'adr/**'],
   head: [
     ['link', { rel: 'icon', href: '/mark.svg' }],
     [
@@ -48,28 +48,12 @@ export default defineConfig({
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'Reference', link: '/reference/' },
       { text: 'Examples', link: '/examples/' },
-      {
-        text: 'Design notes',
-        items: [
-          {
-            text: 'ADR-0001: Automerge over Yjs (superseded)',
-            link: '/adr/0001-automerge-over-yjs-for-synced-scene-state',
-          },
-          {
-            text: 'ADR-0002: Yjs via super-store',
-            link: '/adr/0002-yjs-via-super-store-over-automerge',
-          },
-          {
-            text: 'ADR-0003: Stores are off-contract & untyped',
-            link: '/adr/0003-stores-are-off-contract-and-untyped',
-          },
-        ],
-      },
     ],
     sidebar: {
       '/guide/': [
         {
           text: 'Introduction',
+          collapsed: true,
           items: [
             { text: 'Why super-line', link: '/guide/introduction' },
             { text: 'Getting started', link: '/guide/getting-started' },
@@ -78,6 +62,7 @@ export default defineConfig({
         },
         {
           text: 'Transports',
+          collapsed: true,
           items: [
             { text: 'Choose your wire', link: '/guide/transports' },
             { text: 'WebSocket', link: '/guide/transport-websocket' },
@@ -88,6 +73,7 @@ export default defineConfig({
         },
         {
           text: 'Interaction flavors',
+          collapsed: true,
           items: [
             { text: 'Requests', link: '/guide/requests' },
             { text: 'Events & rooms', link: '/guide/events-rooms' },
@@ -97,6 +83,7 @@ export default defineConfig({
         },
         {
           text: 'Persisted state',
+          collapsed: true,
           items: [
             { text: 'Choosing a store', link: '/guide/choosing-a-store' },
             { text: 'Stores', link: '/guide/store' },
@@ -106,6 +93,7 @@ export default defineConfig({
         },
         {
           text: 'Server',
+          collapsed: true,
           items: [
             { text: 'Roles & auth', link: '/guide/roles-auth' },
             { text: 'Middleware & lifecycle', link: '/guide/middleware-lifecycle' },
@@ -116,6 +104,7 @@ export default defineConfig({
         },
         {
           text: 'Client',
+          collapsed: true,
           items: [
             { text: 'Reconnection & delivery', link: '/guide/reconnection-delivery' },
             { text: 'Serialization', link: '/guide/serialization' },
@@ -124,6 +113,7 @@ export default defineConfig({
         },
         {
           text: 'Adapters',
+          collapsed: true,
           items: [
             { text: 'Choose your backbone', link: '/guide/scaling-adapters' },
             { text: 'Redis', link: '/guide/adapter-redis' },
@@ -134,6 +124,7 @@ export default defineConfig({
         },
         {
           text: 'More',
+          collapsed: true,
           items: [
             { text: 'Testing', link: '/guide/testing' },
             { text: 'Use with your AI agent', link: '/guide/ai-agents' },
@@ -142,25 +133,6 @@ export default defineConfig({
         },
       ],
       '/reference/': [{ text: 'Packages', items: typedocSidebar }],
-      '/adr/': [
-        {
-          text: 'Design notes (ADRs)',
-          items: [
-            {
-              text: 'ADR-0001: Automerge over Yjs (superseded)',
-              link: '/adr/0001-automerge-over-yjs-for-synced-scene-state',
-            },
-            {
-              text: 'ADR-0002: Yjs via super-store',
-              link: '/adr/0002-yjs-via-super-store-over-automerge',
-            },
-            {
-              text: 'ADR-0003: Stores are off-contract & untyped',
-              link: '/adr/0003-stores-are-off-contract-and-untyped',
-            },
-          ],
-        },
-      ],
     },
     search: { provider: 'local' },
     socialLinks: [{ icon: 'github', link: 'https://github.com/mertdogar/super-line' }],

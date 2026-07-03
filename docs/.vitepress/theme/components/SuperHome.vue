@@ -3,6 +3,13 @@ import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 import { withBase } from 'vitepress'
 import ClusterDemo from './ClusterDemo.vue'
 
+// The theme router swallows same-page hash clicks on this layout, so the hero's
+// proof link scrolls itself. Instant jump, same as a native anchor.
+function scrollToCluster() {
+  document.getElementById('live-cluster')?.scrollIntoView()
+  history.replaceState(null, '', '#live-cluster')
+}
+
 /* Hand-highlighted snippets. Code is the hero, so highlighting is tuned to the
    brand: strings carry the cyan accent, keywords a single soft-violet secondary,
    everything else stays light on a dark panel. All API calls are real super-line
@@ -221,6 +228,10 @@ onBeforeUnmount(() => {
             <span class="sl-install__p">pnpm add</span>
             @super-line/core @super-line/server @super-line/client @super-line/transport-websocket
           </p>
+          <a class="sl-proof" href="#live-cluster" @click.prevent="scrollToCluster">
+            <span class="sl-proof__dot" aria-hidden="true" />
+            A real two-node cluster runs on this page — watch a message cross the bus
+          </a>
         </div>
 
         <div class="sl-hero__code">
@@ -452,7 +463,7 @@ onBeforeUnmount(() => {
     </section>
 
     <!-- ░░ IT WORKS ON ONE NODE — THEN YOU ADD A SECOND ░░ -->
-    <section class="sl-sec sl-sec--alt">
+    <section id="live-cluster" class="sl-sec sl-sec--alt">
       <div class="sl-shell reveal">
         <ClusterDemo />
       </div>
@@ -556,6 +567,11 @@ onBeforeUnmount(() => {
             </tbody>
           </table>
         </div>
+        <p class="sl-table__legend reveal" aria-hidden="true">
+          <span class="sl-mark--yes">✓</span> built-in
+          <span class="sl-mark--mid">~</span> partial
+          <span class="sl-mark--no">–</span> not included
+        </p>
       </div>
     </section>
 
@@ -747,6 +763,41 @@ onBeforeUnmount(() => {
 .sl-install__p { color: var(--sl-cyan-strong); }
 .sl-install__p::before { content: '$ '; opacity: 0.5; }
 
+/* Proof is promised at first paint: anchor down to the live cluster demo. */
+.sl-proof {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 1.1rem;
+  font-size: 0.86rem;
+  font-weight: 500;
+  color: var(--sl-cyan-strong);
+  text-decoration: none;
+}
+.sl-proof:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.sl-proof__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sl-cyan-bright);
+  flex: none;
+  animation: sl-proof-pulse 2.2s ease-out infinite;
+}
+@keyframes sl-proof-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--sl-cyan-bright) 45%, transparent); }
+  70% { box-shadow: 0 0 0 9px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sl-proof__dot { animation: none; }
+}
+#live-cluster {
+  scroll-margin-top: 72px;
+}
+
 /* ── code window ────────────────────────────────────────────────── */
 .sl-win {
   border-radius: 14px;
@@ -754,6 +805,12 @@ onBeforeUnmount(() => {
   border: 1px solid var(--sl-code-border);
   box-shadow: 0 24px 60px -28px rgba(2, 12, 20, 0.7), 0 2px 10px -4px rgba(2, 12, 20, 0.5);
   overflow: hidden;
+}
+/* On the near-black dark page the panel bg (#0c0f14 vs #0f1115) flattens;
+   a brighter border + darker seam make it read as a distinct surface. */
+.dark .sl-win {
+  border-color: #2a3441;
+  box-shadow: 0 0 0 1px #05070a, 0 24px 60px -28px rgba(0, 0, 0, 0.9), 0 2px 10px -4px rgba(0, 0, 0, 0.6);
 }
 .sl-win__bar {
   display: flex;
@@ -880,6 +937,7 @@ onBeforeUnmount(() => {
 .sl-real {
   font-size: 0.88rem !important;
   color: var(--sl-text-2);
+  max-width: 58ch;
 }
 
 /* ── terminal ───────────────────────────────────────────────────── */
@@ -1050,7 +1108,7 @@ onBeforeUnmount(() => {
   border: 1px solid transparent;
   background: transparent;
   color: var(--sl-code-dim);
-  font: 600 0.8rem/1 var(--vp-font-family-mono);
+  font: 600 0.8rem/1 var(--vp-font-family-base);
   padding: 0.4rem 0.72rem;
   border-radius: 8px;
   cursor: pointer;
@@ -1154,7 +1212,8 @@ onBeforeUnmount(() => {
 .sl-stage__cap {
   margin: 0.25rem 0 0;
   text-align: center;
-  font: 500 clamp(0.72rem, 0.95vw, 0.82rem) / 1.4 var(--vp-font-family-mono);
+  /* prose caption, not code — sans per the brief's mono-is-for-code rule */
+  font: 500 clamp(0.76rem, 0.95vw, 0.84rem) / 1.4 var(--vp-font-family-base);
   color: var(--sl-code-dim);
 }
 .sl-stage__wire {
@@ -1171,7 +1230,7 @@ onBeforeUnmount(() => {
 }
 .sl-pre :deep(.wl) {
   border-radius: 4px;
-  padding: 0.05em 0.32em;
+  padding: 0.12em 0.4em;
   background: color-mix(in oklab, var(--sl-cyan) 16%, transparent);
 }
 .sl-wirebadge {
@@ -1406,8 +1465,21 @@ onBeforeUnmount(() => {
   line-height: 1;
 }
 .sl-mark--yes { color: var(--sl-cyan-strong); }
-.sl-mark--no { color: var(--vp-c-text-3); }
+.sl-mark--no { color: var(--vp-c-text-2); }
 .sl-mark--mid { color: var(--vp-c-text-2); }
+/* the super-line column resolves at a glance without re-reading the key */
+.sl-table td.is-us .sl-mark { font-size: 1.25rem; }
+.sl-table__legend {
+  margin: 0.7rem 0 0;
+  font-size: 0.8rem;
+  color: var(--sl-text-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.6rem;
+  align-items: baseline;
+}
+.sl-table__legend span { font-weight: 700; }
+.sl-table__legend span:not(:first-child) { margin-left: 0.9rem; }
 .sl-cell__t {
   display: block;
   font-size: 0.72rem;

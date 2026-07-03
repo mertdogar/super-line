@@ -501,6 +501,7 @@ onBeforeUnmount(() => {
   place-items: center;
   font-size: 14px;
   line-height: 1;
+  color: var(--ink);
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--bg);
@@ -748,6 +749,12 @@ onBeforeUnmount(() => {
   .cd-rig {
     grid-template-columns: 1fr;
     max-width: 440px;
+  }
+  /* thumb-sized reaction targets on touch layouts */
+  .cd-key {
+    width: 42px;
+    height: 40px;
+    font-size: 17px;
   }
   .cd-bus {
     height: 66px;

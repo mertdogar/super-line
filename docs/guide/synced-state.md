@@ -33,12 +33,15 @@ With LWW, two simultaneous edits race and one loses. With the CRDT store they **
 survive on every replica:
 
 ```ts
-// alice and bob open the same doc, then edit at the "same time", each a different field:
+// alice and bob open the same doc, then edit
+// at the "same time", each a different field:
 alice.update({ a: 1 })
 bob.update({ b: 2 })
 
-// LWW:  whoever lands last wins → { a: 1 } OR { b: 2 } (one edit is lost)
-// CRDT: both merge everywhere    → { a: 1, b: 2 } on alice, bob, and the server
+// LWW:  whoever lands last wins
+//       → { a: 1 } OR { b: 2 } — one edit is lost
+// CRDT: both merge everywhere
+//       → { a: 1, b: 2 } on alice, bob, and the server
 ```
 
 Fields nobody touched are preserved, and the document converges to the same value on every node
@@ -47,7 +50,7 @@ regardless of the order updates arrive in. That's the whole reason to pay for a 
 ::: tip How it stays CRDT-agnostic
 On the wire, a CRDT `update` is an **opaque base64 delta** — super-line relays it without ever parsing
 the document. The merge logic lives entirely inside the store package, so swapping Yjs for another CRDT
-would be a store-package change, not a wire change. (See ADR-0002 and ADR-0003.)
+would be a store-package change, not a wire change.
 :::
 
 ## The server as a co-writer
@@ -57,7 +60,8 @@ and lets it edit alongside clients. A server `write` of a partial object **merge
 into the document (it doesn't replace it), then fans out to every subscriber tagged `origin: 'server'`:
 
 ```ts
-// a co-writer contributes a field; every other field in the doc is left untouched
+// a co-writer contributes a field; every other
+// field in the doc is left untouched
 await srv.store('docs').write('plan', { priority: 5 })
 ```
 
@@ -65,7 +69,7 @@ await srv.store('docs').write('plan', { priority: 5 })
 A CRDT can't reject *part* of a merge, so the server can't **veto** a client edit — as the hub it can
 only **react**: observe the merged state and emit a compensating edit. Treat synced-document authority
 as eventually-consistent last-word correction; route anything that needs a hard gate (money,
-permissions) through a normal [request](./requests). (See ADR-0003.)
+permissions) through a normal [request](./requests).
 :::
 
 ### A reactive in-process co-writer
@@ -78,9 +82,11 @@ in-process over the canonical document, so it reads reactively and writes withou
 ```ts
 const scene = srv.store('docs').open('plan', { origin: 'agent:42' })
 
-scene.subscribe(render) // sees the user's merged edits, live — the reactive read side
+// the reactive read side — sees the user's merged edits, live
+scene.subscribe(render)
+
 scene.update({ priority: 5 }) // merge a field
-scene.delete(['draft']) // remove a key — merges with concurrent edits to other keys
+scene.delete(['draft']) // remove a key, merging with edits to other keys
 scene.close()
 ```
 
@@ -149,7 +155,10 @@ import { libsqlSyncStore } from '@super-line/store-sync-libsql'
 
 stores: {
   docs: await libsqlSyncStore({ url: 'file:docs.db' }), // local file
-  // or: await libsqlSyncStore({ url: 'libsql://your-db.turso.io', authToken: process.env.TURSO_TOKEN })
+  // or Turso: libsqlSyncStore({
+  //   url: 'libsql://your-db.turso.io',
+  //   authToken: process.env.TURSO_TOKEN,
+  // })
 }
 ```
 
@@ -181,7 +190,8 @@ write-through `set` / `update`:
 ```tsx
 const { data, set } = useResource<JsonValue>('docs', 'plan')
 if (data === undefined) return <p>connecting…</p>
-// every edit merges live across tabs; concurrent edits to different fields both survive
+// every edit merges live across tabs — concurrent
+// edits to different fields both survive
 return <JsonEditor value={data} onChange={set} height={420} />
 ```
 
@@ -194,7 +204,8 @@ field, and watch edits merge live — concurrent edits to *different* fields bot
 nudge** to see the server co-write a field.
 
 ```bash
-pnpm --filter @super-line/example-store-sync-json dev   # http://localhost:5273
+# serves http://localhost:5273
+pnpm --filter @super-line/example-store-sync-json dev
 ```
 
 ## Roll your own (without the Store seam)

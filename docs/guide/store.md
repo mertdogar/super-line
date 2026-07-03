@@ -29,7 +29,7 @@ durability, or clustering is a one-line swap — the wire, ACLs, fan-out, and cl
 Unlike requests, events, and topics, a Store is **not** declared in `defineContract`, and its `data`
 is **not** schema-validated by the server — a CRDT update is an opaque merge delta that can't be
 validated against a JSON schema anyway. Store `data` is `unknown` end-to-end; you assert its shape.
-Route anything that needs a hard, typed gate through a normal [request](./requests). (See ADR-0003.)
+Route anything that needs a hard, typed gate through a normal [request](./requests).
 :::
 
 ## Configure the pair

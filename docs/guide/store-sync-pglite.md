@@ -185,9 +185,7 @@ is automatic; you never wire it up.
 ::: tip The CRDT is opaque to the wire
 super-line relays a CRDT `update` as an **opaque base64 delta** — it never parses the document. The merge
 lives entirely inside the Yjs / [super-store](https://github.com/mertdogar/super-store) engine; Postgres
-stores the deltas as text and Electric ships them as rows. (See
-[ADR-0002](/adr/0002-yjs-via-super-store-over-automerge) and
-[ADR-0003](/adr/0003-stores-are-off-contract-and-untyped).)
+stores the deltas as text and Electric ships them as rows.
 :::
 
 ## The server as a reactive co-writer
@@ -230,7 +228,7 @@ single row through the async driver), so it **can't** serve a synchronous snapsh
 ::: warning Authority is reactive, not preventive
 A CRDT can't reject *part* of a merge, so the server can't **veto** a client edit — it can only observe the
 merged state and emit a compensating one. Route anything that needs a hard gate (money, permissions)
-through a normal [request](./requests). (See [ADR-0003](/adr/0003-stores-are-off-contract-and-untyped).)
+through a normal [request](./requests).
 :::
 
 A server co-write is **fire-and-forget**: `set` / `update` / `delete` return `void`, so the background

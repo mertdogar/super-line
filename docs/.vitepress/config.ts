@@ -126,6 +126,7 @@ export default defineConfig({
           text: 'More',
           collapsed: true,
           items: [
+            { text: 'Composition — embedding a library', link: '/guide/composition' },
             { text: 'Testing', link: '/guide/testing' },
             { text: 'Use with your AI agent', link: '/guide/ai-agents' },
             { text: 'Comparison & FAQ', link: '/guide/comparison-faq' },

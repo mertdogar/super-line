@@ -99,6 +99,83 @@ export type RoleOf<C extends Contract> = keyof C['roles'] & string
 type CtsOf<D> = D extends { clientToServer: infer M extends Record<string, RequestDef> } ? M : {}
 type StcOf<D> = D extends { serverToClient: infer M extends Record<string, ServerEntry> } ? M : {}
 
+// ── Surface composition (embedding one super-line surface into another app's contract) ──
+
+// flatten an intersection for readable hovers
+type Flat<T> = { [K in keyof T]: T[K] }
+// keys present in both maps; skips the check when either side is too wide to know (Record<string, …>)
+type DupKeys<X, Y> = string extends keyof X ? never : string extends keyof Y ? never : Extract<keyof X, keyof Y> & string
+type SurfaceOverlap<A extends Directional, B extends Directional> =
+  | DupKeys<CtsOf<A>, CtsOf<B>>
+  | DupKeys<StcOf<A>, StcOf<B>>
+// collision => the parameter demands a property the argument can't have, and the error names the keys
+type NoOverlap<A extends Directional, B extends Directional> = [SurfaceOverlap<A, B>] extends [never]
+  ? unknown
+  : { 'mergeSurfaces: duplicate keys': SurfaceOverlap<A, B> }
+
+type MergedSurface<A extends Directional, B extends Directional> = Flat<{
+  clientToServer: Flat<CtsOf<A> & CtsOf<B>>
+  serverToClient: Flat<StcOf<A> & StcOf<B>>
+}>
+
+/**
+ * Define an exportable contract fragment (a {@link Directional}) outside `defineContract`.
+ * An identity function whose `const` type parameter preserves literal keys and
+ * `subscribe: true` — a fragment declared as a plain `const` widens `subscribe` to
+ * `boolean`, silently degrading topics to push events once merged.
+ *
+ * @example
+ * ```ts
+ * // a library exports its surface with prefixed keys…
+ * export const harnessSurface = defineSurface({
+ *   clientToServer: { 'harness.join': { input: z.object({ threadId: z.string() }), output: z.object({ ok: z.boolean() }) } },
+ *   serverToClient: { 'harness.suspended': { payload: suspendedSchema } },
+ * })
+ * ```
+ */
+export function defineSurface<const D extends Directional>(surface: D): D {
+  return surface
+}
+
+/**
+ * Merge two surfaces into one, per direction. A duplicate key is a **compile error
+ * naming the key** (and a runtime throw for untyped callers) — rename or prefix
+ * (e.g. `'harness.join'`) instead of letting a spread silently clobber.
+ *
+ * @example
+ * ```ts
+ * // …and the host app mounts it into one of its roles:
+ * const contract = defineContract({
+ *   roles: { user: mergeSurfaces(harnessSurface, defineSurface({ clientToServer: { say: … } })) },
+ * })
+ * ```
+ */
+export function mergeSurfaces<
+  const A extends Directional & { data?: never },
+  const B extends Directional & { data?: never },
+>(a: A, b: B & NoOverlap<A, B>): MergedSurface<A, B> {
+  for (const s of [a, b] as Directional[]) {
+    for (const k of Object.keys(s)) {
+      if (k !== 'clientToServer' && k !== 'serverToClient') {
+        throw new Error(
+          `mergeSurfaces: unexpected key '${k}' — pass only { clientToServer, serverToClient } (a role's 'data' belongs on the role block, outside the merge)`,
+        )
+      }
+    }
+  }
+  const dups = [
+    ...Object.keys(a.clientToServer ?? {}).filter((k) => k in (b.clientToServer ?? {})),
+    ...Object.keys(a.serverToClient ?? {}).filter((k) => k in (b.serverToClient ?? {})),
+  ]
+  if (dups.length > 0) {
+    throw new Error(`mergeSurfaces: duplicate keys: ${dups.join(', ')} — rename or prefix (e.g. 'harness.join')`)
+  }
+  return {
+    clientToServer: { ...a.clientToServer, ...b.clientToServer },
+    serverToClient: { ...a.serverToClient, ...b.serverToClient },
+  } as MergedSurface<A, B>
+}
+
 // serverToClient split: has `input` => request; `subscribe: true` => topic; otherwise => push event.
 type EventsOf<M> = {
   [K in keyof M as M[K] extends { input: Schema } ? never : M[K] extends { subscribe: true } ? never : K]: M[K]

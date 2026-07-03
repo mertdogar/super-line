@@ -6,7 +6,7 @@ export type { Serializer } from './serializer.js'
 
 export type { Adapter, PresenceStore, ConnDescriptor, NodeStat } from './adapter.js'
 
-export { defineContract, validate, validateSync } from './contract.js'
+export { defineContract, defineSurface, mergeSurfaces, validate, validateSync } from './contract.js'
 export type {
   Contract,
   Directional,

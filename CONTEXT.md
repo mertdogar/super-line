@@ -1,6 +1,6 @@
-# Context — super-line persisted-state (Store) + synced-state / CRDT
+# Context — super-line
 
-A glossary of the domain language for super-line's persisted-state feature. Terms only — no implementation details. Updated inline as decisions crystallise during design.
+A glossary of super-line's domain language — grown from the persisted-state (Store) design, now covering composition/embedding too. Terms only — no implementation details. Updated inline as decisions crystallise during design.
 
 ## Glossary
 
@@ -81,6 +81,12 @@ As-built 2026-06-29. The **server-side** reactive replica over one Resource's ca
 
 ### Deletion fan-out
 As-built 2026-06-29. The propagation of a Resource removal across the cluster. `srv.store(name).delete(id)` removes the Resource and fans the removal out as an `sdel` wire frame — to every subscribed client, and between `relay` nodes over the adapter (see [[Transport vs Adapter]]); a `self` store surfaces its backend deletes via `ServerStore.onDelete`. Consumers observe it as the [[ResourceHandle]] `deleted` boolean (React `useResource().deleted`). The delete-side mirror of a [[Change]].
+
+### Surface (contract fragment)
+Resolved 2026-07-03. An **exportable fragment of a contract** — one `Directional` (`clientToServer` + `serverToClient` maps) that a super-line-powered library ships for a host app to mount into *its own* contract. Authored via `defineSurface` (which preserves literal keys and `subscribe: true` the way `defineContract` does inline — without it a separately-declared fragment silently degrades topics to events) and combined via `mergeSurfaces`, where a **duplicate key is a compile error naming the key** (plus a runtime throw), never a silent spread-clobber. A Surface carries no roles and no `data` schema — those belong to the host. The unit of [[Composition (embedding)]].
+
+### Composition (embedding)
+Resolved 2026-07-03 (ADR-0004). How one super-line-powered library rides inside a host app: **one server, one client, one session, one identity** — the library exports [[Surface (contract fragment)]]s plus its handlers and store configs; the host weaves them into its contract, `implement`, and `stores`, and owns roles, `authenticate`, `identify`, and middleware. **Namespacing is a key-prefix convention, not a wire feature**: the library hard-prefixes its request/event keys, store names, and room names (e.g. `harness.join`) in its own source. Chosen over Socket.IO-style connection namespaces and over a mux transport (two independent sessions on one socket — deferred, `PLAN-transport-mux.md`) because the driving requirement was *shared identity*, which composition gives by construction. Distinct from [[Transport vs Adapter]]: composition happens above the wire entirely.
 
 ### Transport vs Adapter
 Two distinct pluggable seams, never conflated. A **Transport** carries client↔server bytes — the wire (WebSocket default; also HTTP-SSE, libp2p, loopback). An **Adapter** carries server↔server, node-to-node fan-out (Redis, libp2p, RabbitMQ, ZeroMQ). A `relay` store (see [[Clustering mode (relay | self)]]) rides the Adapter for cross-node sync; a `self` store owns its own central backend and needs no Adapter.

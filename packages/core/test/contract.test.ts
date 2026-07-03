@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { z } from 'zod'
-import { defineContract, validate } from '@super-line/core'
+import { defineContract, defineSurface, mergeSurfaces, validate } from '@super-line/core'
 import type {
   RoleOf,
   Requests,
@@ -78,5 +78,78 @@ describe('contract (role + direction)', () => {
   it('keeps subscribe:true as a literal flag on topics', () => {
     expect(api.roles.user.serverToClient.roomFeed.subscribe).toBe(true)
     expect('subscribe' in api.roles.user.serverToClient.messagePosted).toBe(false)
+  })
+})
+
+// ── surface composition ──
+
+// an embedded library's exported fragment, keys prefixed by convention
+const libSurface = defineSurface({
+  clientToServer: {
+    'lib.join': { input: z.object({ threadId: z.string() }), output: z.object({ ok: z.boolean() }) },
+  },
+  serverToClient: {
+    'lib.suspended': { payload: z.object({ threadId: z.string() }) },
+    'lib.feed': { payload: z.object({ text: z.string() }), subscribe: true },
+  },
+})
+
+const hostSurface = defineSurface({
+  clientToServer: {
+    say: { input: z.object({ text: z.string() }), output: z.object({ id: z.string() }) },
+  },
+  serverToClient: {
+    posted: { payload: z.object({ id: z.string() }) },
+  },
+})
+
+const composed = defineContract({ roles: { user: mergeSurfaces(libSurface, hostSurface) } })
+type Composed = typeof composed
+
+// the merged role sees both fragments' requests, and lib.feed survives as a TOPIC
+// (defineSurface's const param keeps subscribe:true literal through the merge)
+type _mergedReqs = Expect<Equal<keyof Requests<Composed, 'user'>, 'lib.join' | 'say'>>
+type _mergedEvents = Expect<Equal<keyof Events<Composed, 'user'>, 'lib.suspended' | 'posted'>>
+type _mergedTopics = Expect<Equal<keyof Topics<Composed, 'user'>, 'lib.feed'>>
+
+describe('surface composition (defineSurface + mergeSurfaces)', () => {
+  it('merges both directions and defaults a missing direction to {}', () => {
+    const merged = mergeSurfaces(libSurface, hostSurface)
+    expect(Object.keys(merged.clientToServer)).toEqual(['lib.join', 'say'])
+    expect(Object.keys(merged.serverToClient)).toEqual(['lib.suspended', 'lib.feed', 'posted'])
+    const oneSided = mergeSurfaces(defineSurface({ clientToServer: { a: { input: z.void(), output: z.void() } } }), {})
+    expect(Object.keys(oneSided.clientToServer)).toEqual(['a'])
+    expect(oneSided.serverToClient).toEqual({})
+  })
+
+  it('a duplicate key is a compile error AND a runtime throw naming the key', () => {
+    const dup = defineSurface({
+      clientToServer: { 'lib.join': { input: z.void(), output: z.void() } },
+    })
+    // @ts-expect-error — 'lib.join' collides with libSurface's request
+    expect(() => mergeSurfaces(libSurface, dup)).toThrow(/duplicate keys: lib\.join/)
+    const dupStc = defineSurface({ serverToClient: { 'lib.suspended': { payload: z.void() } } })
+    // @ts-expect-error — 'lib.suspended' collides in serverToClient
+    expect(() => mergeSurfaces(libSurface, dupStc)).toThrow(/duplicate keys: lib\.suspended/)
+  })
+
+  it('same key in OPPOSITE directions is not a collision', () => {
+    const a = defineSurface({ clientToServer: { tick: { input: z.void(), output: z.void() } } })
+    const b = defineSurface({ serverToClient: { tick: { payload: z.void() } } })
+    const merged = mergeSurfaces(a, b)
+    expect(Object.keys(merged.clientToServer)).toEqual(['tick'])
+    expect(Object.keys(merged.serverToClient)).toEqual(['tick'])
+  })
+
+  it("rejects a role block's extra keys (data belongs outside the merge)", () => {
+    const roleBlock = { data: z.object({}), clientToServer: {} }
+    // @ts-expect-error — data?: never keeps RoleBlocks out at the type level too
+    expect(() => mergeSurfaces(libSurface, roleBlock)).toThrow(/unexpected key 'data'/)
+  })
+
+  it('keeps subscribe:true literal at runtime through defineSurface + merge', () => {
+    expect(composed.roles.user.serverToClient['lib.feed'].subscribe).toBe(true)
+    const schema = composed.roles.user.clientToServer['lib.join'].input
+    return expect(validate(schema, { threadId: 't1' })).resolves.toEqual({ threadId: 't1' })
   })
 })

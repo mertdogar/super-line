@@ -11,7 +11,19 @@ export default defineConfig({
   lastUpdated: true,
   // PRODUCT.md is an internal brief — keep the file but don't build it as an orphan page.
   srcExclude: ['PRODUCT.md'],
-  head: [['link', { rel: 'icon', href: '/mark.svg' }]],
+  head: [
+    ['link', { rel: 'icon', href: '/mark.svg' }],
+    [
+      'link',
+      {
+        rel: 'preload',
+        href: '/fonts/IoskeleyMono-Regular.woff2',
+        as: 'font',
+        type: 'font/woff2',
+        crossorigin: '',
+      },
+    ],
+  ],
   markdown: {
     config(md) {
       md.use(copyOrDownloadAsMarkdownButtons)

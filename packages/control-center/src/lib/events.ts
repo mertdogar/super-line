@@ -1,4 +1,4 @@
-import type { ConnDescriptor, InspectorEnvelope, InspectorEvent, MessageFlavor } from '@super-line/core'
+import { eventPayload, type ConnDescriptor, type InspectorEnvelope, type InspectorEvent, type MessageFlavor } from '@super-line/core'
 import {
   familyColor,
   familyShort,
@@ -8,7 +8,7 @@ import {
   type TransportFamily,
 } from './transport'
 
-export { eventPayload } from '@super-line/core'
+export { eventPayload }
 
 /** Resolves a connId / nodeId to friendly labels, so the feed shows names not hashes. */
 export interface FeedResolver {
@@ -421,4 +421,86 @@ export function matchesFilters(en: InspectorEnvelope, f: FeedFilters, row: RowMa
     if (en.byteSize < f.size[0] || en.byteSize > f.size[1]) return false
   }
   return true
+}
+
+/** The chip text of a row's wire attribution ("WebSocket", "ws×2 http×1"), or undefined when unattributed. */
+export function wireLabel(event: InspectorEvent, r?: FeedResolver): string | undefined {
+  const w = eventWire(event, r)
+  if (!w) return undefined
+  return w.kind === 'one' ? w.label : w.parts.map((p) => `${p.short}×${p.count}`).join(' ')
+}
+
+/** One exported feed row: the raw envelope fields plus the derived view columns, so the file is self-contained. */
+export interface ExportRecord {
+  event: InspectorEvent
+  ts: number
+  byteSize?: number
+  originNodeId: string
+  summary: string
+  node: string
+  latencyMs?: number
+  wire?: string
+}
+
+export function exportRecord(
+  en: InspectorEnvelope,
+  summary: string,
+  latencyMs: number | undefined,
+  r: FeedResolver,
+): ExportRecord {
+  return { ...en, summary, node: r.nodeName(en.originNodeId), latencyMs, wire: wireLabel(en.event, r) }
+}
+
+const csvCell = (v: string): string => (/[",\n]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v)
+
+/** CSV of the visible columns (RFC-4180 quoting); the payload lands JSON-stringified in the last cell. */
+export function exportCsv(records: ExportRecord[]): string {
+  const lines = records.map((r) => {
+    const payload = eventPayload(r.event)
+    return [
+      r.event.type,
+      r.summary,
+      r.node,
+      new Date(r.ts).toISOString(),
+      r.byteSize?.toString() ?? '',
+      r.latencyMs?.toString() ?? '',
+      r.wire ?? '',
+      payload === undefined ? '' : JSON.stringify(payload),
+    ]
+      .map(csvCell)
+      .join(',')
+  })
+  return ['type,summary,node,time,size,latency,wire,payload', ...lines].join('\n')
+}
+
+/** JSONL: one compact record per line (no wrapper — line formats carry no metadata). */
+export function exportJsonl(records: ExportRecord[]): string {
+  return records.map((r) => JSON.stringify(r)).join('\n')
+}
+
+/** The .json export: records wrapped with provenance — when, which filters produced it, node id→name map. */
+export function exportJson(
+  records: ExportRecord[],
+  meta: { exportedAt: string; filters: FeedFilters; nodes: { nodeId: string; nodeName: string }[] },
+): string {
+  const f = meta.filters
+  return JSON.stringify(
+    {
+      exportedAt: meta.exportedAt,
+      count: records.length,
+      filters: {
+        text: f.text,
+        types: [...f.types],
+        nodes: [...f.nodes],
+        wires: [...f.wires],
+        windowMs: f.windowMs,
+        latency: f.latency,
+        size: f.size,
+      },
+      nodes: meta.nodes,
+      events: records,
+    },
+    null,
+    2,
+  )
 }

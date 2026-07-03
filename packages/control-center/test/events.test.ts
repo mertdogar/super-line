@@ -8,6 +8,10 @@ import {
   eventPayload,
   eventWire,
   eventWireFamilies,
+  exportCsv,
+  exportJson,
+  exportJsonl,
+  exportRecord,
   filtersActive,
   flavorColor,
   formatBytes,
@@ -27,6 +31,7 @@ import {
   sliderToSizeFilter,
   summarizeEvent,
   windowAnchor,
+  wireLabel,
   type FeedResolver,
   type RowMatch,
 } from '../src/lib/events.js'
@@ -391,5 +396,85 @@ describe('feed filters', () => {
     expect(
       eventWireFamilies({ type: 'msg.broadcast', room: 'lobby', name: 'm', data: {} }, broadcastResolver),
     ).toEqual(['websocket', 'http'])
+  })
+})
+
+describe('export', () => {
+  const resolver: FeedResolver = {
+    conn: (id) => (id === descriptor.id ? { ...descriptor, transport: 'websocket' } : undefined),
+    nodeName: (id) => (id === 'node1234' ? 'node-1' : id.slice(0, 8)),
+    roomWires: (r) => (r === 'lobby' ? [{ family: 'websocket', count: 2 }, { family: 'http', count: 1 }] : []),
+  }
+  const request: InspectorEvent = { type: 'msg.request', connId: descriptor.id, role: 'user', name: 'send', input: { a: 1 }, reqId: 1 }
+
+  it('wireLabel renders one wire, a fan-out breakdown, or undefined', () => {
+    expect(wireLabel(request, resolver)).toBe('WebSocket')
+    expect(wireLabel({ type: 'msg.broadcast', room: 'lobby', name: 'm', data: {} }, resolver)).toBe('ws×2 http×1')
+    expect(wireLabel({ type: 'msg.publish', topic: 't', data: {} }, resolver)).toBeUndefined()
+  })
+
+  it('exportRecord merges the envelope with the derived view columns', () => {
+    const rec = exportRecord(envelope(request, 1000, 36), 'ada (user) → send', 28, resolver)
+    expect(rec).toEqual({
+      event: request,
+      ts: 1000,
+      byteSize: 36,
+      originNodeId: 'node1234',
+      summary: 'ada (user) → send',
+      node: 'node-1',
+      latencyMs: 28,
+      wire: 'WebSocket',
+    })
+  })
+
+  it('exportCsv emits a header, ISO times, empty cells and RFC-4180 quoting', () => {
+    const tricky: InspectorEvent = { type: 'msg.publish', topic: 'a,"b"\nc', data: { s: 'x' } }
+    const records = [
+      exportRecord(envelope(request, 0, 36), 'ada (user) → send', 28, resolver),
+      exportRecord(envelope(tricky, 1000), 'a,"b"\nc', undefined, resolver),
+    ]
+    const [header, row1, ...rest] = exportCsv(records).split('\n')
+    expect(header).toBe('type,summary,node,time,size,latency,wire,payload')
+    expect(row1).toBe('msg.request,ada (user) → send,node-1,1970-01-01T00:00:00.000Z,36,28,WebSocket,"{""a"":1}"')
+    // the quoted newline in the summary keeps the record on "two lines" of the raw text
+    expect(rest.join('\n')).toBe('msg.publish,"a,""b""\nc",node-1,1970-01-01T00:00:01.000Z,,,,"{""s"":""x""}"')
+  })
+
+  it('exportJsonl emits one parseable record per line', () => {
+    const records = [
+      exportRecord(envelope(request, 0), 's1', undefined, resolver),
+      exportRecord(envelope(request, 1), 's2', 5, resolver),
+    ]
+    const lines = exportJsonl(records).split('\n')
+    expect(lines).toHaveLength(2)
+    expect(JSON.parse(lines[1]!)).toMatchObject({ summary: 's2', latencyMs: 5 })
+  })
+
+  it('exportJson wraps records with provenance: time, plain-JSON filters, node names', () => {
+    const filters = emptyFilters()
+    filters.types = new Set(['msg.request'])
+    filters.latency = [1, 100]
+    const records = [exportRecord(envelope(request, 0, 36), 'ada (user) → send', 28, resolver)]
+    const out = JSON.parse(
+      exportJson(records, {
+        exportedAt: '2026-07-03T00:00:00.000Z',
+        filters,
+        nodes: [{ nodeId: 'node1234', nodeName: 'node-1' }],
+      }),
+    )
+    expect(out.exportedAt).toBe('2026-07-03T00:00:00.000Z')
+    expect(out.count).toBe(1)
+    expect(out.filters).toEqual({
+      text: '',
+      types: ['msg.request'],
+      nodes: [],
+      wires: [],
+      windowMs: null,
+      latency: [1, 100],
+      size: null,
+    })
+    expect(out.nodes).toEqual([{ nodeId: 'node1234', nodeName: 'node-1' }])
+    expect(out.events).toHaveLength(1)
+    expect(out.events[0].wire).toBe('WebSocket')
   })
 })

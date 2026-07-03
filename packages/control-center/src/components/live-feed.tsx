@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { ChevronRight, Pause, Play, X } from 'lucide-react'
+import { ChevronRight, Download, Pause, Play, X } from 'lucide-react'
 import type { ConnDescriptor, InspectorEnvelope, InspectorEvent, NodeStat } from '@super-line/core'
 import {
   ALL_EVENT_TYPES,
@@ -10,6 +10,10 @@ import {
   eventPayload,
   eventWire,
   eventWireFamilies,
+  exportCsv,
+  exportJson,
+  exportJsonl,
+  exportRecord,
   filtersActive,
   formatBytes,
   formatDuration,
@@ -86,6 +90,68 @@ function WireChip({ event, resolver }: { event: InspectorEvent; resolver: FeedRe
         </span>
       ))}
     </span>
+  )
+}
+
+const EXPORT_FORMATS = ['json', 'jsonl', 'csv'] as const
+type ExportFormat = (typeof EXPORT_FORMATS)[number]
+
+function download(text: string, filename: string, mime: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function ExportMenu({
+  disabled,
+  onExport,
+}: {
+  disabled: boolean
+  onExport: (format: ExportFormat) => void
+}): React.JSX.Element {
+  const [open, setOpen] = React.useState(false)
+  const ref = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+  return (
+    <div ref={ref} className="relative ml-auto">
+      <button
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors',
+          disabled ? 'cursor-not-allowed opacity-50' : 'text-muted-foreground hover:bg-accent/40',
+        )}
+      >
+        <Download className="h-3.5 w-3.5" />
+        Export
+      </button>
+      {open ? (
+        <div className="absolute right-0 z-20 mt-1 w-28 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+          {EXPORT_FORMATS.map((f) => (
+            <button
+              key={f}
+              onClick={() => {
+                setOpen(false)
+                onExport(f)
+              }}
+              className="w-full rounded px-2 py-1 text-left text-xs uppercase hover:bg-accent/40"
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -323,6 +389,22 @@ export function LiveFeed({
   const maxBytes = rows.reduce((m, r) => Math.max(m, r.en.byteSize ?? 0), 0)
   const maxLatency = rows.reduce((m, r) => Math.max(m, r.latency ?? 0), 0)
 
+  // export exactly the rows on screen (filters, pause and sort respected), in display order
+  const onExport = (format: ExportFormat): void => {
+    const records = rows.map((r) => exportRecord(r.en, r.summary, r.latency, resolver))
+    const now = new Date()
+    const stamp = now.toISOString().replace(/[:.]/g, '-')
+    if (format === 'json') {
+      const nodes = topology.map((n) => ({ nodeId: n.nodeId, nodeName: n.nodeName }))
+      const text = exportJson(records, { exportedAt: now.toISOString(), filters, nodes })
+      download(text, `live-feed-${stamp}.json`, 'application/json')
+    } else if (format === 'jsonl') {
+      download(exportJsonl(records), `live-feed-${stamp}.jsonl`, 'application/x-ndjson')
+    } else {
+      download(exportCsv(records), `live-feed-${stamp}.csv`, 'text/csv')
+    }
+  }
+
   // latency/size sliders work in 0..1000 positions mapped log-wise to value; full span = filter off
   const latPos: [number, number] = filters.latency
     ? [
@@ -389,10 +471,11 @@ export function LiveFeed({
             Reset
           </button>
         ) : null}
+        <ExportMenu disabled={rows.length === 0} onExport={onExport} />
         <button
           onClick={togglePause}
           className={cn(
-            'ml-auto inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors',
+            'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors',
             paused ? 'bg-amber-400/20 text-amber-300' : 'text-muted-foreground hover:bg-accent/40',
           )}
         >

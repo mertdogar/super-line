@@ -60,6 +60,42 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
+/* brand mark EKG (see BrandMark): a faint signal sweeping the wire, and a connecting breathe */
+@keyframes cc-sweep {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.cc-sweep {
+  stroke-dasharray: 6 94;
+  animation: cc-sweep 6s linear infinite;
+  opacity: 0.5;
+}
+@keyframes cc-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.cc-breathe {
+  animation: cc-breathe 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-sweep {
+    animation: none;
+    opacity: 0;
+  }
+  .cc-breathe {
+    animation: none;
+  }
+}
+
 /* read-only topology graph: hide connection handles, tone down attribution */
 .react-flow__handle {
   opacity: 0;

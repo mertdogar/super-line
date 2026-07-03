@@ -19,6 +19,8 @@ import { StoresExplorer } from '@/components/stores-explorer'
 import { SettingsPage } from '@/components/settings-page'
 import { ResourcesPage } from '@/components/resources-page'
 import { StatusDot } from '@/components/status-dot'
+import { BrandMark } from '@/components/brand-mark'
+import { version } from '../package.json'
 import { roomsOf, type Highlight } from '@/lib/topology'
 import { transportsOf } from '@/lib/transport'
 import { cn } from '@/lib/utils'
@@ -150,9 +152,16 @@ export default function App(): React.JSX.Element {
   return (
     <div className="flex h-screen w-screen overflow-hidden">
       <aside className="flex w-56 shrink-0 flex-col border-r bg-card/40">
-        <div className="flex items-center gap-2 px-4 py-4">
-          <span className="h-2.5 w-2.5 rounded-full bg-primary" />
-          <span className="text-sm font-semibold tracking-tight">Control Center</span>
+        <div className="flex items-center gap-2.5 px-4 py-4">
+          <BrandMark status={status} />
+          <div className="leading-none">
+            <div className="text-[15px] font-bold tracking-tight">
+              super-<span className="text-primary">line</span>
+            </div>
+            <div className="mt-1 text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+              Control Center
+            </div>
+          </div>
         </div>
         <nav className="flex flex-col gap-1 px-2">
           {NAV.map((item) => (
@@ -164,7 +173,7 @@ export default function App(): React.JSX.Element {
             <NavButton key={item.id} item={item} active={view === item.id} onClick={() => setView(item.id)} />
           ))}
         </nav>
-        <div className="px-4 py-3 text-[11px] text-muted-foreground">super-line · v1</div>
+        <div className="px-4 py-3 text-[11px] text-muted-foreground">v{version}</div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">

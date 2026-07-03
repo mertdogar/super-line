@@ -242,8 +242,11 @@ export interface ServerStoreHandle {
   create(id: string, data: unknown, accessRules: AccessRules): Promise<void>
   /** Read a Resource (data + accessRules), or undefined if absent. */
   read(id: string): Promise<Resource | undefined>
-  /** Server co-write: replace the Resource's value (LWW), fanned out to subscribers with a `server` origin. */
-  write(id: string, data: unknown): Promise<void>
+  /**
+   * Server co-write: replace the Resource's value (LWW), fanned out to subscribers stamped with `origin`
+   * (default `"server"`) for echo-break + inspector attribution — mirrors {@link ServerStore.open}'s origin.
+   */
+  write(id: string, data: unknown, opts?: { origin?: string }): Promise<void>
   /** Grant a principal read/write on a Resource. */
   grant(id: string, principal: string, perms: Perms): Promise<void>
   /** Revoke a principal's access to a Resource entirely. */
@@ -1229,10 +1232,11 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       read(id) {
         return Promise.resolve(store.read(id))
       },
-      async write(id, data) {
-        await store.apply({ id, update: data, origin: SERVER_ORIGIN })
+      async write(id, data, opts) {
+        const origin = opts?.origin ?? SERVER_ORIGIN
+        await store.apply({ id, update: data, origin })
         if (inspectorEnabled)
-          emitInspectorEvent({ type: 'store.write', store: name, id, origin: SERVER_ORIGIN, data: safeSnapshot(data) })
+          emitInspectorEvent({ type: 'store.write', store: name, id, origin, data: safeSnapshot(data) })
       },
       async grant(id, principal, perms) {
         const r = await readOrThrow(id)

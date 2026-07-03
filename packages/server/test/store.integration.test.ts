@@ -198,6 +198,19 @@ describe('store — wire (ACL + catch-up + fan-out)', () => {
     alice.close()
   })
 
+  it('a server write(id, data, {origin}) co-write fans out stamped with that custom origin', async () => {
+    await env.srv.store('docs').create('d6', { v: 0 }, { alice: { read: true, write: true } })
+    const alice = rawClient(env.transport, 'alice')
+    await alice.opened
+    await alice.req({ t: 'sopen', n: 'docs', id: 'd6' })
+
+    await env.srv.store('docs').write('d6', { v: 42 }, { origin: 'harness' })
+    await flush()
+
+    expect(alice.changes().find((f) => f.id === 'd6')).toMatchObject({ t: 'sch', id: 'd6', u: { v: 42 }, o: 'harness' })
+    alice.close()
+  })
+
   it('a server open(id, {origin}) co-write fans out stamped with that custom origin', async () => {
     await env.srv.store('docs').create('o1', { v: 0 }, { alice: { read: true, write: true } })
     const alice = rawClient(env.transport, 'alice')

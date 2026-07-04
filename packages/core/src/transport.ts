@@ -49,6 +49,21 @@ export interface Handshake {
 export type AuthOutcome = { role: string; ctx: unknown; transport?: string }
 
 /**
+ * A plugin-owned (reserved) connection class the server declares to its transports: a role name the
+ * transport short-circuits `authenticate` for, plus how to recognize it. WS matches on `subprotocol`;
+ * other transports may match on the {@link Handshake} via `match`. The conn is accepted with this `role`
+ * and an empty ctx, then treated as observer-invisible by the core. See ADR-0005 (phase 2).
+ */
+export interface ReservedConnection {
+  /** The reserved role assigned to a matching connection (never one of the user contract's roles). */
+  role: string
+  /** WebSocket subprotocol to advertise + match (browsers can set this where they can't set headers). */
+  subprotocol?: string
+  /** Predicate for transports without a subprotocol (SSE/libp2p): match on the normalized handshake. */
+  match?: (handshake: Handshake) => boolean
+}
+
+/**
  * Server side: the transport listens, authenticates each inbound connection at its
  * native moment, and surfaces only the accepted ones — so the core never holds an
  * unauthenticated connection.
@@ -59,6 +74,12 @@ export interface ServerTransport {
     authenticate: (h: Handshake) => Promise<AuthOutcome>
     /** Fires ONLY for accepted connections. */
     onConnection: (raw: RawConn, auth: AuthOutcome) => void
+    /**
+     * Reserved connection classes the core declares (from `inspector` + plugin connection classes). A
+     * transport that supports them advertises/matches these and short-circuits `authenticate`, accepting
+     * with the matched `role` and empty ctx. Transports without negotiation ignore this. See {@link ReservedConnection}.
+     */
+    reserved?: ReservedConnection[]
   }): void | Promise<void>
   /** Stop listening and drop in-flight connections. */
   stop(): void | Promise<void>

@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { defineContract } from '@super-line/core'
+import { inspector } from '@super-line/plugin-inspector'
 import { createSuperLineServer } from '@super-line/server'
 import { createSuperLineClient } from '@super-line/client'
 import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
@@ -20,9 +21,9 @@ afterEach(async () => {
 async function startServer() {
   const httpServer = http.createServer()
   const srv = createSuperLineServer(contract, {
-    transports: [webSocketServerTransport({ server: httpServer, inspector: true })],
+    transports: [webSocketServerTransport({ server: httpServer })],
     authenticate: () => ({ role: 'user' as const, ctx: {} }),
-    inspector: true,
+    plugins: [inspector()],
   })
   srv.implement({ user: { ping: async () => 1 } })
   await new Promise<void>((resolve) => httpServer.listen(0, resolve))

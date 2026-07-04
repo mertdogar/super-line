@@ -22,6 +22,7 @@
       "@super-line/adapter-zeromq": ["./packages/adapter-zeromq/src/index.ts"],
       "@super-line/adapter-rabbitmq": ["./packages/adapter-rabbitmq/src/index.ts"],
       "@super-line/react": ["./packages/react/src/index.ts"],
+      "@super-line/plugin-inspector": ["./packages/plugin-inspector/src/index.ts"],
       "@super-line/store-memory": ["./packages/store-memory/src/index.ts"],
       "@super-line/store-sqlite": ["./packages/store-sqlite/src/index.ts"],
       "@super-line/store-pglite": ["./packages/store-pglite/src/index.ts"],

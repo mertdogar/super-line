@@ -1,4 +1,5 @@
 import http from 'node:http'
+import { inspector } from '@super-line/plugin-inspector'
 import { createSuperLineServer } from '@super-line/server'
 import { syncStoreServer } from '@super-line/store-sync'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
@@ -10,9 +11,9 @@ const PORT = Number(process.env.PORT ?? 8796)
 const server = http.createServer()
 
 const srv = createSuperLineServer(api, {
-  transports: [webSocketServerTransport({ server, inspector: true })],
+  transports: [webSocketServerTransport({ server })],
   // Surface traffic + store values to the Control Center (dev/trusted only).
-  inspector: true,
+  plugins: [inspector()],
   // the handshake `name` becomes the ACL principal (stable across reconnects)
   authenticate: (h) => {
     const name = h.query.name?.trim()

@@ -2,7 +2,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
-import type { AuthOutcome, Handshake, RawConn } from '@super-line/core'
+import { INSPECTOR_SUBPROTOCOL, type AuthOutcome, type Handshake, type RawConn, type ReservedConnection } from '@super-line/core'
 import { webSocketServerTransport, webSocketClientTransport } from '../src/index.js'
 
 const dec = new TextDecoder()
@@ -14,11 +14,11 @@ afterEach(async () => {
 async function listen(
   authenticate: (h: Handshake) => Promise<AuthOutcome>,
   onConnection: (raw: RawConn, auth: AuthOutcome) => void,
-  inspector = false,
+  reserved?: ReservedConnection[],
 ) {
   const server = http.createServer()
-  const transport = webSocketServerTransport({ server, inspector })
-  await transport.start({ authenticate, onConnection })
+  const transport = webSocketServerTransport({ server })
+  await transport.start({ authenticate, onConnection, reserved })
   await new Promise<void>((r) => server.listen(0, r))
   const { port } = server.address() as AddressInfo
   cleanups.push(async () => {
@@ -88,7 +88,7 @@ describe('websocket transport', () => {
     expect(connected).toBe(0)
   })
 
-  it('accepts inspector subprotocol connections without authenticate', async () => {
+  it('accepts a reserved (subprotocol) connection without authenticate', async () => {
     let authCalls = 0
     let inspectorAuth: AuthOutcome | undefined
     const { url } = await listen(
@@ -99,7 +99,7 @@ describe('websocket transport', () => {
       (_raw, auth) => {
         inspectorAuth = auth
       },
-      true,
+      [{ role: 'inspector', subprotocol: INSPECTOR_SUBPROTOCOL }],
     )
 
     const ws = new WebSocket(url, 'superline.inspector.v1')

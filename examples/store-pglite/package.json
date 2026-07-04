@@ -18,8 +18,8 @@
     "@super-line/adapter-libp2p": "workspace:*",
     "@super-line/client": "workspace:*",
     "@super-line/core": "workspace:*",
-    "@super-line/server": "workspace:*",
-    "@super-line/store-memory": "workspace:*",
+    "@super-line/plugin-inspector": "workspace:*",
+    "@super-line/server": "workspace:*",    "@super-line/store-memory": "workspace:*",
     "@super-line/store-pglite": "workspace:*",
     "@super-line/transport-websocket": "workspace:*"
   },

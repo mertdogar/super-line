@@ -67,6 +67,7 @@
     "@super-line/adapter-redis": "workspace:*",
     "@super-line/adapter-zeromq": "workspace:*",
     "@super-line/client": "workspace:*",
+    "@super-line/plugin-inspector": "workspace:*",
     "@super-line/transport-http": "workspace:*",
     "@super-line/transport-loopback": "workspace:*",
     "@super-line/transport-websocket": "workspace:*",

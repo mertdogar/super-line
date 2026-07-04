@@ -14,6 +14,7 @@ export default defineConfig({
       '@super-line/adapter-zeromq': src('packages/adapter-zeromq/src/index.ts'),
       '@super-line/adapter-rabbitmq': src('packages/adapter-rabbitmq/src/index.ts'),
       '@super-line/react': src('packages/react/src/index.ts'),
+      '@super-line/plugin-inspector': src('packages/plugin-inspector/src/index.ts'),
       '@super-line/store-memory': src('packages/store-memory/src/index.ts'),
       '@super-line/store-pglite': src('packages/store-pglite/src/index.ts'),
       '@super-line/store-sync': src('packages/store-sync/src/index.ts'),

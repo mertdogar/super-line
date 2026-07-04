@@ -15,6 +15,8 @@ import { webSocketServerTransport, webSocketClientTransport } from '@super-line/
 export function createHarness() {
   const cleanups: Array<() => Promise<void> | void> = []
 
+  // Harness keeps `plugins` loosely typed (no P inference through this wrapper); compile-time handler
+  // subtraction is asserted separately via a direct createSuperLineServer call in plugins.integration.test.ts.
   async function server<C extends Contract, A extends AuthResult<C>>(
     contract: C,
     opts: Omit<SuperLineServerOptions<C, A>, 'transports'>,
@@ -24,10 +26,12 @@ export function createHarness() {
     url: string
   }> {
     const httpServer = http.createServer()
-    const srv = createSuperLineServer<C, A>(contract, {
+    const srv = createSuperLineServer<C, A, []>(contract, {
+      // no `inspector` on the transport: the server declares the inspector reserved-connection class and the
+      // transport negotiates from that (phase 2). Exercises the generalized reserved path, not the back-compat.
       ...opts,
-      transports: [webSocketServerTransport({ server: httpServer, inspector: !!opts.inspector })],
-    })
+      transports: [webSocketServerTransport({ server: httpServer })],
+    } as unknown as SuperLineServerOptions<C, A, []>) // harness forgoes subtraction typing; plugins flow through at runtime
     await new Promise<void>((resolve) => httpServer.listen(0, resolve))
     const { port } = httpServer.address() as AddressInfo
     cleanups.push(async () => {

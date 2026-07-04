@@ -110,6 +110,14 @@ export type InspectorEvent =
   | { type: 'store.unsubscribe'; connId: string; store: string; id: string }
 
 /**
+ * The public taxonomy a plugin `onEvent` tap observes: an {@link InspectorEvent} with live
+ * (un-snapshotted, un-redacted) payload references, fired synchronously at the emit site. The
+ * inspector is itself one tap consumer; it snapshots + redacts before its own events cross the bus.
+ * Same shape as `InspectorEvent` (the envelope is added only by the inspector consumer, not the tap).
+ */
+export type TapEvent = InspectorEvent
+
+/**
  * Cross-cutting metadata about one inspection record, wrapping the {@link InspectorEvent} it
  * describes. The event stays a pure "what happened" union; the envelope carries when the origin
  * node emitted it, how big the (redacted) payload snapshot was, and which node emitted it. This is

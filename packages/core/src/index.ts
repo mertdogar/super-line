@@ -23,6 +23,7 @@ export type {
   InferIn,
   InferOut,
   RoleOf,
+  CtsOf,
   Requests,
   ServerMessages,
   Events,
@@ -55,6 +56,7 @@ export type {
   ConnView,
   InspectorEvent,
   InspectorEnvelope,
+  TapEvent,
   StoreInfo,
   StoreResourceView,
   SchemaConverter,
@@ -103,6 +105,7 @@ export type {
   RawConn,
   Handshake,
   AuthOutcome,
+  ReservedConnection,
   ServerTransport,
   ClientTransport,
 } from './transport.js'

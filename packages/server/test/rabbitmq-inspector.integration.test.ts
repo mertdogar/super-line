@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers'
 import { defineContract } from '@super-line/core'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
+import { inspector } from '@super-line/plugin-inspector'
 import { connectInspector, createHarness, waitFor } from './harness.js'
 
 // Requires Docker (testcontainers spins up rabbitmq:4); skipped cleanly when Docker is absent.
@@ -46,7 +47,7 @@ async function node() {
   const n = await h.server(contract, {
     authenticate: () => ({ role: 'user' as const, ctx: {} }),
     adapter: await createRabbitmqAdapter(amqpUrl),
-    inspector: true,
+    plugins: [inspector()],
   })
   n.srv.implement({ user: { join: async () => ({ ok: true }) } })
   return n

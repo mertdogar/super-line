@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import http from 'node:http'
 import { fileURLToPath } from 'node:url'
 import { SuperLineError } from '@super-line/core'
+import { inspector } from '@super-line/plugin-inspector'
 import { createSuperLineServer, type Conn } from '@super-line/server'
 import { sqliteStoreServer } from '@super-line/store-sqlite'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
@@ -38,10 +39,10 @@ const nameOf = (conn: Conn) => (conn.ctx as Ctx).name
 const server = http.createServer()
 
 const srv = createSuperLineServer(chat, {
-  transports: [webSocketServerTransport({ server, inspector: true })],
+  transports: [webSocketServerTransport({ server })],
   stores: { chat: sqliteStoreServer({ file: DB_FILE }) },
   nodeName: 'chat', // friendly name in the Control Center
-  inspector: true, // expose the inspector channel so `pnpm inspector` (Control Center) can attach
+  plugins: [inspector()],
   authenticate: (h) => {
     const name = h.query.name?.trim()
     if (!name) throw new Error('name is required')

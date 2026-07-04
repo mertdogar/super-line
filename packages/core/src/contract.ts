@@ -96,7 +96,8 @@ export function defineContract<const C extends Contract>(contract: C): C {
 /** Union of a contract's role names. */
 export type RoleOf<C extends Contract> = keyof C['roles'] & string
 
-type CtsOf<D> = D extends { clientToServer: infer M extends Record<string, RequestDef> } ? M : {}
+/** The `clientToServer` request map of a {@link Directional}/surface (`{}` if none). Public so plugins can key handlers off a paired surface's requests. */
+export type CtsOf<D> = D extends { clientToServer: infer M extends Record<string, RequestDef> } ? M : {}
 type StcOf<D> = D extends { serverToClient: infer M extends Record<string, ServerEntry> } ? M : {}
 
 // ── Surface composition (embedding one super-line surface into another app's contract) ──

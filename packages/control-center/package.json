@@ -44,6 +44,7 @@
     "@radix-ui/react-slider": "^1.4.1",
     "@super-line/client": "workspace:*",
     "@super-line/core": "workspace:*",
+    "@super-line/plugin-inspector": "workspace:*",
     "@super-line/server": "workspace:*",
     "@super-line/transport-websocket": "workspace:*",
     "@tailwindcss/vite": "^4.0.0",

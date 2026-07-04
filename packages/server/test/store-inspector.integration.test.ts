@@ -2,6 +2,7 @@ import type { ServerStore, StoreInfo } from '@super-line/core'
 import { defineContract } from '@super-line/core'
 import { memoryStoreClient, memoryStoreServer } from '@super-line/store-memory'
 import { afterEach, describe, expect, it } from 'vitest'
+import { inspector as inspectorPlugin } from '@super-line/plugin-inspector'
 import { connectInspector, createHarness, waitFor } from './harness.js'
 
 const contract = defineContract({ roles: { user: { clientToServer: {} } } })
@@ -14,7 +15,7 @@ describe('store inspector events', () => {
     const { srv, url } = await h.server(contract, {
       authenticate: (hs) => ({ role: 'user' as const, ctx: { uid: hs.query.uid } }),
       identify: (conn) => (conn.ctx as { uid?: string }).uid,
-      inspector: { redact: ['secret'] },
+      plugins: [inspectorPlugin({ redact: ['secret'] })],
       stores: { docs: memoryStoreServer() },
     })
     await srv.store('docs').create('d1', { v: 0 }, { ada: { read: true, write: true } })
@@ -54,7 +55,7 @@ describe('store inspection RPCs', () => {
   it('lists stores with their model, lists resources, and reads materialized values', async () => {
     const { srv, url } = await h.server(contract, {
       authenticate: () => ({ role: 'user' as const, ctx: {} }),
-      inspector: true,
+      plugins: [inspectorPlugin()],
       stores: { docs: memoryStoreServer() },
     })
     await srv.store('docs').create('d1', { v: 1, secret: 's' }, { ada: { read: false, write: false } })
@@ -101,7 +102,7 @@ describe('store inspection RPCs', () => {
     }
     const { url } = await h.server(contract, {
       authenticate: () => ({ role: 'user' as const, ctx: {} }),
-      inspector: true,
+      plugins: [inspectorPlugin()],
       stores: { crdt: fake },
     })
     const inspector = await connectInspector(url)
@@ -113,7 +114,7 @@ describe('store inspection RPCs', () => {
   it('emits store.create and store.delete lifecycle events', async () => {
     const { srv, url } = await h.server(contract, {
       authenticate: () => ({ role: 'user' as const, ctx: {} }),
-      inspector: true,
+      plugins: [inspectorPlugin()],
       stores: { docs: memoryStoreServer() },
     })
     const inspector = await connectInspector(url)

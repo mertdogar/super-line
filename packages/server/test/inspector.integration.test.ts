@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { defineContract, INSPECTOR_SUBPROTOCOL } from '@super-line/core'
 import type { InspectedContract, Schema } from '@super-line/core'
 import { MemoryBus, createInMemoryAdapter } from '@super-line/server'
+import { inspector } from '@super-line/plugin-inspector'
 import { connectInspector, createHarness, tick, waitFor } from './harness.js'
 
 const contract = defineContract({
@@ -28,7 +29,7 @@ describe('inspector connection (slice 2)', () => {
         authCalls++
         return authenticate(req)
       },
-      inspector: true,
+      plugins: [inspector()],
     })
     const insp = await connectInspector(url)
     expect(insp.protocol).toBe(INSPECTOR_SUBPROTOCOL)
@@ -37,7 +38,7 @@ describe('inspector connection (slice 2)', () => {
   })
 
   it('serves getNode / listConnections / getTopology, excluding itself', async () => {
-    const { srv, url } = await h.server(contract, { authenticate, inspector: true })
+    const { srv, url } = await h.server(contract, { authenticate, plugins: [inspector()] })
     srv.implement({ user: { ping: async () => 1 }, agent: {} })
 
     const u1 = h.client(contract, { url, role: 'user' })
@@ -75,7 +76,7 @@ describe('inspector connection (slice 2)', () => {
   })
 
   it('surfaces a friendly nodeName through getNode / getTopology / listConnections', async () => {
-    const { srv, url } = await h.server(contract, { authenticate, inspector: true, nodeName: 'node-A' })
+    const { srv, url } = await h.server(contract, { authenticate, plugins: [inspector()], nodeName: 'node-A' })
     srv.implement({ user: { ping: async () => 1 }, agent: {} })
     expect(srv.nodeName).toBe('node-A')
 
@@ -94,7 +95,7 @@ describe('inspector connection (slice 2)', () => {
   })
 
   it('returns NOT_FOUND for an unknown inspector method', async () => {
-    const { url } = await h.server(contract, { authenticate, inspector: true })
+    const { url } = await h.server(contract, { authenticate, plugins: [inspector()] })
     const insp = await connectInspector(url)
     await expect(insp.request('bogus')).rejects.toThrow('NOT_FOUND')
     insp.close()
@@ -130,7 +131,7 @@ describe('inspector getContract (slice 3)', () => {
   it('returns structure + best-effort JSON Schema, falling back to structure-only per message', async () => {
     const { url } = await h.server(richContract, {
       authenticate: () => ({ role: 'user' as const, ctx: {} }),
-      inspector: true,
+      plugins: [inspector()],
     })
     const insp = await connectInspector(url)
     const got = (await insp.request('getContract')) as InspectedContract
@@ -179,7 +180,7 @@ describe('inspector getConn (slice 4)', () => {
       onConnection: (conn) => {
         ;(conn.data as { count?: number }).count = 5
       },
-      inspector: { redact: ['token'] },
+      plugins: [inspector({ redact: ['token'] })],
     })
     srv.implement({ user: { ping: async () => 1 } })
 
@@ -206,7 +207,7 @@ describe('inspector getConn (slice 4)', () => {
   it('returns NOT_FOUND for an unknown connection id', async () => {
     const { url } = await h.server(ctxContract, {
       authenticate: () => ({ role: 'user' as const, ctx: {} }),
-      inspector: true,
+      plugins: [inspector()],
     })
     const insp = await connectInspector(url)
     await expect(insp.request('getConn', { id: 'nope' })).rejects.toThrow('NOT_FOUND')
@@ -219,7 +220,7 @@ describe('inspector getConn (slice 4)', () => {
       h.server(ctxContract, {
         authenticate: () => ({ role: 'user' as const, ctx: { secret: 1 } }),
         adapter: createInMemoryAdapter(bus),
-        inspector: true,
+        plugins: [inspector()],
       })
     const nodeA = await mk()
     const nodeB = await mk()
@@ -252,7 +253,7 @@ const eventsAuth = () => ({ role: 'user' as const, ctx: {} })
 
 describe('inspector events topic (slice 5)', () => {
   it('pushes live connect / room / topic / disconnect events to subscribed inspectors', async () => {
-    const { srv, url } = await h.server(eventsContract, { authenticate: eventsAuth, inspector: true })
+    const { srv, url } = await h.server(eventsContract, { authenticate: eventsAuth, plugins: [inspector()] })
     srv.implement({
       user: { join: async ({ room }, _ctx, conn) => (srv.room(room).add(conn), { ok: true }) },
     })
@@ -288,7 +289,7 @@ describe('inspector events topic (slice 5)', () => {
       h.server(eventsContract, {
         authenticate: eventsAuth,
         adapter: createInMemoryAdapter(bus),
-        inspector: true,
+        plugins: [inspector()],
       })
     const nodeA = await mk()
     const nodeB = await mk()
@@ -330,7 +331,7 @@ describe('inspector message events (T3.2)', () => {
   it('mirrors request/response/event/broadcast/publish, redacting payload fields', async () => {
     const { srv, url } = await h.server(msgContract, {
       authenticate: () => ({ role: 'user' as const, ctx: {} }),
-      inspector: { redact: ['secret'] },
+      plugins: [inspector({ redact: ['secret'] })],
     })
     srv.implement({
       user: {
@@ -376,7 +377,7 @@ describe('inspector message events (T3.2)', () => {
   it('wraps every event in an envelope with ts, originNodeId, and payload-only byteSize', async () => {
     const { srv, url } = await h.server(msgContract, {
       authenticate: () => ({ role: 'user' as const, ctx: {} }),
-      inspector: true,
+      plugins: [inspector()],
     })
     srv.implement({
       user: { echo: async () => ({ ok: true }), boom: async () => {} },
@@ -404,7 +405,7 @@ describe('inspector message events (T3.2)', () => {
   it('tags request/response with a reqId so concurrent same-name calls pair unambiguously', async () => {
     const { srv, url } = await h.server(msgContract, {
       authenticate: () => ({ role: 'user' as const, ctx: {} }),
-      inspector: true,
+      plugins: [inspector()],
     })
     // a tiny delay keeps both echoes in flight at once, exercising the concurrency case
     srv.implement({
@@ -432,7 +433,7 @@ describe('inspector message events (T3.2)', () => {
     const big = 'x'.repeat(5000)
     const { srv, url } = await h.server(msgContract, {
       authenticate: () => ({ role: 'user' as const, ctx: {} }),
-      inspector: { redact: ['secret'] },
+      plugins: [inspector({ redact: ['secret'] })],
     })
     srv.implement({ user: { echo: async () => ({ ok: true }), boom: async () => {} } })
     const insp = await connectInspector(url)
@@ -462,7 +463,7 @@ describe('inspector server→client request pairing', () => {
   it('tags serverRequest and serverReply with a shared reqId', async () => {
     const { srv, url } = await h.server(srvReqContract, {
       authenticate: () => ({ role: 'user' as const, ctx: {} }),
-      inspector: true,
+      plugins: [inspector()],
     })
     srv.implement({ shared: { hello: async () => ({ ok: true }) }, user: {} })
 

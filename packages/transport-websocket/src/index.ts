@@ -2,13 +2,12 @@ import type { IncomingMessage, Server as HttpServer } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { WebSocketServer, type RawData, type WebSocket as WsServerSocket } from 'ws'
 import {
-  INSPECTOR_SUBPROTOCOL,
-  INSPECTOR_ROLE,
   type RawConn,
   type ServerTransport,
   type ClientTransport,
   type Handshake,
   type AuthOutcome,
+  type ReservedConnection,
 } from '@super-line/core'
 
 /** Backpressure policy for the WS server: what to do when a connection's send buffer grows too large. */
@@ -27,8 +26,6 @@ export interface WebSocketServerTransportOptions {
   path?: string
   /** Guard against slow consumers: when a connection's send buffer exceeds the limit, close or drop. */
   backpressure?: Backpressure
-  /** Accept Control Center inspector clients via the `superline.inspector.v1` subprotocol (dev/trusted only). */
-  inspector?: boolean
 }
 
 /** Options for {@link webSocketClientTransport}. */
@@ -41,22 +38,35 @@ export interface WebSocketClientTransportOptions {
 
 /** A WebSocket server transport: attaches to an `http.Server` and accepts upgrades. */
 export function webSocketServerTransport(opts: WebSocketServerTransportOptions = {}): ServerTransport {
-  // echo the reserved subprotocol only when inspector is on, so browsers complete the handshake
-  const wss = new WebSocketServer({
-    noServer: true,
-    handleProtocols: (protocols) =>
-      opts.inspector && protocols.has(INSPECTOR_SUBPROTOCOL) ? INSPECTOR_SUBPROTOCOL : false,
-  })
   let hooks: Parameters<ServerTransport['start']>[0] | undefined
   let upgradeHandler: ((req: IncomingMessage, socket: Duplex, head: Buffer) => void) | undefined
   let stopped = false
 
-  function isInspectorRequest(req: IncomingMessage): boolean {
-    if (!opts.inspector) return false
+  // reserved connection classes the server declared via the start hooks (e.g. the inspector plugin's)
+  const negotiable = (): ReservedConnection[] => hooks?.reserved ?? []
+
+  // echo a reserved subprotocol the browser offered, so the WS handshake completes. Runs per-upgrade
+  // (after start), so reading `hooks.reserved` is safe even though the server is built before start().
+  const wss = new WebSocketServer({
+    noServer: true,
+    handleProtocols: (protocols) => {
+      for (const rc of negotiable()) if (rc.subprotocol && protocols.has(rc.subprotocol)) return rc.subprotocol
+      return false
+    },
+  })
+
+  // the reserved role for this upgrade, if it matches a declared class (by subprotocol, then by handshake)
+  function reservedRoleFor(req: IncomingMessage): string | undefined {
+    const list = negotiable()
+    if (list.length === 0) return undefined
     const raw = req.headers['sec-websocket-protocol']
-    if (!raw) return false
-    const offered = (Array.isArray(raw) ? raw.join(',') : raw).split(',').map((p) => p.trim())
-    return offered.includes(INSPECTOR_SUBPROTOCOL)
+    const offered = raw ? (Array.isArray(raw) ? raw.join(',') : raw).split(',').map((p) => p.trim()) : []
+    for (const rc of list) if (rc.subprotocol && offered.includes(rc.subprotocol)) return rc.role
+    if (list.some((rc) => rc.match)) {
+      const handshake = buildHandshake(req)
+      for (const rc of list) if (rc.match?.(handshake)) return rc.role
+    }
+    return undefined
   }
 
   async function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
@@ -69,8 +79,9 @@ export function webSocketServerTransport(opts: WebSocketServerTransportOptions =
         hooks!.onConnection(wsServerRawConn(ws, opts.backpressure), auth)
       })
     }
-    if (isInspectorRequest(req)) {
-      accept({ role: INSPECTOR_ROLE, ctx: {} }) // short-circuit authenticate for the read-only inspector channel
+    const reservedRole = reservedRoleFor(req)
+    if (reservedRole) {
+      accept({ role: reservedRole, ctx: {} }) // short-circuit authenticate for a reserved (plugin-owned) connection
       return
     }
     let auth: AuthOutcome

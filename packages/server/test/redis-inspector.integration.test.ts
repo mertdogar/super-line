@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { GenericContainer, type StartedTestContainer } from 'testcontainers'
 import { defineContract } from '@super-line/core'
 import { createRedisAdapter } from '@super-line/adapter-redis'
+import { inspector } from '@super-line/plugin-inspector'
 import { connectInspector, createHarness, waitFor } from './harness.js'
 
 // Requires Docker (testcontainers spins up redis:7); skipped cleanly when Docker is absent.
@@ -41,7 +42,7 @@ async function node() {
   const n = await h.server(contract, {
     authenticate: () => ({ role: 'user' as const, ctx: {} }),
     adapter: createRedisAdapter(redisUrl),
-    inspector: true,
+    plugins: [inspector()],
   })
   n.srv.implement({ user: { join: async () => ({ ok: true }) } })
   return n

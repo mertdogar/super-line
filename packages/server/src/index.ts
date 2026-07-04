@@ -2,23 +2,20 @@ import {
   jsonSerializer,
   validate,
   SuperLineError,
-  INSPECTOR_ROLE,
-  classifyContract,
-  eventPayload,
   type Adapter,
   type Serializer,
   type Schema,
   type Contract,
-  type InspectedContract,
-  type ConnView,
+  type Directional,
+  type CtsOf,
   type InspectorEvent,
-  type InspectorEnvelope,
+  type TapEvent,
   type StoreInfo,
-  type StoreResourceView,
   type ServerTransport,
   type RawConn,
   type Handshake,
   type AuthOutcome,
+  type ReservedConnection,
   type ClientFrame,
   type ReqFrame,
   type EvtFrame,
@@ -81,13 +78,7 @@ const TOPIC = 't:'
 const CONN = 'c:' // personal channel per connection (targeted cross-node send)
 const USER = 'u:' // personal channel per user key (cross-node fan-out)
 const REPLY = 'reply:' // per-node channel carrying server→client request replies back to the origin
-const INSPECT = 'i:' // reserved fan-out channel for the inspector `events` topic
-
-const inspectorEncoder = new TextEncoder()
-/** Byte length of an encoded value, whether the serializer produced a string or bytes. */
-function encodedByteSize(encoded: string | Uint8Array): number {
-  return typeof encoded === 'string' ? inspectorEncoder.encode(encoded).length : encoded.byteLength
-}
+const PLUGIN = 'x:' // reserved prefix for plugin-private channels: `x:<plugin>:<name>`
 const STORE = 's:' // per-Resource fan-out channel: `s:<name>:<id>`
 const SERVER_ORIGIN = 'server' // origin stamped on server co-writes (distinct from any client writer id)
 
@@ -132,13 +123,26 @@ export type Handlers<C extends Contract, A> = ([keyof SharedRequests<C>] extends
 
 /** Context passed to middleware and lifecycle hooks about the current operation. */
 export interface MiddlewareInfo {
-  /** Whether this is a request, a topic subscribe, or a bus event delivery. */
-  kind: 'request' | 'subscribe' | 'event'
-  /** The request/topic/event name. */
+  /**
+   * The operation kind. Middleware only ever sees `'request'`/`'subscribe'`; `'event'` marks a bus
+   * event delivery, and `'connect'`/`'disconnect'` mark a lifecycle-hook throw routed to `onError`.
+   */
+  kind: 'request' | 'subscribe' | 'event' | 'connect' | 'disconnect'
+  /** The request/topic/event name (the hook name for lifecycle errors). */
   name: string
   /** The connection the operation is on, if any (`conn.role` available). Absent for bus events. */
   conn?: Conn
 }
+
+/**
+ * A plugin's flat middleware — like {@link Middleware} but `ctx` is `unknown` (a plugin is written
+ * independently of the host's per-role ctx). Concatenated after the host chain, in plugin array order.
+ */
+export type PluginMiddleware = (
+  ctx: unknown,
+  info: MiddlewareInfo,
+  next: () => Promise<void>,
+) => Awaitable<void>
 
 /** Metadata passed to a {@link SuperLineServer.subscribe} callback alongside the event payload. */
 export interface BusMeta {
@@ -264,8 +268,156 @@ export interface ServerStoreHandle {
   open(id: string, opts?: { origin?: string }): ServerReplica
 }
 
+/**
+ * Handlers a plugin provides for its paired surface `S` (ADR-0004): one per `clientToServer` key,
+ * typed from `S`. `ctx`/`conn` are loose — a plugin is written independently of the host's per-role ctx.
+ */
+export type HandlersFor<S extends Directional> = {
+  [K in keyof CtsOf<S>]: (
+    input: ServerInput<CtsOf<S>[K]>,
+    ctx: unknown,
+    conn: Conn,
+  ) => Awaitable<Output<CtsOf<S>[K]>>
+}
+
+/** Union of the `clientToServer` keys handled across a plugin tuple `P` (subtracted from `implement`). */
+export type HandledKeys<P extends readonly SuperLinePlugin<any>[]> =
+  P[number] extends SuperLinePlugin<infer S> ? keyof CtsOf<S> & string : never
+
+/** Remove the plugin-handled keys `HK` from every block (each role + `shared`) of a {@link Handlers} map. */
+export type SubtractHandlers<H, HK extends string> = { [B in keyof H]: Omit<H[B], HK> }
+
+/**
+ * A named, declarative bundle of runtime contributions registered on `plugins: [...]`. All fields
+ * are optional; a plugin ships as a pair (this server half + an optional client half). See ADR-0005.
+ * The optional type param `S` is the plugin's paired surface — its `handlers` compile against `S`, and
+ * `S`'s `clientToServer` keys are subtracted from the host's `implement()` obligation at compile time.
+ */
+export interface SuperLinePlugin<S extends Directional = {}> {
+  /** Unique among the server's plugins; a duplicate name throws at construction. */
+  name: string
+  /**
+   * Node-local tap fired synchronously at each emit site with LIVE payload references (an observer
+   * must not mutate them). Reuses the {@link TapEvent} taxonomy; zero cost when no plugin taps. A
+   * throwing tap is isolated and routed to `onError` — it never fails the underlying operation.
+   */
+  onEvent?: (event: TapEvent) => void
+  /** Middleware run before request/subscribe handlers, after the host chain, in plugin array order. */
+  use?: PluginMiddleware[]
+  /** Called once per accepted connection (multiplexed after the host's `onConnection`). */
+  onConnection?: (conn: Conn, ctx: unknown) => void
+  /** Called when a connection closes (multiplexed after the host's `onDisconnect`). */
+  onDisconnect?: (conn: Conn, ctx: unknown, code: number) => void
+  /** Receives any error thrown in middleware/handlers/hooks (multiplexed with the host's `onError`). */
+  onError?: (error: unknown, info: MiddlewareInfo) => void
+  /**
+   * Request handlers for the plugin's paired surface `S`, built lazily with the {@link PluginContext}.
+   * Merged into dispatch under their method names; the host merges `S` into a role and these keys are
+   * subtracted from its `implement()` obligation. A key already handled by the host (or another plugin)
+   * throws at construction.
+   */
+  handlers?: (ctx: PluginContext) => HandlersFor<S>
+  /**
+   * Server halves of Store pairs the plugin contributes, merged into the host's `stores` and reachable
+   * via `srv.store(name)`. A name colliding with a host store or another plugin's store throws at construction.
+   */
+  stores?: Record<string, ServerStore>
+  /**
+   * A plugin-owned (reserved) connection class — its own role, handshake negotiation, and parallel contract,
+   * served over observer-invisible connections. See {@link PluginConnection}. (Phase 2.)
+   */
+  connection?: PluginConnection
+  /**
+   * Imperative escape hatch, run once at construction with the plugin's {@link PluginContext}. Return
+   * an optional dispose function, called on `server.close()`. Use for wiring cluster-wide views from
+   * local taps + a plugin channel (the inspector's pattern), timers, or background subscriptions.
+   */
+  setup?: (ctx: PluginContext) => void | (() => void)
+}
+
+/**
+ * A plugin-owned connection class (ADR-0005 phase 2): a reserved role the transport negotiates (never one
+ * of the user contract's roles), dispatched against the plugin's own fixed `contract` — never merged into
+ * the user's. Matching conns are observer-invisible (excluded from conns/presence/heartbeat/user hooks).
+ * The inspector's Control-Center channel is one such class.
+ */
+export interface PluginConnection {
+  /** The reserved role; must be unique across the server (user roles + other reserved classes). */
+  role: string
+  /** WebSocket subprotocol to advertise + match (browsers set this where they can't set headers). */
+  subprotocol?: string
+  /** Predicate for transports without a subprotocol (SSE/libp2p): match on the normalized handshake. */
+  match?: (handshake: Handshake) => boolean
+  /** The parallel contract these connections speak (its `clientToServer` = requests, `subscribe` topics = feeds). */
+  contract: Contract
+  /**
+   * Request handlers for `contract`'s `clientToServer`, built with the {@link PluginContext}. A subscribe to
+   * one of `contract`'s topics bridges the conn to the plugin's {@link PluginChannel} of the same name.
+   */
+  handlers?: (ctx: PluginContext) => Record<string, (input: unknown, conn: Conn) => Awaitable<unknown>>
+}
+
+/** A plugin-private adapter channel (reserved `x:<plugin>:` prefix), fanned out cluster-wide. */
+export interface PluginChannel {
+  /** Publish to this channel; delivered to every node's subscribers (local echo included). */
+  publish(data: unknown): void
+  /** Subscribe to this channel. `meta.from` is the publishing node. Returns an unsubscribe fn. */
+  subscribe(handler: (data: unknown, meta: BusMeta) => void): () => void
+}
+
+/**
+ * The capabilities handed to a plugin's `setup`/`handlers`: the server's public surface minus the
+ * footguns (`implement`/`close`), plus a privileged block — a plugin-private adapter {@link PluginChannel},
+ * node identity, the serializer, a read-only conns view, and the raw contract for reflection. Sized to
+ * the inspector's audited needs; grows case-by-case.
+ */
+export interface PluginContext {
+  /** This node's stable id (equals `srv.nodeId`). */
+  readonly nodeId: string
+  /** This node's friendly name (equals `srv.nodeName`). */
+  readonly nodeName: string
+  /** Alias of {@link PluginContext.nodeId} — the per-process instance id used to tag cluster fan-out. */
+  readonly instanceId: string
+  /** The wire serializer configured on the server. */
+  readonly serializer: Serializer
+  /** The raw contract, for reflection (e.g. `classifyContract`). */
+  readonly contract: Contract
+  /** Connections accepted on THIS node (read-only snapshot; excludes reserved conns). */
+  readonly conns: readonly Conn[]
+  /** Node-local introspection (connections, rooms, topics on this process). */
+  readonly local: LocalView
+  /** Cluster-wide presence introspection (rejects without a presence-capable adapter). */
+  readonly cluster: ClusterView
+  /** Whether a user (by `identify` key) has at least one live connection anywhere. */
+  isOnline(userId: string): Promise<boolean>
+  /** Publish a shared topic (server-only publish). */
+  publish(topic: string, data: unknown): void
+  /** Subscribe server-side to a shared topic, cluster-wide (local echo). Returns an unsubscribe fn. */
+  subscribe(topic: string, handler: (data: unknown, meta: BusMeta) => void): () => void
+  /** Target a single connection by id, on whatever node holds it. */
+  toConn(id: string): { emit(event: string, data: unknown): void; close(): void }
+  /** Target all of a user's connections across nodes. */
+  toUser(userId: string): { emit(event: string, data: unknown): void; disconnect(): void }
+  /** Server-authoritative handle for a configured store (incl. plugin-contributed stores). */
+  store(name: string): ServerStoreHandle
+  /** Configured stores (host + plugin) and their models. */
+  storeInfos(): StoreInfo[]
+  /** Full cluster descriptor for a local connection (identity + rooms + `describeConn` extras). */
+  describe(conn: Conn): ConnDescriptor
+  /** A connection's descriptor anywhere in the cluster (rejects without presence support); undefined if absent. */
+  connectionById(id: string): Promise<ConnDescriptor | undefined>
+  /** A plugin-private, cluster-wide adapter channel under the reserved `x:<plugin>:` prefix. */
+  channel(name: string): PluginChannel
+}
+
 /** Options for {@link createSuperLineServer}. */
-export interface SuperLineServerOptions<C extends Contract, A extends AuthResult<C>> {
+export interface SuperLineServerOptions<
+  C extends Contract,
+  A extends AuthResult<C>,
+  P extends readonly SuperLinePlugin<any>[] = readonly SuperLinePlugin<any>[],
+> {
+  /** Named runtime bundles (taps, middleware, lifecycle, handlers, stores). See {@link SuperLinePlugin}. */
+  plugins?: P
   /** Client↔server transports to accept connections on (e.g. `webSocketServerTransport({ server })`). */
   transports: ServerTransport[]
   /** Wire serializer; MUST match the client. Defaults to `jsonSerializer`. */
@@ -295,12 +447,6 @@ export interface SuperLineServerOptions<C extends Contract, A extends AuthResult
    */
   heartbeat?: { interval?: number; maxMissed?: number } | false
   /**
-   * Enable the read-only Control Center inspector: emit `msg.*` telemetry and accept inspector
-   * clients. The WS transport must also be created with `inspector: true` to negotiate the
-   * `superline.inspector.v1` subprotocol. **Default off; dev / trusted-network only.**
-   */
-  inspector?: boolean | { redact?: string[] }
-  /**
    * Pluggable persisted-state Stores, keyed by name (`{ scene: crdtStoreServer(), config: memoryStoreServer() }`).
    * Each is the server half of a Store pair; the client passes the matching client halves. Surfaced as
    * `srv.store.<name>` and `client.store.<name>`. Stores are off-contract and untyped (ADR-0003).
@@ -315,7 +461,7 @@ export interface SuperLineServerOptions<C extends Contract, A extends AuthResult
 }
 
 /** A running super-line server, returned by {@link createSuperLineServer}. */
-export interface SuperLineServer<C extends Contract, A extends AuthResult<C>> {
+export interface SuperLineServer<C extends Contract, A extends AuthResult<C>, HK extends string = never> {
   /** This node's stable id (unique per server process). */
   readonly nodeId: string
   /** This node's friendly name (from `nodeName`/`SUPER_LINE_NODE_NAME`, else a short `nodeId` slice). */
@@ -330,8 +476,8 @@ export interface SuperLineServer<C extends Contract, A extends AuthResult<C>> {
   toConn(id: string): ConnTarget<C>
   /** Target all of a user's connections (by `identify` key) across nodes (emit/disconnect). */
   toUser(userId: string): UserTarget<C>
-  /** Register handlers for shared + per-role requests (chainable). */
-  implement(handlers: Handlers<C, A>): SuperLineServer<C, A>
+  /** Register handlers for shared + per-role requests (chainable). Keys handled by a plugin (`HK`) are subtracted. */
+  implement(handlers: SubtractHandlers<Handlers<C, A>, HK>): SuperLineServer<C, A, HK>
   /** Mixed-role connection group; broadcast() sends a shared contract event to members. */
   room(name: string): Room<C>
   /** Publish a SHARED topic to all subscribers (server-only publish). */
@@ -378,24 +524,101 @@ type Impl = Record<string, Record<string, AnyHandler>>
  * })
  * ```
  */
-export function createSuperLineServer<C extends Contract, A extends AuthResult<C>>(
-  contract: C,
-  opts: SuperLineServerOptions<C, A>,
-): SuperLineServer<C, A> {
+export function createSuperLineServer<
+  C extends Contract,
+  A extends AuthResult<C>,
+  const P extends readonly SuperLinePlugin<any>[] = [],
+>(contract: C, opts: SuperLineServerOptions<C, A, P>): SuperLineServer<C, A, HandledKeys<P>> {
   const c: Contract = contract
   const serializer = opts.serializer ?? jsonSerializer
   const adapter = opts.adapter ?? createInMemoryAdapter()
-  const inspectorEnabled = !!opts.inspector
-  const inspectorRedact = new Set<string>(
-    opts.inspector && typeof opts.inspector === 'object' ? opts.inspector.redact ?? [] : [],
-  )
   const storeMap = (opts.stores ?? {}) as Record<string, ServerStore>
+  const plugins = opts.plugins ?? []
+  const pluginNames = new Set<string>()
+  for (const p of plugins) {
+    if (pluginNames.has(p.name)) throw new Error(`Duplicate plugin name: ${p.name}`)
+    pluginNames.add(p.name)
+  }
+  // merge plugin-contributed stores into the host's store map; a name collision throws (never silent)
+  for (const p of plugins) {
+    if (!p.stores) continue
+    for (const [name, store] of Object.entries(p.stores)) {
+      if (name in storeMap)
+        throw new Error(`Plugin '${p.name}' store '${name}' collides with an existing store of that name`)
+      storeMap[name] = store
+    }
+  }
+
+  // Reserved (plugin-owned) connection classes declared to transports; matching conns are observer-invisible.
+  const reserved: ReservedConnection[] = []
+  for (const p of plugins) {
+    if (!p.connection) continue
+    const { role, subprotocol, match } = p.connection
+    if (reserved.some((r) => r.role === role) || role in c.roles)
+      throw new Error(`Plugin '${p.name}' reserved role '${role}' collides with an existing role`)
+    reserved.push({ role, subprotocol, match })
+  }
+  const reservedRoles = new Set(reserved.map((r) => r.role))
+  // serving side (handlers + parallel contract + ctx), populated after `api` is built
+  const reservedServing = new Map<
+    string,
+    { connection: PluginConnection; handlers: Record<string, (input: unknown, conn: Conn) => Awaitable<unknown>>; ctx: PluginContext }
+  >()
+
+  // Lifecycle + error fan-out: host hook first, then each plugin's, error-isolated per listener.
+  const errorHandlers: Array<(error: unknown, info: MiddlewareInfo) => void> = []
+  if (opts.onError) errorHandlers.push(opts.onError)
+  for (const p of plugins) if (p.onError) errorHandlers.push(p.onError)
+  function fireError(error: unknown, info: MiddlewareInfo): void {
+    for (const handler of errorHandlers) {
+      try {
+        handler(error, info)
+      } catch {
+        // an error handler that itself throws has nowhere left to route — swallow
+      }
+    }
+  }
+
+  const connectionHooks: Array<(conn: Conn, ctx: unknown) => void> = []
+  if (opts.onConnection) connectionHooks.push(opts.onConnection as (conn: Conn, ctx: unknown) => void)
+  for (const p of plugins) if (p.onConnection) connectionHooks.push(p.onConnection)
+  function fireConnection(conn: Conn, ctx: unknown): void {
+    for (const handler of connectionHooks) {
+      try {
+        handler(conn, ctx)
+      } catch (err) {
+        fireError(err, { kind: 'connect', name: 'onConnection', conn })
+      }
+    }
+  }
+
+  const disconnectHooks: Array<(conn: Conn, ctx: unknown, code: number) => void> = []
+  if (opts.onDisconnect) disconnectHooks.push(opts.onDisconnect as (conn: Conn, ctx: unknown, code: number) => void)
+  for (const p of plugins) if (p.onDisconnect) disconnectHooks.push(p.onDisconnect)
+  function fireDisconnect(conn: Conn, ctx: unknown, code: number): void {
+    for (const handler of disconnectHooks) {
+      try {
+        handler(conn, ctx, code)
+      } catch (err) {
+        fireError(err, { kind: 'disconnect', name: 'onDisconnect', conn })
+      }
+    }
+  }
+
+  // Combined middleware chain: host `use` first, then each plugin's `use` in array order.
+  const middlewareChain: Middleware<A>[] = [
+    ...(opts.use ?? []),
+    ...plugins.flatMap((p) => (p.use ?? []) as Middleware<A>[]),
+  ]
+
   const conns = new Set<Conn>()
-  const inspectorConns = new Set<Conn>() // read-only inspectors: kept out of conns/presence/heartbeat
+  const reservedConns = new Set<Conn>() // plugin-owned conns: kept out of conns/presence/heartbeat/user hooks
   // local members per namespaced channel (rooms + topics share this registry)
   const members = new Map<string, Set<Conn>>()
   // server-side bus subscribers per topic channel (parallel to `members` which holds conns)
   const busListeners = new Map<string, Set<(data: unknown, meta: BusMeta) => void>>()
+  // plugin-private channels (x:<plugin>:<name>), off-contract so they don't ride the validated bus path
+  const pluginChannels = new Map<string, Set<(data: unknown, meta: BusMeta) => void>>()
   const instanceId = randomUUID() // identifies this node; lets the bus drop its own looped-back echo
   const envNodeName = typeof process !== 'undefined' ? process.env.SUPER_LINE_NODE_NAME : undefined
   const nodeName = opts.nodeName ?? envNodeName ?? instanceId.slice(0, 8)
@@ -444,6 +667,10 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     }
     if (channel.startsWith(STORE)) {
       handleStoreRelay(channel, payload)
+      return
+    }
+    if (channel.startsWith(PLUGIN)) {
+      handlePluginChannel(channel, payload)
       return
     }
     const set = members.get(channel)
@@ -518,10 +745,10 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     } else {
       env = { i: r.corrId, ok: false, code: result.code, m: result.m, d: result.d }
     }
-    if (inspectorEnabled)
-      emitInspectorEvent(
+    if (taps.length)
+      emitTap(
         env.ok
-          ? { type: 'msg.serverReply', target: conn.id, name: r.name, ok: true, output: safeSnapshot(env.d), reqId: r.corrId }
+          ? { type: 'msg.serverReply', target: conn.id, name: r.name, ok: true, output: env.d, reqId: r.corrId }
           : {
               type: 'msg.serverReply',
               target: conn.id,
@@ -556,28 +783,31 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     hbTimer.unref?.()
   }
 
-  // publish a live topology event to subscribed inspectors (fans out cluster-wide via the adapter).
-  // ts/byteSize/originNodeId are stamped here, the single choke point — call sites stay metadata-free.
-  function emitInspectorEvent(event: InspectorEvent): void {
-    if (!inspectorEnabled) return
-    const payload = eventPayload(event)
-    const envelope: InspectorEnvelope = {
-      event,
-      ts: Date.now(),
-      originNodeId: instanceId,
-      byteSize: payload === undefined ? undefined : encodedByteSize(serializer.encode(payload)),
+  // Multi-consumer tap: every emit site funnels here. Consumers receive LIVE payload refs, in
+  // registration order (the inspector first, then plugin `onEvent` taps). A throwing consumer is
+  // isolated + routed to onError so a bad tap can't fail the underlying op. Zero cost when empty.
+  const taps: Array<(event: InspectorEvent) => void> = []
+  function emitTap(event: InspectorEvent): void {
+    if (!taps.length) return
+    for (const tap of taps) {
+      try {
+        tap(event)
+      } catch (err) {
+        fireError(err, { kind: 'event', name: event.type })
+      }
     }
-    void adapter.publish(INSPECT + 'events', serializer.encode({ t: 'pub', c: 'events', d: envelope }))
   }
+
+  for (const p of plugins) if (p.onEvent) taps.push(p.onEvent) // taps: plugin observers (the inspector is one)
 
   function joinChannel(conn: Conn, channel: string): void | Promise<void> {
     conn.channels.add(channel)
     if (channel.startsWith(ROOM)) {
       const room = channel.slice(ROOM.length)
       void adapter.presence?.addRoom(conn.id, room)
-      emitInspectorEvent({ type: 'room.add', connId: conn.id, room })
+      emitTap({ type: 'room.add', connId: conn.id, room })
     } else if (channel.startsWith(TOPIC)) {
-      emitInspectorEvent({ type: 'topic.sub', connId: conn.id, topic: channel.slice(channel.indexOf(':', TOPIC.length) + 1) })
+      emitTap({ type: 'topic.sub', connId: conn.id, topic: channel.slice(channel.indexOf(':', TOPIC.length) + 1) })
     }
     const set = members.get(channel)
     if (set) {
@@ -597,9 +827,9 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     if (channel.startsWith(ROOM)) {
       const room = channel.slice(ROOM.length)
       void adapter.presence?.removeRoom(conn.id, room)
-      emitInspectorEvent({ type: 'room.remove', connId: conn.id, room })
+      emitTap({ type: 'room.remove', connId: conn.id, room })
     } else if (channel.startsWith(TOPIC)) {
-      emitInspectorEvent({ type: 'topic.unsub', connId: conn.id, topic: channel.slice(channel.indexOf(':', TOPIC.length) + 1) })
+      emitTap({ type: 'topic.unsub', connId: conn.id, topic: channel.slice(channel.indexOf(':', TOPIC.length) + 1) })
     }
     if (set.size === 0) {
       members.delete(channel)
@@ -632,135 +862,50 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     return out
   }
 
-  // inspector connections dispatch against the fixed InspectorContract, never the user's contract
-  async function onInspectorFrame(conn: Conn, frame: ClientFrame): Promise<void> {
-    if (frame.t === 'req') await handleInspectorReq(conn, frame)
-    else if (frame.t === 'sub') await handleInspectorSub(conn, frame)
-    else if (frame.t === 'unsub') leaveChannel(conn, INSPECT + 'events')
-  }
-
-  async function handleInspectorSub(conn: Conn, frame: { i: number; c: string }): Promise<void> {
-    if (frame.c !== 'events') {
-      conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: `Unknown topic: ${frame.c}` })
-      return
-    }
-    await joinChannel(conn, INSPECT + 'events') // await subscribe so the ack means "receiving"
-    conn.send({ t: 'res', i: frame.i, d: null })
-  }
-
-  async function handleInspectorReq(conn: Conn, frame: ReqFrame): Promise<void> {
-    const handler = inspectorHandlers[frame.m]
-    if (!handler) {
-      conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: `Unknown message: ${frame.m}` })
-      return
-    }
-    try {
-      const output = await handler(frame.d, conn)
-      conn.send({ t: 'res', i: frame.i, d: output })
-    } catch (err) {
-      const e = err instanceof SuperLineError ? err : new SuperLineError('INTERNAL', 'Internal server error')
-      conn.send({ t: 'err', i: frame.i, code: e.code, m: e.message, d: e.data })
-    }
-  }
-
-  // getContract structure + best-effort JSON Schema via lazy, optional @standard-community/standard-json.
-  // The package (and the per-vendor converter) is optional — missing/unsupported falls back to structure only.
-  async function buildInspectedContract(): Promise<InspectedContract> {
-    let toJsonSchema: (s: Schema) => Promise<unknown>
-    try {
-      const mod = await import('@standard-community/standard-json')
-      toJsonSchema = mod.toJsonSchema as unknown as (s: Schema) => Promise<unknown>
-    } catch {
-      return classifyContract(c) // converter package not installed -> structure only
-    }
-    const schemas = new Set<Schema>()
-    classifyContract(c, (s) => {
-      schemas.add(s)
-      return undefined
-    })
-    const converted = new Map<Schema, unknown>()
-    await Promise.all(
-      [...schemas].map((s) =>
-        toJsonSchema(s).then(
-          (j) => {
-            converted.set(s, j)
-          },
-          () => {}, // unsupported vendor / missing per-vendor converter -> structure-only for this entry
-        ),
-      ),
-    )
-    return classifyContract(c, (s) => converted.get(s))
-  }
-
-  // best-effort, never-throwing snapshot of ctx/conn.data for the inspector (node-local, display-only)
-  function safeSnapshot(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
-    if (value === null) return null
-    const t = typeof value
-    if (t === 'bigint') return `${(value as bigint).toString()}n`
-    if (t === 'function') return '[Function]'
-    if (t === 'symbol') return (value as symbol).toString()
-    if (t !== 'object') return value // string | number | boolean | undefined
-    const obj = value as object
-    if (obj instanceof Date) return obj.toISOString()
-    if (seen.has(obj)) return '[Circular]'
-    if (depth >= 6) return '[MaxDepth]'
-    seen.add(obj)
-    try {
-      if (Array.isArray(obj)) return obj.slice(0, 1000).map((v) => safeSnapshot(v, depth + 1, seen))
-      const ctor = (Object.getPrototypeOf(obj) as { constructor?: { name?: string } } | null)?.constructor?.name
-      const out: Record<string, unknown> = {}
-      if (ctor && ctor !== 'Object') out['#type'] = ctor
-      for (const [k, v] of Object.entries(obj)) {
-        out[k] = inspectorRedact.has(k) ? '[Redacted]' : safeSnapshot(v, depth + 1, seen)
+  // Serve a plugin-owned reserved connection: dispatch req against its parallel-contract handlers, and
+  // bridge a topic subscribe to the plugin's channel of the same name (so the plugin's publishes reach it).
+  const reservedBridges = new WeakMap<Conn, Map<string, () => void>>()
+  async function onReservedFrame(conn: Conn, frame: ClientFrame): Promise<void> {
+    const serving = reservedServing.get(conn.role)
+    if (!serving) return
+    if (frame.t === 'req') {
+      const handler = serving.handlers[frame.m]
+      if (!handler) {
+        conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: `Unknown message: ${frame.m}` })
+        return
       }
-      return out
-    } finally {
-      seen.delete(obj)
+      try {
+        conn.send({ t: 'res', i: frame.i, d: await handler(frame.d, conn) })
+      } catch (err) {
+        const e = err instanceof SuperLineError ? err : new SuperLineError('INTERNAL', 'Internal server error')
+        conn.send({ t: 'err', i: frame.i, code: e.code, m: e.message, d: e.data })
+      }
+    } else if (frame.t === 'sub') {
+      if (!isSubscribeTopic(serving.connection.contract, frame.c)) {
+        conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: `Unknown topic: ${frame.c}` })
+        return
+      }
+      let bridges = reservedBridges.get(conn)
+      if (!bridges) {
+        bridges = new Map()
+        reservedBridges.set(conn, bridges)
+      }
+      bridges.get(frame.c)?.() // drop a prior subscription to the same topic
+      bridges.set(frame.c, serving.ctx.channel(frame.c).subscribe((data) => conn.send({ t: 'pub', c: frame.c, d: data })))
+      conn.send({ t: 'res', i: frame.i, d: null })
+    } else if (frame.t === 'unsub') {
+      const bridges = reservedBridges.get(conn)
+      bridges?.get(frame.c)?.()
+      bridges?.delete(frame.c)
     }
   }
 
-  const inspectorHandlers: Record<string, (input: unknown, conn: Conn) => Promise<unknown>> = {
-    getContract: () => buildInspectedContract(),
-    getTopology: async () => presenceOrThrow().topology(),
-    listConnections: async () => presenceOrThrow().list(),
-    getNode: async () => ({ nodeId: instanceId, nodeName, rooms: localRooms(), topics: localTopics() }),
-    getConn: async (input) => {
-      const id = (input as { id?: string } | undefined)?.id
-      if (!id) throw new SuperLineError('BAD_REQUEST', 'getConn requires an id')
-      const local = [...conns].find((cn) => cn.id === id)
-      if (local) {
-        return {
-          descriptor: buildDescriptor(local),
-          ctx: safeSnapshot(local.ctx),
-          data: safeSnapshot(local.data),
-          ctxAvailable: true,
-        } satisfies ConnView
-      }
-      const remote = await presenceOrThrow().get(id) // on another node: descriptor only, no ctx
-      if (!remote) throw new SuperLineError('NOT_FOUND', `Unknown connection: ${id}`)
-      return { descriptor: remote, ctxAvailable: false } satisfies ConnView
-    },
-    listStores: async () =>
-      Object.entries(storeMap).map(([name, store]) => ({ name, model: store.model })) satisfies StoreInfo[],
-    listResources: async (input) => {
-      const store = storeMap[(input as { store: string }).store]
-      if (!store) throw new SuperLineError('NOT_FOUND', `Unknown store: ${(input as { store: string }).store}`)
-      return store.list()
-    },
-    readResource: async (input) => {
-      const { store: name, id } = input as { store: string; id: string }
-      const store = storeMap[name]
-      if (!store) throw new SuperLineError('NOT_FOUND', `Unknown store: ${name}`)
-      const resource = await store.read(id) // ACL bypassed — inspector is a trusted observer
-      if (!resource) throw new SuperLineError('NOT_FOUND', `No resource: ${name}/${id}`)
-      let data = resource.data
-      if (store.open) {
-        const replica = store.open(id) // materialize a readable snapshot (LWW: plain; CRDT: decoded)
-        data = replica.getSnapshot()
-        replica.close()
-      }
-      return { data: safeSnapshot(data), accessRules: resource.accessRules } satisfies StoreResourceView
-    },
+  function isSubscribeTopic(contract: Contract, name: string): boolean {
+    const isTopicDef = (def: unknown): boolean =>
+      !!def && typeof def === 'object' && 'subscribe' in def && (def as { subscribe?: unknown }).subscribe === true
+    if (isTopicDef(contract.shared?.serverToClient?.[name])) return true
+    for (const role of Object.keys(contract.roles)) if (isTopicDef(contract.roles[role]?.serverToClient?.[name])) return true
+    return false
   }
 
   // Core owns the auth decision; each transport calls this at its native moment and rejects natively on throw.
@@ -769,16 +914,12 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     return { role: auth.role, ctx: auth.ctx, transport: handshake.transport }
   }
 
-  // A transport accepted (and authenticated) a connection — wire it up. Inspector conns
-  // (role === INSPECTOR_ROLE, set by the transport) are observer-invisible.
+  // A transport accepted (and authenticated) a connection — wire it up. Reserved conns (a role the server
+  // declared in `reserved`, set by the transport) are observer-invisible and dispatch against a parallel contract.
   function acceptConn(raw: RawConn, auth: AuthOutcome): void {
     const role = auth.role
     const ctx = auth.ctx
-    const inspector = role === INSPECTOR_ROLE
-    if (inspector && !inspectorEnabled) {
-      raw.close() // server-authoritative: refuse an inspector a transport offered but this server didn't enable
-      return
-    }
+    const isReserved = reservedRoles.has(role) // a plugin-declared reserved role (e.g. the inspector's)
     const connId = randomUUID()
     const conn = new Conn(
       raw,
@@ -786,9 +927,8 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       role,
       ctx,
       serializer,
-      inspectorEnabled
-        ? (event, data) =>
-            emitInspectorEvent({ type: 'msg.event', target: connId, name: event, data: safeSnapshot(data) })
+      taps.length
+        ? (event, data) => emitTap({ type: 'msg.event', target: connId, name: event, data })
         : undefined,
     )
     conn.transport = auth.transport
@@ -797,12 +937,17 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       void onMessage(conn, bytes)
     })
 
-    if (inspector) {
+    if (isReserved) {
       // observer-invisible: not in conns/presence/heartbeat, no lifecycle hooks
-      inspectorConns.add(conn)
+      reservedConns.add(conn)
       raw.onClose(() => {
-        inspectorConns.delete(conn)
-        for (const channel of conn.channels) leaveChannel(conn, channel) // drop its events subscription
+        reservedConns.delete(conn)
+        const bridges = reservedBridges.get(conn) // plugin-owned conns bridge topics to plugin channels
+        if (bridges) {
+          for (const off of bridges.values()) off()
+          reservedBridges.delete(conn)
+        }
+        for (const channel of conn.channels) leaveChannel(conn, channel) // inline inspector's i:events sub
       })
       return
     }
@@ -813,18 +958,18 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       for (const channel of conn.channels) leaveChannel(conn, channel)
       void adapter.presence?.del(conn.id)
       const goneUserId = opts.identify?.(conn) // carry the name so the feed can label a purged conn
-      emitInspectorEvent({
+      emitTap({
         type: 'disconnect',
         connId: conn.id,
         nodeId: instanceId,
         ...(goneUserId !== undefined ? { userId: goneUserId } : {}),
       })
-      opts.onDisconnect?.(conn, ctx as CtxUnion<A>, code)
+      fireDisconnect(conn, ctx, code)
     })
-    opts.onConnection?.(conn, ctx as CtxUnion<A>) // may seed conn.data before the snapshot
+    fireConnection(conn, ctx) // may seed conn.data before the snapshot
     const descriptor = buildDescriptor(conn) // snapshot (reads conn.data)
     void adapter.presence?.set(descriptor)
-    emitInspectorEvent({ type: 'connect', descriptor })
+    emitTap({ type: 'connect', descriptor })
     void joinChannel(conn, CONN + conn.id) // personal channel for targeted cross-node send
     const uid = opts.identify?.(conn)
     if (uid !== undefined) void joinChannel(conn, USER + uid)
@@ -837,8 +982,8 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     } catch {
       return
     }
-    if (inspectorConns.has(conn)) {
-      await onInspectorFrame(conn, frame)
+    if (reservedConns.has(conn)) {
+      await onReservedFrame(conn, frame) // dispatch against the plugin's parallel contract
       return
     }
     if (frame.t === 'req') await handleReq(conn, frame)
@@ -861,11 +1006,11 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
   }
 
   for (const transport of opts.transports) {
-    void transport.start({ authenticate: authHook, onConnection: acceptConn })
+    void transport.start({ authenticate: authHook, onConnection: acceptConn, reserved })
   }
 
   function runMiddleware(info: MiddlewareInfo, terminal: () => Promise<void>): Promise<void> {
-    const chain = opts.use ?? []
+    const chain = middlewareChain
     let last = -1
     const dispatch = (idx: number): Promise<void> => {
       if (idx <= last) return Promise.reject(new Error('next() called multiple times'))
@@ -891,11 +1036,11 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
         responded = true
       })
     } catch (err) {
-      opts.onError?.(err, info)
+      fireError(err, info)
       const e = err instanceof SuperLineError ? err : new SuperLineError('INTERNAL', 'Internal server error')
       if (!responded) conn.send({ t: 'err', i: id, code: e.code, m: e.message, d: e.data })
-      if (inspectorEnabled && info.kind === 'request')
-        emitInspectorEvent({
+      if (taps.length && info.kind === 'request')
+        emitTap({
           type: 'msg.response',
           connId: conn.id,
           name: info.name,
@@ -907,32 +1052,33 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
   }
 
   async function handleReq(conn: Conn, frame: ReqFrame): Promise<void> {
-    // resolving by role inherently enforces the boundary: a cross-role method is unknown here
+    // resolving by role inherently enforces the boundary: a cross-role method is unknown here. The `def`
+    // lookup gates the plugin-handler fallback too, so a plugin handler only fires for a method in this role.
     const def = c.roles[conn.role]?.clientToServer?.[frame.m] ?? c.shared?.clientToServer?.[frame.m]
-    const handler = impl[conn.role]?.[frame.m] ?? impl.shared?.[frame.m]
+    const handler = impl[conn.role]?.[frame.m] ?? impl.shared?.[frame.m] ?? pluginHandlers[frame.m]
     if (!def || !handler) {
       conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: `Unknown message: ${frame.m}` })
       return
     }
     await dispatchOp(conn, frame.i, { kind: 'request', name: frame.m, conn }, async () => {
       const input = await validate(def.input, frame.d)
-      if (inspectorEnabled)
-        emitInspectorEvent({
+      if (taps.length)
+        emitTap({
           type: 'msg.request',
           connId: conn.id,
           role: conn.role,
           name: frame.m,
-          input: safeSnapshot(input),
+          input,
           reqId: frame.i,
         })
       const output = await handler(input, conn.ctx, conn)
-      if (inspectorEnabled)
-        emitInspectorEvent({
+      if (taps.length)
+        emitTap({
           type: 'msg.response',
           connId: conn.id,
           name: frame.m,
           ok: true,
-          output: safeSnapshot(output),
+          output,
           reqId: frame.i,
         })
       conn.send({ t: 'res', i: frame.i, d: output })
@@ -976,7 +1122,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       if (!resource.accessRules[principal]?.read)
         throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}/${frame.id}`)
       await joinChannel(conn, STORE + frame.n + ':' + frame.id)
-      if (inspectorEnabled) emitInspectorEvent({ type: 'store.subscribe', connId: conn.id, store: frame.n, id: frame.id })
+      if (taps.length) emitTap({ type: 'store.subscribe', connId: conn.id, store: frame.n, id: frame.id })
       conn.send({ t: 'res', i: frame.i, d: resource.data }) // catch-up snapshot
     })
   }
@@ -1004,14 +1150,14 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       if (!resource.accessRules[principal]?.write)
         throw new SuperLineError('FORBIDDEN', `Write denied: ${frame.n}/${frame.id}`)
       await store.apply({ id: frame.id, update: frame.u, origin: frame.o }) // → store.onChange → fan-out
-      if (inspectorEnabled)
-        emitInspectorEvent({
+      if (taps.length)
+        emitTap({
           type: 'store.write',
           store: frame.n,
           id: frame.id,
           origin: frame.o,
           connId: conn.id,
-          data: safeSnapshot(frame.u),
+          data: frame.u,
         })
       conn.send({ t: 'res', i: frame.i, d: null })
     })
@@ -1020,7 +1166,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
   function handleStoreClose(conn: Conn, frame: SCloseFrame): void {
     if (!storeMap[frame.n]) return
     leaveChannel(conn, STORE + frame.n + ':' + frame.id)
-    if (inspectorEnabled) emitInspectorEvent({ type: 'store.unsubscribe', connId: conn.id, store: frame.n, id: frame.id })
+    if (taps.length) emitTap({ type: 'store.unsubscribe', connId: conn.id, store: frame.n, id: frame.id })
   }
 
   // Each Store's onChange is core's single fan-out source. A `relay` store has no shared backend, so core
@@ -1096,8 +1242,8 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
         leaveChannel(conn, channel)
       },
       broadcast(event, data) {
-        if (inspectorEnabled)
-          emitInspectorEvent({ type: 'msg.broadcast', room: name, name: String(event), data: safeSnapshot(data) })
+        if (taps.length)
+          emitTap({ type: 'msg.broadcast', room: name, name: String(event), data })
         void adapter.publish(channel, serializer.encode({ t: 'evt', e: String(event), d: data }))
       },
       get size() {
@@ -1111,7 +1257,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
 
   function publishTo(ns: string, name: string, data: unknown): void {
     const channel = TOPIC + ns + ':' + name
-    if (inspectorEnabled) emitInspectorEvent({ type: 'msg.publish', topic: name, data: safeSnapshot(data) })
+    if (taps.length) emitTap({ type: 'msg.publish', topic: name, data })
     // local echo: fire same-node bus subscribers in-process (no adapter round-trip), trusted (not re-validated)
     const busSet = busListeners.get(channel)
     if (busSet) for (const cb of busSet) callBus(cb, data, instanceId, name)
@@ -1127,7 +1273,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     try {
       cb(data, { from }) // isolate each listener: one throw can't kill siblings or the message pump
     } catch (err) {
-      opts.onError?.(err, { kind: 'event', name })
+      fireError(err, { kind: 'event', name })
     }
   }
 
@@ -1150,12 +1296,56 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
         try {
           data = await validate(schema, frame.d)
         } catch (err) {
-          opts.onError?.(err, { kind: 'event', name })
+          fireError(err, { kind: 'event', name })
           return
         }
       }
       for (const cb of set) callBus(cb, data, from, name)
     })()
+  }
+
+  // a frame on a plugin channel (x:<plugin>:<name>): decode the {i,d} envelope, drop our own echo, deliver.
+  function handlePluginChannel(channel: string, payload: string | Uint8Array): void {
+    const set = pluginChannels.get(channel)
+    if (!set) return
+    let frame: { i: string; d: unknown }
+    try {
+      frame = serializer.decode(payload) as { i: string; d: unknown }
+    } catch {
+      return
+    }
+    if (frame.i === instanceId) return // own publish looped back; local listeners already fired directly
+    for (const cb of set) callBus(cb, frame.d, frame.i, channel)
+  }
+
+  // a plugin-private, cluster-wide channel: local echo in-process + adapter fan-out, own echo dropped by id.
+  function pluginChannel(pluginName: string, name: string): PluginChannel {
+    const channel = PLUGIN + pluginName + ':' + name
+    return {
+      publish(data) {
+        const set = pluginChannels.get(channel)
+        if (set) for (const cb of set) callBus(cb, data, instanceId, channel) // local echo
+        void adapter.publish(channel, serializer.encode({ i: instanceId, d: data }))
+      },
+      subscribe(handler) {
+        let set = pluginChannels.get(channel)
+        if (!set) {
+          set = new Set()
+          pluginChannels.set(channel, set)
+          void adapter.subscribe(channel)
+        }
+        set.add(handler)
+        return () => {
+          const current = pluginChannels.get(channel)
+          if (!current) return
+          current.delete(handler)
+          if (current.size === 0) {
+            pluginChannels.delete(channel)
+            void adapter.unsubscribe(channel)
+          }
+        }
+      },
+    }
   }
 
   // emit/close to a personal (c:/u:) channel; the owning node delivers via handlePersonal
@@ -1165,12 +1355,12 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
   } {
     return {
       emit(event, data) {
-        if (inspectorEnabled)
-          emitInspectorEvent({
+        if (taps.length)
+          emitTap({
             type: 'msg.event',
             target: channel.slice(channel.indexOf(':') + 1),
             name: event,
-            data: safeSnapshot(data),
+            data,
           })
         const env: PersonalEnvelope = { p: 'emit', f: { t: 'evt', e: event, d: data } }
         void adapter.publish(channel, serializer.encode(env))
@@ -1209,8 +1399,8 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
         },
         { once: true },
       )
-      if (inspectorEnabled)
-        emitInspectorEvent({ type: 'msg.serverRequest', target: id, name, input: safeSnapshot(input), reqId })
+      if (taps.length)
+        emitTap({ type: 'msg.serverRequest', target: id, name, input, reqId })
       const env: PersonalEnvelope = { p: 'req', o: instanceId, i: reqId, m: name, d: input }
       void adapter.publish(CONN + id, serializer.encode(env))
     })
@@ -1227,7 +1417,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     storeApi[name] = {
       async create(id, data, accessRules) {
         await store.create(id, data, accessRules)
-        if (inspectorEnabled) emitInspectorEvent({ type: 'store.create', store: name, id })
+        if (taps.length) emitTap({ type: 'store.create', store: name, id })
       },
       read(id) {
         return Promise.resolve(store.read(id))
@@ -1235,20 +1425,19 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       async write(id, data, opts) {
         const origin = opts?.origin ?? SERVER_ORIGIN
         await store.apply({ id, update: data, origin })
-        if (inspectorEnabled)
-          emitInspectorEvent({ type: 'store.write', store: name, id, origin, data: safeSnapshot(data) })
+        if (taps.length) emitTap({ type: 'store.write', store: name, id, origin, data })
       },
       async grant(id, principal, perms) {
         const r = await readOrThrow(id)
         await store.setAccess(id, { ...r.accessRules, [principal]: perms })
-        if (inspectorEnabled) emitInspectorEvent({ type: 'store.grant', store: name, id, principal, perms })
+        if (taps.length) emitTap({ type: 'store.grant', store: name, id, principal, perms })
       },
       async revoke(id, principal) {
         const r = await readOrThrow(id)
         const next = { ...r.accessRules }
         delete next[principal]
         await store.setAccess(id, next)
-        if (inspectorEnabled) emitInspectorEvent({ type: 'store.revoke', store: name, id, principal })
+        if (taps.length) emitTap({ type: 'store.revoke', store: name, id, principal })
       },
       async delete(id) {
         await store.delete(id)
@@ -1258,7 +1447,7 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
             STORE + name + ':' + id,
             serializer.encode({ t: 'sdel', n: name, id, nd: instanceId } satisfies SDeleteFrame),
           )
-        if (inspectorEnabled) emitInspectorEvent({ type: 'store.delete', store: name, id })
+        if (taps.length) emitTap({ type: 'store.delete', store: name, id })
       },
       list() {
         return Promise.resolve(store.list())
@@ -1267,11 +1456,10 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
         if (!store.open)
           throw new SuperLineError('UNSUPPORTED', `Store ${name} does not support reactive open()`)
         const replica = store.open(id, openOpts)
-        if (!inspectorEnabled) return replica
-        // Surface server co-writes in the inspector (reusing store.write), attributed to this handle's origin.
+        if (!taps.length) return replica
+        // Surface server co-writes to taps (reusing store.write), attributed to this handle's origin.
         const origin = openOpts?.origin ?? SERVER_ORIGIN
-        const emit = (data: unknown): void =>
-          emitInspectorEvent({ type: 'store.write', store: name, id, origin, data: safeSnapshot(data) })
+        const emit = (data: unknown): void => emitTap({ type: 'store.write', store: name, id, origin, data })
         return {
           ...replica,
           set: (d) => {
@@ -1291,7 +1479,10 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     }
   }
 
-  const api: SuperLineServer<C, A> = {
+  const pluginDisposers: Array<() => void> = [] // populated after `api` is built (plugin setup() returns)
+  const pluginHandlers: Record<string, AnyHandler> = {} // plugin request handlers, keyed by method name
+
+  const api: SuperLineServer<C, A, HandledKeys<P>> = {
     nodeId: instanceId,
     nodeName,
     get local(): LocalView {
@@ -1338,7 +1529,26 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
       return { emit: t.emit, disconnect: t.close }
     },
     implement(handlers) {
-      impl = handlers as unknown as Impl
+      const map = handlers as unknown as Impl
+      // Runtime floor (ships regardless of the compile-time subtraction): every contract clientToServer
+      // key must be covered by exactly one of the impl map or a plugin — never both, never neither.
+      const missing: string[] = []
+      const duplicate: string[] = []
+      const checkBlock = (block: string, defs: Record<string, unknown> | undefined): void => {
+        if (!defs) return
+        for (const key of Object.keys(defs)) {
+          const inImpl = !!map[block]?.[key]
+          const inPlugin = key in pluginHandlers
+          if (inImpl && inPlugin) duplicate.push(`${block}.${key}`)
+          else if (!inImpl && !inPlugin) missing.push(`${block}.${key}`)
+        }
+      }
+      checkBlock('shared', c.shared?.clientToServer)
+      for (const role of Object.keys(c.roles)) checkBlock(role, c.roles[role]?.clientToServer)
+      if (duplicate.length)
+        throw new Error(`implement: these keys are also handled by a plugin — remove them: ${duplicate.join(', ')}`)
+      if (missing.length) throw new Error(`implement: missing handler(s) for: ${missing.join(', ')}`)
+      impl = map
       return api
     },
     room,
@@ -1380,13 +1590,81 @@ export function createSuperLineServer<C extends Contract, A extends AuthResult<C
     async close() {
       if (closing) return
       closing = true
+      for (const dispose of pluginDisposers) {
+        try {
+          dispose() // plugins tear down first, while the adapter is still live for channel unsubscribes
+        } catch {
+          // a dispose that throws can't block the rest of shutdown
+        }
+      }
       if (hbTimer) clearInterval(hbTimer)
       for (const conn of conns) conn.close()
-      for (const conn of inspectorConns) conn.close()
+      for (const conn of reservedConns) conn.close()
       await adapter.presence?.clearNode(instanceId) // remove this node's registry entries before disconnecting
       await adapter.close?.()
       for (const transport of opts.transports) await transport.stop()
     },
   }
+
+  // The plugin's public capabilities: forward to `api` (minus implement/close) + the privileged block.
+  function makePluginContext(pluginName: string): PluginContext {
+    return {
+      nodeId: instanceId,
+      nodeName,
+      instanceId,
+      serializer,
+      contract: c,
+      get conns() {
+        return [...conns]
+      },
+      get local() {
+        return api.local
+      },
+      cluster: api.cluster,
+      isOnline: (userId) => api.isOnline(userId),
+      publish: (topic, data) => publishTo('shared', topic, data),
+      subscribe: (topic, handler) => api.subscribe(topic as never, handler as never),
+      toConn: (id) => {
+        const t = api.toConn(id)
+        return { emit: (event, data) => t.emit(event as never, data as never), close: t.close }
+      },
+      toUser: (userId) => {
+        const t = api.toUser(userId)
+        return { emit: (event, data) => t.emit(event as never, data as never), disconnect: t.disconnect }
+      },
+      store: (name) => api.store(name),
+      storeInfos: () => Object.entries(storeMap).map(([name, store]) => ({ name, model: store.model })),
+      describe: (conn) => buildDescriptor(conn),
+      connectionById: (id) => Promise.resolve(presenceOrThrow().get(id)),
+      channel: (name) => pluginChannel(pluginName, name),
+    }
+  }
+
+  // every clientToServer key the contract knows (across shared + roles) — the orphan-handler guard
+  const contractRequestKeys = new Set<string>(Object.keys(c.shared?.clientToServer ?? {}))
+  for (const role of Object.keys(c.roles))
+    for (const k of Object.keys(c.roles[role]?.clientToServer ?? {})) contractRequestKeys.add(k)
+
+  for (const p of plugins) {
+    const ctx = makePluginContext(p.name)
+    if (p.handlers) {
+      for (const [key, fn] of Object.entries(p.handlers(ctx))) {
+        if (!contractRequestKeys.has(key))
+          throw new Error(`Plugin '${p.name}' handles '${key}', which the contract has no request for — did you forget to merge its surface?`)
+        if (key in pluginHandlers)
+          throw new Error(`Plugin handler collision on '${key}' (already provided by another plugin)`)
+        pluginHandlers[key] = fn as AnyHandler
+      }
+    }
+    if (p.connection)
+      reservedServing.set(p.connection.role, {
+        connection: p.connection,
+        handlers: p.connection.handlers?.(ctx) ?? {},
+        ctx,
+      })
+    const dispose = p.setup?.(ctx)
+    if (dispose) pluginDisposers.push(dispose)
+  }
+
   return api
 }

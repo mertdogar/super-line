@@ -6,6 +6,7 @@ import { yamux } from '@chainsafe/libp2p-yamux'
 import { identify } from '@libp2p/identify'
 import { gossipsub } from '@libp2p/gossipsub'
 import { mdns } from '@libp2p/mdns'
+import { inspector } from '@super-line/plugin-inspector'
 import { createSuperLineServer } from '@super-line/server'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createLibp2pAdapter, type PubSubLibp2p } from '@super-line/adapter-libp2p'
@@ -48,12 +49,12 @@ node.addEventListener('peer:discovery', (e) => {
 const server = http.createServer()
 const srv = createSuperLineServer(contract, {
   nodeName: NODE,
-  transports: [webSocketServerTransport({ server, inspector: true })],
+  transports: [webSocketServerTransport({ server })],
   authenticate: () => ({ role: 'user' as const, ctx: {} }),
   identify: () => 'demo', // shared principal: every client reads/writes the same room
   adapter: await createLibp2pAdapter({ node }), // reuse the BYO node for server↔server fan-out
   stores: { docs: store },
-  inspector: true, // read-only Control Center channel at /inspect (dev/trusted-network only)
+  plugins: [inspector()],
 })
 
 // Seed the shared resource once. All nodes share the central Postgres, so the first wins; the rest

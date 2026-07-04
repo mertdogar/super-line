@@ -10,6 +10,7 @@ import { dcutr } from '@libp2p/dcutr'
 import { gossipsub } from '@libp2p/gossipsub'
 import { pubsubPeerDiscovery } from '@libp2p/pubsub-peer-discovery'
 import { multiaddr } from '@multiformats/multiaddr'
+import { inspector } from '@super-line/plugin-inspector'
 import { createSuperLineServer, type Conn } from '@super-line/server'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { libp2pServerTransport } from '@super-line/transport-libp2p'
@@ -79,7 +80,7 @@ if (INSPECTOR_PORT) {
   // Out-of-band management port for the Control Center (WS inspector). NOT how app clients connect —
   // they use libp2p/webrtc. Inspector telemetry is cluster-wide, so one gateway shows every node.
   inspectorHttp = http.createServer()
-  transports.push(webSocketServerTransport({ server: inspectorHttp, inspector: true }))
+  transports.push(webSocketServerTransport({ server: inspectorHttp }))
 }
 
 const roomOf = new Map<Conn, string>()
@@ -89,7 +90,7 @@ const srv = createSuperLineServer(chat, {
   transports,
   adapter: await createLibp2pAdapter({ node }), // reuse the SAME node for server↔server fan-out
   nodeName: NODE,
-  inspector: true,
+  plugins: [inspector()],
   identify: (conn) => (conn.ctx as { name: string }).name,
   authenticate: (h) => {
     const name = h.query.name?.trim()

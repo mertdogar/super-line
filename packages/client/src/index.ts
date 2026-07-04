@@ -23,6 +23,7 @@ import {
   type ClientStore,
   type ResourceReplica,
   type StoreChange,
+  type TapEvent,
 } from '@super-line/core'
 import { backoffDelay } from './backoff.js'
 
@@ -123,6 +124,34 @@ export interface ClientStoreHandle {
   write(id: string, data: unknown): Promise<void>
 }
 
+/** What went wrong, passed to the client `onError` sink alongside the caught error. */
+export interface ClientErrorInfo {
+  /** Which lifecycle hook threw. */
+  kind: 'connect' | 'disconnect' | 'reconnect'
+}
+
+/**
+ * The client half of a {@link https://…|SuperLinePlugin} pair, registered on `plugins: [...]`. All fields
+ * optional. Mirrors the server half but smaller — no taps in v1 (`onEvent` is type-reserved) and no
+ * handler subtraction (client `implement` is already optional per-key).
+ */
+export interface SuperLineClientPlugin {
+  /** Unique among the client's plugins; a duplicate name throws at construction. */
+  name: string
+  /** Called on the first successful connect (multiplexed after the client's `onConnect`). */
+  onConnect?: () => void
+  /** Called when the socket drops, with the close `code` (multiplexed after `onDisconnect`). */
+  onDisconnect?: (code: number) => void
+  /** Called on each successful reconnect after the first (multiplexed after `onReconnect`). */
+  onReconnect?: () => void
+  /** Type-reserved for a client-side tap; NOT instrumented in v1. */
+  onEvent?: (event: TapEvent) => void
+  /** Client halves of Store pairs the plugin contributes, merged into the client's `stores`. */
+  stores?: Record<string, ClientStore>
+  /** Handlers answering the library's server→client requests; a key collision (with the app or another plugin) throws. */
+  implement?: Record<string, (input: unknown) => Awaitable<unknown>>
+}
+
 /** Describes which inbound payload failed validation, passed to `onValidationError`. */
 export interface ValidationErrorInfo {
   /** The kind of inbound payload that failed. */
@@ -154,6 +183,16 @@ export interface SuperLineClientOptions<C extends Contract, R extends RoleOf<C>>
   stores?: Record<string, ClientStore>
   /** Called when a store write is rejected by the server (e.g. FORBIDDEN). Default: logs to console. */
   onStoreError?: (error: unknown, info: { store: string; id: string }) => void
+  /** Client plugin halves (lifecycle, stores, server→client handlers). See {@link SuperLineClientPlugin}. */
+  plugins?: SuperLineClientPlugin[]
+  /** Called on the first successful connect. */
+  onConnect?: () => void
+  /** Called when the socket drops, with the close `code`. */
+  onDisconnect?: (code: number) => void
+  /** Called on each successful reconnect after the first. */
+  onReconnect?: () => void
+  /** Receives a throw from any lifecycle hook (host or plugin). Default: logs to console. */
+  onError?: (error: unknown, info: ClientErrorInfo) => void
   /** Auto-reconnect on drop. Defaults to `true`. */
   reconnect?: boolean
   /** Initial reconnect backoff in ms. Defaults to `500`. */
@@ -232,7 +271,52 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   const readyByTopic = new Map<string, Deferred>() // topics awaiting their first ack
   const subAckById = new Map<number, string>() // outstanding sub frame id -> topic
   const serverHandlers = new Map<string, (input: unknown) => unknown>() // answer server→client requests
-  const storeMap = (opts.stores ?? {}) as Record<string, ClientStore>
+  const storeMap = { ...opts.stores } as Record<string, ClientStore> // copy: plugin stores merge in below
+
+  const clientPlugins = opts.plugins ?? []
+  const pluginNames = new Set<string>()
+  for (const p of clientPlugins) {
+    if (pluginNames.has(p.name)) throw new Error(`Duplicate plugin name: ${p.name}`)
+    pluginNames.add(p.name)
+  }
+  // register a server→client handler, throwing on a name collision (app implement, or another plugin)
+  function registerServerHandler(name: string, handler: (input: unknown) => unknown): void {
+    if (serverHandlers.has(name)) throw new Error(`Duplicate server→client handler for '${name}'`)
+    serverHandlers.set(name, handler)
+  }
+  for (const p of clientPlugins) {
+    if (p.stores)
+      for (const [name, store] of Object.entries(p.stores)) {
+        if (name in storeMap) throw new Error(`Plugin '${p.name}' store '${name}' collides with an existing store`)
+        storeMap[name] = store
+      }
+    if (p.implement) for (const [name, handler] of Object.entries(p.implement)) registerServerHandler(name, handler)
+  }
+
+  // lifecycle fan-out: host hook first, then plugins in order; a throw is isolated + routed to onError.
+  let connectedOnce = false
+  const connectHooks = [opts.onConnect, ...clientPlugins.map((p) => p.onConnect)]
+  const disconnectHooks = [opts.onDisconnect, ...clientPlugins.map((p) => p.onDisconnect)]
+  const reconnectHooks = [opts.onReconnect, ...clientPlugins.map((p) => p.onReconnect)]
+  function routeError(error: unknown, kind: ClientErrorInfo['kind']): void {
+    if (opts.onError) {
+      try {
+        opts.onError(error, { kind })
+      } catch {
+        // an onError that itself throws has nowhere left to go
+      }
+    } else console.error(`[super-line] client ${kind} handler threw`, error)
+  }
+  function fireLifecycle(hooks: Array<((code: number) => void) | undefined>, kind: ClientErrorInfo['kind'], code: number): void {
+    for (const hook of hooks) {
+      if (!hook) continue
+      try {
+        hook(code)
+      } catch (err) {
+        routeError(err, kind)
+      }
+    }
+  }
   // opened Resources, keyed `name\0id`: routes inbound `sch` to the local replicas and re-snapshots on reconnect
   interface OpenEntry {
     store: string
@@ -282,9 +366,15 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     }
     for (const topic of topicListeners.keys()) sendSub(topic)
     for (const entry of openResources.values()) sendOpen(entry) // re-snapshot opened Resources (at-most-once recovery)
+    if (connectedOnce) fireLifecycle(reconnectHooks, 'reconnect', 0)
+    else {
+      connectedOnce = true
+      fireLifecycle(connectHooks, 'connect', 0)
+    }
   }
 
-  function onClose(): void {
+  function onClose(code = 1006): void {
+    fireLifecycle(disconnectHooks, 'disconnect', code)
     for (const [id, op] of requests) {
       if (op.sent) {
         if (op.timer) clearTimeout(op.timer)
@@ -638,7 +728,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     store: storeHandle,
     implement(handlers: Record<string, (input: unknown) => unknown>): void {
       for (const [name, handler] of Object.entries(handlers)) {
-        if (handler) serverHandlers.set(name, handler)
+        if (handler) registerServerHandler(name, handler) // throws on a collision (plugin or a prior implement)
       }
     },
     close(): void {

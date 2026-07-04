@@ -1,4 +1,5 @@
 import http from 'node:http'
+import { inspector } from '@super-line/plugin-inspector'
 import { createSuperLineServer, type Conn } from '@super-line/server'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
@@ -17,11 +18,11 @@ const roomOf = new Map<Conn, string>()
 let seq = 0
 
 const srv = createSuperLineServer(chat, {
-  transports: [webSocketServerTransport({ server, inspector: true })],
+  transports: [webSocketServerTransport({ server })],
   // createRabbitmqAdapter is async (it connects + declares its topology before returning).
   adapter: await createRabbitmqAdapter(RABBITMQ_URL),
   nodeName: NODE, // surface node-1 / node-2 in the Control Center topology
-  inspector: true, // read-only Control Center channel (dev/trusted-network only)
+  plugins: [inspector()],
   identify: (conn) => (conn.ctx as { name: string }).name, // surface the chat name cluster-wide
   authenticate: (h) => {
     const name = h.query.name?.trim()

@@ -6,6 +6,7 @@ import { yamux } from '@chainsafe/libp2p-yamux'
 import { identify } from '@libp2p/identify'
 import { gossipsub } from '@libp2p/gossipsub'
 import { mdns } from '@libp2p/mdns'
+import { inspector } from '@super-line/plugin-inspector'
 import { createSuperLineServer } from '@super-line/server'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createLibp2pAdapter, type PubSubLibp2p } from '@super-line/adapter-libp2p'
@@ -51,8 +52,8 @@ node.addEventListener('peer:discovery', (e) => {
 const server = http.createServer()
 const srv = createSuperLineServer(api, {
   nodeName: NODE,
-  transports: [webSocketServerTransport({ server, inspector: true })],
-  inspector: true, // read-only Control Center channel (dev/trusted-network only)
+  transports: [webSocketServerTransport({ server })],
+  plugins: [inspector()],
   // the handshake `name` is for the UI only; the ACL principal is shared so every client co-edits one board
   authenticate: (h) => ({ role: 'user' as const, ctx: { name: h.query.name?.trim() || 'anon' } }),
   identify: () => 'demo',

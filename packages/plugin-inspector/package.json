@@ -1,0 +1,39 @@
+{
+  "name": "@super-line/plugin-inspector",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Control Center inspector for super-line, packaged as a plugin — taps + a plugin-owned CC connection.",
+  "license": "MIT",
+  "author": "Mert",
+  "keywords": ["super-line", "plugin", "inspector", "control-center", "observability"],
+  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/plugin-inspector" },
+  "homepage": "https://mertdogar.github.io/super-line/",
+  "bugs": "https://github.com/mertdogar/super-line/issues",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "engines": { "node": ">=18" },
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "tsup"
+  },
+  "dependencies": {
+    "@super-line/core": "workspace:^",
+    "@standard-community/standard-json": "^0.3.5"
+  },
+  "peerDependencies": {
+    "@super-line/server": "workspace:^"
+  },
+  "devDependencies": {
+    "@super-line/server": "workspace:^"
+  }
+}

@@ -6,6 +6,7 @@ import { noise } from '@chainsafe/libp2p-noise'
 import { yamux } from '@chainsafe/libp2p-yamux'
 import { identify } from '@libp2p/identify'
 import { generateKeyPairFromSeed } from '@libp2p/crypto/keys'
+import { inspector } from '@super-line/plugin-inspector'
 import { createSuperLineServer, type Conn } from '@super-line/server'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { httpServerTransport } from '@super-line/transport-http'
@@ -46,12 +47,12 @@ server.on('request', (req, res) => {
 
 const srv = createSuperLineServer(chat, {
   transports: [
-    webSocketServerTransport({ server, inspector: true }),
+    webSocketServerTransport({ server }),
     httpServerTransport({ server }), // basePath defaults to /superline
     libp2pServerTransport({ node }), // protocol /super-line/1.0.0 on the started node
   ],
   nodeName: NODE,
-  inspector: true,
+  plugins: [inspector()],
   identify: (c) => (c.ctx as { name: string }).name,
   authenticate: (h) => {
     const name = h.query.name?.trim()

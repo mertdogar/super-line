@@ -541,13 +541,15 @@ catch (e) {
 
 ## Control Center (live inspector)
 
-The read-only inspector is **server-authoritative and off by default**. Turn it on in **two** places — server opts (gates the `msg.*` telemetry) and the WS transport (negotiates the `superline.inspector.v1` subprotocol) — then point the dashboard at the node. Dev / trusted-network only.
+The read-only inspector ships as the plugin `@super-line/plugin-inspector` and is **off by default**. Mount it with `plugins: [inspector()]` — it contributes the `msg.*` telemetry tap and the reserved connection class the WS transport negotiates (`superline.inspector.v1`) — then point the dashboard at the node. Dev / trusted-network only.
 
 ```ts
+import { inspector } from '@super-line/plugin-inspector'
+
 const srv = createSuperLineServer(api, {
-  transports: [webSocketServerTransport({ server, inspector: true })], // negotiate the inspector subprotocol
+  transports: [webSocketServerTransport({ server })],
   authenticate,
-  inspector: { redact: ['token', 'password'] },                         // true, or mask ctx/data keys in telemetry
+  plugins: [inspector({ redact: ['token', 'password'] })], // inspector() alone, or mask ctx/data keys in telemetry
 })
 ```
 

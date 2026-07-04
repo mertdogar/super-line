@@ -81,6 +81,10 @@ Mounting decisions, in order:
 
 The client mirrors the server: one `createSuperLineClient(api, …)`, and the library exposes its client-side helpers over your client instance.
 
+::: tip Package the weave as a plugin
+Exporting handlers, stores, and middleware as separate factories and wiring them by hand at four config sites works — but a [**plugin**](./plugins) bundles them into one mountable unit (`plugins: [lib()]`), multiplexes lifecycle hooks so two libraries can coexist, and **subtracts** the library's handler keys from your `implement()` obligation. The surface merge above stays exactly the same; the plugin just carries the runtime half.
+:::
+
 ## Collisions
 
 ```ts

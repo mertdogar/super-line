@@ -53,4 +53,8 @@ createSuperLineServer(api, {
 
 These hooks are also the recommended seams for [testing](./testing) — capture the server-side `conn`, assert connects/disconnects, observe thrown errors.
 
+::: tip One hook, many concerns
+`onConnection`/`onDisconnect`/`onError` and `use` are singular here — but a [**plugin**](./plugins) multiplexes them, so any number of independent concerns (metrics, audit, an embedded library) can each register their own without hand-composition. Plugins also add a node-local **tap** (`onEvent`) that observes every request, event, and store write with live payloads.
+:::
+
 Next: [Error handling](./errors).

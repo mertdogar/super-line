@@ -52,7 +52,7 @@
 | 🚌 **Cluster event bus** | `server.publish` / `server.subscribe` on a shared topic — cluster-wide pub/sub to server listeners (every node, local echo) and subscribed clients at once. |
 | 📨 **Server→client req/res** | `await srv.toConn(id).request(...)` — ask a client and await a typed reply, across nodes. |
 | 🛰️ **Presence & introspection** | `srv.local.*` (sync) + `srv.cluster.*` (counts, topology, `isOnline`) backed by a Redis registry. |
-| 🩺 **Control Center** | `inspector: true` + `npx @super-line/control-center` — a shadcn webapp for live topology, contract, roles & ctx. |
+| 🩺 **Control Center** | `plugins: [inspector()]` (from `@super-line/plugin-inspector`) + `npx @super-line/control-center` — a shadcn webapp for live topology, contract, roles & ctx. |
 | 🎯 **Targeted send** | `srv.toConn(id)` / `srv.toUser(uid)` emit or kick any connection on any node. |
 | 🔌 **Composable** | Attaches to your `http.Server`; lifecycle hooks + middleware. |
 | 🔁 **Resilient client** | Auto-reconnect, re-subscribe, in-flight reject, queue-and-flush. |

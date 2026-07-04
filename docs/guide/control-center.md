@@ -8,23 +8,24 @@ It ships as `@super-line/control-center` and runs with `npx` — no install.
 
 ## Enable the inspector
 
-The Control Center connects over a reserved WebSocket subprotocol (`superline.inspector.v1`). Turn it on per node — the inspector is server-authoritative, so set `inspector: true` both on the server opts (gates the `msg.*` telemetry) and on the WebSocket transport (negotiates the subprotocol). It is **off by default**:
+The inspector ships as the [plugin](./plugins) `@super-line/plugin-inspector`. Mount it with `plugins: [inspector()]` on any node — it contributes a node-local tap (the `msg.*` telemetry) and a plugin-owned connection class the Control Center attaches to over the reserved `superline.inspector.v1` subprotocol. The server is the single authority: the WS transport advertises that subprotocol **only** because the plugin declared it. It is **off by default**:
 
 ```ts
 import { createSuperLineServer } from '@super-line/server'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
+import { inspector } from '@super-line/plugin-inspector'
 
 const srv = createSuperLineServer(contract, {
-  transports: [webSocketServerTransport({ server, inspector: true })],
+  transports: [webSocketServerTransport({ server })],
   authenticate,
-  inspector: true,
+  plugins: [inspector()],
 })
 ```
 
 Inspector connections **bypass `authenticate`**, are **read-only**, and are kept out of presence, the heartbeat, and `local`/`cluster` results — so the observer never shows up in what it observes.
 
 ::: warning Dev / trusted-network only
-The inspector channel is unauthenticated in v1. Never enable `inspector: true` on an internet-facing production node. (A `redact` option lets you hide specific `ctx`/`data` field names: `inspector: { redact: ['token'] }`.)
+The inspector channel is unauthenticated in v1. Never mount `inspector()` on an internet-facing production node. (A `redact` option masks specific `ctx`/`data` field names: `inspector({ redact: ['token'] })`.)
 :::
 
 ## Run it

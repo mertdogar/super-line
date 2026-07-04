@@ -80,7 +80,7 @@ replica.close()
 
 ### Control Center inspector
 
-Set `inspector: true` (or `{ redact: ['password', 'token'] }`) to emit `msg.*` telemetry and accept read-only [Control Center](https://www.npmjs.com/package/@super-line/control-center) clients. The WS transport must also be created with `inspector: true` to negotiate the subprotocol. **Default off; dev / trusted-network only.**
+Mount `plugins: [inspector()]` (from [`@super-line/plugin-inspector`](https://www.npmjs.com/package/@super-line/plugin-inspector); `inspector({ redact: ['password', 'token'] })` to mask fields) to emit `msg.*` telemetry and accept read-only [Control Center](https://www.npmjs.com/package/@super-line/control-center) clients. The plugin declares the reserved connection class the WS transport negotiates. **Default off; dev / trusted-network only.**
 
 - 📖 Docs: <https://mertdogar.github.io/super-line/>
 - 📚 Guides: [roles & auth](https://mertdogar.github.io/super-line/guide/roles-auth), [events & rooms](https://mertdogar.github.io/super-line/guide/events-rooms)

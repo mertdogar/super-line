@@ -13,6 +13,8 @@ import {
   type ConnView,
   type NodeView,
   type StoreResourceView,
+  type ListOpts,
+  type SearchOpts,
 } from '@super-line/core'
 import type { SuperLinePlugin, PluginChannel } from '@super-line/server'
 
@@ -164,9 +166,14 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
         },
         listStores: async () => ctx.storeInfos(),
         listResources: async (input) => {
-          const name = (input as { store: string }).store
+          const { store: name, ...opts } = input as { store: string } & ListOpts
           if (!ctx.storeInfos().some((s) => s.name === name)) throw new SuperLineError('NOT_FOUND', `Unknown store: ${name}`)
-          return ctx.store(name).list()
+          return ctx.store(name).list(opts)
+        },
+        searchPrincipals: async (input) => {
+          const { store: name, ...opts } = input as { store: string } & SearchOpts
+          if (!ctx.storeInfos().some((s) => s.name === name)) throw new SuperLineError('NOT_FOUND', `Unknown store: ${name}`)
+          return ctx.store(name).searchPrincipals(opts)
         },
         readResource: async (input) => {
           const { store: name, id } = input as { store: string; id: string }

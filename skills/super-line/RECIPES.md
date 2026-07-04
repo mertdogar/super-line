@@ -289,8 +289,9 @@ The `adapter:` slot is pluggable — same code, different fan-out infra. All fac
 
 ```ts
 // decentralized, broker-less — one shared gossipsub topic; bring your own node, or let it build one
+// discovery: 'mdns' (LAN/docker, zero-config) | { bootstrap: [multiaddr] } | { relay: multiaddr } (NAT; run createRelayNode)
 import { createLibp2pAdapter } from '@super-line/adapter-libp2p'      // npm i @super-line/adapter-libp2p
-const adapter = await createLibp2pAdapter({ bootstrap: ['/ip4/10.0.0.1/tcp/9001/p2p/12D3Koo…'], identity: { path: '.id' } })
+const adapter = await createLibp2pAdapter({ discovery: 'mdns' })
 
 // broker-routed — channels become routing keys on one durable direct exchange
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'  // npm i @super-line/adapter-rabbitmq

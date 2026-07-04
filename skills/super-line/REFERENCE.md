@@ -255,7 +255,9 @@ createRedisAdapter(options?: { url?: string; presenceTtlMs?: number } | string):
 // presenceTtlMs (default 90_000): node liveness key TTL, refreshed by the heartbeat; must exceed heartbeat interval
 
 // @super-line/adapter-libp2p — broker-less gossipsub mesh (BYO node OR a built-in one); presence via gossip
-createLibp2pAdapter(opts?: { node?; topic?; ... }): Promise<Adapter & { node }>
+// discovery: 'mdns' (LAN/docker) | { mdns } | { bootstrap: [multiaddr] } | { relay: multiaddr } | array; omit = none
+createLibp2pAdapter(opts?: { node?; discovery?; listen?; transport?; identity?; topic?; presence? }): Promise<Adapter & { node }>
+createRelayNode(opts?: { port?; listen?; identity?; topic?; relay? }): Promise<Libp2p>  // public rendezvous node for { relay }
 
 // @super-line/adapter-rabbitmq — one durable `direct` exchange; per-node exclusive queue
 createRabbitmqAdapter(opts?: { url?; connection?; exchange?; queuePrefix?; presence? } | string): Promise<Adapter & { connection }>

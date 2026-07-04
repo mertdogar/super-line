@@ -41,7 +41,7 @@ const srv = createSuperLineServer(sync, {
   adapter: await createLibp2pAdapter({
     identity: myKey,
     listen: [`/ip4/0.0.0.0/tcp/${P2P_PORT}`],
-    bootstrap,
+    discovery: { bootstrap },
   }),
   onConnection: (conn) => {
     srv.room('global').add(conn) // auto-join: every client lands in one shared room

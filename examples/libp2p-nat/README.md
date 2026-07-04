@@ -11,6 +11,11 @@ unchanged — the *connectivity* (and a little header copy) is all that really d
 packages are unchanged: one libp2p node per server feeds both the libp2p **transport**
 (browser↔server) and the libp2p **adapter** (server↔server).
 
+> If you only need the **server↔server** half through a relay (no browsers), that's now a one-liner:
+> `createLibp2pAdapter({ discovery: { relay: '/dns4/…/ws/p2p/<relay>' } })`, with the relay itself run
+> by `createRelayNode()`. This example still hand-builds the node because it *also* runs the
+> browser-facing WebRTC transport on the same node — a single node feeding two planes stays BYO.
+
 ## Run it
 
 ```bash

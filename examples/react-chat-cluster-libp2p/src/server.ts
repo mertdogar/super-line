@@ -41,7 +41,7 @@ const srv = createSuperLineServer(chat, {
   adapter: await createLibp2pAdapter({
     identity: myKey,
     listen: [`/ip4/0.0.0.0/tcp/${P2P_PORT}`],
-    bootstrap,
+    discovery: { bootstrap },
   }),
   nodeName: NODE, // surface node-1 / node-2 in the Control Center topology
   inspector: true, // read-only Control Center channel (dev/trusted-network only)

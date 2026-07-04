@@ -133,7 +133,7 @@ The `PluginContext` is the server's public surface minus the footguns (`implemen
 | `nodeId` · `nodeName` · `instanceId` | node identity |
 | `serializer` · `contract` | the wire serializer and raw contract (for reflection) |
 | `conns` · `local` · `cluster` | read-only connection views (node-local + cluster-wide) |
-| `publish` · `subscribe` · `toConn` · `toUser` · `store` · `isOnline` | the public server capabilities |
+| `publish` · `subscribe` · `toConn` · `toUser` · `room` · `store` · `isOnline` | the public server capabilities |
 | `channel(name)` | a **plugin-private, cluster-wide** adapter channel under a reserved `x:<plugin>:` prefix |
 
 `channel(name)` is how a plugin fans its own data across nodes without touching the contract:
@@ -217,4 +217,4 @@ export function harnessClient(): SuperLineClientPlugin {
 
 Plugins **observe and contribute new operations** — they never transform or veto in-flight traffic. There's no outbound-message interception and no client `use` chain; that collides with super-line's encode-once fan-out and echo-break invariants. Rate-limit and gate with server `use`; observe with `onEvent`; add capability with `handlers`/`stores`/`channel`. The reasoning is in [ADR-0005](https://github.com/mertdogar/super-line/blob/main/docs/adr/0005-plugins-as-paired-runtime-bundles.md).
 
-Next: [Composition](./composition) — the surface-merge discipline plugins build on.
+Next: [Building a plugin](./building-plugins) — a hands-on walkthrough that grows one plugin from a tap into a full server + client pair. Or [Composition](./composition) — the surface-merge discipline plugins build on.

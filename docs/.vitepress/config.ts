@@ -128,6 +128,7 @@ export default defineConfig({
           items: [
             { text: 'Composition — embedding a library', link: '/guide/composition' },
             { text: 'Plugins', link: '/guide/plugins' },
+            { text: 'Building a plugin', link: '/guide/building-plugins' },
             { text: 'Testing', link: '/guide/testing' },
             { text: 'Use with your AI agent', link: '/guide/ai-agents' },
             { text: 'Comparison & FAQ', link: '/guide/comparison-faq' },

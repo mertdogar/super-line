@@ -24,6 +24,21 @@ const srv = createSuperLineServer(contract, {
 
 Inspector connections **bypass `authenticate`**, are **read-only**, and are kept out of presence, the heartbeat, and `local`/`cluster` results — so the observer never shows up in what it observes.
 
+::: details Migrating from `inspector: true`
+Earlier versions enabled the inspector with an `inspector: true` server option (and a matching transport option). Both are gone — the inspector is now a [plugin](./plugins). Add the dependency and mount it:
+
+```ts
+// before
+const srv = createSuperLineServer(contract, { transports, authenticate, inspector: true })
+
+// after — pnpm add @super-line/plugin-inspector
+import { inspector } from '@super-line/plugin-inspector'
+const srv = createSuperLineServer(contract, { transports, authenticate, plugins: [inspector()] })
+```
+
+The old `inspector.redact` option becomes `inspector({ redact: ['token'] })`. The wire, the `superline.inspector.v1` subprotocol, and the Control Center are unchanged — only the mount point moved.
+:::
+
 ::: warning Dev / trusted-network only
 The inspector channel is unauthenticated in v1. Never mount `inspector()` on an internet-facing production node. (A `redact` option masks specific `ctx`/`data` field names: `inspector({ redact: ['token'] })`.)
 :::

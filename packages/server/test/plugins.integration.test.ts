@@ -333,6 +333,15 @@ function _subtractionTypeCheck(): void {
       'harness.ping': async () => 'x',
     },
   })
+
+  // subtraction must still work with MULTIPLE plugins — a surface-carrying plugin alongside a
+  // surfaceless one (the tuple's P[number] is a union; HandledKeys distributes over it).
+  const multi = createSuperLineServer(harnessContract, {
+    transports: [],
+    authenticate: hAuth,
+    plugins: [harnessPlugin(), { name: 'noop', onEvent: () => {} }],
+  })
+  multi.implement({ user: { say: async (t) => t } }) // OK: 'harness.ping' still subtracted despite the 2nd plugin
 }
 void _subtractionTypeCheck
 

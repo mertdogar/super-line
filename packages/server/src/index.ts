@@ -288,9 +288,10 @@ export type HandlersFor<S extends Directional> = {
   ) => Awaitable<Output<CtsOf<S>[K]>>
 }
 
+/** Keys one plugin handles; a naked param so a multi-plugin `P[number]` union distributes per-plugin. */
+type PluginHandledKeys<U> = U extends SuperLinePlugin<infer S> ? keyof CtsOf<S> & string : never
 /** Union of the `clientToServer` keys handled across a plugin tuple `P` (subtracted from `implement`). */
-export type HandledKeys<P extends readonly SuperLinePlugin<any>[]> =
-  P[number] extends SuperLinePlugin<infer S> ? keyof CtsOf<S> & string : never
+export type HandledKeys<P extends readonly SuperLinePlugin<any>[]> = PluginHandledKeys<P[number]>
 
 /** Remove the plugin-handled keys `HK` from every block (each role + `shared`) of a {@link Handlers} map. */
 export type SubtractHandlers<H, HK extends string> = { [B in keyof H]: Omit<H[B], HK> }

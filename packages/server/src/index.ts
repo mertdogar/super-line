@@ -398,6 +398,14 @@ export interface PluginContext {
   toConn(id: string): { emit(event: string, data: unknown): void; close(): void }
   /** Target all of a user's connections across nodes. */
   toUser(userId: string): { emit(event: string, data: unknown): void; disconnect(): void }
+  /** Server-controlled room membership + broadcast (loosely typed, mirroring toConn/toUser). */
+  room(name: string): {
+    add(conn: Conn): void
+    remove(conn: Conn): void
+    broadcast(event: string, data: unknown): void
+    readonly size: number
+    readonly connections: readonly Conn[]
+  }
   /** Server-authoritative handle for a configured store (incl. plugin-contributed stores). */
   store(name: string): ServerStoreHandle
   /** Configured stores (host + plugin) and their models. */
@@ -1631,6 +1639,20 @@ export function createSuperLineServer<
       toUser: (userId) => {
         const t = api.toUser(userId)
         return { emit: (event, data) => t.emit(event as never, data as never), disconnect: t.disconnect }
+      },
+      room: (name) => {
+        const r = room(name)
+        return {
+          add: (conn) => r.add(conn),
+          remove: (conn) => r.remove(conn),
+          broadcast: (event, data) => r.broadcast(event as never, data as never),
+          get size() {
+            return r.size
+          },
+          get connections() {
+            return r.connections
+          },
+        }
       },
       store: (name) => api.store(name),
       storeInfos: () => Object.entries(storeMap).map(([name, store]) => ({ name, model: store.model })),

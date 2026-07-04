@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { WebSocket } from 'ws'
 import { defineContract, defineSurface, jsonSerializer, mergeSurfaces, SuperLineError, type TapEvent } from '@super-line/core'
-import { MemoryBus, createInMemoryAdapter, createSuperLineServer, type SuperLinePlugin } from '@super-line/server'
+import { MemoryBus, createInMemoryAdapter, createSuperLineServer, type PluginContext, type SuperLinePlugin } from '@super-line/server'
 import { memoryStoreServer } from '@super-line/store-memory'
 import { inspector } from '@super-line/plugin-inspector'
 import { connectInspector, createHarness, waitFor } from './harness.js'
@@ -154,6 +154,29 @@ describe('plugin multiplexing (phase 1 · lifecycle + middleware)', () => {
 
     expect(calls).toEqual(['host', 'a', 'b', 'c']) // host first, then plugin order; b threw but c still ran
     expect(errors).toContain('b-broke') // the throw was isolated + routed to onError
+    u.close()
+  })
+
+  it('lets a plugin manage room membership via ctx.room (add / size / connections / remove)', async () => {
+    let ctx: PluginContext | undefined
+    const plugin: SuperLinePlugin = {
+      name: 'rooms',
+      setup: (c) => void (ctx = c),
+      onConnection: (conn) => ctx?.room('vip').add(conn),
+    }
+    const { srv, url } = await h.server(contract, { authenticate: auth, plugins: [plugin] })
+    srv.implement({ user: { echo: async () => ({ ok: true }) } })
+
+    const u = h.client(contract, { url, role: 'user' })
+    await u.echo({ text: 'x', secret: 'y' })
+
+    await waitFor(() => ctx?.room('vip').size === 1) // the plugin added the conn on connect
+    const [member] = ctx!.room('vip').connections
+    expect(member).toBeDefined()
+
+    ctx!.room('vip').broadcast('ping', { hello: true }) // de-typed broadcast doesn't throw
+    ctx!.room('vip').remove(member!)
+    expect(ctx!.room('vip').size).toBe(0)
     u.close()
   })
 

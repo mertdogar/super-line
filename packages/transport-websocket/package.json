@@ -1,6 +1,6 @@
 {
   "name": "@super-line/transport-websocket",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "description": "WebSocket client↔server transport for super-line (Node `ws` server + browser/Node client).",
   "license": "MIT",

@@ -1,6 +1,6 @@
 {
   "name": "@super-line/store-sync-pglite",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Self-clustering CRDT Store for super-line — an append-only Yjs op-log in central Postgres that ElectricSQL ships to a per-node PGlite replica, folded into in-memory super-store docs. Postgres+Electric is the only fan-out infra; no adapter.",
   "license": "MIT",

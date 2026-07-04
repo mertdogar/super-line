@@ -1,6 +1,6 @@
 {
   "name": "@super-line/store-sync",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "type": "module",
   "description": "CRDT (Yjs, via super-store) Store for super-line — a merging, real-time collaborative persisted-state pair.",
   "license": "MIT",

@@ -1,6 +1,6 @@
 {
   "name": "@super-line/server",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "type": "module",
   "description": "Realtime data-bus server for super-line — requests, events, rooms, topics, stores, pluggable transports & adapters.",
   "license": "MIT",

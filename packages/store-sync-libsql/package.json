@@ -1,6 +1,6 @@
 {
   "name": "@super-line/store-sync-libsql",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Durable CRDT Store for super-line — store-sync's Yjs merge engine backed by libsql (Turso / sqld).",
   "license": "MIT",

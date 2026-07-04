@@ -65,6 +65,40 @@ export interface StoreChange {
 }
 
 /**
+ * A per-Resource summary returned by {@link ServerStore.list}: the id, its ACL principal count, and
+ * creation / last-mutation timestamps (epoch ms, non-null). `updatedAt` bumps on ANY mutation — a data
+ * write (`apply`) or an ACL change ({@link ServerStore.setAccess}).
+ */
+export interface ResourceSummary {
+  id: string
+  principalCount: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** Server-side filter / sort / paginate options for {@link ServerStore.list}. */
+export interface ListOpts {
+  /** Substring match on Resource id. */
+  idContains?: string
+  /** OR / union — keep Resources that grant access to ANY listed principal. */
+  principals?: string[]
+  /** Sort key + direction; omitted ⇒ `id` ascending. */
+  sort?: { by: 'id' | 'createdAt' | 'updatedAt' | 'principalCount'; dir: 'asc' | 'desc' }
+  /** Page size; omitted ⇒ unbounded (every row). */
+  limit?: number
+  /** Page offset. */
+  offset?: number
+}
+
+/** Options for {@link ServerStore.searchPrincipals} — a store-global principal lookup. */
+export interface SearchOpts {
+  /** Substring match on principal id; omitted ⇒ every principal. */
+  query?: string
+  limit?: number
+  offset?: number
+}
+
+/**
  * The server half of a Store pair: persistence + the consistency model + change-notification.
  * It does NOT enforce access (core does) and does NOT touch the wire. `apply` interprets a
  * {@link StoreChange} per its consistency model (LWW replace vs CRDT merge); every applied mutation —
@@ -89,8 +123,16 @@ export interface ServerStore {
   setAccess(id: string, accessRules: AccessRules): Awaitable<void>
   /** Remove a Resource. */
   delete(id: string): Awaitable<void>
-  /** All Resource ids in this store (core ACL-filters before returning ids to a client). */
-  list(): Awaitable<string[]>
+  /**
+   * Summaries of this store's Resources, server-side filtered / sorted / paginated per {@link ListOpts}.
+   * Omitting `opts` returns every Resource, `id`-ascending — a superset of the old id-only listing.
+   */
+  list(opts?: ListOpts): Awaitable<ResourceSummary[]>
+  /**
+   * Distinct principals granted access anywhere in this store — substring-filtered by `query`, paginated,
+   * `principal`-ascending. Store-global: independent of any {@link ListOpts} resource filter.
+   */
+  searchPrincipals(opts: SearchOpts): Awaitable<string[]>
   /** Subscribe to every applied mutation — the single fan-out source. Returns an unsubscribe fn. */
   onChange(cb: (change: StoreChange) => void): () => void
   /**

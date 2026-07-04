@@ -28,6 +28,9 @@ import {
   type SDeleteFrame,
   type ServerStore,
   type ServerReplica,
+  type ResourceSummary,
+  type ListOpts,
+  type SearchOpts,
   type Resource,
   type AccessRules,
   type Perms,
@@ -257,8 +260,13 @@ export interface ServerStoreHandle {
   revoke(id: string, principal: string): Promise<void>
   /** Delete a Resource. */
   delete(id: string): Promise<void>
-  /** All Resource ids in this store. */
-  list(): Promise<string[]>
+  /**
+   * Summaries of this store's Resources, server-side filtered / sorted / paginated per {@link ListOpts}
+   * (omit `opts` for every Resource, id-ascending). Forwards to {@link ServerStore.list}.
+   */
+  list(opts?: ListOpts): Promise<ResourceSummary[]>
+  /** Distinct principals granted anywhere in this store (store-global). Forwards to {@link ServerStore.searchPrincipals}. */
+  searchPrincipals(opts: SearchOpts): Promise<string[]>
   /**
    * Open a reactive in-process co-writer over a Resource's canonical state — the server half's mirror of
    * `client.store(name).open(id)`. Reactive reads, merging `update`, and surgical `delete(path)` (the only
@@ -1457,8 +1465,11 @@ export function createSuperLineServer<
           )
         if (taps.length) emitTap({ type: 'store.delete', store: name, id })
       },
-      list() {
-        return Promise.resolve(store.list())
+      list(opts) {
+        return Promise.resolve(store.list(opts))
+      },
+      searchPrincipals(opts) {
+        return Promise.resolve(store.searchPrincipals(opts))
       },
       open(id, openOpts) {
         if (!store.open)

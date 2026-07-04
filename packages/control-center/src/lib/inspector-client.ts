@@ -5,8 +5,11 @@ import {
   type ConnView,
   type InspectedContract,
   type InspectorEnvelope,
+  type ListOpts,
   type NodeStat,
   type NodeView,
+  type ResourceSummary,
+  type SearchOpts,
   type StoreInfo,
   type StoreResourceView,
 } from '@super-line/core'
@@ -21,7 +24,10 @@ export interface InspectorClient {
   getNode(): Promise<NodeView>
   getConn(id: string): Promise<ConnView>
   listStores(): Promise<StoreInfo[]>
-  listResources(store: string): Promise<string[]>
+  /** Server-side filtered / sorted / paginated Resource summaries for one store. */
+  listResources(store: string, opts?: ListOpts): Promise<ResourceSummary[]>
+  /** Store-global principal lookup (substring, principal-ascending) for the Users filter. */
+  searchPrincipals(store: string, opts?: SearchOpts): Promise<string[]>
   readResource(store: string, id: string): Promise<StoreResourceView>
   /** Subscribe to live inspection records. Returns an unsubscribe fn. */
   onEvent(cb: (env: InspectorEnvelope) => void): () => void
@@ -129,7 +135,8 @@ export function createInspector(opts: InspectorOptions): InspectorClient {
     getNode: () => request<NodeView>('getNode'),
     getConn: (id) => request<ConnView>('getConn', { id }),
     listStores: () => request<StoreInfo[]>('listStores'),
-    listResources: (store) => request<string[]>('listResources', { store }),
+    listResources: (store, opts) => request<ResourceSummary[]>('listResources', { store, ...opts }),
+    searchPrincipals: (store, opts) => request<string[]>('searchPrincipals', { store, ...opts }),
     readResource: (store, id) => request<StoreResourceView>('readResource', { store, id }),
     onEvent(cb) {
       eventCbs.add(cb)

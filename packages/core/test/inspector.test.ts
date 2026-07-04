@@ -89,6 +89,7 @@ describe('InspectorContract', () => {
       'listResources',
       'listStores',
       'readResource',
+      'searchPrincipals',
     ])
   })
 

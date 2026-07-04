@@ -2,6 +2,7 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { ConnDescriptor, NodeStat } from './adapter.js'
 import { defineContract } from './contract.js'
 import type { Contract, Directional, Schema } from './contract.js'
+import type { ListOpts, ResourceSummary, SearchOpts } from './store.js'
 
 /** WS subprotocol the Control Center connects with; the server short-circuits auth for it. */
 export const INSPECTOR_SUBPROTOCOL = 'superline.inspector.v1'
@@ -182,7 +183,8 @@ export const InspectorContract = defineContract({
         getNode: { input: s<void>(), output: s<NodeView>() },
         getConn: { input: s<{ id: string }>(), output: s<ConnView>() },
         listStores: { input: s<void>(), output: s<StoreInfo[]>() },
-        listResources: { input: s<{ store: string }>(), output: s<string[]>() },
+        listResources: { input: s<{ store: string } & ListOpts>(), output: s<ResourceSummary[]>() },
+        searchPrincipals: { input: s<{ store: string } & SearchOpts>(), output: s<string[]>() },
         readResource: { input: s<{ store: string; id: string }>(), output: s<StoreResourceView>() },
       },
       serverToClient: {

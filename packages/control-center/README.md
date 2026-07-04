@@ -32,6 +32,7 @@ It serves the app locally and opens your browser. Switch endpoints from the conn
 - **Connections** — a table of every connection (role, **transport/wire**, user, node, rooms); click one for its descriptor plus a best-effort, node-local snapshot of `ctx` and `conn.data`.
 - **Contract** — the full contract surface (roles × directions × message flavors) with best-effort JSON Schemas.
 - **Live feed** — lifecycle events (connect / disconnect / room / topic) *and* message traffic (requests + responses, events, broadcasts, topic publishes), each tagged with the **wire** it rode, fanned out across the cluster in real time. Filter by category, node, or wire; pause; and expand any message row to its payload.
+- **Stores** — browse each configured Store's Resources in a table you can filter by **id** (substring) or **granted users** (async, server-backed principal search), sort (id / users / created / updated), and page through; click a row for its live value + access rules. Filtering, sorting, and paging run server-side (`ServerStore.list` / `searchPrincipals`).
 - **Settings** — configure the inspector WebSocket URL (saved to your browser). **Resources** — a page of links to the docs, repo, and npm.
 
 Transport/wire is a first-class dimension throughout: connections carry a normalized `transport` (ws / http / libp2p / loopback), surfaced as a topology color + highlight, a Connections column, and a live-feed tag + filter.

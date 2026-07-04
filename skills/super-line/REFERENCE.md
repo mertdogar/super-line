@@ -329,9 +329,12 @@ interface ServerStoreHandle {
   grant(id, principal, { read, write }): Promise<void>
   revoke(id, principal): Promise<void>
   delete(id): Promise<void>                           // remove the WHOLE Resource
-  list(): Promise<string[]>
+  list(opts?: ListOpts): Promise<ResourceSummary[]>   // filter/sort/paginate; ResourceSummary { id, principalCount, createdAt, updatedAt }
+  searchPrincipals(opts: SearchOpts): Promise<string[]> // distinct principals granted anywhere; substring, principal-asc
   open(id, opts?: { origin?: string }): ServerReplica // reactive in-process co-writer ↓
 }
+// ListOpts  { idContains?; principals?: string[] (OR/union); sort?: { by: 'id'|'createdAt'|'updatedAt'|'principalCount'; dir: 'asc'|'desc' }; limit?; offset? }
+// SearchOpts { query?; limit?; offset? }  — both run server-side over a reverse ACL index; they back the Control Center store filters
 // reactive co-writer over canonical state — server-authoritative, no transport, no ACL:
 interface ServerReplica {
   getSnapshot(): unknown

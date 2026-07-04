@@ -81,6 +81,16 @@ It also streams **message traffic** — `msg.request` / `msg.response` / `msg.br
 
 <img src="/control-center/live-feed-payload.png" alt="Control Center live feed with a broadcast row expanded to show its JSON payload" class="sl-shot" />
 
+### Stores
+
+Browse the Resources in every configured [Store](./store). Pick a store, then filter the table by
+**id** (substring) or by **granted users** — an async, server-backed search over the principals in that
+store's access rules. Sort by id, user count, or created / updated time, and page through with **Load
+more**. The filtering, sorting, and paging all run server-side (`ServerStore.list` / `searchPrincipals`),
+so a store with a large keyspace stays responsive. Click a row to inspect a Resource's live value and
+access rules — the detail updates in place as the Resource changes, while a **⚡ refresh** pill counts
+new creates and deletes so the paginated list never reshuffles under you.
+
 ### Settings
 
 Point the Control Center at a different node. The inspector-connection URL is saved to your browser and reused next time; the status dot shows the live socket state.

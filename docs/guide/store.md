@@ -111,9 +111,17 @@ await docs.revoke('note-1', 'bob') // remove it
 await docs.write('note-1', { title: 'Curated', body: '' }) // server co-write (origin 'server')
 
 const res = await docs.read('note-1') // Resource | undefined (server admin read, no ACL)
-const ids = await docs.list() // string[]
+const rows = await docs.list() // ResourceSummary[] — { id, principalCount, createdAt, updatedAt }
 await docs.delete('note-1')
 ```
+
+`list(opts?)` filters, sorts, and paginates **server-side** — narrow by `idContains` (substring) or
+`principals` (keep Resources granting **any** listed principal), `sort` by `id` / `createdAt` /
+`updatedAt` / `principalCount`, and page with `limit` / `offset`. `searchPrincipals({ query, limit,
+offset })` looks up the distinct principals granted anywhere in the store (substring, principal-ascending).
+Every backend implements both against a reverse ACL index, and the `createdAt` / `updatedAt` timestamps
+come from the store's own clock — `updatedAt` bumps on any mutation, a data write or an ACL change. The
+pair is what backs the Control Center's [store filters](./control-center#stores).
 
 The wire ops a **client** can attempt are read/subscribe and write — each ACL-checked against its
 principal:

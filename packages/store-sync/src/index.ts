@@ -55,10 +55,30 @@ export function syncStoreServer(opts?: SyncServerOptions): ServerStore {
     sv: Doc
     accessRules: Resource['accessRules']
     off: () => void
+    createdAt: number
+    updatedAt: number
   }
   const entries = new Map<string, Entry>()
   const cbs = new Set<(change: StoreChange) => void>()
+  const acl = new Map<string, Set<string>>() // principal → resource ids (reverse ACL index for list/searchPrincipals)
+  const now = (): number => Date.now()
   let currentOrigin = SERVER_ORIGIN // the origin of the in-progress apply; read synchronously by onUpdate
+
+  const indexAdd = (id: string, rules: Resource['accessRules']): void => {
+    for (const p of Object.keys(rules)) {
+      let s = acl.get(p)
+      if (!s) acl.set(p, (s = new Set()))
+      s.add(id)
+    }
+  }
+  const indexRemove = (id: string, rules: Resource['accessRules']): void => {
+    for (const p of Object.keys(rules)) {
+      const s = acl.get(p)
+      if (!s) continue
+      s.delete(id)
+      if (s.size === 0) acl.delete(p)
+    }
+  }
 
   const get = (id: string): Entry => {
     const e = entries.get(id)
@@ -82,7 +102,8 @@ export function syncStoreServer(opts?: SyncServerOptions): ServerStore {
         const origin = currentOrigin
         for (const cb of cbs) cb({ id, update: b64(update), origin })
       })
-      entries.set(id, { sv, accessRules, off })
+      entries.set(id, { sv, accessRules, off, createdAt: now(), updatedAt: now() })
+      indexAdd(id, accessRules)
     },
     apply(change) {
       const e = get(change.id)
@@ -94,6 +115,7 @@ export function syncStoreServer(opts?: SyncServerOptions): ServerStore {
       } finally {
         currentOrigin = SERVER_ORIGIN
       }
+      e.updatedAt = now()
     },
     open(id, openOpts) {
       const e = get(id)
@@ -105,6 +127,7 @@ export function syncStoreServer(opts?: SyncServerOptions): ServerStore {
         currentOrigin = origin
         try {
           fn()
+          e.updatedAt = now() // co-write is a mutation → bump, matching store-memory's commit() path
         } finally {
           currentOrigin = SERVER_ORIGIN
         }
@@ -131,17 +154,48 @@ export function syncStoreServer(opts?: SyncServerOptions): ServerStore {
       } satisfies ServerReplica
     },
     setAccess(id, accessRules) {
-      get(id).accessRules = accessRules
+      const e = get(id)
+      indexRemove(id, e.accessRules)
+      e.accessRules = accessRules
+      indexAdd(id, accessRules)
+      e.updatedAt = now()
     },
     delete(id) {
       const e = entries.get(id)
       if (!e) return
+      indexRemove(id, e.accessRules)
       e.off()
       e.sv.dispose()
       entries.delete(id)
     },
-    list() {
-      return [...entries.keys()]
+    list(opts) {
+      const { idContains, principals, sort, limit, offset = 0 } = opts ?? {}
+      let rows = [...entries.entries()].map(([id, e]) => ({
+        id,
+        principalCount: Object.keys(e.accessRules).length,
+        createdAt: e.createdAt,
+        updatedAt: e.updatedAt,
+      }))
+      if (idContains) rows = rows.filter((r) => r.id.includes(idContains))
+      if (principals?.length) {
+        const allowed = new Set<string>()
+        for (const p of principals) for (const rid of acl.get(p) ?? []) allowed.add(rid)
+        rows = rows.filter((r) => allowed.has(r.id))
+      }
+      const by = sort?.by ?? 'id'
+      const mul = sort?.dir === 'desc' ? -1 : 1
+      rows.sort((a, b) => {
+        if (by === 'id') return (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) * mul
+        return (a[by] - b[by]) * mul
+      })
+      return limit === undefined ? rows.slice(offset) : rows.slice(offset, offset + limit)
+    },
+    searchPrincipals(opts) {
+      const { query, limit, offset = 0 } = opts
+      let ps = [...acl.keys()]
+      if (query) ps = ps.filter((p) => p.includes(query))
+      ps.sort()
+      return limit === undefined ? ps.slice(offset) : ps.slice(offset, offset + limit)
     },
     onChange(cb) {
       cbs.add(cb)

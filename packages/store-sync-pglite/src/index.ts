@@ -90,8 +90,18 @@ export async function syncPgliteStoreServer(opts: SyncPgliteStoreOptions): Promi
   // truncate into) the meta table. Guard the derived name, not just the base.
   if (ups.length > 63) throw new Error(`Table name too long: "${meta}" — "${ups}" exceeds Postgres' 63-char limit`)
 
+  const acl = `${meta}_acl` // reverse ACL index; shorter suffix than `_updates`, so already within the 63-char guard above
   const ddlMeta = `CREATE TABLE IF NOT EXISTS "${meta}" (id text PRIMARY KEY, access jsonb NOT NULL, origin text, data jsonb)`
   const ddlUps = `CREATE TABLE IF NOT EXISTS "${ups}" (seq bigserial PRIMARY KEY, res_id text NOT NULL, update text NOT NULL, origin text)`
+  // ACL reverse index + resource timestamps, all on CENTRAL Postgres (the shared source of truth). `<meta>_acl`
+  // backs list(principals)/searchPrincipals; created_at/updated_at back list sorting. A VOLATILE ADD COLUMN
+  // DEFAULT backfills timestamps onto legacy rows (per-row clock rewrite); the jsonb_object_keys backfill seeds
+  // _acl from pre-existing access rules. All idempotent + race-swallowed for the clustering:'self' multi-node boot.
+  const NOW_MS = '(extract(epoch from clock_timestamp())*1000)::bigint'
+  const ddlAcl = `CREATE TABLE IF NOT EXISTS "${acl}" (res_id text NOT NULL, principal text NOT NULL, PRIMARY KEY (res_id, principal))`
+  const alterCreated = `ALTER TABLE "${meta}" ADD COLUMN IF NOT EXISTS created_at bigint NOT NULL DEFAULT ${NOW_MS}`
+  const alterUpdated = `ALTER TABLE "${meta}" ADD COLUMN IF NOT EXISTS updated_at bigint NOT NULL DEFAULT ${NOW_MS}`
+  const backfillAcl = `INSERT INTO "${acl}" (res_id, principal) SELECT id, jsonb_object_keys(access) FROM "${meta}" ON CONFLICT DO NOTHING`
 
   // Central Postgres — the op-log + strong ACL/existence.
   const sql = postgres(opts.pgUrl, { prepare: false, onnotice: () => {} })
@@ -99,7 +109,7 @@ export async function syncPgliteStoreServer(opts: SyncPgliteStoreOptions): Promi
   // a peer can create the relation (and its implicit rowtype) in the window after our existence check. Swallow
   // only those duplicate-on-race codes — duplicate_table / duplicate_object(rowtype) / catalog unique_violation.
   const RACE_OK = new Set(['42P07', '42710', '23505'])
-  for (const ddl of [ddlMeta, ddlUps]) {
+  for (const ddl of [ddlMeta, ddlUps, ddlAcl, alterCreated, alterUpdated, backfillAcl]) {
     try {
       await sql.unsafe(ddl)
     } catch (err) {
@@ -112,6 +122,10 @@ export async function syncPgliteStoreServer(opts: SyncPgliteStoreOptions): Promi
   const ownsDb = !opts.db
   const db = (opts.db ?? (await PGlite.create({ extensions: { live, sync: electricSync() } }))) as StoreDb
   await db.exec(ddlMeta)
+  // The local replica mirrors central's meta shape (Electric syncs `meta` incl. created_at/updated_at); without
+  // these columns an incoming synced updated_at write fails with 42703 (undefined_column).
+  await db.exec(alterCreated)
+  await db.exec(alterUpdated)
   await db.exec(ddlUps)
 
   const changeCbs = new Set<(c: StoreChange) => void>()
@@ -134,7 +148,10 @@ export async function syncPgliteStoreServer(opts: SyncPgliteStoreOptions): Promi
       // Fire-and-forget: ServerReplica.set/update/delete are synchronous (void), so this INSERT can't reject to
       // the caller. Surface a failure via onError instead of swallowing it — a silently-dropped server co-write
       // is data loss (the in-memory doc has it; no other node ever will).
-      void sql`INSERT INTO ${sql(ups)} (res_id, update, origin) VALUES (${id}, ${b64(update)}, ${origin})`.catch((err) => onError(err, { op: 'append', id }))
+      void sql`
+        WITH ins AS (INSERT INTO ${sql(ups)} (res_id, update, origin) VALUES (${id}, ${b64(update)}, ${origin}))
+        UPDATE ${sql(meta)} SET updated_at = (extract(epoch from clock_timestamp())*1000)::bigint WHERE id = ${id}
+      `.catch((err) => onError(err, { op: 'append', id }))
     })
     docs.set(id, d)
     return d
@@ -276,6 +293,8 @@ export async function syncPgliteStoreServer(opts: SyncPgliteStoreOptions): Promi
           ON CONFLICT (id) DO NOTHING`
         if (res.count === 0) throw new SuperLineError('CONFLICT', `Resource already exists: ${id}`)
         await tx`INSERT INTO ${tx(ups)} (res_id, update, origin) VALUES (${id}, ${seed}, ${null})`
+        const principals = Object.keys(accessRules)
+        if (principals.length) await tx`INSERT INTO ${tx(acl)} (res_id, principal) SELECT ${id}, x FROM unnest(${principals}::text[]) AS x`
       })
       // Materialize on the creating node so its read()/open() are immediately correct (the Electric echo of
       // the seed re-applies idempotently; other nodes fold it when Electric delivers it).
@@ -297,6 +316,7 @@ export async function syncPgliteStoreServer(opts: SyncPgliteStoreOptions): Promi
         SELECT ${change.id}, ${change.update}, ${change.origin}
         WHERE EXISTS (SELECT 1 FROM ${sql(meta)} WHERE id = ${change.id})`
       if (res.count === 0) throw new SuperLineError('NOT_FOUND', `No resource: ${change.id}`)
+      await sql`UPDATE ${sql(meta)} SET updated_at = (extract(epoch from clock_timestamp())*1000)::bigint WHERE id = ${change.id}`
     },
     open(id, openOpts) {
       const doc = getDoc(id)
@@ -326,20 +346,54 @@ export async function syncPgliteStoreServer(opts: SyncPgliteStoreOptions): Promi
       } satisfies ServerReplica
     },
     async setAccess(id, accessRules) {
-      const res = await sql`UPDATE ${sql(meta)} SET access = ${asJson(accessRules)} WHERE id = ${id}`
-      if (res.count === 0) throw new SuperLineError('NOT_FOUND', `No resource: ${id}`)
+      await sql.begin(async (tx) => {
+        const res = await tx`UPDATE ${tx(meta)} SET access = ${asJson(accessRules)}, updated_at = (extract(epoch from clock_timestamp())*1000)::bigint WHERE id = ${id}`
+        if (res.count === 0) throw new SuperLineError('NOT_FOUND', `No resource: ${id}`)
+        await tx`DELETE FROM ${tx(acl)} WHERE res_id = ${id}` // rebuild the reverse index for the new rules
+        const principals = Object.keys(accessRules)
+        if (principals.length) await tx`INSERT INTO ${tx(acl)} (res_id, principal) SELECT ${id}, x FROM unnest(${principals}::text[]) AS x`
+      })
     },
     async delete(id) {
-      // One transaction: the meta row (→ onDelete) and the op-log rows go together, so a crash can't leave op-log
-      // rows for an id with no meta row (which would resurrect on a delete-then-recreate of the same id).
+      // One transaction: the meta row (→ onDelete), op-log rows, and ACL rows go together, so a crash can't leave
+      // orphan op-log/ACL rows for an id with no meta row (which would resurrect on a delete-then-recreate).
       await sql.begin(async (tx) => {
         await tx`DELETE FROM ${tx(meta)} WHERE id = ${id}` // → live.changes DELETE → onDelete on every node
         await tx`DELETE FROM ${tx(ups)} WHERE res_id = ${id}` // GC the op-log for the gone resource
+        await tx`DELETE FROM ${tx(acl)} WHERE res_id = ${id}` // GC the reverse ACL index
       })
     },
-    async list() {
-      const rows = await sql`SELECT id FROM ${sql(meta)}`
-      return rows.map((r) => r.id as string)
+    async list(opts) {
+      const { idContains, principals, sort, limit, offset = 0 } = opts ?? {}
+      const by = sort?.by ?? 'id'
+      const dir = sort?.dir === 'desc' ? sql`DESC` : sql`ASC`
+      // COLLATE "C" = byte/code-point order (NOT locale), to match store-memory's raw string compare.
+      const orderCol = { id: sql`m.id COLLATE "C"`, createdAt: sql`m.created_at`, updatedAt: sql`m.updated_at`, principalCount: sql`principal_count` }[by]
+      const tie = by === 'id' ? sql`` : sql`, m.id COLLATE "C" ASC` // deterministic secondary key on non-id sorts
+      const conds = []
+      if (idContains) conds.push(sql`strpos(m.id, ${idContains}) > 0`) // literal substring (like JS .includes), not LIKE
+      if (principals?.length) conds.push(sql`EXISTS (SELECT 1 FROM ${sql(acl)} a WHERE a.res_id = m.id AND a.principal = ANY(${principals}))`)
+      const where = conds.length ? conds.reduce((a, c) => sql`${a} AND ${c}`) : sql`TRUE`
+      const rows = await sql`
+        SELECT m.id,
+          (SELECT count(*)::int FROM ${sql(acl)} a WHERE a.res_id = m.id) AS principal_count,
+          m.created_at, m.updated_at
+        FROM ${sql(meta)} m
+        WHERE ${where}
+        ORDER BY ${orderCol} ${dir}${tie}
+        ${limit === undefined ? sql`` : sql`LIMIT ${limit}`}
+        OFFSET ${offset}`
+      return rows.map((r) => ({ id: r.id as string, principalCount: r.principal_count as number, createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) }))
+    },
+    async searchPrincipals(opts) {
+      const { query, limit, offset = 0 } = opts
+      const rows = await sql`
+        SELECT DISTINCT principal FROM ${sql(acl)}
+        ${query ? sql`WHERE strpos(principal, ${query}) > 0` : sql``}
+        ORDER BY principal COLLATE "C" ASC
+        ${limit === undefined ? sql`` : sql`LIMIT ${limit}`}
+        OFFSET ${offset}`
+      return rows.map((r) => r.principal as string)
     },
     onChange(cb) {
       changeCbs.add(cb)

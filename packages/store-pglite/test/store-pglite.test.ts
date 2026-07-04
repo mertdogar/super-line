@@ -65,7 +65,7 @@ describe('pglite store — central CRUD (postgres.js over pg-wire)', () => {
     await store.setAccess('a', { bob: { read: true, write: false } })
     expect((await store.read('a'))?.accessRules).toEqual({ bob: { read: true, write: false } })
 
-    expect(await store.list()).toContain('a')
+    expect((await store.list()).map((r) => r.id)).toContain('a')
 
     await store.delete('a')
     expect(await store.read('a')).toBeUndefined()
@@ -80,6 +80,52 @@ describe('pglite store — central CRUD (postgres.js over pg-wire)', () => {
     const { store } = await makeStore()
     expect(store.clustering).toBe('self')
     expect(store.model).toBe('lww')
+  })
+})
+
+describe('pglite store — list()/searchPrincipals (central ACL index + timestamps)', () => {
+  it('filters, sorts, paginates + maintains the ACL index and timestamps', async () => {
+    const { store } = await makeStore()
+    await store.create('chan-a', { v: 1 }, { alice: { read: true, write: true }, bob: { read: true, write: false } })
+    await store.create('chan-b', { v: 1 }, { bob: { read: true, write: true } })
+    await store.create('room-x', { v: 1 }, { carol: { read: true, write: true } })
+
+    // default: every row, id ASC, with principalCount + timestamps
+    const all = await store.list()
+    expect(all.map((r) => r.id)).toEqual(['chan-a', 'chan-b', 'room-x'])
+    const a = all.find((r) => r.id === 'chan-a')!
+    expect(a.principalCount).toBe(2)
+    expect(a.createdAt).toBeGreaterThan(0)
+    expect(a.updatedAt).toBe(a.createdAt)
+
+    // idContains = substring
+    expect((await store.list({ idContains: 'chan' })).map((r) => r.id)).toEqual(['chan-a', 'chan-b'])
+
+    // principals = union/OR
+    expect((await store.list({ principals: ['bob'] })).map((r) => r.id).sort()).toEqual(['chan-a', 'chan-b'])
+    expect((await store.list({ principals: ['alice', 'carol'] })).map((r) => r.id).sort()).toEqual(['chan-a', 'room-x'])
+
+    // sort + paginate
+    expect((await store.list({ sort: { by: 'id', dir: 'desc' } })).map((r) => r.id)).toEqual(['room-x', 'chan-b', 'chan-a'])
+    expect((await store.list({ sort: { by: 'principalCount', dir: 'desc' }, limit: 1 })).map((r) => r.id)).toEqual(['chan-a'])
+    expect((await store.list({ limit: 1, offset: 1 })).map((r) => r.id)).toEqual(['chan-b'])
+
+    // searchPrincipals: store-global, distinct, ASC
+    expect(await store.searchPrincipals({})).toEqual(['alice', 'bob', 'carol'])
+    expect(await store.searchPrincipals({ query: 'b' })).toEqual(['bob'])
+
+    // updated_at bumps on apply and setAccess; ACL index follows setAccess
+    await new Promise((r) => setTimeout(r, 5))
+    await store.apply({ id: 'chan-a', update: { v: 2 }, origin: 'c1' })
+    expect((await store.list({ idContains: 'chan-a' }))[0]!.updatedAt).toBeGreaterThan(a.createdAt)
+
+    await store.setAccess('chan-b', { dave: { read: true, write: true } })
+    expect(await store.searchPrincipals({ query: 'dave' })).toEqual(['dave'])
+    expect((await store.list({ principals: ['bob'] })).map((r) => r.id)).toEqual(['chan-a'])
+
+    // delete drops the resource + its ACL rows
+    await store.delete('chan-a')
+    expect(await store.searchPrincipals({ query: 'alice' })).toEqual([])
   })
 })
 

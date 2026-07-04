@@ -106,7 +106,7 @@ describe('store-sync-pglite — central CRUD + op-log (postgres.js over pg-wire)
     await store.setAccess('a', { bob: { read: true, write: false } })
     expect((await store.read('a'))?.accessRules).toEqual({ bob: { read: true, write: false } })
 
-    expect(await store.list()).toContain('a')
+    expect((await store.list()).map((r) => r.id)).toContain('a')
 
     await store.delete('a')
     expect(await store.read('a')).toBeUndefined()

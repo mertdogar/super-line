@@ -70,7 +70,7 @@ describe('libsqlSyncStore — rehydrate on restart (B2)', () => {
     await s1.close?.()
 
     const s2 = await libsqlSyncStore({ url })
-    expect(await s2.list()).toEqual(['d'])
+    expect((await s2.list()).map((r) => r.id)).toEqual(['d'])
     expect((await s2.read('d'))?.accessRules).toEqual(rules)
     expect(s2.open!('d').getSnapshot()).toEqual({ title: 'y', count: 3 })
     await s2.close?.()
@@ -116,6 +116,80 @@ describe('libsqlSyncStore — delete + setAccess (B3)', () => {
     const s2 = await libsqlSyncStore({ url })
     expect(await s2.list()).toEqual([])
     await s2.close?.()
+  })
+})
+
+describe('libsqlSyncStore — list/searchPrincipals (B4)', () => {
+  it('list returns ResourceSummary rows with counts + timestamps, id-asc by default', async () => {
+    const s = await libsqlSyncStore({ url: fileUrl() })
+    await s.create('beta', {}, { alice: { read: true, write: true }, bob: { read: true, write: false } })
+    await s.create('alpha', {}, { alice: { read: true, write: true } })
+
+    const rows = await s.list()
+    expect(rows.map((r) => r.id)).toEqual(['alpha', 'beta']) // id ASC (binary)
+    const beta = rows.find((r) => r.id === 'beta')!
+    expect(beta.principalCount).toBe(2)
+    expect(typeof beta.createdAt).toBe('number')
+    expect(beta.createdAt).toBeGreaterThan(0)
+    expect(beta.updatedAt).toBeGreaterThanOrEqual(beta.createdAt)
+    await s.close?.()
+  })
+
+  it('idContains is a case-sensitive substring filter', async () => {
+    const s = await libsqlSyncStore({ url: fileUrl() })
+    await s.create('doc-1', {}, rules)
+    await s.create('doc-2', {}, rules)
+    await s.create('note', {}, rules)
+    await s.create('DOC-3', {}, rules)
+
+    expect((await s.list({ idContains: 'doc' })).map((r) => r.id)).toEqual(['doc-1', 'doc-2']) // not DOC-3
+    await s.close?.()
+  })
+
+  it('principals is an OR/union filter', async () => {
+    const s = await libsqlSyncStore({ url: fileUrl() })
+    await s.create('a', {}, { alice: { read: true, write: true } })
+    await s.create('b', {}, { bob: { read: true, write: true } })
+    await s.create('c', {}, { carol: { read: true, write: true } })
+
+    expect((await s.list({ principals: ['alice', 'bob'] })).map((r) => r.id)).toEqual(['a', 'b'])
+    expect((await s.list({ principals: [] })).map((r) => r.id)).toEqual(['a', 'b', 'c']) // empty ⇒ no filter
+    await s.close?.()
+  })
+
+  it('sorts by principalCount desc and paginates', async () => {
+    const s = await libsqlSyncStore({ url: fileUrl() })
+    await s.create('one', {}, { a: { read: true, write: true } })
+    await s.create('three', {}, { a: { read: true, write: true }, b: { read: true, write: true }, c: { read: true, write: true } })
+    await s.create('two', {}, { a: { read: true, write: true }, b: { read: true, write: true } })
+
+    expect((await s.list({ sort: { by: 'principalCount', dir: 'desc' } })).map((r) => r.id)).toEqual(['three', 'two', 'one'])
+    expect((await s.list({ sort: { by: 'principalCount', dir: 'desc' }, limit: 1, offset: 1 })).map((r) => r.id)).toEqual(['two'])
+    await s.close?.()
+  })
+
+  it('updatedAt bumps on setAccess but createdAt is stable', async () => {
+    const s = await libsqlSyncStore({ url: fileUrl() })
+    await s.create('d', {}, rules)
+    const before = (await s.list())[0]!
+    await sleep(5)
+    await s.setAccess('d', { bob: { read: true, write: false } })
+    const after = (await s.list())[0]!
+    expect(after.createdAt).toBe(before.createdAt)
+    expect(after.updatedAt).toBeGreaterThan(before.updatedAt)
+    expect(after.principalCount).toBe(1)
+    await s.close?.()
+  })
+
+  it('searchPrincipals is distinct, substring-filtered, principal-asc', async () => {
+    const s = await libsqlSyncStore({ url: fileUrl() })
+    await s.create('x', {}, { alice: { read: true, write: true }, bob: { read: true, write: true } })
+    await s.create('y', {}, { alice: { read: true, write: true }, carol: { read: true, write: true } })
+
+    expect(await s.searchPrincipals({})).toEqual(['alice', 'bob', 'carol']) // distinct + asc
+    expect(await s.searchPrincipals({ query: 'a' })).toEqual(['alice', 'carol']) // substring on principal
+    expect(await s.searchPrincipals({ limit: 1, offset: 1 })).toEqual(['bob'])
+    await s.close?.()
   })
 
   it('setAccess persists across a reopen', async () => {

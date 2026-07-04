@@ -307,6 +307,67 @@ describe('store-sync (CRDT) — client delete(path) (R4)', () => {
   })
 })
 
+describe('store-sync (CRDT) — list + searchPrincipals', () => {
+  const rw = { read: true, write: true }
+  it('returns ResourceSummary rows with counts + timestamps, id-ASC by default', async () => {
+    const store = syncStoreServer()
+    store.create('b', {}, { alice: rw, bob: rw })
+    store.create('a', {}, { alice: rw })
+    const rows = await store.list()
+    expect(rows.map((r) => r.id)).toEqual(['a', 'b'])
+    expect(rows.find((r) => r.id === 'b')?.principalCount).toBe(2)
+    expect(rows.find((r) => r.id === 'a')?.createdAt).toBeGreaterThan(0)
+    expect(rows.find((r) => r.id === 'a')?.updatedAt).toBeGreaterThan(0)
+  })
+
+  it('filters by idContains and by principals (OR/union)', async () => {
+    const store = syncStoreServer()
+    store.create('doc-1', {}, { alice: rw })
+    store.create('doc-2', {}, { bob: rw })
+    store.create('note-3', {}, { carol: rw })
+    expect((await store.list({ idContains: 'doc' })).map((r) => r.id)).toEqual(['doc-1', 'doc-2'])
+    expect((await store.list({ principals: ['alice', 'carol'] })).map((r) => r.id)).toEqual(['doc-1', 'note-3'])
+    expect(await store.list({ principals: ['nobody'] })).toEqual([])
+  })
+
+  it('supports sort, limit, offset', async () => {
+    const store = syncStoreServer()
+    store.create('a', {}, {})
+    store.create('b', {}, {})
+    store.create('c', {}, {})
+    expect((await store.list({ sort: { by: 'id', dir: 'desc' } })).map((r) => r.id)).toEqual(['c', 'b', 'a'])
+    expect((await store.list({ limit: 2 })).map((r) => r.id)).toEqual(['a', 'b'])
+    expect((await store.list({ offset: 1 })).map((r) => r.id)).toEqual(['b', 'c'])
+  })
+
+  it('searchPrincipals is global, distinct, ASC, substring-filtered', async () => {
+    const store = syncStoreServer()
+    store.create('x', {}, { alice: rw, bob: rw })
+    store.create('y', {}, { alice: rw, carol: rw })
+    expect(await store.searchPrincipals({})).toEqual(['alice', 'bob', 'carol'])
+    expect(await store.searchPrincipals({ query: 'a' })).toEqual(['alice', 'carol'])
+  })
+
+  it('setAccess reindexes principals and delete drops from the index', async () => {
+    const store = syncStoreServer()
+    store.create('x', {}, { alice: rw })
+    store.setAccess('x', { bob: rw })
+    expect(await store.searchPrincipals({})).toEqual(['bob'])
+    store.delete('x')
+    expect(await store.searchPrincipals({})).toEqual([])
+    expect(await store.list()).toEqual([])
+  })
+
+  it('a server co-write (open().set) bumps updatedAt', async () => {
+    const store = syncStoreServer()
+    store.create('d', { v: 0 }, {})
+    await new Promise((r) => setTimeout(r, 5))
+    const t0 = Date.now()
+    store.open!('d').set({ v: 1 })
+    expect((await store.list())[0]!.updatedAt).toBeGreaterThanOrEqual(t0)
+  })
+})
+
 describe('store-sync (CRDT) — replica applyDelete', () => {
   it('notifies subscribers (so the handle re-reads deleted)', () => {
     const r = syncStoreClient().open('a')

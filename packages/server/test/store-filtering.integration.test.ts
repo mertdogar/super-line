@@ -14,7 +14,7 @@ const contract = defineContract({ roles: { user: { clientToServer: {} } } })
 //   note-gamma → bob(rw)  carol(r)  count 2
 //   doc-delta  → carol(rw)          count 1
 // principals across the store: alice, bob, carol
-async function seed(srv: { store: (n: string) => { create: (id: string, data: unknown, acl: unknown) => Promise<void> } }) {
+async function seed(srv: { store: (n: string) => { create: (id: string, data: unknown, acl: Record<string, { read: boolean; write: boolean }>) => Promise<void> } }) {
   const s = srv.store('docs')
   await s.create('doc-alpha', { v: 1 }, { alice: { read: true, write: true }, bob: { read: true, write: false } })
   await s.create('doc-beta', { v: 1 }, { alice: { read: true, write: true } })
@@ -48,10 +48,10 @@ describe('store filtering RPCs (list(opts) + searchPrincipals via the inspector)
     const rows = await list({ sort: { by: 'id', dir: 'asc' } })
     expect(ids(rows)).toEqual(['doc-alpha', 'doc-beta', 'doc-delta', 'note-gamma'])
     const byId = Object.fromEntries(rows.map((r) => [r.id, r]))
-    expect(byId['doc-alpha'].principalCount).toBe(2)
-    expect(byId['doc-beta'].principalCount).toBe(1)
-    expect(byId['note-gamma'].principalCount).toBe(2)
-    expect(byId['doc-delta'].principalCount).toBe(1)
+    expect(byId['doc-alpha']!.principalCount).toBe(2)
+    expect(byId['doc-beta']!.principalCount).toBe(1)
+    expect(byId['note-gamma']!.principalCount).toBe(2)
+    expect(byId['doc-delta']!.principalCount).toBe(1)
     for (const r of rows) {
       expect(r.createdAt).toBeGreaterThan(0)
       expect(r.updatedAt).toBeGreaterThanOrEqual(r.createdAt)
@@ -96,7 +96,7 @@ describe('store filtering RPCs (list(opts) + searchPrincipals via the inspector)
     await tick() // separate the timestamp from the seed creates
     await srv.store('docs').grant('doc-beta', 'zoe', { read: true, write: false }) // setAccess bumps updatedAt
     const rows = await list({ sort: { by: 'updatedAt', dir: 'desc' } })
-    expect(rows[0].id).toBe('doc-beta')
+    expect(rows[0]!.id).toBe('doc-beta')
     inspector.close()
   })
 

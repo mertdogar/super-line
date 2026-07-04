@@ -59,7 +59,8 @@ function selfStore(): ServerStore & { feed(c: StoreChange): void; feedDelete(id:
     delete: (id) => {
       data.delete(id)
     },
-    list: () => [...data.keys()],
+    list: () => [...data.values()].map((r) => ({ id: r.id, principalCount: Object.keys(r.accessRules).length, createdAt: 0, updatedAt: 0 })),
+    searchPrincipals: () => [],
     onChange: (cb) => {
       changeCbs.add(cb)
       return () => changeCbs.delete(cb)

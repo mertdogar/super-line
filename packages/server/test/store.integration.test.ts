@@ -103,8 +103,8 @@ describe('store — server-side handle (srv.store)', () => {
     await env.srv.store('docs').create('l1', {}, {})
     await env.srv.store('docs').create('l2', {}, {})
     await env.srv.store('docs').delete('l1')
-    expect(await env.srv.store('docs').list()).toContain('l2')
-    expect(await env.srv.store('docs').list()).not.toContain('l1')
+    expect((await env.srv.store('docs').list()).map((r) => r.id)).toContain('l2')
+    expect((await env.srv.store('docs').list()).map((r) => r.id)).not.toContain('l1')
   })
 
   it('an unconfigured store name throws NOT_FOUND', () => {
@@ -250,6 +250,7 @@ describe('store — wire (ACL + catch-up + fan-out)', () => {
       setAccess: () => {},
       delete: () => {},
       list: () => [],
+      searchPrincipals: () => [],
       onChange: () => () => {},
     }
     const srv2 = createSuperLineServer(contract, {

@@ -1,4 +1,4 @@
-import type { ServerStore, StoreInfo } from '@super-line/core'
+import type { ResourceSummary, ServerStore, StoreInfo } from '@super-line/core'
 import { defineContract } from '@super-line/core'
 import { memoryStoreClient, memoryStoreServer } from '@super-line/store-memory'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -65,8 +65,8 @@ describe('store inspection RPCs', () => {
     const stores = (await inspector.request('listStores')) as StoreInfo[]
     expect(stores).toEqual([{ name: 'docs', model: 'lww' }])
 
-    const ids = (await inspector.request('listResources', { store: 'docs' })) as string[]
-    expect(ids).toEqual(['d1'])
+    const rows = (await inspector.request('listResources', { store: 'docs' })) as ResourceSummary[]
+    expect(rows.map((r) => r.id)).toEqual(['d1'])
 
     // ACL bypass: ada has no read perms, yet the inspector reads the value + the access rules.
     const view = (await inspector.request('readResource', { store: 'docs', id: 'd1' })) as {
@@ -89,7 +89,8 @@ describe('store inspection RPCs', () => {
       apply: () => {},
       setAccess: () => {},
       delete: () => {},
-      list: () => ['x'],
+      list: () => [{ id: 'x', principalCount: 0, createdAt: 0, updatedAt: 0 }],
+      searchPrincipals: () => [],
       onChange: () => () => {},
       open: () => ({
         getSnapshot: () => ({ title: 'decoded' }),

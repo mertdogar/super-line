@@ -15,6 +15,25 @@ const SERVER_ORIGIN = 'server'
 export function memoryStoreServer(): ServerStore {
   const resources = new Map<string, Resource>()
   const listeners = new Set<(change: StoreChange) => void>()
+  const meta = new Map<string, { createdAt: number; updatedAt: number }>()
+  const acl = new Map<string, Set<string>>() // principal → resource ids (reverse ACL index for list/searchPrincipals)
+  const now = (): number => Date.now()
+
+  const indexAdd = (id: string, rules: Resource['accessRules']): void => {
+    for (const p of Object.keys(rules)) {
+      let s = acl.get(p)
+      if (!s) acl.set(p, (s = new Set()))
+      s.add(id)
+    }
+  }
+  const indexRemove = (id: string, rules: Resource['accessRules']): void => {
+    for (const p of Object.keys(rules)) {
+      const s = acl.get(p)
+      if (!s) continue
+      s.delete(id)
+      if (s.size === 0) acl.delete(p)
+    }
+  }
 
   const get = (id: string): Resource => {
     const r = resources.get(id)
@@ -26,6 +45,8 @@ export function memoryStoreServer(): ServerStore {
   // `apply` (relayed/client writes) and the server-side replica's set/update/delete co-writes.
   const commit = (change: StoreChange): void => {
     get(change.id).data = change.update
+    const m = meta.get(change.id)
+    if (m) m.updatedAt = now()
     for (const cb of listeners) cb(change)
   }
 
@@ -38,6 +59,8 @@ export function memoryStoreServer(): ServerStore {
     create(id, data, accessRules) {
       if (resources.has(id)) throw new SuperLineError('CONFLICT', `Resource already exists: ${id}`)
       resources.set(id, { id, accessRules, data })
+      meta.set(id, { createdAt: now(), updatedAt: now() })
+      indexAdd(id, accessRules)
     },
     apply(change) {
       commit(change) // LWW replace + single fan-out source
@@ -77,13 +100,50 @@ export function memoryStoreServer(): ServerStore {
       } satisfies ServerReplica
     },
     setAccess(id, accessRules) {
-      get(id).accessRules = accessRules
+      const r = get(id)
+      indexRemove(id, r.accessRules)
+      r.accessRules = accessRules
+      indexAdd(id, accessRules)
+      const m = meta.get(id)
+      if (m) m.updatedAt = now()
     },
     delete(id) {
+      const r = resources.get(id)
+      if (r) indexRemove(id, r.accessRules)
       resources.delete(id)
+      meta.delete(id)
     },
-    list() {
-      return [...resources.keys()]
+    list(opts) {
+      const { idContains, principals, sort, limit, offset = 0 } = opts ?? {}
+      let rows = [...resources.values()].map((r) => {
+        const m = meta.get(r.id)
+        return {
+          id: r.id,
+          principalCount: Object.keys(r.accessRules).length,
+          createdAt: m?.createdAt ?? 0,
+          updatedAt: m?.updatedAt ?? 0,
+        }
+      })
+      if (idContains) rows = rows.filter((r) => r.id.includes(idContains))
+      if (principals?.length) {
+        const allowed = new Set<string>()
+        for (const p of principals) for (const rid of acl.get(p) ?? []) allowed.add(rid)
+        rows = rows.filter((r) => allowed.has(r.id))
+      }
+      const by = sort?.by ?? 'id'
+      const mul = sort?.dir === 'desc' ? -1 : 1
+      rows.sort((a, b) => {
+        if (by === 'id') return (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) * mul
+        return (a[by] - b[by]) * mul
+      })
+      return limit === undefined ? rows.slice(offset) : rows.slice(offset, offset + limit)
+    },
+    searchPrincipals(opts) {
+      const { query, limit, offset = 0 } = opts
+      let ps = [...acl.keys()]
+      if (query) ps = ps.filter((p) => p.includes(query))
+      ps.sort()
+      return limit === undefined ? ps.slice(offset) : ps.slice(offset, offset + limit)
     },
     onChange(cb) {
       listeners.add(cb)

@@ -63,9 +63,9 @@ describe('memoryStoreServer (LWW)', () => {
     const s = memoryStoreServer()
     await s.create('a', {}, rules)
     await s.create('b', {}, rules)
-    expect((await s.list()).sort()).toEqual(['a', 'b'])
+    expect((await s.list()).map((r) => r.id).sort()).toEqual(['a', 'b'])
     await s.delete('a')
-    expect(await s.list()).toEqual(['b'])
+    expect((await s.list()).map((r) => r.id)).toEqual(['b'])
   })
 
   it('onChange returns a working unsubscribe', async () => {

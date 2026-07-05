@@ -1412,6 +1412,19 @@ importers:
         specifier: workspace:^
         version: link:../core
 
+  packages/collections-sqlite:
+    dependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+      better-sqlite3:
+        specifier: ^11.8.1
+        version: 11.10.0
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.12
+        version: 7.6.13
+
   packages/control-center:
     devDependencies:
       '@radix-ui/react-slider':

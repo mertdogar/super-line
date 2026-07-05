@@ -16,6 +16,7 @@ export default defineConfig({
       '@super-line/react': src('packages/react/src/index.ts'),
       '@super-line/plugin-inspector': src('packages/plugin-inspector/src/index.ts'),
       '@super-line/collections-memory': src('packages/collections-memory/src/index.ts'),
+      '@super-line/collections-sqlite': src('packages/collections-sqlite/src/index.ts'),
       '@super-line/tanstack-db': src('packages/tanstack-db/src/index.ts'),
       '@super-line/store-memory': src('packages/store-memory/src/index.ts'),
       '@super-line/store-pglite': src('packages/store-pglite/src/index.ts'),

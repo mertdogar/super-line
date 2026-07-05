@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { defineContract, eq } from '@super-line/core'
 import { memoryCollections } from '@super-line/collections-memory'
+import { sqliteCollections } from '@super-line/collections-sqlite'
 import { createHarness, waitFor } from './harness.js'
 import type { CollectionPolicy } from '@super-line/server'
 
@@ -151,5 +152,25 @@ describe('collections — atomic batches & filter transitions', () => {
 
     await client.collection('messages').update({ ...msg('m1', 'random', 'u1', 1) }) // leaves the 'general' filter
     await waitFor(() => sub.rows().length === 0)
+  })
+})
+
+describe('collections — durable backend drop-in', () => {
+  it('serves a filtered subset end-to-end with the sqlite backend', async () => {
+    const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: sqliteCollections({ file: ':memory:' }), // same CollectionStore contract as memory
+      policies: { messages: { read: () => undefined, write: authorOnly } },
+    })
+    await srv.collection('messages').insert(msg('m1', 'general', 'u9', 1))
+
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    const sub = client.collection('messages').subscribe({ filter: eq('channelId', 'general') })
+    await sub.ready
+    expect(sub.rows().map((r) => r.id)).toEqual(['m1'])
+
+    await client.collection('messages').insert(msg('m2', 'general', 'u1', 2))
+    await waitFor(() => sub.rows().length === 2)
   })
 })

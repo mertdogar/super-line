@@ -24,6 +24,7 @@
       "@super-line/react": ["./packages/react/src/index.ts"],
       "@super-line/plugin-inspector": ["./packages/plugin-inspector/src/index.ts"],
       "@super-line/collections-memory": ["./packages/collections-memory/src/index.ts"],
+      "@super-line/collections-sqlite": ["./packages/collections-sqlite/src/index.ts"],
       "@super-line/tanstack-db": ["./packages/tanstack-db/src/index.ts"],
       "@super-line/store-memory": ["./packages/store-memory/src/index.ts"],
       "@super-line/store-sqlite": ["./packages/store-sqlite/src/index.ts"],

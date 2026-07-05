@@ -12,6 +12,8 @@ import {
   type SearchOpts,
   type StoreInfo,
   type StoreResourceView,
+  type CollectionInfo,
+  type CollectionQuery,
 } from '@super-line/core'
 
 export type InspectorStatus = 'connecting' | 'open' | 'closed'
@@ -29,6 +31,10 @@ export interface InspectorClient {
   /** Store-global principal lookup (substring, principal-ascending) for the Users filter. */
   searchPrincipals(store: string, opts?: SearchOpts): Promise<string[]>
   readResource(store: string, id: string): Promise<StoreResourceView>
+  /** Declared collections (name + key + advisory references + best-effort JSON Schema) for the schema graph. */
+  listCollections(): Promise<CollectionInfo[]>
+  /** Browse a collection's rows via the query IR (policy-bypassed, trusted observer). */
+  queryCollection(collection: string, query?: CollectionQuery): Promise<unknown[]>
   /** Subscribe to live inspection records. Returns an unsubscribe fn. */
   onEvent(cb: (env: InspectorEnvelope) => void): () => void
   /** Observe connection status (called immediately with the current status). Returns an unsubscribe fn. */
@@ -138,6 +144,8 @@ export function createInspector(opts: InspectorOptions): InspectorClient {
     listResources: (store, opts) => request<ResourceSummary[]>('listResources', { store, ...opts }),
     searchPrincipals: (store, opts) => request<string[]>('searchPrincipals', { store, ...opts }),
     readResource: (store, id) => request<StoreResourceView>('readResource', { store, id }),
+    listCollections: () => request<CollectionInfo[]>('listCollections'),
+    queryCollection: (collection, query) => request<unknown[]>('queryCollection', { collection, ...query }),
     onEvent(cb) {
       eventCbs.add(cb)
       return () => eventCbs.delete(cb)

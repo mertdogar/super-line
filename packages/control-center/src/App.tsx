@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Boxes, Database, FileText, LibraryBig, Network, Radio, Settings } from 'lucide-react'
+import { Boxes, Database, FileText, LibraryBig, Network, Radio, Settings, Table2 } from 'lucide-react'
 import type {
   ConnDescriptor,
   InspectedContract,
@@ -16,6 +16,7 @@ import { ConnDetail } from '@/components/conn-detail'
 import { ContractExplorer } from '@/components/contract-explorer'
 import { LiveFeed } from '@/components/live-feed'
 import { StoresExplorer } from '@/components/stores-explorer'
+import { CollectionsExplorer } from '@/components/collections-explorer'
 import { SettingsPage } from '@/components/settings-page'
 import { ResourcesPage } from '@/components/resources-page'
 import { StatusDot } from '@/components/status-dot'
@@ -25,7 +26,7 @@ import { roomsOf, type Highlight } from '@/lib/topology'
 import { transportsOf } from '@/lib/transport'
 import { cn } from '@/lib/utils'
 
-type View = 'topology' | 'connections' | 'contract' | 'stores' | 'feed' | 'settings' | 'resources'
+type View = 'topology' | 'connections' | 'contract' | 'stores' | 'collections' | 'feed' | 'settings' | 'resources'
 type NavItem = { id: View; label: string; icon: typeof Network }
 
 const NAV: NavItem[] = [
@@ -33,6 +34,7 @@ const NAV: NavItem[] = [
   { id: 'connections', label: 'Connections', icon: Boxes },
   { id: 'contract', label: 'Contract', icon: FileText },
   { id: 'stores', label: 'Stores', icon: Database },
+  { id: 'collections', label: 'Collections', icon: Table2 },
   { id: 'feed', label: 'Live feed', icon: Radio },
 ]
 const NAV_BOTTOM: NavItem[] = [
@@ -226,6 +228,7 @@ export default function App(): React.JSX.Element {
                   <p className="text-sm text-muted-foreground">No contract.</p>
                 ))}
               {view === 'stores' && <StoresExplorer client={client} />}
+              {view === 'collections' && <CollectionsExplorer client={client} />}
               {view === 'feed' && <LiveFeed events={feed} connections={connections} topology={topology} />}
               {view === 'settings' && <SettingsPage url={url} status={status} onConnect={connect} />}
               {view === 'resources' && <ResourcesPage />}

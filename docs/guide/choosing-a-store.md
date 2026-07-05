@@ -1,5 +1,14 @@
 # Choose your store
 
+::: tip Tabular data? Reach for Collections first
+This page covers the **document** stores — one opaque JSON blob per id. For **tabular** data (messages,
+users, tasks — anything you'd filter, paginate, join, or secure per-row), use
+[**Collections**](./collections): typed rows declared on the contract, subset subscriptions, row-level
+security, and [TanStack DB](https://tanstack.com/db) for client-side joins. Collections are the successor to
+the LWW (last-writer-wins) document stores below, which are now deprecated. The CRDT stores remain the right
+tool for a single collaborative document.
+:::
+
 A [**Store**](./store) is super-line's persisted-state primitive — a named collection of permissioned
 JSON **Resources** the server owns and clients read/write through a reactive handle. Like a
 [transport](./transports) or an [adapter](./scaling-adapters), a Store is **pluggable** and ships as a

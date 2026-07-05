@@ -86,6 +86,7 @@ export default defineConfig({
           collapsed: true,
           items: [
             { text: 'Choosing a store', link: '/guide/choosing-a-store' },
+            { text: 'Collections (typed rows)', link: '/guide/collections' },
             { text: 'Stores', link: '/guide/store' },
             { text: 'Synced state (CRDT)', link: '/guide/synced-state' },
             { text: 'Postgres + Electric (CRDT)', link: '/guide/store-sync-pglite' },

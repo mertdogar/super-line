@@ -292,6 +292,8 @@ Create the client once (e.g. `useState(() => createSuperLineClient(api, { transp
 
 ## Stores (6: store-memory · store-sync · store-sqlite · store-sync-libsql · store-pglite · store-sync-pglite)
 
+> **The LWW stores (store-memory · store-sqlite · store-pglite) are DEPRECATED** in favor of [Collections](#collections-typed-rows-the-relational-store-successor) (typed rows, on-contract) — see below. The CRDT stores (store-sync*) remain the tool for a single collaborative document.
+
 A Store is super-line's **off-contract** persisted-state seam: named, permissioned JSON Resources `{ id, accessRules, data }`. Configure a server + client pair under matching `stores:` keys. `data` is `unknown` end-to-end (not schema-validated). ACL is **deny-by-default**, keyed by the principal (`identify(conn) ?? conn.id`).
 
 Each `ServerStore` declares two static traits the inspector surfaces: `model: 'lww' | 'crdt'` (replace vs merge) and `clustering: 'relay' | 'self'`. **`relay`** = the store does no networking; core relays its Changes/deletes across nodes over the server↔server Adapter (so >1 node needs an adapter). **`self`** = the store owns a shared backend + a per-node replica and fans only to LOCAL subscribers — it needs **NO adapter** (it IS the fan-out). Match model on both halves: LWW server ↔ `memoryStoreClient`, CRDT server ↔ `syncStoreClient`.
@@ -380,3 +382,52 @@ Notes:
 - **Clustering.** `relay` stores (memory, sync, sqlite, sync-libsql) are node-local — super-line relays their Changes across nodes over the **Adapter** (so >1 node needs one). `self` stores (pglite, sync-pglite) own a central Postgres + per-node Electric→PGlite replica and fan only to local subscribers — they need **NO adapter**. For LWW, cross-node writes resolve last-writer-wins; CRDT stores merge.
 - **Deletion fan-out.** `srv.store(ns).delete(id)` removes the whole Resource and propagates cluster-wide as an `sdel` frame: subscribers see `ResourceHandle.deleted` / `useResource().deleted` go `true` (a `subscribe` fires). Without it a deleted Resource just reads as a silent empty snapshot. Distinct from `delete(path)`, which is a surgical key removal within a Resource.
 - React: `useResource<T>(name, id)` wraps open + subscribe + write-through + unmount-close, and exposes `deleted` (see above).
+
+## Collections (typed rows — the relational store successor)
+
+Collections (ADR-0006) are the **typed, on-contract** successor to the LWW stores: named sets of **rows**, each schema-validated. super-line is the server-authoritative **sync source**; **TanStack DB is the client query engine** (joins/live-queries/optimism) via `@super-line/tanstack-db`. Unlike stores, rows are declared IN the contract, so the server validates every write and types flow end-to-end. Deletion/routing is filter-based, not per-id channels.
+
+```ts
+// CONTRACT — a top-level `collections` block (rows flow end-to-end via RowOf<C,N>):
+defineContract({
+  collections: {
+    users: { schema: z.object({ id: z.string(), name: z.string() }), key: 'id' },
+    messages: { schema: z.object({ id: z.string(), channelId: z.string(), authorId: z.string(), text: z.string() }), key: 'id', references: { authorId: 'users' } },
+  },
+  roles: { /* … */ },
+})
+
+// SERVER — ONE backend serves all collections (single tx domain → atomic cross-collection batches) + row policies:
+createSuperLineServer(api, {
+  collections: memoryCollections(),            // or sqliteCollections({ file }) (relay) · await pgliteCollections({ pgUrl, electricUrl? }) (self)
+  checkReferences: true,                        // opt-in advisory FK existence check (no cascades)
+  policies: {                                   // DENY-BY-DEFAULT: omit read/write ⇒ that op is server-only
+    messages: {
+      read: (principal, ctx) => isIn('channelId', ctx.channels),  // → IR filter ANDed into every snapshot + live change; return undefined = whole collection
+      write: (principal, op, next, prev) => op === 'delete' ? prev?.authorId === principal : next?.authorId === principal,
+    },
+  },
+})
+srv.collection('messages').insert/update/delete/read/snapshot   // server co-write: policy-free, schema-validated
+
+// CLIENT — client.collection(name), typed by the contract:
+const sub = client.collection('messages').subscribe({ filter: eq('channelId', 'general'), orderBy: [{ field: 'createdAt', dir: 'asc' }], limit: 50 })
+await sub.ready                                 // AWAIT before depending on live delivery (frames process concurrently)
+sub.rows()                                      // current rows, ordered + limited
+sub.subscribe((ev) => {})                       // { type: 'insert'|'update'|'delete', id, row } — NON-optimistic (optimism is TanStack's job)
+await client.collection('messages').insert(row) // also update(row) / delete(id) / batch([{type,row}|{type:'delete',id}]) — atomic
+// React: const { rows, insert, update, delete: del } = useCollection('messages', { filter: eq('channelId', id) })
+
+// QUERY IR (from @super-line/core) — one evaluator shared by routing/snapshots/client re-filter:
+and/or/not · eq/neq/lt/lte/gt/gte(field, value) · isIn(field, values) · like/ilike(field, pattern)   // field = dot path
+type CollectionQuery = { filter?: Expr; orderBy?: { field, dir: 'asc'|'desc' }[]; limit?; offset? }
+
+// TANSTACK DB adapter — the query engine (joins, live queries):
+import { createCollection, createLiveQueryCollection, eq as teq } from '@tanstack/db'
+import { superLineCollectionOptions } from '@super-line/tanstack-db'
+const messages = createCollection(superLineCollectionOptions(client, api, 'messages', { query: { filter: eq('channelId', 'general') } }))
+const users = createCollection(superLineCollectionOptions(client, api, 'users'))
+createLiveQueryCollection((q) => q.from({ m: messages }).join({ u: users }, ({ m, u }) => teq(u.id, m.authorId), 'inner').select(({ m, u }) => ({ id: m.id, text: m.text, author: u.name })))
+```
+
+Backends (all drop-in, one line to swap): `@super-line/collections-memory` (in-memory · relay) · `collections-sqlite` (SQLite · relay, IR→SQL snapshot pushdown) · `collections-pglite` (central Postgres + Electric→PGlite · **self**, no adapter). Inspector: `listCollections` / `queryCollection` + a Control Center **Collections** view (schema graph + row browser). Guide: `docs/guide/collections.md`; example: `examples/collections`.

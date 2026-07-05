@@ -47,7 +47,8 @@
 | ↔️ **Req/res** | Unary `await client.x()` with typed errors, timeout & `AbortSignal`. |
 | 📣 **Events & rooms** | Server-pushed events; server-controlled room broadcasts. |
 | 📡 **Topics** | Client-subscribed pub/sub streams, authorized server-side. |
-| 🗄️ **Stores** | Permissioned, real-time JSON documents — a pluggable persisted-state primitive with per-client access rules, a reactive client handle, and a reactive in-process server co-writer (`srv.store(ns).open(id)`) that reads, merges, and surgically deletes. **Six backends:** LWW or CRDT × in-memory · durable (SQLite, libsql/Turso) · self-clustering (Postgres + Electric). |
+| 🧩 **Collections** | Typed, relational **rows** declared on the contract — the server validates every write, enforces row-level security, and streams each client a live subset; [TanStack DB](https://tanstack.com/db) does client-side joins & optimistic mutations via the first-party adapter. The typed successor to the LWW stores. **Backends:** in-memory · SQLite · self-clustering (Postgres + Electric). |
+| 🗄️ **Stores** | Permissioned, real-time JSON documents — a pluggable persisted-state primitive with per-client access rules, a reactive client handle, and a reactive in-process server co-writer (`srv.store(ns).open(id)`) that reads, merges, and surgically deletes. **Backends:** the CRDT stores (in-memory · libsql/Turso · Postgres+Electric) for collaborative documents; the LWW stores are superseded by Collections. |
 | 🧹 **Cluster-wide delete** | `srv.store(ns).delete(id)` fans a deletion across every node (wire `sdel`); observe it via `ServerStore.onDelete`, the client `ResourceHandle.deleted` flag, and React `useResource().deleted`. |
 | 🚌 **Cluster event bus** | `server.publish` / `server.subscribe` on a shared topic — cluster-wide pub/sub to server listeners (every node, local echo) and subscribed clients at once. |
 | 📨 **Server→client req/res** | `await srv.toConn(id).request(...)` — ask a client and await a typed reply, across nodes. |
@@ -74,7 +75,13 @@ pnpm add @super-line/adapter-rabbitmq  # AMQP broker
 pnpm add @super-line/adapter-zeromq    # brokerless mesh / forwarder
 pnpm add @super-line/adapter-libp2p    # decentralized gossip, broker-less
 
-# stores — permissioned, real-time documents (pick a backend; pair with its client store)
+# collections — typed relational rows (pick a backend; client-side joins via TanStack DB)
+pnpm add @super-line/collections-memory  # in-memory · relay
+pnpm add @super-line/collections-sqlite  # durable (better-sqlite3) · relay
+pnpm add @super-line/collections-pglite  # self-clustering (Postgres + Electric)
+pnpm add @super-line/tanstack-db         # the TanStack DB adapter (joins, live queries)
+
+# stores — permissioned, real-time documents (CRDT for collab docs; LWW deprecated → collections)
 pnpm add @super-line/store-memory       # LWW · in-memory · relay
 pnpm add @super-line/store-sync         # CRDT · in-memory · relay
 pnpm add @super-line/store-sqlite       # LWW · durable (better-sqlite3) · relay
@@ -205,7 +212,7 @@ See [Introspection & presence](https://super-line.dogar.biz/guide/introspection-
 The full docs live at **[super-line.dogar.biz](https://super-line.dogar.biz/)**:
 
 - **Start here** — [Getting started](https://super-line.dogar.biz/guide/getting-started) · [The contract](https://super-line.dogar.biz/guide/the-contract) (roles, direction & the five flavors)
-- **Guides** — [Requests](https://super-line.dogar.biz/guide/requests) · [Events & rooms](https://super-line.dogar.biz/guide/events-rooms) · [Topics](https://super-line.dogar.biz/guide/topics) · [Stores](https://super-line.dogar.biz/guide/store) · [Synced state (CRDT)](https://super-line.dogar.biz/guide/synced-state) · [Roles & auth](https://super-line.dogar.biz/guide/roles-auth) · [Middleware & lifecycle](https://super-line.dogar.biz/guide/middleware-lifecycle) · [Error handling](https://super-line.dogar.biz/guide/errors) · [Reconnection & delivery](https://super-line.dogar.biz/guide/reconnection-delivery) · [Serialization](https://super-line.dogar.biz/guide/serialization) · [Scaling & adapters](https://super-line.dogar.biz/guide/scaling-adapters) · [React](https://super-line.dogar.biz/guide/react) · [Testing](https://super-line.dogar.biz/guide/testing)
+- **Guides** — [Requests](https://super-line.dogar.biz/guide/requests) · [Events & rooms](https://super-line.dogar.biz/guide/events-rooms) · [Topics](https://super-line.dogar.biz/guide/topics) · [Collections](https://super-line.dogar.biz/guide/collections) · [Stores](https://super-line.dogar.biz/guide/store) · [Synced state (CRDT)](https://super-line.dogar.biz/guide/synced-state) · [Roles & auth](https://super-line.dogar.biz/guide/roles-auth) · [Middleware & lifecycle](https://super-line.dogar.biz/guide/middleware-lifecycle) · [Error handling](https://super-line.dogar.biz/guide/errors) · [Reconnection & delivery](https://super-line.dogar.biz/guide/reconnection-delivery) · [Serialization](https://super-line.dogar.biz/guide/serialization) · [Scaling & adapters](https://super-line.dogar.biz/guide/scaling-adapters) · [React](https://super-line.dogar.biz/guide/react) · [Testing](https://super-line.dogar.biz/guide/testing)
 - **[API reference](https://super-line.dogar.biz/reference/)** — generated from source: every export, option, and type across the five packages.
 
 ## Examples

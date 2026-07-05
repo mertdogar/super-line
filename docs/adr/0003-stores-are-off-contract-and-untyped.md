@@ -1,6 +1,6 @@
 # ADR-0003: Stores are off-contract and untyped, outside the typed-contract spine
 
-- Status: Accepted
+- Status: Accepted — narrowed to CRDT doc stores by [ADR-0006](0006-collections-are-on-contract-typed-rows.md) (2026-07-05)
 - Date: 2026-06-23
 
 ## Context

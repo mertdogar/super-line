@@ -3,6 +3,7 @@ import type { ConnDescriptor, NodeStat } from './adapter.js'
 import { defineContract } from './contract.js'
 import type { Contract, Directional, Schema } from './contract.js'
 import type { ListOpts, ResourceSummary, SearchOpts } from './store.js'
+import type { CollectionQuery } from './query.js'
 
 /** WS subprotocol the Control Center connects with; the server short-circuits auth for it. */
 export const INSPECTOR_SUBPROTOCOL = 'superline.inspector.v1'
@@ -68,6 +69,18 @@ export interface StoreInfo {
 export interface StoreResourceView {
   data: unknown
   accessRules: Record<string, { read: boolean; write: boolean }>
+}
+
+/**
+ * A declared collection — what `listCollections` returns, for the Control Center schema graph. `references`
+ * are the advisory foreign keys (graph edges); `schema` is best-effort JSON Schema of the row (node fields),
+ * omitted when no converter is available.
+ */
+export interface CollectionInfo {
+  name: string
+  key: string
+  references: Record<string, string>
+  schema?: unknown
 }
 
 /** A failed response/reply, carried on `msg.response` / `msg.serverReply`. */
@@ -186,6 +199,8 @@ export const InspectorContract = defineContract({
         listResources: { input: s<{ store: string } & ListOpts>(), output: s<ResourceSummary[]>() },
         searchPrincipals: { input: s<{ store: string } & SearchOpts>(), output: s<string[]>() },
         readResource: { input: s<{ store: string; id: string }>(), output: s<StoreResourceView>() },
+        listCollections: { input: s<void>(), output: s<CollectionInfo[]>() },
+        queryCollection: { input: s<{ collection: string } & CollectionQuery>(), output: s<unknown[]>() },
       },
       serverToClient: {
         events: { payload: s<InspectorEnvelope>(), subscribe: true },

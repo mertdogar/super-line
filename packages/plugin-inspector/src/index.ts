@@ -13,6 +13,8 @@ import {
   type ConnView,
   type NodeView,
   type StoreResourceView,
+  type CollectionInfo,
+  type CollectionQuery,
   type ListOpts,
   type SearchOpts,
 } from '@super-line/core'
@@ -29,16 +31,21 @@ function encodedByteSize(encoded: string | Uint8Array): number {
   return typeof encoded === 'string' ? encoder.encode(encoded).length : encoded.byteLength
 }
 
-// getContract structure + best-effort JSON Schema via lazy, optional @standard-community/standard-json.
-// The package (and per-vendor converter) is optional — missing/unsupported falls back to structure only.
-async function buildInspectedContract(contract: Contract): Promise<InspectedContract> {
-  let toJsonSchema: (s: Schema) => Promise<unknown>
+// Best-effort schema → JSON Schema, via lazy, optional @standard-community/standard-json. The package (and
+// per-vendor converter) is optional — a missing/unsupported converter falls back to structure-only.
+async function loadJsonConverter(): Promise<((s: Schema) => Promise<unknown>) | null> {
   try {
     const mod = await import('@standard-community/standard-json')
-    toJsonSchema = mod.toJsonSchema as unknown as (s: Schema) => Promise<unknown>
+    return mod.toJsonSchema as unknown as (s: Schema) => Promise<unknown>
   } catch {
-    return classifyContract(contract) // converter package not installed -> structure only
+    return null
   }
+}
+
+// getContract structure + best-effort JSON Schema for each message.
+async function buildInspectedContract(contract: Contract): Promise<InspectedContract> {
+  const toJsonSchema = await loadJsonConverter()
+  if (!toJsonSchema) return classifyContract(contract) // converter unavailable -> structure only
   const schemas = new Set<Schema>()
   classifyContract(contract, (s) => {
     schemas.add(s)
@@ -56,6 +63,29 @@ async function buildInspectedContract(contract: Contract): Promise<InspectedCont
     ),
   )
   return classifyContract(contract, (s) => converted.get(s))
+}
+
+// listCollections: structural info (name/key/references) + best-effort JSON Schema of each row for the graph.
+async function buildCollectionInfos(
+  contract: Contract,
+  infos: { name: string; key: string; references: Record<string, string> }[],
+): Promise<CollectionInfo[]> {
+  const toJsonSchema = await loadJsonConverter()
+  const defs = contract.collections ?? {}
+  return Promise.all(
+    infos.map(async (info) => {
+      const schema = defs[info.name]?.schema
+      let json: unknown
+      if (toJsonSchema && schema) {
+        try {
+          json = await toJsonSchema(schema) // may throw sync (no per-vendor converter) or reject — either way, structure-only
+        } catch {
+          json = undefined
+        }
+      }
+      return { ...info, ...(json !== undefined ? { schema: json } : {}) } satisfies CollectionInfo
+    }),
+  )
 }
 
 /**
@@ -190,6 +220,14 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
             // store has no reactive open() — the plain resource data is the snapshot
           }
           return { data: safeSnapshot(data), accessRules: resource.accessRules } satisfies StoreResourceView
+        },
+        listCollections: () => buildCollectionInfos(ctx.contract, ctx.collectionInfos()),
+        queryCollection: async (input) => {
+          const { collection, ...query } = input as { collection: string } & CollectionQuery
+          if (!ctx.collectionInfos().some((c) => c.name === collection))
+            throw new SuperLineError('NOT_FOUND', `Unknown collection: ${collection}`)
+          const rows = await ctx.collection(collection).snapshot(query) // ACL/policy bypassed — the inspector is a trusted observer
+          return rows.map((r) => safeSnapshot(r))
         },
       }),
     },

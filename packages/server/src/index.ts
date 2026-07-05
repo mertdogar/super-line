@@ -436,6 +436,10 @@ export interface PluginContext {
   store(name: string): ServerStoreHandle
   /** Configured stores (host + plugin) and their models. */
   storeInfos(): StoreInfo[]
+  /** Server-authoritative handle for a contract collection (loosely typed here); throws if none is configured. */
+  collection(name: string): ServerCollectionHandle
+  /** Declared collections (name + key + advisory references) for the schema graph. */
+  collectionInfos(): { name: string; key: string; references: Record<string, string> }[]
   /** Full cluster descriptor for a local connection (identity + rooms + `describeConn` extras). */
   describe(conn: Conn): ConnDescriptor
   /** A connection's descriptor anywhere in the cluster (rejects without presence support); undefined if absent. */
@@ -1916,6 +1920,9 @@ export function createSuperLineServer<
       },
       store: (name) => api.store(name),
       storeInfos: () => Object.entries(storeMap).map(([name, store]) => ({ name, model: store.model })),
+      collection: (name) => api.collection(name as CollectionName<C>),
+      collectionInfos: () =>
+        Object.entries(collectionDefs).map(([name, def]) => ({ name, key: def.key, references: def.references ?? {} })),
       describe: (conn) => buildDescriptor(conn),
       connectionById: (id) => Promise.resolve(presenceOrThrow().get(id)),
       channel: (name) => pluginChannel(pluginName, name),

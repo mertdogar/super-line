@@ -66,6 +66,7 @@ export type {
   TapEvent,
   StoreInfo,
   StoreResourceView,
+  CollectionInfo,
   SchemaConverter,
 } from './inspector.js'
 

@@ -497,6 +497,13 @@ export interface SuperLineServerOptions<
    * policy is server-only (clients can neither read nor write it). Server co-writes via `srv.collection(n)` bypass them.
    */
   policies?: { [N in CollectionName<C>]?: CollectionPolicy<CtxUnion<A>, RowOf<C, N>> }
+  /**
+   * Opt-in advisory foreign-key checks (see ADR-0006, decision 8). When true, an insert/update whose
+   * `references` field points at a non-existent row is rejected at the accepting node. Best-effort under
+   * relay clustering (no global serialization point) and does NOT resolve intra-batch parent-then-child
+   * references; there are no cascades. Off by default.
+   */
+  checkReferences?: boolean
   /** Called once per accepted connection. */
   onConnection?: (conn: Conn, ctx: CtxUnion<A>) => void
   /** Called when a connection closes, with the WebSocket close `code`. */
@@ -600,6 +607,7 @@ export function createSuperLineServer<
   const collectionStore = opts.collections
   const collectionDefs = (c.collections ?? {}) as Record<string, CollectionDef>
   const collectionPolicies = (opts.policies ?? {}) as Record<string, CollectionPolicy<unknown, unknown>>
+  const checkReferences = opts.checkReferences ?? false
   const collIsRelay = collectionStore?.clustering === 'relay'
   const COLL_CHANNEL = 'cbatch' // fixed cluster channel carrying relayed collection batches (compared by ===)
   type ConnCollState = { subs: Map<string, Map<number, CollectionQuery>>; policy: Map<string, Expr | undefined> }
@@ -1379,6 +1387,14 @@ export function createSuperLineServer<
       if (typeof key !== 'string')
         throw new SuperLineError('VALIDATION', `Collection ${op.n} row is missing string key '${def.key}'`)
       if (key !== op.id) throw new SuperLineError('VALIDATION', `Row key '${key}' does not match op id '${op.id}'`)
+      if (checkReferences && def.references) {
+        for (const [field, refCollection] of Object.entries(def.references)) {
+          const ref = (row as Record<string, unknown>)[field]
+          if (ref === undefined || ref === null) continue // an absent/null FK is "no reference"
+          if ((await store.read(refCollection, String(ref))) === undefined)
+            throw new SuperLineError('VALIDATION', `Dangling reference: ${op.n}.${field} → ${refCollection}/${String(ref)} does not exist`)
+        }
+      }
       const kind: WriteOp = op.op
       if (!(await policy.write(principal, kind, row, prev, ctx)))
         throw new SuperLineError('FORBIDDEN', `Write denied: ${op.n}/${op.id}`)

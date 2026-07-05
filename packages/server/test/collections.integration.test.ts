@@ -174,3 +174,34 @@ describe('collections — durable backend drop-in', () => {
     await waitFor(() => sub.rows().length === 2)
   })
 })
+
+describe('collections — advisory foreign keys', () => {
+  it('rejects a dangling reference when checkReferences is on, then accepts it once the parent exists', async () => {
+    const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+      checkReferences: true,
+      policies: { users: { read: () => undefined, write: () => true }, messages: { read: () => undefined, write: authorOnly } },
+    })
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    // messages.authorId references users; no users/u1 row yet → dangling
+    await expect(client.collection('messages').insert(msg('m1', 'general', 'u1', 1))).rejects.toMatchObject({ code: 'VALIDATION' })
+
+    await srv.collection('users').insert({ id: 'u1', name: 'Ada' })
+    await client.collection('messages').insert(msg('m1', 'general', 'u1', 1)) // parent exists now → ok
+    expect(await srv.collection('messages').read('m1')).toMatchObject({ id: 'm1' })
+  })
+
+  it('allows dangling references by default (the check is opt-in)', async () => {
+    const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+      policies: { messages: { read: () => undefined, write: authorOnly } },
+    })
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    await client.collection('messages').insert(msg('m1', 'general', 'u1', 1)) // no users/u1 row, but the check is off
+    expect(await srv.collection('messages').read('m1')).toMatchObject({ id: 'm1' })
+  })
+})

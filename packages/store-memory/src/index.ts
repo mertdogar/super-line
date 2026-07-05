@@ -11,6 +11,11 @@ const SERVER_ORIGIN = 'server'
  * The in-memory, last-writer-wins **server half**. Holds Resources in a `Map`; a write replaces the
  * whole `data`. `clustering: 'relay'` — it does no networking; super-line core relays its Changes across
  * nodes and feeds remote Changes back in via {@link ServerStore.apply}.
+ *
+ * @deprecated The LWW single-document store family is superseded by typed collections (ADR-0006). Use
+ * `@super-line/collections-memory` (`memoryCollections`) with a contract `collections` block; on the client
+ * use `client.collection(name)` — collections need no separate client half. The CRDT doc stores
+ * (`@super-line/store-sync*`) are unaffected.
  */
 export function memoryStoreServer(): ServerStore {
   const resources = new Map<string, Resource>()
@@ -212,6 +217,9 @@ class LwwReplica implements ResourceReplica {
 /**
  * The in-memory, last-writer-wins **client half**. Each opened Resource is a plain reactive value cell;
  * a write replaces it and emits a full-value Change. `origin` is one per client instance.
+ *
+ * @deprecated Superseded by typed collections (ADR-0006); collections need no client-half package —
+ * use `client.collection(name)` directly.
  */
 export function memoryStoreClient(opts?: { origin?: string }): ClientStore {
   const origin = opts?.origin ?? randomId()

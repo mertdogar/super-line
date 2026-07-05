@@ -2,7 +2,7 @@
   "name": "@super-line/store-sqlite",
   "version": "0.4.0",
   "type": "module",
-  "description": "Durable last-writer-wins Store for super-line — SQLite-backed server persistence (better-sqlite3).",
+  "description": "[Deprecated — use @super-line/collections-sqlite] Durable last-writer-wins Store for super-line (better-sqlite3).",
   "license": "MIT",
   "author": "Mert",
   "keywords": ["super-line", "store", "sqlite", "persistence", "durable", "lww"],

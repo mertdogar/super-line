@@ -44,6 +44,10 @@ export interface PgliteStoreOptions {
  * fans to LOCAL subscribers only (`clustering: 'self'`). Postgres+Electric is the only fan-out infra. A write
  * round-trips central PG → Electric → every node's `live.changes`; the `origin` column carries echo-break through
  * the round-trip. Pair it with `memoryStoreClient()` on the client.
+ *
+ * @deprecated The LWW single-document store family is superseded by typed collections (ADR-0006). Use
+ * `@super-line/collections-pglite` (`pgliteCollections`, the self-clustering collection backend) with a contract
+ * `collections` block; on the client use `client.collection(name)`. The CRDT doc stores (`store-sync*`) are unaffected.
  */
 export async function pgliteStoreServer(opts: PgliteStoreOptions): Promise<ServerStore> {
   const table = opts.table ?? 'resources'

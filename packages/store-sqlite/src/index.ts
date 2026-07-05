@@ -27,6 +27,10 @@ interface Row {
  * but backed by SQLite (better-sqlite3) so Resources survive a restart. A write replaces the whole `data`.
  * `clustering: 'relay'` — it does no networking; super-line core relays its Changes across nodes and feeds
  * remote Changes back in via {@link ServerStore.apply}. Pair it with `memoryStoreClient()` on the client.
+ *
+ * @deprecated The LWW single-document store family is superseded by typed collections (ADR-0006). Use
+ * `@super-line/collections-sqlite` (`sqliteCollections`) with a contract `collections` block; on the client
+ * use `client.collection(name)`. The CRDT doc stores (`@super-line/store-sync*`) are unaffected.
  */
 export function sqliteStoreServer(opts: SqliteStoreOptions): ServerStore {
   const table = opts.table ?? 'resources'

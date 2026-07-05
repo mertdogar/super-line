@@ -2,7 +2,7 @@
   "name": "@super-line/store-pglite",
   "version": "0.2.0",
   "type": "module",
-  "description": "Self-clustering last-writer-wins Store for super-line — central Postgres + per-node Electric-synced PGlite replica (live.changes). Postgres is the only fan-out infra; no separate adapter.",
+  "description": "[Deprecated — use @super-line/collections-pglite] Self-clustering last-writer-wins Store for super-line — central Postgres + Electric-synced PGlite replica.",
   "license": "MIT",
   "author": "Mert",
   "keywords": ["super-line", "store", "pglite", "postgres", "electric", "sync", "self", "persistence", "lww"],

@@ -5,6 +5,7 @@ import { memoryCollections } from '@super-line/collections-memory'
 import { sqliteCollections } from '@super-line/collections-sqlite'
 import { createHarness, waitFor } from './harness.js'
 import type { CollectionPolicy } from '@super-line/server'
+import type { CollectionStore, RowChange } from '@super-line/core'
 
 const chat = defineContract({
   collections: {
@@ -172,6 +173,35 @@ describe('collections — durable backend drop-in', () => {
 
     await client.collection('messages').insert(msg('m2', 'general', 'u1', 2))
     await waitFor(() => sub.rows().length === 2)
+  })
+
+  it('routes a self-backend delete (no prior row) to subscribers, who remove it', async () => {
+    // A `self` backend (e.g. pglite) surfaces deletes via its Electric feed WITHOUT the prior row. Simulate one
+    // with a fake self-store whose onChange we can fire directly.
+    let fire: (c: RowChange) => void = () => {}
+    const fakeSelf: CollectionStore = {
+      clustering: 'self',
+      apply: () => [],
+      snapshot: (n) => (n === 'messages' ? [msg('m1', 'general', 'u1', 1)] : []),
+      read: () => undefined,
+      onChange: (cb) => {
+        fire = cb
+        return () => {}
+      },
+    }
+    const { url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: fakeSelf,
+      policies: { messages: { read: () => undefined, write: authorOnly } },
+    })
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    const sub = client.collection('messages').subscribe({ filter: eq('channelId', 'general') })
+    await sub.ready
+    expect(sub.rows().map((r) => r.id)).toEqual(['m1']) // from the snapshot
+
+    fire({ n: 'messages', k: 'delete', id: 'm1', origin: 'x' }) // prev-less delete off the feed
+    await waitFor(() => sub.rows().length === 0)
   })
 })
 

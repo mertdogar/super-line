@@ -17,8 +17,11 @@ import type {
   ClientInput,
   Output,
   EventData,
+  CollectionName,
+  RowOf,
+  CollectionQuery,
 } from '@super-line/core'
-import type { ResourceHandle, SuperLineClient } from '@super-line/client'
+import type { ResourceHandle, SuperLineClient, CollectionHandle } from '@super-line/client'
 
 /** State returned by `useRequest`. */
 export interface RequestState<T> {
@@ -153,5 +156,48 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     return { data, deleted, set, update, delete: del }
   }
 
-  return { Provider, useClient, useEvent, useSubscription, useRequest, useResource }
+  /**
+   * Subscribe to a collection subset and track its rows reactively (typed by the contract). Returns the live,
+   * ordered + limited `rows` plus `insert`/`update`/`delete` mutations. `error` is set if the subscribe is
+   * denied. For joins and complex live queries, use TanStack DB via `@super-line/tanstack-db` instead — this
+   * hook is the thin, single-collection filtered-list surface. Re-subscribes when `name` or `query` changes.
+   */
+  function useCollection<N extends CollectionName<C>>(
+    name: N,
+    query?: CollectionQuery,
+  ): {
+    rows: RowOf<C, N>[]
+    error?: unknown
+    insert: (row: RowOf<C, N>) => Promise<void>
+    update: (row: RowOf<C, N>) => Promise<void>
+    delete: (id: string) => Promise<void>
+  } {
+    const client = useClient()
+    const queryKey = JSON.stringify(query ?? {}) // stabilize an inline-literal query across renders
+    const [rows, setRows] = useState<RowOf<C, N>[]>([])
+    const [error, setError] = useState<unknown>()
+    const handleRef = useRef<CollectionHandle<RowOf<C, N>> | undefined>(undefined)
+    useEffect(() => {
+      const q = JSON.parse(queryKey) as CollectionQuery
+      const handle = client.collection(name)
+      handleRef.current = handle
+      setError(undefined)
+      const sub = handle.subscribe(q)
+      const sync = (): void => setRows(sub.rows() as RowOf<C, N>[])
+      sync() // reset to the fresh subscription's rows on name/query change
+      const off = sub.subscribe(sync)
+      void sub.ready.then(sync).catch(setError)
+      return () => {
+        off()
+        sub.close()
+        handleRef.current = undefined
+      }
+    }, [client, name, queryKey])
+    const insert = useCallback((row: RowOf<C, N>) => handleRef.current?.insert(row) ?? Promise.resolve(), [])
+    const update = useCallback((row: RowOf<C, N>) => handleRef.current?.update(row) ?? Promise.resolve(), [])
+    const del = useCallback((id: string) => handleRef.current?.delete(id) ?? Promise.resolve(), [])
+    return { rows, error, insert, update, delete: del }
+  }
+
+  return { Provider, useClient, useEvent, useSubscription, useRequest, useResource, useCollection }
 }

@@ -5,14 +5,18 @@ import { createElement, type ReactNode } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { z } from 'zod'
-import { defineContract } from '@super-line/core'
+import { defineContract, eq } from '@super-line/core'
 import { createSuperLineServer, type SuperLineServer } from '@super-line/server'
 import { createSuperLineClient, type SuperLineClient } from '@super-line/client'
 import { createSuperLineHooks } from '@super-line/react'
 import { memoryStoreClient, memoryStoreServer } from '@super-line/store-memory'
+import { memoryCollections } from '@super-line/collections-memory'
 import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
 
 const contract = defineContract({
+  collections: {
+    messages: { schema: z.object({ id: z.string(), channelId: z.string(), text: z.string() }), key: 'id' },
+  },
   roles: {
     user: {
       clientToServer: {
@@ -25,7 +29,7 @@ const contract = defineContract({
   },
 })
 
-const { Provider, useRequest, useResource } = createSuperLineHooks<typeof contract, 'user'>()
+const { Provider, useRequest, useResource, useCollection } = createSuperLineHooks<typeof contract, 'user'>()
 
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
@@ -40,6 +44,8 @@ async function boot(): Promise<{ client: SuperLineClient<typeof contract, 'user'
     authenticate: () => ({ role: 'user' as const, ctx: {} }),
     identify: () => 'tester',
     stores: { docs: memoryStoreServer() },
+    collections: memoryCollections(),
+    policies: { messages: { read: () => undefined, write: () => true } },
   })
   srv.implement({ user: { add: async ({ a, b }) => ({ sum: a + b }) } })
   await new Promise<void>((resolve) => server.listen(0, resolve))
@@ -117,5 +123,29 @@ describe('react hooks', () => {
       result.current.delete(['drop'])
     })
     await waitFor(() => expect(result.current.data).toEqual({ keep: 1 }))
+  })
+
+  it('useCollection reflects a filtered snapshot, live server pushes, and client write-through', async () => {
+    const { client, srv } = await boot()
+    await srv.collection('messages').insert({ id: 'm1', channelId: 'general', text: 'seed' })
+
+    const { result } = renderHook(() => useCollection('messages', { filter: eq('channelId', 'general') }), {
+      wrapper: wrapper(client),
+    })
+    // snapshot + filter (the subscription is registered once this resolves)
+    await waitFor(() => expect(result.current.rows.map((r) => r.id)).toEqual(['m1']))
+
+    // live server-side pushes: the matching one arrives, the non-matching one is filtered out
+    await act(async () => {
+      await srv.collection('messages').insert({ id: 'm2', channelId: 'random', text: 'offtopic' })
+      await srv.collection('messages').insert({ id: 'm3', channelId: 'general', text: 'live' })
+    })
+    await waitFor(() => expect(result.current.rows.map((r) => r.id).sort()).toEqual(['m1', 'm3']))
+
+    // client write-through (subscription already established → no subscribe/write race)
+    await act(async () => {
+      await result.current.insert({ id: 'm4', channelId: 'general', text: 'mine' })
+    })
+    await waitFor(() => expect(result.current.rows.map((r) => r.id).sort()).toEqual(['m1', 'm3', 'm4']))
   })
 })

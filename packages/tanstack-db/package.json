@@ -1,12 +1,12 @@
 {
-  "name": "@super-line/react",
-  "version": "0.7.0",
+  "name": "@super-line/tanstack-db",
+  "version": "0.1.0",
   "type": "module",
-  "description": "React hooks for super-line — useRequest, useEvent, useSubscription.",
+  "description": "TanStack DB collection adapter for super-line — use super-line collections as a TanStack DB sync source with client-side live queries and joins.",
   "license": "MIT",
   "author": "Mert",
-  "keywords": ["websocket", "react", "hooks", "typesafe", "realtime", "super-line"],
-  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/react" },
+  "keywords": ["super-line", "tanstack", "tanstack-db", "collections", "sync", "live-query"],
+  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/tanstack-db" },
   "homepage": "https://mertdogar.github.io/super-line/",
   "bugs": "https://github.com/mertdogar/super-line/issues",
   "main": "./dist/index.cjs",
@@ -27,22 +27,18 @@
     "prepublishOnly": "tsup"
   },
   "dependencies": {
-    "@super-line/client": "workspace:^",
-    "@super-line/core": "workspace:^"
+    "@super-line/core": "workspace:^",
+    "@super-line/client": "workspace:^"
   },
   "peerDependencies": {
-    "react": ">=18"
+    "@tanstack/db": ">=0.1"
   },
   "devDependencies": {
     "@super-line/collections-memory": "workspace:*",
     "@super-line/server": "workspace:*",
     "@super-line/transport-websocket": "workspace:*",
-    "@testing-library/react": "^16.1.0",
-    "@types/react": "^18.3.18",
-    "@types/react-dom": "^18.3.5",
-    "jsdom": "^25.0.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "@tanstack/db": "^0.5.0",
+    "ws": "^8.18.0",
     "zod": "^3.24.1"
   }
 }

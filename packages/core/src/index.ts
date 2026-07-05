@@ -11,6 +11,13 @@ export type {
   Contract,
   Directional,
   RoleBlock,
+  CollectionDef,
+  CollectionsOf,
+  CollectionName,
+  CollectionRow,
+  CollectionRowInput,
+  RowOf,
+  RowInputOf,
   DataOf,
   AnyData,
   RequestDef,
@@ -85,6 +92,11 @@ export type {
   SReadFrame,
   SChangeFrame,
   SDeleteFrame,
+  CSubFrame,
+  CUnsubFrame,
+  RowOp,
+  CBatchFrame,
+  CChangeFrame,
   PingFrame,
   PongFrame,
 } from './wire.js'
@@ -103,6 +115,30 @@ export type {
   ResourceReplica,
   ServerReplica,
 } from './store.js'
+
+export type { CollectionStore, ResolvedRowOp, RowChange } from './collections.js'
+
+export {
+  and,
+  or,
+  not,
+  eq,
+  neq,
+  lt,
+  lte,
+  gt,
+  gte,
+  isIn,
+  like,
+  ilike,
+  andFilters,
+  orFilters,
+  matchesFilter,
+  evalExpr,
+  applyQuery,
+  getField,
+} from './query.js'
+export type { Scalar, Expr, OrderBy, CollectionQuery } from './query.js'
 
 export type {
   RawConn,

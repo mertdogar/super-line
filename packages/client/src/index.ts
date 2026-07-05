@@ -2,6 +2,8 @@ import {
   jsonSerializer,
   validateSync,
   SuperLineError,
+  matchesFilter,
+  applyQuery,
   type Schema,
   type Serializer,
   type Contract,
@@ -24,6 +26,11 @@ import {
   type ResourceReplica,
   type StoreChange,
   type TapEvent,
+  type CollectionQuery,
+  type CChangeFrame,
+  type RowOp,
+  type CollectionName,
+  type RowOf,
 } from '@super-line/core'
 import { backoffDelay } from './backoff.js'
 
@@ -82,6 +89,8 @@ export type SuperLineClient<C extends Contract, R extends RoleOf<C>> = ClientMet
   implement(handlers: ServerHandlers<C, R>): void
   /** Client-side handle for a configured Store (`client.store('scene').open(id)`). Throws if the name isn't configured. */
   store(name: string): ClientStoreHandle
+  /** Client-side handle for a contract collection (`client.collection('messages').subscribe(...)`), typed by the contract. */
+  collection<N extends CollectionName<C>>(name: N): CollectionHandle<RowOf<C, N>>
   /** Close the connection and stop reconnecting. */
   close(): void
   /** Whether the socket is currently open. */
@@ -122,6 +131,45 @@ export interface ClientStoreHandle {
   read(id: string): Promise<unknown>
   /** One-shot replace of a Resource's value (last-writer-wins). */
   write(id: string, data: unknown): Promise<void>
+}
+
+/** A fine-grained change to a {@link LiveRowSet} (fed to sync consumers like the TanStack DB adapter). */
+export interface RowSetEvent<Row = unknown> {
+  type: 'insert' | 'update' | 'delete'
+  id: string
+  /** The row (present for insert/update; absent for delete). */
+  row?: Row
+}
+
+/**
+ * A live view of the rows matching one subscription — the raw, **non-optimistic** sync primitive beneath the
+ * TanStack DB adapter. The initial snapshot arrives via `ready`; thereafter every matching change streams as a
+ * {@link RowSetEvent}. Rows leaving the filter (an update that no longer matches) arrive as `delete` events.
+ * Auto-resubscribes and re-diffs on reconnect. Optimism belongs to the layer above (TanStack), not here.
+ */
+export interface LiveRowSet<Row = unknown> {
+  /** Current matching rows, ordered + limited per the subscription query (stable reference between changes). */
+  rows(): Row[]
+  /** Subscribe to per-row changes. A `() => void` consumer (e.g. useSyncExternalStore) may ignore the event. Returns an unsub. */
+  subscribe(cb: (ev: RowSetEvent<Row>) => void): () => void
+  /** Resolves once the initial snapshot has been applied. */
+  readonly ready: Promise<void>
+  /** Stop the subscription and tell the server to drop it. */
+  close(): void
+}
+
+/** Client-side handle for one contract collection, reached via `client.collection(name)`. Typed by the contract. */
+export interface CollectionHandle<Row = unknown> {
+  /** Open a live subset subscription (omit the query for the whole collection, subject to server policy). */
+  subscribe(query?: CollectionQuery): LiveRowSet<Row>
+  /** Insert a row (its key field becomes the id). Resolves on the server ack; rejects on conflict/denial. */
+  insert(row: Row): Promise<void>
+  /** Replace a row by its key (LWW). */
+  update(row: Row): Promise<void>
+  /** Delete a row by id. */
+  delete(id: string): Promise<void>
+  /** Apply several ops as ONE atomic batch (all-or-nothing on the server). */
+  batch(ops: Array<{ type: 'insert' | 'update'; row: Row } | { type: 'delete'; id: string }>): Promise<void>
 }
 
 /** What went wrong, passed to the client `onError` sink alongside the caught error. */
@@ -327,6 +375,21 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     deleted: boolean
   }
   const openResources = new Map<string, OpenEntry>()
+  // live collection subscriptions: `cchg` frames route here by collection name; all re-subscribe (+ re-diff) on reconnect
+  interface LiveSub {
+    n: string
+    subId: number
+    query: CollectionQuery
+    key: string // primary-key field, from the contract
+    map: Map<string, unknown> // every filter-matching row seen (unbounded by limit; the view applies the window)
+    view: unknown[] // ordered + limited derivation, recomputed on change (stable ref between changes)
+    listeners: Set<(ev: RowSetEvent) => void>
+    ready: Deferred
+    settled: boolean
+  }
+  const collectionSubs = new Map<number, LiveSub>() // subId → sub (drives reconnect re-subscribe)
+  const collectionSubsByName = new Map<string, Set<LiveSub>>() // collection → subs (drives `cchg` dispatch)
+  let nextSubId = 1
   const openKey = (store: string, id: string): string => store + '\u0000' + id
 
   // resolve contract defs from this role's effective surface (shared ∪ role)
@@ -366,6 +429,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     }
     for (const topic of topicListeners.keys()) sendSub(topic)
     for (const entry of openResources.values()) sendOpen(entry) // re-snapshot opened Resources (at-most-once recovery)
+    for (const sub of collectionSubs.values()) sendCollectionSub(sub) // re-snapshot collection subscriptions (client re-diffs)
     if (connectedOnce) fireLifecycle(reconnectHooks, 'reconnect', 0)
     else {
       connectedOnce = true
@@ -468,6 +532,9 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
         entry.deleted = true
         for (const replica of entry.replicas) replica.applyDelete() // notify so handles/hooks re-read `deleted`
       }
+    } else if (frame.t === 'cchg') {
+      const subs = collectionSubsByName.get(frame.n)
+      if (subs) for (const sub of subs) applyCollectionChange(sub, frame) // client re-filters per subscription
     }
   }
 
@@ -706,6 +773,128 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     }
   }
 
+  // ---- Collections --------------------------------------------------------
+  const recomputeView = (sub: LiveSub): void => {
+    sub.view = applyQuery([...sub.map.values()], sub.query) // filter (redundant, already matched) + sort + window
+  }
+  const notifySub = (sub: LiveSub, ev: RowSetEvent): void => {
+    for (const cb of sub.listeners) cb(ev)
+  }
+
+  // Seed from a snapshot: first snapshot populates + resolves ready; a reconnect re-snapshot diffs against the
+  // current rows and emits only the delta (no flicker, correct on whatever node we reconnected to).
+  function seedCollection(sub: LiveSub, rows: unknown[]): void {
+    const next = new Map<string, unknown>()
+    for (const r of rows) {
+      const id = (r as Record<string, unknown>)[sub.key]
+      if (typeof id === 'string') next.set(id, r)
+    }
+    if (!sub.settled) {
+      sub.map = next
+      recomputeView(sub)
+      sub.settled = true
+      sub.ready.resolve()
+      return
+    }
+    const events: RowSetEvent[] = []
+    for (const id of sub.map.keys()) if (!next.has(id)) events.push({ type: 'delete', id })
+    // ponytail: reconnect emits `update` for still-present rows without an equality check; add one if it causes re-render churn.
+    for (const [id, row] of next) events.push({ type: sub.map.has(id) ? 'update' : 'insert', id, row })
+    sub.map = next
+    recomputeView(sub)
+    for (const ev of events) notifySub(sub, ev)
+  }
+
+  // Apply one `cchg`, re-filtering against THIS subscription: a row matching the filter is upserted; one that no
+  // longer matches (an update that left the filter) or a delete is removed.
+  function applyCollectionChange(sub: LiveSub, frame: CChangeFrame): void {
+    const { id } = frame
+    if (frame.k === 'delete' || frame.d === undefined) {
+      if (sub.map.delete(id)) {
+        recomputeView(sub)
+        notifySub(sub, { type: 'delete', id })
+      }
+      return
+    }
+    const row = frame.d
+    if (matchesFilter(sub.query.filter, row)) {
+      const was = sub.map.has(id)
+      sub.map.set(id, row)
+      recomputeView(sub)
+      notifySub(sub, { type: was ? 'update' : 'insert', id, row })
+    } else if (sub.map.delete(id)) {
+      recomputeView(sub)
+      notifySub(sub, { type: 'delete', id })
+    }
+  }
+
+  function sendCollectionSub(sub: LiveSub): void {
+    if (!rawConn?.writable) return // onOpen re-sends for every sub on (re)connect
+    void trackRequest('collection:sub', (i) => ({ t: 'csub', i, n: sub.n, s: sub.subId, q: sub.query }))
+      .then((snapshot) => seedCollection(sub, (snapshot as unknown[]) ?? []))
+      .catch((err) => {
+        if (err instanceof SuperLineError && err.code === 'DISCONNECTED') return // reconnect retries
+        if (!sub.settled) {
+          sub.settled = true
+          sub.ready.reject(err)
+        }
+      })
+  }
+
+  const sendBatch = (ops: RowOp[]): Promise<void> =>
+    trackRequest('collection:batch', (i) => ({ t: 'cbat', i, ops })).then(() => undefined)
+
+  function collectionHandle(name: string): CollectionHandle {
+    const key = c.collections?.[name]?.key
+    if (!key) throw new SuperLineError('NOT_FOUND', `Collection not declared: ${name}`)
+    const idOf = (row: unknown): string => {
+      const v = (row as Record<string, unknown>)[key]
+      if (typeof v !== 'string') throw new SuperLineError('VALIDATION', `Collection ${name} row is missing string key '${key}'`)
+      return v
+    }
+    return {
+      subscribe(query = {}) {
+        const subId = nextSubId++
+        const sub: LiveSub = {
+          n: name,
+          subId,
+          query,
+          key,
+          map: new Map(),
+          view: [],
+          listeners: new Set(),
+          ready: deferred(),
+          settled: false,
+        }
+        collectionSubs.set(subId, sub)
+        let set = collectionSubsByName.get(name)
+        if (!set) collectionSubsByName.set(name, (set = new Set()))
+        set.add(sub)
+        sendCollectionSub(sub)
+        return {
+          rows: () => sub.view,
+          subscribe: (cb) => {
+            sub.listeners.add(cb)
+            return () => sub.listeners.delete(cb)
+          },
+          ready: sub.ready.promise,
+          close: () => {
+            collectionSubs.delete(subId)
+            collectionSubsByName.get(name)?.delete(sub)
+            if (rawConn?.writable) rawConn.send(serializer.encode({ t: 'cuns', n: name, s: subId }))
+          },
+        }
+      },
+      insert: (row) => sendBatch([{ op: 'insert', n: name, id: idOf(row), d: row }]),
+      update: (row) => sendBatch([{ op: 'update', n: name, id: idOf(row), d: row }]),
+      delete: (id) => sendBatch([{ op: 'delete', n: name, id }]),
+      batch: (ops) =>
+        sendBatch(
+          ops.map((o) => (o.type === 'delete' ? { op: 'delete', n: name, id: o.id } : { op: o.type, n: name, id: idOf(o.row), d: o.row })),
+        ),
+    }
+  }
+
   connect()
 
   const base = {
@@ -726,6 +915,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     },
     subscribe,
     store: storeHandle,
+    collection: collectionHandle,
     implement(handlers: Record<string, (input: unknown) => unknown>): void {
       for (const [name, handler] of Object.entries(handlers)) {
         if (handler) registerServerHandler(name, handler) // throws on a collision (plugin or a prior implement)

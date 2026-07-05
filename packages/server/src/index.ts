@@ -2,12 +2,27 @@ import {
   jsonSerializer,
   validate,
   SuperLineError,
+  andFilters,
+  orFilters,
+  matchesFilter,
   type Adapter,
   type Serializer,
   type Schema,
   type Contract,
   type Directional,
   type CtsOf,
+  type CollectionDef,
+  type CollectionName,
+  type RowOf,
+  type CollectionStore,
+  type ResolvedRowOp,
+  type RowChange,
+  type Expr,
+  type CollectionQuery,
+  type CSubFrame,
+  type CUnsubFrame,
+  type CBatchFrame,
+  type CChangeFrame,
   type InspectorEvent,
   type TapEvent,
   type StoreInfo,
@@ -55,9 +70,11 @@ import {
 } from '@super-line/core'
 import { Conn, resolvePrincipal } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
+import type { CollectionPolicy, ServerCollectionHandle, WriteOp } from './collections.js'
 
 export { Conn, resolvePrincipal } from './conn.js'
 export { MemoryBus, createInMemoryAdapter } from './memory-adapter.js'
+export type { CollectionPolicy, ServerCollectionHandle, WriteOp } from './collections.js'
 
 // Web Crypto UUID — available in every browser and Node 19+. Keeps the server
 // runnable in-browser (e.g. a loopback-transport demo) with no node:crypto import.
@@ -469,6 +486,17 @@ export interface SuperLineServerOptions<
    * `srv.store.<name>` and `client.store.<name>`. Stores are off-contract and untyped (ADR-0003).
    */
   stores?: Record<string, ServerStore>
+  /**
+   * The single {@link CollectionStore} backend serving every collection this contract declares (typed rows;
+   * ADR-0006), e.g. `collections: memoryCollections()`. One backend ⇒ one transaction domain, so a
+   * cross-collection batch commits atomically.
+   */
+  collections?: CollectionStore
+  /**
+   * Row-security policies per collection (see {@link CollectionPolicy}). Deny-by-default: a collection with no
+   * policy is server-only (clients can neither read nor write it). Server co-writes via `srv.collection(n)` bypass them.
+   */
+  policies?: { [N in CollectionName<C>]?: CollectionPolicy<CtxUnion<A>, RowOf<C, N>> }
   /** Called once per accepted connection. */
   onConnection?: (conn: Conn, ctx: CtxUnion<A>) => void
   /** Called when a connection closes, with the WebSocket close `code`. */
@@ -513,6 +541,8 @@ export interface SuperLineServer<C extends Contract, A extends AuthResult<C>, HK
   forRole<R extends RoleOf<C>>(role: R): RoleLens<C, R>
   /** Server-authoritative handle for a configured Store (`srv.store('scene').create(...)`). Throws `NOT_FOUND` if the name isn't configured. */
   store(name: string): ServerStoreHandle
+  /** Server-authoritative handle for a contract collection (`srv.collection('messages').insert(...)`), typed by the contract. Throws `NOT_FOUND` if no collection backend is configured or the name isn't declared. */
+  collection<N extends CollectionName<C>>(name: N): ServerCollectionHandle<RowOf<C, N>>
   close(): Promise<void>
 }
 
@@ -564,6 +594,21 @@ export function createSuperLineServer<
         throw new Error(`Plugin '${p.name}' store '${name}' collides with an existing store of that name`)
       storeMap[name] = store
     }
+  }
+
+  // ---- Collections: the single backend + row policies + filter-based routing registry ----
+  const collectionStore = opts.collections
+  const collectionDefs = (c.collections ?? {}) as Record<string, CollectionDef>
+  const collectionPolicies = (opts.policies ?? {}) as Record<string, CollectionPolicy<unknown, unknown>>
+  const collIsRelay = collectionStore?.clustering === 'relay'
+  const COLL_CHANNEL = 'cbatch' // fixed cluster channel carrying relayed collection batches (compared by ===)
+  type ConnCollState = { subs: Map<string, Map<number, CollectionQuery>>; policy: Map<string, Expr | undefined> }
+  const collSubscribers = new Map<string, Set<Conn>>() // collection name → conns with ≥1 live subscription (routing index)
+  const connColl = new Map<Conn, ConnCollState>() // per-conn: subscription filters + cached policy read-filter
+  interface CollRelay {
+    ops: ResolvedRowOp[]
+    origin: string
+    nd: string
   }
 
   // Reserved (plugin-owned) connection classes declared to transports; matching conns are observer-invisible.
@@ -686,6 +731,10 @@ export function createSuperLineServer<
       handleStoreRelay(channel, payload)
       return
     }
+    if (channel === COLL_CHANNEL) {
+      handleCollectionRelay(payload)
+      return
+    }
     if (channel.startsWith(PLUGIN)) {
       handlePluginChannel(channel, payload)
       return
@@ -698,6 +747,8 @@ export function createSuperLineServer<
 
   // the server→client request feature subscribes its reply channel up front (one per node)
   void adapter.subscribe(replyChannel)
+  // a relay-mode collection backend needs every node to receive every batch (any node may hold subscribers)
+  if (collectionStore && collIsRelay) void adapter.subscribe(COLL_CHANNEL)
 
   // personal (c:/u:) channels carry a control envelope, not a raw frame to forward verbatim
   function handlePersonal(channel: string, payload: string | Uint8Array): void {
@@ -973,6 +1024,7 @@ export function createSuperLineServer<
     raw.onClose((code) => {
       conns.delete(conn)
       for (const channel of conn.channels) leaveChannel(conn, channel)
+      collUnsubAll(conn) // drop this conn's collection subscriptions from the routing registry
       void adapter.presence?.del(conn.id)
       const goneUserId = opts.identify?.(conn) // carry the name so the feed can label a purged conn
       emitTap({
@@ -1012,6 +1064,9 @@ export function createSuperLineServer<
     else if (frame.t === 'srd') await handleStoreRead(conn, frame)
     else if (frame.t === 'swr') await handleStoreWrite(conn, frame)
     else if (frame.t === 'sclose') handleStoreClose(conn, frame)
+    else if (frame.t === 'csub') await handleCollectionSub(conn, frame)
+    else if (frame.t === 'cuns') handleCollectionUnsub(conn, frame)
+    else if (frame.t === 'cbat') await handleCollectionBatch(conn, frame)
     else if (frame.t === 'sres') {
       await handleClientReply(conn, frame.i, { ok: true, d: frame.d })
     } else if (frame.t === 'serr') {
@@ -1248,6 +1303,150 @@ export function createSuperLineServer<
       relaying = false
     }
   }
+
+  // ---- Collections --------------------------------------------------------
+  // Typed rows (ADR-0006). Unlike stores (per-Resource channels), routing is FILTER-based: each row change is
+  // evaluated against every subscribed connection's effective visibility (policy read-filter ∧ the OR of its
+  // subscription filters), so the server keeps only predicates per connection — never per-row membership. The
+  // CLIENT re-filters per subscription. Writes are atomic batches; under relay the whole batch fans as ONE
+  // adapter message and re-applies on each node (each node routes to its own local subscribers).
+  const collConnState = (conn: Conn): ConnCollState => {
+    let s = connColl.get(conn)
+    if (!s) connColl.set(conn, (s = { subs: new Map(), policy: new Map() }))
+    return s
+  }
+
+  function collUnsubAll(conn: Conn): void {
+    connColl.delete(conn)
+    for (const set of collSubscribers.values()) set.delete(conn)
+  }
+
+  async function handleCollectionSub(conn: Conn, frame: CSubFrame): Promise<void> {
+    if (!collectionStore || !collectionDefs[frame.n]) {
+      conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: `Unknown collection: ${frame.n}` })
+      return
+    }
+    await dispatchOp(conn, frame.i, { kind: 'subscribe', name: `collection:${frame.n}`, conn }, async () => {
+      const principal = conn.principal ?? conn.id
+      const policy = collectionPolicies[frame.n]
+      if (!policy?.read) throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}`) // deny-by-default
+      const policyFilter = await policy.read(principal, conn.ctx)
+      const eff = andFilters(policyFilter, frame.q.filter)
+      const rows = await collectionStore.snapshot(frame.n, { ...frame.q, filter: eff })
+      const state = collConnState(conn)
+      let subs = state.subs.get(frame.n)
+      if (!subs) state.subs.set(frame.n, (subs = new Map()))
+      subs.set(frame.s, frame.q)
+      state.policy.set(frame.n, policyFilter) // principal-derived; refreshed each (re)subscribe (staleness caveat)
+      let set = collSubscribers.get(frame.n)
+      if (!set) collSubscribers.set(frame.n, (set = new Set()))
+      set.add(conn)
+      conn.send({ t: 'res', i: frame.i, d: rows }) // initial snapshot
+    })
+  }
+
+  function handleCollectionUnsub(conn: Conn, frame: CUnsubFrame): void {
+    const state = connColl.get(conn)
+    const subs = state?.subs.get(frame.n)
+    if (!state || !subs) return
+    subs.delete(frame.s)
+    if (subs.size === 0) {
+      state.subs.delete(frame.n)
+      state.policy.delete(frame.n)
+      collSubscribers.get(frame.n)?.delete(conn)
+    }
+  }
+
+  // Validate + policy-guard every op against the current state. Throws to abort the whole batch (nothing applied).
+  async function resolveCollectionOps(ops: CBatchFrame['ops'], principal: string, ctx: unknown): Promise<ResolvedRowOp[]> {
+    const store = collectionStore
+    if (!store) throw new SuperLineError('NOT_FOUND', 'No collection backend configured')
+    const out: ResolvedRowOp[] = []
+    for (const op of ops) {
+      const def = collectionDefs[op.n]
+      if (!def) throw new SuperLineError('NOT_FOUND', `Unknown collection: ${op.n}`)
+      const policy = collectionPolicies[op.n]
+      if (!policy?.write) throw new SuperLineError('FORBIDDEN', `Write denied: ${op.n}`) // deny-by-default
+      const prev = await store.read(op.n, op.id)
+      if (op.op === 'delete') {
+        if (!(await policy.write(principal, 'delete', undefined, prev, ctx)))
+          throw new SuperLineError('FORBIDDEN', `Write denied: ${op.n}/${op.id}`)
+        out.push({ op: 'delete', n: op.n, id: op.id })
+        continue
+      }
+      const row = await validate(def.schema, op.d)
+      const key = (row as Record<string, unknown>)[def.key]
+      if (typeof key !== 'string')
+        throw new SuperLineError('VALIDATION', `Collection ${op.n} row is missing string key '${def.key}'`)
+      if (key !== op.id) throw new SuperLineError('VALIDATION', `Row key '${key}' does not match op id '${op.id}'`)
+      const kind: WriteOp = op.op
+      if (!(await policy.write(principal, kind, row, prev, ctx)))
+        throw new SuperLineError('FORBIDDEN', `Write denied: ${op.n}/${op.id}`)
+      out.push({ op: kind, n: op.n, id: op.id, row })
+    }
+    return out
+  }
+
+  // Apply a resolved batch atomically, fan out locally (via onChange → routeRowChange), and — under relay —
+  // publish the whole batch to other nodes. Shared by client batches and server co-writes (`srv.collection`).
+  // ponytail: the guard reads `prev` in resolveCollectionOps then applies here; the backend's synchronous apply
+  // is the real serialization point, so a TOCTOU only affects guards that read prev, and durable backends will
+  // wrap resolve+apply in one transaction later.
+  async function commitCollectionBatch(ops: ResolvedRowOp[], origin: string, relay: boolean): Promise<void> {
+    if (ops.length === 0 || !collectionStore) return
+    await collectionStore.apply(ops, origin)
+    if (relay && collIsRelay)
+      void adapter.publish(COLL_CHANNEL, serializer.encode({ ops, origin, nd: instanceId } satisfies CollRelay))
+  }
+
+  async function handleCollectionBatch(conn: Conn, frame: CBatchFrame): Promise<void> {
+    if (!collectionStore) {
+      conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: 'No collection backend configured' })
+      return
+    }
+    await dispatchOp(conn, frame.i, { kind: 'request', name: 'collection:batch', conn }, async () => {
+      const principal = conn.principal ?? conn.id
+      const resolved = await resolveCollectionOps(frame.ops, principal, conn.ctx)
+      await commitCollectionBatch(resolved, principal, true)
+      conn.send({ t: 'res', i: frame.i, d: null })
+    })
+  }
+
+  // The single fan-out source: route one applied row change to local subscribers whose effective filter admits
+  // it (pre-op OR post-op — so a row that leaves a filter on update is delivered too, and the client removes it).
+  function routeRowChange(change: RowChange): void {
+    const conns = collSubscribers.get(change.n)
+    if (!conns || conns.size === 0) return
+    for (const conn of conns) {
+      const state = connColl.get(conn)
+      const subs = state?.subs.get(change.n)
+      if (!state || !subs || subs.size === 0) continue
+      const eff = andFilters(state.policy.get(change.n), orFilters([...subs.values()].map((q) => q.filter)))
+      const inPrev = change.prev !== undefined && matchesFilter(eff, change.prev)
+      const inNext = change.next !== undefined && matchesFilter(eff, change.next)
+      if (!inPrev && !inNext) continue
+      conn.send({ t: 'cchg', n: change.n, k: change.k, id: change.id, d: change.next } satisfies CChangeFrame)
+    }
+  }
+
+  function handleCollectionRelay(payload: string | Uint8Array): void {
+    let env: CollRelay
+    try {
+      env = serializer.decode(payload) as CollRelay
+    } catch {
+      return
+    }
+    if (env.nd === instanceId) return // our own publish looped back; already applied + routed locally
+    if (!collectionStore || !collIsRelay) return
+    try {
+      void collectionStore.apply(env.ops, env.origin) // → onChange → routeRowChange (this node's local conns)
+    } catch {
+      // insert-conflict / not-found from a cross-node race — drop; it converges on the next write.
+      // ponytail: LWW-merge-on-conflict for concurrent same-id inserts is a phase-2 multi-node hardening.
+    }
+  }
+
+  if (collectionStore) collectionStore.onChange(routeRowChange) // one subscription drives all local delivery
 
   function room(name: string): Room<C> {
     const channel = ROOM + name
@@ -1606,6 +1805,39 @@ export function createSuperLineServer<
       const handle = storeApi[name]
       if (!handle) throw new SuperLineError('NOT_FOUND', `Store not configured: ${name}`)
       return handle
+    },
+    collection<N extends CollectionName<C>>(name: N): ServerCollectionHandle<RowOf<C, N>> {
+      if (!collectionStore) throw new SuperLineError('NOT_FOUND', 'No collection backend configured')
+      const def = collectionDefs[name]
+      if (!def) throw new SuperLineError('NOT_FOUND', `Collection not declared: ${name}`)
+      const store = collectionStore
+      // Server co-writes: schema-validated, policy-free (server-authoritative), fan out + relay like a client batch.
+      const resolve = async (row: unknown): Promise<{ id: string; row: unknown }> => {
+        const v = await validate(def.schema, row)
+        const key = (v as Record<string, unknown>)[def.key]
+        if (typeof key !== 'string')
+          throw new SuperLineError('VALIDATION', `Collection ${name} row is missing string key '${def.key}'`)
+        return { id: key, row: v }
+      }
+      return {
+        async insert(row) {
+          const { id, row: v } = await resolve(row)
+          await commitCollectionBatch([{ op: 'insert', n: name, id, row: v }], SERVER_ORIGIN, true)
+        },
+        async update(row) {
+          const { id, row: v } = await resolve(row)
+          await commitCollectionBatch([{ op: 'update', n: name, id, row: v }], SERVER_ORIGIN, true)
+        },
+        async delete(id) {
+          await commitCollectionBatch([{ op: 'delete', n: name, id }], SERVER_ORIGIN, true)
+        },
+        read(id) {
+          return Promise.resolve(store.read(name, id)) as Promise<RowOf<C, N> | undefined>
+        },
+        snapshot(query) {
+          return Promise.resolve(store.snapshot(name, query ?? {})) as Promise<RowOf<C, N>[]>
+        },
+      }
     },
     async close() {
       if (closing) return

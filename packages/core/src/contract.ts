@@ -57,6 +57,28 @@ export interface RoleBlock extends Directional {
 }
 
 /**
+ * A typed row collection (the relational store family; see ADR-0006). Rows are validated against
+ * `schema` on every write — restoring super-line's end-to-end-types + validate-every-message promise
+ * for row data, the promise ADR-0003 gave up for opaque CRDT deltas.
+ */
+export interface CollectionDef {
+  /** Row schema — any Standard Schema (Zod/Valibot/ArkType). The server validates every row write against it. */
+  schema: Schema
+  /**
+   * The primary-key field: `row[key]` becomes the resource id, so it must be a present string field.
+   * Kept as a plain `string` (not `keyof row`) to avoid perturbing `defineContract`'s inference — the
+   * server validates its presence/type at write time. // ponytail: tighten to `keyof InferOut<schema>` later if the inference cost is worth it.
+   */
+  key: string
+  /**
+   * Advisory foreign keys — `{ authorId: 'users' }` maps a field to a referenced collection name.
+   * Metadata only: feeds the Control Center schema graph and TanStack adapter join hints, plus an
+   * opt-in existence check on write. No cascades in core (unsound under masterless relay clustering).
+   */
+  references?: Record<string, string>
+}
+
+/**
  * The single source of truth, imported by both server and client. Split by
  * **direction** and scoped by **role**: a `shared` base every role inherits,
  * plus one block per role.
@@ -66,6 +88,12 @@ export interface Contract {
   shared?: Directional
   /** Per-role surfaces. A connection's role selects which one (plus `shared`) it sees. */
   roles: Record<string, RoleBlock>
+  /**
+   * Typed row collections (see {@link CollectionDef}). A top-level sibling of `roles`, not a role
+   * block: a collection is a global data domain, and per-caller visibility is a server-side row policy,
+   * not contract structure.
+   */
+  collections?: Record<string, CollectionDef>
 }
 
 /**
@@ -231,6 +259,25 @@ export type Output<T> = T extends RequestDef ? InferOut<T['output']> : never
 export type EventData<T> = T extends ServerMessageDef ? InferOut<T['payload']> : never
 /** The data a server sends for an event/topic (pre-validation). */
 export type EmitData<T> = T extends ServerMessageDef ? InferIn<T['payload']> : never
+
+// ── collections ──
+
+/** A contract's collection map (`{}` if it declares none). */
+export type CollectionsOf<C extends Contract> = C extends {
+  collections: infer M extends Record<string, CollectionDef>
+}
+  ? M
+  : {}
+/** Union of a contract's collection names. */
+export type CollectionName<C extends Contract> = keyof CollectionsOf<C> & string
+/** The validated row type of a collection def (what handlers and clients read). */
+export type CollectionRow<D> = D extends CollectionDef ? InferOut<D['schema']> : never
+/** The input row type of a collection def (what a client passes to insert, pre-validation). */
+export type CollectionRowInput<D> = D extends CollectionDef ? InferIn<D['schema']> : never
+/** The validated row type of collection `N` in contract `C`. */
+export type RowOf<C extends Contract, N extends CollectionName<C>> = CollectionRow<CollectionsOf<C>[N]>
+/** The input row type of collection `N` in contract `C` (pre-validation). */
+export type RowInputOf<C extends Contract, N extends CollectionName<C>> = CollectionRowInput<CollectionsOf<C>[N]>
 
 /** Infer a schema's **input** type (what you pass into the validator). */
 export type InferIn<S extends Schema> = StandardSchemaV1.InferInput<S>

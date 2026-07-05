@@ -1,0 +1,155 @@
+import { afterEach, describe, expect, it } from 'vitest'
+import { z } from 'zod'
+import { defineContract, eq } from '@super-line/core'
+import { memoryCollections } from '@super-line/collections-memory'
+import { createHarness, waitFor } from './harness.js'
+import type { CollectionPolicy } from '@super-line/server'
+
+const chat = defineContract({
+  collections: {
+    users: { schema: z.object({ id: z.string(), name: z.string() }), key: 'id' },
+    messages: {
+      schema: z.object({ id: z.string(), channelId: z.string(), authorId: z.string(), text: z.string(), createdAt: z.number() }),
+      key: 'id',
+      references: { authorId: 'users' },
+    },
+  },
+  roles: { user: { clientToServer: { noop: { input: z.void(), output: z.void() } } } },
+})
+
+type Ctx = { userId: string }
+type MsgRow = { id: string; channelId: string; authorId: string; text: string; createdAt: number }
+
+const authenticate = (h: { query: Record<string, string> }) => ({ role: 'user' as const, ctx: { userId: h.query.userId ?? 'anon' } })
+const identify = (conn: { ctx: unknown }) => (conn.ctx as Ctx).userId
+
+// author-only writes: you may only create/edit/delete rows whose authorId is you.
+const authorOnly: CollectionPolicy<Ctx, MsgRow>['write'] = (principal, op, next, prev) =>
+  op === 'delete' ? prev?.authorId === principal : next?.authorId === principal
+
+const msg = (id: string, channelId: string, authorId: string, n: number): MsgRow => ({ id, channelId, authorId, text: `m${n}`, createdAt: n })
+
+const h = createHarness()
+afterEach(() => h.dispose())
+
+describe('collections — snapshot, filtering, live routing', () => {
+  it('seeds a filtered snapshot then streams matching inserts, ignoring non-matching ones', async () => {
+    const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+      policies: {
+        users: { read: () => undefined, write: () => true },
+        messages: { read: () => undefined, write: authorOnly },
+      },
+    })
+    await srv.collection('messages').insert(msg('m1', 'general', 'u9', 1))
+    await srv.collection('messages').insert(msg('m2', 'random', 'u9', 2))
+
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    const sub = client.collection('messages').subscribe({ filter: eq('channelId', 'general'), orderBy: [{ field: 'createdAt', dir: 'asc' }] })
+    await sub.ready
+    expect(sub.rows().map((r) => r.id)).toEqual(['m1']) // only the general one
+
+    await client.collection('messages').insert(msg('m3', 'general', 'u1', 3)) // matches → arrives
+    await client.collection('messages').insert(msg('m4', 'random', 'u1', 4)) // doesn't match → ignored
+    await waitFor(() => sub.rows().length === 2)
+    expect(sub.rows().map((r) => r.id)).toEqual(['m1', 'm3'])
+  })
+
+  it('delivers a row-set change event to a plain subscriber', async () => {
+    const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+      policies: { messages: { read: () => undefined, write: authorOnly } },
+    })
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    const sub = client.collection('messages').subscribe({ filter: eq('channelId', 'general') })
+    await sub.ready
+    const events: string[] = []
+    sub.subscribe((ev) => events.push(`${ev.type}:${ev.id}`))
+
+    await srv.collection('messages').insert(msg('m1', 'general', 'srv', 1))
+    await waitFor(() => events.length === 1)
+    expect(events).toEqual(['insert:m1'])
+  })
+})
+
+describe('collections — row policies', () => {
+  it('rejects a write that fails the write guard (author-only)', async () => {
+    const { url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+      policies: { messages: { read: () => undefined, write: authorOnly } },
+    })
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    await expect(client.collection('messages').insert(msg('x', 'general', 'someoneElse', 1))).rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+
+  it('denies reads by default (a collection with no read policy)', async () => {
+    const { url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+      policies: { messages: { write: authorOnly } }, // no `read` ⇒ denied
+    })
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    const sub = client.collection('messages').subscribe({})
+    await expect(sub.ready).rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+
+  it('applies the read policy filter as a hard visibility boundary', async () => {
+    const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+      // a caller may only ever see the 'general' channel, regardless of the filter they ask for
+      policies: { messages: { read: () => eq('channelId', 'general'), write: authorOnly } },
+    })
+    await srv.collection('messages').insert(msg('m1', 'general', 'srv', 1))
+    await srv.collection('messages').insert(msg('m2', 'secret', 'srv', 2))
+
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    const sub = client.collection('messages').subscribe({}) // asks for everything
+    await sub.ready
+    expect(sub.rows().map((r) => r.id)).toEqual(['m1']) // policy hid the secret channel
+  })
+})
+
+describe('collections — atomic batches & filter transitions', () => {
+  it('a batch is all-or-nothing: one denied op rolls back the whole batch', async () => {
+    const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+      policies: { messages: { read: () => undefined, write: authorOnly } },
+    })
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    await expect(
+      client.collection('messages').batch([
+        { type: 'insert', row: msg('ok', 'general', 'u1', 1) },
+        { type: 'insert', row: msg('bad', 'general', 'u2', 2) }, // not my message → whole batch rejected
+      ]),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(await srv.collection('messages').read('ok')).toBeUndefined() // rolled back
+  })
+
+  it('an update that moves a row out of the filter arrives as a delete', async () => {
+    const { url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+      policies: { messages: { read: () => undefined, write: authorOnly } },
+    })
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    const sub = client.collection('messages').subscribe({ filter: eq('channelId', 'general') })
+    await sub.ready
+    await client.collection('messages').insert(msg('m1', 'general', 'u1', 1))
+    await waitFor(() => sub.rows().length === 1)
+
+    await client.collection('messages').update({ ...msg('m1', 'random', 'u1', 1) }) // leaves the 'general' filter
+    await waitFor(() => sub.rows().length === 0)
+  })
+})

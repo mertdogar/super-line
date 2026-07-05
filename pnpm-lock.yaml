@@ -398,6 +398,37 @@ importers:
         specifier: ^5.4.11
         version: 5.4.21(@types/node@22.19.21)(lightningcss@1.32.0)(terser@5.48.0)
 
+  examples/collections:
+    dependencies:
+      '@super-line/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@super-line/collections-memory':
+        specifier: workspace:*
+        version: link:../../packages/collections-memory
+      '@super-line/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@super-line/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      '@super-line/tanstack-db':
+        specifier: workspace:*
+        version: link:../../packages/tanstack-db
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
+      '@tanstack/db':
+        specifier: ^0.5.0
+        version: 0.5.33(typescript@5.9.3)
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
+
   examples/event-bus:
     dependencies:
       '@super-line/client':

@@ -310,8 +310,16 @@ type PluginHandledKeys<U> = U extends SuperLinePlugin<infer S> ? keyof CtsOf<S> 
 /** Union of the `clientToServer` keys handled across a plugin tuple `P` (subtracted from `implement`). */
 export type HandledKeys<P extends readonly SuperLinePlugin<any>[]> = PluginHandledKeys<P[number]>
 
-/** Remove the plugin-handled keys `HK` from every block (each role + `shared`) of a {@link Handlers} map. */
-export type SubtractHandlers<H, HK extends string> = { [B in keyof H]: Omit<H[B], HK> }
+/**
+ * Remove the plugin-handled keys `HK` from every block (each role + `shared`) of a {@link Handlers} map. A block
+ * a plugin fully owns collapses to `{}` and becomes OPTIONAL — so a host needn't pass an empty `shared: {}` /
+ * `guest: {}` for a role or shared surface a plugin handles entirely.
+ */
+export type SubtractHandlers<H, HK extends string> = {
+  [B in keyof H as [keyof Omit<H[B], HK>] extends [never] ? never : B]: Omit<H[B], HK>
+} & {
+  [B in keyof H as [keyof Omit<H[B], HK>] extends [never] ? B : never]?: Omit<H[B], HK>
+}
 
 /**
  * A named, declarative bundle of runtime contributions registered on `plugins: [...]`. All fields
@@ -348,6 +356,14 @@ export interface SuperLinePlugin<S extends Directional = {}> {
    * via `srv.store(name)`. A name colliding with a host store or another plugin's store throws at construction.
    */
   stores?: Record<string, ServerStore>
+  /**
+   * Row-security policies for the collections the plugin's contract fragment declares (see {@link CollectionPolicy}).
+   * Merged into the host's `policies`; a collection already policied by the host or another plugin throws at
+   * construction, and a policy for a collection no fragment declared throws too. Deny-by-default still holds —
+   * a collection nobody policies is server-only. Lets a plugin ship its collections locked down (e.g. deny-all
+   * on secret tables) without the host hand-spreading them.
+   */
+  policies?: Record<string, CollectionPolicy<unknown, unknown>>
   /**
    * A plugin-owned (reserved) connection class — its own role, handshake negotiation, and parallel contract,
    * served over observer-invisible connections. See {@link PluginConnection}. (Phase 2.)
@@ -610,7 +626,20 @@ export function createSuperLineServer<
   // ---- Collections: the single backend + row policies + filter-based routing registry ----
   const collectionStore = opts.collections
   const collectionDefs = (c.collections ?? {}) as Record<string, CollectionDef>
-  const collectionPolicies = (opts.policies ?? {}) as Record<string, CollectionPolicy<unknown, unknown>>
+  const collectionPolicies = { ...opts.policies } as Record<string, CollectionPolicy<unknown, unknown>>
+  // merge plugin-contributed row policies; unknown-collection or collision with host/another plugin throws
+  for (const p of plugins) {
+    if (!p.policies) continue
+    for (const [name, policy] of Object.entries(p.policies)) {
+      if (!(name in collectionDefs))
+        throw new Error(
+          `Plugin '${p.name}' policy references unknown collection '${name}' — register its contract fragment on defineContract({ plugins })`,
+        )
+      if (name in collectionPolicies)
+        throw new Error(`Plugin '${p.name}' policy for collection '${name}' collides with an existing policy`)
+      collectionPolicies[name] = policy as CollectionPolicy<unknown, unknown>
+    }
+  }
   const checkReferences = opts.checkReferences ?? false
   const collIsRelay = collectionStore?.clustering === 'relay'
   const COLL_CHANNEL = 'cbatch' // fixed cluster channel carrying relayed collection batches (compared by ===)

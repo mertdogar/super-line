@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { WebSocket } from 'ws'
-import { defineContract, defineSurface, jsonSerializer, mergeSurfaces, SuperLineError, type TapEvent } from '@super-line/core'
+import { defineContract, defineContractPlugin, defineSurface, jsonSerializer, mergeSurfaces, SuperLineError, type TapEvent } from '@super-line/core'
 import { MemoryBus, createInMemoryAdapter, createSuperLineServer, type PluginContext, type SuperLinePlugin } from '@super-line/server'
 import { memoryStoreServer } from '@super-line/store-memory'
+import { memoryCollections } from '@super-line/collections-memory'
 import { inspector } from '@super-line/plugin-inspector'
 import { connectInspector, createHarness, waitFor } from './harness.js'
 
@@ -395,6 +396,71 @@ describe('plugin stores (phase 1 · stores)', () => {
         plugins: [{ name: 'p', stores: { dup: memoryStoreServer() } }],
       }),
     ).rejects.toThrow(/store 'dup' collides/i)
+  })
+})
+
+// A paired plugin: its contract fragment declares the collections, its server half locks/opens them via `policies`.
+// This is the auth-plugin shape in miniature — secret tables locked, a public one open, the host can't override.
+const secretFrag = defineContractPlugin('secretz', {
+  collections: {
+    profiles: { schema: z.object({ id: z.string(), name: z.string() }), key: 'id' },
+    secrets: { schema: z.object({ id: z.string(), value: z.string() }), key: 'id' },
+  },
+})
+const policyContract = defineContract({
+  roles: { user: { clientToServer: { noop: { input: z.void(), output: z.void() } } } },
+  plugins: [secretFrag],
+})
+const policyAuth = () => ({ role: 'user' as const, ctx: {} })
+const secretPlugin: SuperLinePlugin = {
+  name: 'secretz',
+  policies: {
+    profiles: { read: () => undefined, write: () => true }, // open: clients read + write
+    secrets: {}, // locked: no read, no write — server-only (co-writer still bypasses)
+  },
+}
+
+describe('plugin policies (phase 1 · row policies from a paired plugin)', () => {
+  it('applies plugin-contributed policies: open collection reads/writes, locked one denies client writes', async () => {
+    const { srv, url } = await h.server(policyContract, {
+      authenticate: policyAuth,
+      collections: memoryCollections(),
+      plugins: [secretPlugin],
+    })
+    await srv.collection('profiles').insert({ id: 'p1', name: 'Ann' }) // co-writer, policy-free
+    await srv.collection('secrets').insert({ id: 's1', value: 'top' })
+
+    const client = h.client(policyContract, { url, role: 'user' })
+    const pub = client.collection('profiles').subscribe({}) // 'profiles' typed off the plugin-merged contract
+    await pub.ready
+    expect(pub.rows().map((r) => r.id)).toEqual(['p1']) // open read via the plugin policy
+
+    await client.collection('profiles').insert({ id: 'p2', name: 'Bo' }) // open write → ok
+    await waitFor(() => pub.rows().length === 2)
+    // the locked collection rejects a client write; deny-by-default is asserted by the plugin's `{}` policy
+    await expect(client.collection('secrets').insert({ id: 'x', value: 'v' })).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    client.close()
+  })
+
+  it('throws when a plugin policy collides with a host policy for the same collection', async () => {
+    await expect(
+      h.server(policyContract, {
+        authenticate: policyAuth,
+        collections: memoryCollections(),
+        policies: { profiles: { read: () => undefined } },
+        plugins: [secretPlugin], // also policies `profiles`
+      }),
+    ).rejects.toThrow(/policy for collection 'profiles' collides/i)
+  })
+
+  it('throws when a plugin policies a collection no fragment declared', async () => {
+    await expect(
+      h.server(policyContract, {
+        authenticate: policyAuth,
+        collections: memoryCollections(),
+        plugins: [{ name: 'bad', policies: { nope: {} } }],
+      }),
+    ).rejects.toThrow(/unknown collection 'nope'/i)
   })
 })
 

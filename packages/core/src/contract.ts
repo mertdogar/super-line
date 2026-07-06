@@ -117,8 +117,32 @@ export interface Contract {
  * })
  * ```
  */
-export function defineContract<const C extends Contract>(contract: C): C {
-  return contract
+export function defineContract<const C extends Contract & { plugins: readonly ContractPlugin[] }>(
+  contract: C,
+): ResolveContract<C>
+export function defineContract<const C extends Contract>(contract: C): C
+export function defineContract(contract: ContractWithPlugins): Contract {
+  const pluginList = contract.plugins
+  if (!pluginList || pluginList.length === 0) return contract
+  const collections: Record<string, CollectionDef> = { ...contract.collections }
+  const roles: Record<string, RoleBlock> = {}
+  for (const [name, block] of Object.entries(contract.roles)) roles[name] = { ...block }
+  let shared = contract.shared
+  for (const plugin of pluginList) {
+    const { fragment } = plugin
+    for (const [name, def] of Object.entries(fragment.collections ?? {})) {
+      if (name in collections) {
+        throw new Error(`defineContract: plugin '${plugin.name}' collection '${name}' collides with an existing collection`)
+      }
+      collections[name] = def
+    }
+    if (fragment.shared) shared = mergeDirectional(shared, fragment.shared, `plugin '${plugin.name}' shared`)
+    for (const [name, block] of Object.entries(fragment.roles ?? {})) {
+      const current = roles[name]
+      roles[name] = current ? mergeRoleBlock(current, block, `plugin '${plugin.name}' role '${name}'`) : { ...block }
+    }
+  }
+  return { ...(shared ? { shared } : {}), roles, collections }
 }
 
 /** Union of a contract's role names. */
@@ -203,6 +227,67 @@ export function mergeSurfaces<
     clientToServer: { ...a.clientToServer, ...b.clientToServer },
     serverToClient: { ...a.serverToClient, ...b.serverToClient },
   } as MergedSurface<A, B>
+}
+
+// ── contract plugins (contract-time fragment composition) ──
+// ADR-0005's paired runtime bundle grows a contract-time half: a plugin can contribute collections,
+// roles, and shared surface that `defineContract` merges INTO the contract, so end-to-end types
+// (`RowOf`, per-role `Requests`, `client.collection`) flow from the single materialized contract object
+// exactly as hand-declared surface does. The plugin's server/client runtime halves register separately.
+
+/** A contract fragment a plugin contributes at {@link defineContract} time: any subset of a contract's typed surface. */
+export interface ContractFragment {
+  shared?: Directional
+  roles?: Record<string, RoleBlock>
+  collections?: Record<string, CollectionDef>
+}
+
+/**
+ * A named contract fragment — the contract-time half of a paired plugin. Pass it in
+ * `defineContract({ plugins: [...] })`; its collections/roles/shared surface merge into the contract
+ * (a duplicate collection name or surface key is a startup throw). Its server/client runtime halves
+ * register separately on `createSuperLineServer` / `createSuperLineClient`.
+ */
+export interface ContractPlugin<F extends ContractFragment = ContractFragment> {
+  readonly name: string
+  readonly fragment: F
+}
+
+/**
+ * Author a {@link ContractPlugin}. `const F` preserves literal keys and `subscribe: true` — a fragment
+ * declared as a plain const widens `subscribe` to `boolean`, degrading topics to push events once merged.
+ */
+export function defineContractPlugin<const F extends ContractFragment>(name: string, fragment: F): ContractPlugin<F> {
+  return { name, fragment }
+}
+
+type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) extends (k: infer I) => void ? I : never
+type ContractWithPlugins = Contract & { plugins?: readonly ContractPlugin[] }
+type PluginsOf<C> = C extends { plugins: infer P extends readonly ContractPlugin[] } ? P : readonly []
+type FragmentsOf<P extends readonly ContractPlugin[]> = P extends readonly []
+  ? unknown
+  : UnionToIntersection<P[number]['fragment']>
+/** The contract type after merging all plugin fragments: base (minus `plugins`) intersected with every fragment. */
+export type ResolveContract<C extends ContractWithPlugins> = Flat<Omit<C, 'plugins'> & FragmentsOf<PluginsOf<C>>>
+
+function mergeDirectional(a: Directional | undefined, b: Directional, where: string): Directional {
+  const out: Directional = { clientToServer: { ...a?.clientToServer }, serverToClient: { ...a?.serverToClient } }
+  for (const dir of ['clientToServer', 'serverToClient'] as const) {
+    const src = b[dir]
+    if (!src) continue
+    const dst = out[dir] as Record<string, unknown>
+    for (const k of Object.keys(src)) {
+      if (k in dst) throw new Error(`defineContract: ${where} duplicate ${dir} key '${k}' — rename or prefix`)
+      dst[k] = (src as Record<string, unknown>)[k]
+    }
+  }
+  return out
+}
+
+function mergeRoleBlock(a: RoleBlock, b: RoleBlock, where: string): RoleBlock {
+  const merged = mergeDirectional(a, b, where) as RoleBlock
+  const data = a.data ?? b.data
+  return data ? { ...merged, data } : merged
 }
 
 // serverToClient split: has `input` => request; `subscribe: true` => topic; otherwise => push event.

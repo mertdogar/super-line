@@ -47,10 +47,14 @@ export function superLineCollectionOptions<C extends Contract, R extends RoleOf<
       sync: ({ begin, write, commit, markReady }) => {
         const rowSet = handle.subscribe(opts.query ?? {})
         let ready = false
+        // A collection can be cleaned up before its initial snapshot resolves (e.g. an app that re-creates a
+        // collection when its query changes). Once cleaned up, the sync-engine handles reject any call, so guard
+        // every begin/write/commit/markReady behind this flag — set in the returned cleanup.
+        let cancelled = false
         // Live changes after the initial snapshot. Pre-ready changes need no handling: they are already folded
         // into rowSet.rows(), which we write as the initial insert set at markReady time.
         const off = rowSet.subscribe((ev) => {
-          if (!ready) return
+          if (!ready || cancelled) return
           begin()
           if (ev.type === 'delete') write({ type: 'delete', key: ev.id })
           else write({ type: ev.type, value: ev.row as Row })
@@ -58,6 +62,7 @@ export function superLineCollectionOptions<C extends Contract, R extends RoleOf<
         })
         void rowSet.ready
           .then(() => {
+            if (cancelled) return
             begin()
             for (const row of rowSet.rows()) write({ type: 'insert', value: row as Row })
             commit()
@@ -67,9 +72,10 @@ export function superLineCollectionOptions<C extends Contract, R extends RoleOf<
           .catch(() => {
             // A denied subscribe (deny-by-default policy) still resolves the collection, empty — the rejection
             // surfaces through the client's own error channel, not by hanging the TanStack collection.
-            markReady()
+            if (!cancelled) markReady()
           })
         return () => {
+          cancelled = true
           off()
           rowSet.close()
         }

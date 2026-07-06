@@ -116,6 +116,9 @@ describe('CRDT document collections (ADR-0007)', () => {
     // canonical stayed valid: the server co-writer and the other client never saw the bad value
     expect(await env.srv.collection('scenes').read('s1')).toMatchObject({ title: 'ok' })
     expect((b.getSnapshot() as Scene).title).toBe('ok')
+    // reject→resync: the writer's own optimistic edit is discarded — its replica returns to authoritative
+    await waitFor(() => (a.getSnapshot() as Scene).title === 'ok')
+    expect(a.getSnapshot()).toMatchObject({ title: 'ok' })
   })
 
   it('read policy denies open (deny-by-default guard)', async () => {

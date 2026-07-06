@@ -181,6 +181,13 @@ export interface ResourceReplica {
   delete(path: (string | number)[]): StoreChange | null
   applyRemote(change: StoreChange): void
   seed(snapshot: unknown): void
+  /**
+   * Hard-resync to authoritative full state, **discarding** any local optimistic edits — unlike `seed`,
+   * which merges. Used by CRDT document collections after a server rejects a write (validate-before-commit,
+   * ADR-0007): the rejected edit was applied optimistically and must be thrown away. Optional — the store
+   * family never validates/rejects, so its replicas don't implement it.
+   */
+  reset?(snapshot: unknown): void
   /** Mark this Resource deleted (server fan-out of a `delete`) + notify subscribers, so consumers re-read. */
   applyDelete(): void
 }

@@ -849,17 +849,27 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   function sendDocWrite(n: string, change: StoreChange): void {
     void trackRequest('collection:doc-write', (i) => ({ t: 'cdwr', i, n, id: change.id, u: change.update, o: change.origin })).catch(
       (err) => {
+        // A rejected write (validate-before-commit or a write-policy denial) was already applied optimistically,
+        // so the replica now diverges from authoritative state. Resync from the server and hard-reset it,
+        // discarding the bad edit. (A DISCONNECTED failure is left to the reconnect re-seed.)
+        if (!(err instanceof SuperLineError && err.code === 'DISCONNECTED')) {
+          const entry = openDocs.get(docKey(n, change.id))
+          if (entry) sendDocOpen(entry, true)
+        }
         if (opts.onStoreError) opts.onStoreError(err, { store: n, id: change.id })
-        else console.error(`[super-line] CRDT collection write rejected for ${n}/${change.id}`, err)
+        else console.error(`[super-line] CRDT collection write rejected for ${n}/${change.id} — resyncing`, err)
       },
     )
   }
 
-  function sendDocOpen(entry: OpenDocEntry): void {
+  function sendDocOpen(entry: OpenDocEntry, reset = false): void {
     if (!rawConn?.writable) return // onOpen re-sends for every entry on (re)connect
     void trackRequest('collection:doc-open', (i) => ({ t: 'cdopen', i, n: entry.n, id: entry.id }))
       .then((snapshot) => {
-        for (const replica of entry.replicas) replica.seed(snapshot)
+        for (const replica of entry.replicas) {
+          if (reset && replica.reset) replica.reset(snapshot) // reject→resync: discard the optimistic edit
+          else replica.seed(snapshot) // catch-up / reconnect: merge
+        }
         if (!entry.settled) {
           entry.settled = true
           entry.ready.resolve()

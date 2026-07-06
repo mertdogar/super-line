@@ -176,7 +176,7 @@ class CrdtDocReplica implements ResourceReplica {
   constructor(
     private readonly id: string,
     private readonly origin: string,
-    opts: DocOptions | undefined,
+    private readonly opts: DocOptions | undefined,
   ) {
     this.sv = new StoreValue<Record<string, unknown>, StoreMode>({}, opts)
     this.off = this.sv.onUpdate((update, meta) => {
@@ -214,6 +214,19 @@ class CrdtDocReplica implements ResourceReplica {
   }
   seed(snapshot: unknown): void {
     if (typeof snapshot === 'string') this.sv.applyUpdate(fromB64(snapshot)) // catch-up = full Yjs state
+  }
+  reset(snapshot: unknown): void {
+    // Reject→resync (ADR-0007): diff-patch the doc back to authoritative plaintext IN PLACE — super-store
+    // `set` is a recursive diff-and-patch, so subscriptions survive — discarding the rejected optimistic edit.
+    // (A plain `applyUpdate` merge can't remove an already-integrated op; only a value-replace reverts it.)
+    const scratch = new StoreValue<Record<string, unknown>, StoreMode>({}, this.opts)
+    try {
+      if (typeof snapshot === 'string') scratch.applyUpdate(fromB64(snapshot))
+      this.sv.set(scratch.getSnapshot() as Record<string, unknown>)
+    } finally {
+      scratch.dispose()
+    }
+    this.pendingLocal = null // the compensating diff is not a user edit — never forward it
   }
   applyDelete(): void {
     this.sv.emitChange()

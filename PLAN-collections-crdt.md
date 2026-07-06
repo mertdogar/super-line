@@ -19,9 +19,14 @@ scope (solo user, pre-adoption). Companion ADR: `docs/adr/0007-crdt-docs-are-typ
   validation, guard-shaped policies, server-authoritative create, relay fan-out); client
   `collection(n).open(id)` doc handle; react `useDoc`; `ai-canvas` migrated off `store-sync`.
   Proof: `packages/server/test/collections-crdt.integration.test.ts` (6/6) + backend unit tests
-  (5/5). Typecheck + oxlint clean. **Not yet wired: reject→resync push** (server rejects invalidly,
-  but doesn't yet push authoritative state back — the client just surfaces the error). Deferred to
-  a Phase 1.5 follow-up.
+  (5/5). Typecheck + oxlint clean. Committed on branch `collections-crdt` (66f02b4).
+- **Phase 1.5 (reject→resync) — BUILT & GREEN (2026-07-06).** On a rejected write (validate-before-commit
+  or a write-policy denial) the client now **resyncs**: `sendDocWrite`'s reject handler re-opens the doc
+  (reusing the `cdopen` catch-up path — no new frame, no server change) and hard-**resets** the replica to
+  authoritative state, discarding the optimistic edit. `ResourceReplica.reset?()` is optional (the store
+  family never validates/rejects); `CrdtDocReplica.reset` diff-patches back to authoritative plaintext IN
+  PLACE via super-store `set` (subscriptions survive). Proof: the writer's own replica now returns to
+  authoritative in the validate-before-commit test (extended). Typecheck + oxlint + suite green.
 - **Phases 2–4 — not started.**
 
 ## The reframe that makes this possible

@@ -8,6 +8,10 @@ The headline: **channels and message history live in a `Store`, persisted to SQL
 [`@super-line/store-sqlite`](../../packages/store-sqlite)** — so the workspace survives a server
 restart and streams live to every connected client for free.
 
+> **Looking for the relational version?** [`collections-chat`](../collections-chat) is the same app
+> rebuilt on super-line **Collections** (typed rows on the contract, TanStack DB joins, per-channel
+> row-level security) — the successor to the LWW document Store this example uses.
+
 ## Run it
 
 ```bash

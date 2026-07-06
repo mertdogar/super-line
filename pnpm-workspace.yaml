@@ -2,6 +2,10 @@ packages:
   - packages/*
   - examples/*
   - docs
+overrides:
+  # collections-chat uses @tanstack/react-db (pins db@0.5.32) alongside the source-aliased
+  # @super-line/tanstack-db adapter (resolves db@0.5.33). Pin one db instance so they interop.
+  '@tanstack/react-db>@tanstack/db': 0.5.33
 allowBuilds:
   '@swc/core': true
   better-sqlite3: true

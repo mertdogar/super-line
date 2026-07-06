@@ -1,0 +1,46 @@
+{
+  "name": "@super-line/example-collections-chat",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c magenta,green \"tsx src/server.ts\" \"vite\"",
+    "dev:server": "tsx src/server.ts",
+    "dev:web": "vite",
+    "inspector": "pnpm --filter @super-line/control-center build && node ../../packages/control-center/bin/control-center.js --url ws://localhost:8791",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@super-line/client": "workspace:*",
+    "@super-line/collections-sqlite": "workspace:*",
+    "@super-line/core": "workspace:*",
+    "@super-line/plugin-inspector": "workspace:*",
+    "@super-line/react": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "@super-line/tanstack-db": "workspace:*",
+    "@super-line/transport-websocket": "workspace:*",
+    "@radix-ui/react-dialog": "^1.1.6",
+    "@tanstack/db": "0.5.33",
+    "@tanstack/react-db": "0.1.76",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^2.6.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.2",
+    "tw-animate-css": "^1.2.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  }
+}

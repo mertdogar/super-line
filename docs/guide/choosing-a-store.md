@@ -96,7 +96,9 @@ empty snapshot. (Server-side: `ServerStore.onDelete`.)
 - The [`store` example](https://github.com/mertdogar/super-line/tree/main/examples/store) — permissioned
   notes over the in-memory LWW Store.
 - [`advanced-chat-app`](https://github.com/mertdogar/super-line/tree/main/examples/advanced-chat-app) —
-  a Slack-like app with channels and history persisted to **`store-sqlite`**.
+  a Slack-like app with channels and history persisted to **`store-sqlite`**. Its relational counterpart
+  [`collections-chat`](https://github.com/mertdogar/super-line/tree/main/examples/collections-chat) rebuilds
+  the same UI on **[Collections](./collections)** (typed rows, TanStack DB joins, per-channel row-level security).
 - [`store-pglite`](https://github.com/mertdogar/super-line/tree/main/examples/store-pglite) and
   [`ai-canvas-pglite`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas-pglite) —
   the **`self`**-clustering stores: central Postgres + Electric→PGlite, no adapter.

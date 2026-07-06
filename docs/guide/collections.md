@@ -191,6 +191,17 @@ insert/update whose reference points at a missing row is then rejected. It's **a
 parent-then-child references. For strict integrity, use a `self` backend or route the write through a request
 handler.
 
+## Run it
+
+- [`examples/collections`](https://github.com/mertdogar/super-line/tree/main/examples/collections) — a
+  runnable tsx tracer: RLS pushdown, a `messages ⋈ users` join, and optimistic writes with rollback, in
+  ~120 lines against a real server.
+- [`examples/collections-chat`](https://github.com/mertdogar/super-line/tree/main/examples/collections-chat)
+  — a full Slack-like React app: four collections (users/channels/memberships/messages), per-channel
+  row-level security with a join gate, optimistic sends, and the Control Center Collections view. The
+  relational counterpart to [`advanced-chat-app`](https://github.com/mertdogar/super-line/tree/main/examples/advanced-chat-app)
+  (same UI on the LWW `store-sqlite`).
+
 ## See also
 
 - [Choosing a store](./choosing-a-store) — collections vs the doc-store families

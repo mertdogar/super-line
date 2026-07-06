@@ -1,6 +1,6 @@
 {
   "name": "@super-line/client",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "type": "module",
   "description": "Realtime data-bus client for super-line — typed calls, events, topics, stores, auto-reconnect over any transport.",
   "license": "MIT",

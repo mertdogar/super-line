@@ -1,0 +1,55 @@
+{
+  "name": "@super-line/plugin-auth",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "First-party authentication for super-line — email/password, sessions, and roles backed by typed collections. A paired plugin (contract · server · client).",
+  "license": "MIT",
+  "author": "Mert",
+  "keywords": ["super-line", "plugin", "auth", "authentication", "sessions", "rbac"],
+  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/plugin-auth" },
+  "homepage": "https://mertdogar.github.io/super-line/",
+  "bugs": "https://github.com/mertdogar/super-line/issues",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+    },
+    "./server": {
+      "import": { "types": "./dist/server.d.ts", "default": "./dist/server.js" },
+      "require": { "types": "./dist/server.d.cts", "default": "./dist/server.cjs" }
+    },
+    "./client": {
+      "import": { "types": "./dist/client.d.ts", "default": "./dist/client.js" },
+      "require": { "types": "./dist/client.d.cts", "default": "./dist/client.cjs" }
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "engines": { "node": ">=18" },
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "tsup"
+  },
+  "dependencies": {
+    "@super-line/core": "workspace:^",
+    "zod": "^3.24.1"
+  },
+  "peerDependencies": {
+    "@super-line/client": "workspace:^",
+    "@super-line/server": "workspace:^"
+  },
+  "peerDependenciesMeta": {
+    "@super-line/client": { "optional": true },
+    "@super-line/server": { "optional": true }
+  },
+  "devDependencies": {
+    "@super-line/client": "workspace:^",
+    "@super-line/collections-memory": "workspace:*",
+    "@super-line/server": "workspace:^",
+    "@super-line/transport-websocket": "workspace:*"
+  }
+}

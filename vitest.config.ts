@@ -15,6 +15,10 @@ export default defineConfig({
       '@super-line/adapter-rabbitmq': src('packages/adapter-rabbitmq/src/index.ts'),
       '@super-line/react': src('packages/react/src/index.ts'),
       '@super-line/plugin-inspector': src('packages/plugin-inspector/src/index.ts'),
+      // subpath aliases must precede the bare one — vite matches string aliases by prefix, in order
+      '@super-line/plugin-auth/server': src('packages/plugin-auth/src/server.ts'),
+      '@super-line/plugin-auth/client': src('packages/plugin-auth/src/client.ts'),
+      '@super-line/plugin-auth': src('packages/plugin-auth/src/index.ts'),
       '@super-line/collections-memory': src('packages/collections-memory/src/index.ts'),
       '@super-line/collections-sqlite': src('packages/collections-sqlite/src/index.ts'),
       '@super-line/collections-pglite': src('packages/collections-pglite/src/index.ts'),

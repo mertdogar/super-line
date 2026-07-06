@@ -282,9 +282,15 @@ importers:
       '@super-line/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@super-line/collections-memory':
+        specifier: workspace:*
+        version: link:../../packages/collections-memory
       '@super-line/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@super-line/plugin-auth':
+        specifier: workspace:*
+        version: link:../../packages/plugin-auth
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
@@ -1610,6 +1616,28 @@ importers:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
+
+  packages/plugin-auth:
+    dependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@super-line/client':
+        specifier: workspace:^
+        version: link:../client
+      '@super-line/collections-memory':
+        specifier: workspace:*
+        version: link:../collections-memory
+      '@super-line/server':
+        specifier: workspace:^
+        version: link:../server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../transport-websocket
 
   packages/plugin-inspector:
     dependencies:

@@ -8,7 +8,9 @@
   },
   "dependencies": {
     "@super-line/client": "workspace:*",
+    "@super-line/collections-memory": "workspace:*",
     "@super-line/core": "workspace:*",
+    "@super-line/plugin-auth": "workspace:*",
     "@super-line/server": "workspace:*",
     "@super-line/transport-websocket": "workspace:*",
     "zod": "^3.24.1"

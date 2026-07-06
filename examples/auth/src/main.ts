@@ -1,88 +1,114 @@
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { SuperLineError } from '@super-line/core'
+import { z } from 'zod'
+import { defineContract, eq } from '@super-line/core'
 import { createSuperLineServer } from '@super-line/server'
 import { createSuperLineClient } from '@super-line/client'
-import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
-import { api } from './contract.js'
+import { memoryCollections } from '@super-line/collections-memory'
+import { webSocketClientTransport, webSocketServerTransport } from '@super-line/transport-websocket'
+import { authContract } from '@super-line/plugin-auth'
+import { auth } from '@super-line/plugin-auth/server'
+import { authClient } from '@super-line/plugin-auth/client'
 
-// Pretend token store. In a real app, verify a JWT / session here instead.
-const TOKENS: Record<string, { user: string; role: 'user' | 'admin' }> = {
-  tok_ada: { user: 'ada', role: 'admin' },
-  tok_grace: { user: 'grace', role: 'user' },
-}
+// Proper authentication as a paired plugin. `authContract()` adds — to the contract merged on BOTH ends —
+// the `guest` role, the `users`/`credentials`/`sessions` collections, and signIn/signUp/signOut/whoami. So the
+// app declares only its OWN surface: a private `notes` collection and an admin-only `stats` request.
+const app = defineContract({
+  roles: {
+    user: {}, // a plain user acts through the notes collection + the shared whoami/signOut
+    admin: { clientToServer: { stats: { input: z.void(), output: z.object({ users: z.number() }) } } },
+  },
+  collections: {
+    notes: {
+      schema: z.object({ id: z.string(), ownerId: z.string(), text: z.string(), createdAt: z.number() }),
+      key: 'id',
+      references: { ownerId: 'users' }, // advisory FK into the auth plugin's user directory
+    },
+  },
+  plugins: [authContract()],
+})
 
 async function main(): Promise<void> {
   const server = http.createServer()
-  const srv = createSuperLineServer(api, {
+  const backend = memoryCollections()
+  // The SAME backend is handed to both the auth kit (so `authenticate` can read sessions/users) and the server.
+  const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
+
+  const srv = createSuperLineServer(app, {
     transports: [webSocketServerTransport({ server })],
-    // runs at the HTTP upgrade — resolve the role from the token, verify the claim, throw to reject
-    authenticate: (h) => {
-      const rec = TOKENS[h.query.token ?? '']
-      if (!rec) throw new SuperLineError('UNAUTHORIZED', 'invalid token')
-      if (rec.role !== h.query.role) {
-        throw new SuperLineError('FORBIDDEN', 'token does not grant that role')
-      }
-      return rec.role === 'admin'
-        ? { role: 'admin' as const, ctx: { user: rec.user } }
-        : { role: 'user' as const, ctx: { user: rec.user } }
+    collections: backend,
+    authenticate: authKit.authenticate, // verifies the session token → { role, ctx }; wired top-level for clean ctx inference
+    identify: authKit.identify, // principal := userId, so row policies key on the logged-in user
+    // The plugin locks credentials/sessions and opens the users directory; the app adds only its notes policy.
+    policies: {
+      notes: {
+        read: (principal) => eq('ownerId', principal), // you only ever read your OWN notes
+        write: (principal, op, next, prev) =>
+          op === 'delete' ? prev?.ownerId === principal : next?.ownerId === principal, // …and only write your own
+      },
     },
+    plugins: [authKit.plugin],
   })
+  // signIn/signUp/signOut/whoami are plugin-handled → subtracted; the empty user/guest/shared blocks are optional.
+  srv.implement({ admin: { stats: async () => ({ users: (await srv.collection('users').snapshot()).length }) } })
 
-  srv.implement({
-    shared: { whoami: async (_input, _ctx, conn) => ({ user: conn.ctx.user, role: conn.role }) },
-    user: {},
-    admin: {
-      secret: async (_input, ctx) => ({ data: `classified data for ${ctx.user}` }),
-    },
-  })
-
-  await new Promise<void>((r) => server.listen(0, r))
+  await new Promise<void>((resolve) => server.listen(0, resolve))
   const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`
+  const transport = () => webSocketClientTransport({ url })
+  // The one concession for the guest↔authed swap: connect is called first as 'guest', then 'user'.
+  const connect = ({ role, params }: { role: string; params: Record<string, string> }) =>
+    createSuperLineClient(app, { transport: transport(), role: role as 'user', params })
 
-  // admin token + admin role -> full surface
-  const ada = createSuperLineClient(api, {
-    transport: webSocketClientTransport({ url }),
-    role: 'admin',
-    params: { token: 'tok_ada' },
-  })
-  console.log('admin -> whoami:', await ada.whoami({}))
-  console.log('admin -> secret:', await ada.secret({}))
-  ada.close()
+  // ── Alice signs up. authClient hides super-line's guest→user reconnect: signUp connects as guest, mints a
+  //    session, and transparently rebuilds the client as `user`. ──
+  console.log('— Alice signs up —')
+  const alice = authClient({ authedRole: 'user', connect })
+  await alice.ready
+  await alice.signUp({ email: 'alice@example.com', password: 'correct-horse', displayName: 'Alice' })
+  console.log('  whoami →', await alice.client.whoami()) // { userId, displayName: 'Alice', roles: ['user'] }
+  const aliceId = alice.state.userId!
+  await alice.client.collection('notes').insert({ id: 'n1', ownerId: aliceId, text: 'my api keys are…', createdAt: Date.now() })
 
-  // user token + user role -> `secret` isn't on the surface (compile error). Forced at runtime:
-  const grace = createSuperLineClient(api, {
-    transport: webSocketClientTransport({ url }),
-    role: 'user',
-    params: { token: 'tok_grace' },
-  })
-  console.log('user  -> whoami:', await grace.whoami({}))
-  try {
-    await (grace as unknown as { secret: (i: unknown) => Promise<unknown> }).secret({})
-    console.log('user  -> secret: UNEXPECTEDLY succeeded')
-  } catch (e) {
-    const code = e instanceof SuperLineError ? e.code : 'ERROR'
-    console.log(`user  -> secret: rejected (${code}) — not on the user role's surface`)
-  }
-  grace.close()
+  // ── Bob signs up. His notes read policy keys on HIS principal, so Alice's note is invisible to him. ──
+  console.log('\n— Bob signs up —')
+  const bob = authClient({ authedRole: 'user', connect })
+  await bob.ready
+  await bob.signUp({ email: 'bob@example.com', password: 'battery-staple', displayName: 'Bob' })
+  const bobId = bob.state.userId!
+  await bob.client.collection('notes').insert({ id: 'n2', ownerId: bobId, text: 'lunch ideas', createdAt: Date.now() })
 
-  // invalid token -> rejected at the upgrade (reconnect off so it surfaces immediately)
-  const intruder = createSuperLineClient(api, {
-    transport: webSocketClientTransport({ url }),
-    role: 'user',
-    params: { token: 'nope' },
-    reconnect: false,
-  })
-  try {
-    await intruder.whoami({})
-    console.log('bad   -> UNEXPECTEDLY succeeded')
-  } catch (e) {
-    const code = e instanceof SuperLineError ? e.code : 'ERROR'
-    console.log(`bad   -> rejected (${code}) — refused at the upgrade, no socket opened`)
-  }
-  intruder.close()
+  const aliceNotes = alice.client.collection('notes').subscribe({})
+  const bobNotes = bob.client.collection('notes').subscribe({})
+  await Promise.all([aliceNotes.ready, bobNotes.ready])
+  console.log('  Alice sees →', aliceNotes.rows().map((r) => r.text)) // ['my api keys are…'] — RLS: only her own
+  console.log('  Bob sees   →', bobNotes.rows().map((r) => r.text)) // ['lunch ideas']
 
-  await new Promise<void>((r) => server.close(() => r()))
+  // The user directory is public — both see both.
+  const dir = alice.client.collection('users').subscribe({})
+  await dir.ready
+  console.log('  directory  →', dir.rows().map((r) => r.displayName).sort()) // ['Alice', 'Bob']
+
+  // ── Roles are just data. Grant Alice `admin` by co-writing her user row; her session token then opens an
+  //    admin connection (authenticate validates the requested role against her granted roles). ──
+  console.log('\n— Alice is promoted to admin —')
+  await srv.collection('users').update({ id: aliceId, displayName: 'Alice', roles: ['user', 'admin'], createdAt: Date.now() })
+  const guest = createSuperLineClient(app, { transport: transport(), role: 'guest' })
+  const { token } = await guest.signIn({ email: 'alice@example.com', password: 'correct-horse' }) // fresh session token
+  guest.close()
+  const adminAlice = createSuperLineClient(app, { transport: transport(), role: 'admin', params: { token } })
+  console.log('  admin stats →', await adminAlice.stats()) // { users: 2 } — the same token now authorizes 'admin'
+  adminAlice.close()
+
+  // ── Sign out revokes the session; the client drops back to guest. ──
+  console.log('\n— Alice signs out —')
+  await alice.signOut()
+  console.log('  state  →', alice.state.status) // 'guest'
+  console.log('  whoami →', await alice.client.whoami()) // null
+
+  alice.client.close()
+  bob.client.close()
+  await srv.close()
+  await new Promise<void>((resolve) => server.close(() => resolve()))
   process.exit(0)
 }
 

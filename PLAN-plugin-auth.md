@@ -63,9 +63,13 @@ Auth-server features ✅ DONE (13 tests):
 - **Password reset** ✅ — host `sendPasswordReset({ user, token })` callback + a `passwordResets` collection;
   `requestPasswordReset` (constant response, no email-existence leak) / `confirmPasswordReset` (flushes sessions).
 
+- **`/react`** half ✅ — `createAuth()` → `<AuthProvider>` + `useAuth()` (useSyncExternalStore); `displayName`
+  threaded through the identity output + `AuthState`.
+- **collections-chat → real auth** ✅ — slug-identity retired; `authContract()` merged, `authKit` wired, a
+  login/sign-up screen via `/react`, presence by display name. **Browser-verified end-to-end** (sign-up →
+  workspace → RLS message → sign-out → sign-in + persistence).
+
 Remaining:
-- **Email verification** — deferred (would add a required `userSchema` field / blocking-login policy). Fold in
-  with the same host-callback shape when needed.
-- **`/react`** half (`AuthProvider`/`useAuth`) + **upgrade `collections-chat`** to real login (retire slug-identity).
+- **Email verification** — deferred (would add a required `userSchema` field / blocking-login policy).
 - **DX niceties:** `extendCtx` + bare `authenticate` escape hatch; configurable guest-role name; extensible user fields.
-- **Docs:** guide page + skill update; changesets/version bumps; publish (ASK first).
+- **Docs:** guide page (in progress) + skill update; changesets/version bumps; publish (ASK first).

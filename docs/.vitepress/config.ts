@@ -97,6 +97,7 @@ export default defineConfig({
           collapsed: true,
           items: [
             { text: 'Roles & auth', link: '/guide/roles-auth' },
+            { text: 'Authentication (plugin)', link: '/guide/plugin-auth' },
             { text: 'Middleware & lifecycle', link: '/guide/middleware-lifecycle' },
             { text: 'Error handling', link: '/guide/errors' },
             { text: 'Introspection & presence', link: '/guide/introspection-and-presence' },

@@ -6,7 +6,7 @@ Resources, grants and revokes per-client access, and validates every read and wr
 **reactive handle** that catches up to the current value and stays live.
 
 Like a [transport](./transports), a Store is **pluggable** and ships as a **server + client pair** you
-pass at construction. **Six stores ship today**, varying along two axes — the **consistency model**
+pass at construction. **Five stores ship today**, varying along two axes — the **consistency model**
 (last-writer-wins vs a merging CRDT) and **durability + clustering** (where state lives, and how a change
 crosses nodes):
 
@@ -15,7 +15,6 @@ crosses nodes):
 | **`@super-line/store-memory`** | LWW | in-memory | relay | `memoryStoreClient()` |
 | [**`@super-line/store-sync`**](./synced-state) | CRDT | in-memory | relay | `syncStoreClient()` |
 | **`@super-line/store-sqlite`** | LWW | SQLite (better-sqlite3, WAL) | relay | `memoryStoreClient()` |
-| [**`@super-line/store-sync-libsql`**](./synced-state) | CRDT | libsql / Turso / sqld | relay | `syncStoreClient()` |
 | **`@super-line/store-pglite`** | LWW | central Postgres + Electric→PGlite | **self** | `memoryStoreClient()` |
 | [**`@super-line/store-sync-pglite`**](./store-sync-pglite) | CRDT | central Postgres op-log + Electric→PGlite | **self** | `syncStoreClient()` |
 
@@ -70,22 +69,21 @@ import { syncStoreClient } from '@super-line/store-sync' // client: stores: { do
 ```
 
 To make it **durable**, swap only the server half for a backend that persists — the client half is
-unchanged (LWW keeps `memoryStoreClient()`, CRDT keeps `syncStoreClient()`):
+unchanged (LWW keeps `memoryStoreClient()`):
 
 ```ts
 // LWW → durable SQLite (better-sqlite3, WAL). `table?` lets several stores share one file.
 import { sqliteStoreServer } from '@super-line/store-sqlite'
 // server: stores: { docs: sqliteStoreServer({ file: 'data.db' }) }
-
-// CRDT → durable libsql/Turso/sqld. Async factory — it rehydrates every Resource before resolving.
-import { libsqlSyncStore } from '@super-line/store-sync-libsql'
-// server: stores: { docs: await libsqlSyncStore({ url: 'libsql://…', authToken }) }
 ```
 
-`libsqlSyncStore` is an **async factory**: it rehydrates each Resource from libsql (history-preserving
-`applyUpdate`) before returning a ready store, then snapshots each Resource's CRDT state on a debounce
-(`debounceMs`, default 250ms). As with any CRDT pair, pass the same `resolveOptions` to both halves so the
-per-Resource doc modes match — see [Synced state](./synced-state).
+::: tip Durable CRDT lives in collections now
+The durable-`relay` CRDT store (`store-sync-libsql`) has folded into
+[collections](./collections#crdt-document-collections) (ADR-0007): a durable, mergeable document is now a
+**CRDT document collection** — declared on the contract, validated on every write, and served by
+`@super-line/collections-crdt-libsql` via `crdtCollections:` rather than `stores:`. For an **in-memory**
+CRDT store, [`store-sync`](./synced-state) is still here.
+:::
 
 ## Server-authoritative access
 
@@ -215,7 +213,7 @@ merging with users' concurrent edits.
 Every Store declares a **clustering mode** that decides how a change on one node reaches the others.
 Echo-break — a writer never re-applies its own change — is automatic in both.
 
-**`relay`** — store-memory, store-sync, store-sqlite, store-sync-libsql. Each node keeps its own replica;
+**`relay`** — store-memory, store-sync, store-sqlite. Each node keeps its own replica;
 super-line relays every applied Change across nodes over the [server↔server adapter](./scaling-adapters)
 and converges each replica. No extra wiring — if you already run an adapter for events and topics, relay
 stores ride the same bus.

@@ -48,7 +48,7 @@
 | 📣 **Events & rooms** | Server-pushed events; server-controlled room broadcasts. |
 | 📡 **Topics** | Client-subscribed pub/sub streams, authorized server-side. |
 | 🧩 **Collections** | Typed, relational **rows** declared on the contract — the server validates every write, enforces row-level security, and streams each client a live subset; [TanStack DB](https://tanstack.com/db) does client-side joins & optimistic mutations via the first-party adapter. The typed successor to the LWW stores. **Backends:** in-memory · SQLite · self-clustering (Postgres + Electric). |
-| 🗄️ **Stores** | Permissioned, real-time JSON documents — a pluggable persisted-state primitive with per-client access rules, a reactive client handle, and a reactive in-process server co-writer (`srv.store(ns).open(id)`) that reads, merges, and surgically deletes. **Backends:** the CRDT stores (in-memory · libsql/Turso · Postgres+Electric) for collaborative documents; the LWW stores are superseded by Collections. |
+| 🗄️ **Stores** | Permissioned, real-time JSON documents — a pluggable persisted-state primitive with per-client access rules, a reactive client handle, and a reactive in-process server co-writer (`srv.store(ns).open(id)`) that reads, merges, and surgically deletes. **Backends:** the CRDT stores (in-memory · Postgres+Electric) for collaborative documents; the durable libsql/Turso tier and the LWW stores are superseded by Collections. |
 | 🧹 **Cluster-wide delete** | `srv.store(ns).delete(id)` fans a deletion across every node (wire `sdel`); observe it via `ServerStore.onDelete`, the client `ResourceHandle.deleted` flag, and React `useResource().deleted`. |
 | 🚌 **Cluster event bus** | `server.publish` / `server.subscribe` on a shared topic — cluster-wide pub/sub to server listeners (every node, local echo) and subscribed clients at once. |
 | 📨 **Server→client req/res** | `await srv.toConn(id).request(...)` — ask a client and await a typed reply, across nodes. |
@@ -85,7 +85,6 @@ pnpm add @super-line/tanstack-db         # the TanStack DB adapter (joins, live 
 pnpm add @super-line/store-memory       # LWW · in-memory · relay
 pnpm add @super-line/store-sync         # CRDT · in-memory · relay
 pnpm add @super-line/store-sqlite       # LWW · durable (better-sqlite3) · relay
-pnpm add @super-line/store-sync-libsql  # CRDT · durable (libsql/Turso) · relay
 pnpm add @super-line/store-pglite       # LWW · self-clustering (Postgres + Electric)
 pnpm add @super-line/store-sync-pglite  # CRDT · self-clustering (Postgres + Electric)
 
@@ -356,13 +355,12 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 | [`@super-line/store-memory`](packages/store-memory) | LWW · in-memory · relay — the default store pair (`memoryStoreServer`/`memoryStoreClient`) |
 | [`@super-line/store-sync`](packages/store-sync) | CRDT (Yjs/super-store) · in-memory · relay (`syncStoreServer`/`syncStoreClient`) |
 | [`@super-line/store-sqlite`](packages/store-sqlite) | LWW · durable (better-sqlite3 WAL) · relay (`sqliteStoreServer`; pair with `memoryStoreClient`) |
-| [`@super-line/store-sync-libsql`](packages/store-sync-libsql) | CRDT · durable (libsql/Turso/sqld) · relay — async `libsqlSyncStore`; snapshot-per-resource, history-preserving rehydrate |
 | [`@super-line/store-pglite`](packages/store-pglite) | LWW · self-clustering (central Postgres + per-node Electric→PGlite, **no adapter**) (`pgliteStoreServer`) |
 | [`@super-line/store-sync-pglite`](packages/store-sync-pglite) | CRDT · self-clustering (Postgres op-log + Electric→PGlite, **no adapter**) (`syncPgliteStoreServer`) |
 
 ## Status
 
-Pre-1.0. **Implemented:** role-scoped contracts, req/res, events, rooms, topics, Stores (LWW + CRDT across in-memory, durable SQLite / libsql-Turso, and self-clustering Postgres+Electric backends — with a reactive server-side co-writer and cluster-wide deletion fan-out), the cluster event bus (`server.publish`/`server.subscribe`), pluggable client↔server transports (WebSocket · HTTP/SSE · libp2p · loopback), auth, reconnect, middleware, in-memory + Redis + RabbitMQ + ZeroMQ + libp2p adapters, React hooks. **Not yet:** fire-and-forget client→server signals (every client→server is req/res today), mutable per-connection state, NATS adapter, wildcard/retained topics, session resume/replay, parameterized-topic type inference (topics are typed by exact contract key for now), backpressure safeguards.
+Pre-1.0. **Implemented:** role-scoped contracts, req/res, events, rooms, topics, Stores (LWW + CRDT across in-memory, durable SQLite, and self-clustering Postgres+Electric backends — with a reactive server-side co-writer and cluster-wide deletion fan-out), the cluster event bus (`server.publish`/`server.subscribe`), pluggable client↔server transports (WebSocket · HTTP/SSE · libp2p · loopback), auth, reconnect, middleware, in-memory + Redis + RabbitMQ + ZeroMQ + libp2p adapters, React hooks. **Not yet:** fire-and-forget client→server signals (every client→server is req/res today), mutable per-connection state, NATS adapter, wildcard/retained topics, session resume/replay, parameterized-topic type inference (topics are typed by exact contract key for now), backpressure safeguards.
 
 ## License
 

@@ -142,31 +142,16 @@ receive and recovers by re-snapshotting on reconnect (which the handle does for 
 For state that **survives a restart**, use a `self`-clustering store — the broker-free
 [`@super-line/store-sync-pglite`](./store-sync-pglite) (central Postgres + Electric).
 
-::: tip Durable CRDT has moved to collections
-The CRDT doc-store family is being folded into [collections](./collections) (ADR-0007): a durable, mergeable
-document is now a **CRDT document collection** — declared on the contract, validated on every write, and
-served by `@super-line/collections-crdt-libsql` (libsql/Turso) via `crdtCollections:` rather than `stores:`.
-See [Collections → CRDT document collections](./collections#crdt-document-collections).
+::: tip Durable `relay` CRDT has moved to collections
+The durable-`relay` CRDT store (`store-sync-libsql`) has folded into [collections](./collections) (ADR-0007):
+a durable, mergeable document is now a **CRDT document collection** — declared on the contract, validated on
+every write, and served by `@super-line/collections-crdt-libsql` (libsql/Turso) via `crdtCollections:` rather
+than `stores:`. It rehydrates every doc from the DB on boot and snapshots each on a debounce — the same
+history-preserving persistence, now with schema validation. See
+[Collections → CRDT document collections](./collections#crdt-document-collections).
 :::
 
-The client stays `syncStoreClient()` — durability is a server-half concern, so the wire and the merge
-model are unchanged. `libsqlSyncStore` is an **async factory** (`await` it): on boot it rehydrates every
-Resource from the DB before the store is ready, replaying each saved document with a history-preserving
-`applyUpdate` — so the CRDT keeps converging across the restart instead of resetting to a fresh root.
-
-| option | default | what it does |
-| --- | --- | --- |
-| `url` | — | libsql URL: `file:x.db`, `:memory:`, `libsql://` (Turso) or `http(s)://` (sqld) |
-| `authToken` | — | auth token for Turso Cloud |
-| `table` | `'resources'` | the table this store owns (must match `/^[A-Za-z_]\w*$/`) |
-| `debounceMs` | `250` | coalesce rapid edits into one snapshot write |
-| `resolveOptions` | — | per-Resource `DocOptions` — **must match the client's** (the store-sync rule) |
-
-Persistence is **snapshot-per-resource**: each Resource is one row holding its full merged state,
-upserted off the hot path and debounced per id, so a burst of edits collapses into a single write. The
-`apply` hot path stays synchronous and relay-safe — persistence is just an extra `onChange` subscriber.
-
-For the full menu — LWW vs CRDT, memory vs SQLite vs libsql vs Postgres, `relay` vs `self` clustering —
+For the full menu — LWW vs CRDT, memory vs SQLite vs Postgres, `relay` vs `self` clustering —
 see [Choosing a store](./choosing-a-store).
 
 ## In React

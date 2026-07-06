@@ -4,7 +4,6 @@ The **default**, zero-dependency in-memory **Store** for [**super-line**](https:
 a permissioned, real-time JSON document store with last-writer-wins (LWW) semantics. This is the
 reference Store pair; durable and self-clustering backends
 ([`store-sqlite`](https://www.npmjs.com/package/@super-line/store-sqlite),
-[`store-sync-libsql`](https://www.npmjs.com/package/@super-line/store-sync-libsql),
 [`store-pglite`](https://www.npmjs.com/package/@super-line/store-pglite)) match its API.
 
 ```bash

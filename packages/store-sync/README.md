@@ -47,10 +47,11 @@ their changes.
   black box to the bus.
 - **`clustering: 'relay'`** — replicas converge across nodes via super-line's
   server↔server [Adapter](https://mertdogar.github.io/super-line/guide/scaling-adapters)
-  fan-out. Storage is **in-memory** — for durability use
-  [`store-sync-libsql`](https://www.npmjs.com/package/@super-line/store-sync-libsql)
-  (Turso/sqld) or [`store-sync-pglite`](https://www.npmjs.com/package/@super-line/store-sync-pglite)
-  (self-clustering Postgres), which reuse this engine.
+  fan-out. Storage is **in-memory** — for durability use the self-clustering
+  [`store-sync-pglite`](https://www.npmjs.com/package/@super-line/store-sync-pglite)
+  (Postgres), or the durable-`relay`
+  [`collections-crdt-libsql`](https://www.npmjs.com/package/@super-line/collections-crdt-libsql)
+  (Turso/sqld) — the CRDT doc-store family has folded into collections (ADR-0007).
 - **Deletion fan-out** — `srv.store('docs').delete(id)` publishes a cluster-wide
   `sdel` frame; every replica's `ResourceHandle.deleted` (React: `useResource().deleted`)
   flips so consumers re-read.

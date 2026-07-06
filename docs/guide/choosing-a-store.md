@@ -12,13 +12,13 @@ tool for a single collaborative document.
 A [**Store**](./store) is super-line's persisted-state primitive — a named collection of permissioned
 JSON **Resources** the server owns and clients read/write through a reactive handle. Like a
 [transport](./transports) or an [adapter](./scaling-adapters), a Store is **pluggable** and ships as a
-server + client pair you pass at construction. Six ship today, and they vary on three independent axes:
+server + client pair you pass at construction. Five ship today, and they vary on three independent axes:
 
 - **Consistency model** — **LWW** (last-writer-wins: the last write to land clobbers the rest) or
   **CRDT** (concurrent writes to different fields **merge** instead of clobbering — true multiplayer,
   Yjs via [super-store](https://github.com/mertdogar/super-store)).
 - **Durability** — where the canonical state lives: **in-memory** (gone on restart), a durable
-  **SQLite** / **libsql-Turso** backend, or a central **Postgres** streamed to each node by Electric.
+  **SQLite** backend, or a central **Postgres** streamed to each node by Electric.
 - **Clustering** — how a change reaches other nodes: **`relay`** (super-line relays it over the
   server↔server [adapter](./scaling-adapters)) or **`self`** (the store owns a central backend + a
   per-node replica and syncs itself — **no adapter needed**).
@@ -48,11 +48,12 @@ await pgliteStoreServer({ pgUrl, electricUrl })        // self-clustering — Po
 
 // CRDT — pair the server half with syncStoreClient
 syncStoreServer()                                      // in-memory
-await libsqlSyncStore({ url: 'libsql://…' })           // durable — libsql / Turso / sqld
 await syncPgliteStoreServer({ pgUrl, electricUrl })    // self-clustering — op-log + Electric→PGlite
 ```
 
-The libsql and PGlite server factories are **async** (they open the backend) — `await` them. For the
+Durable `relay` CRDT is now a [CRDT document collection](./collections#crdt-document-collections)
+(`@super-line/collections-crdt-libsql`), not a store — see below. The PGlite server factories are
+**async** (they open the backend) — `await` them. For the
 CRDT durable/self stores, a `resolveOptions: (id) => DocOptions` passed to the server **must match** the
 one on `syncStoreClient` — both peers have to agree on each Resource's `mode` (`'shallow'` | `'document'`)
 and `opaque` paths. See [Synced state](./synced-state).

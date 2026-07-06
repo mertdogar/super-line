@@ -30,9 +30,9 @@ Reach for it when **all three** are true at once:
 
 If you only need two of the three, a lighter sibling fits — see [Choosing a store](./choosing-a-store). And
 if you *already* run an adapter (Redis, libp2p) for other reasons, a
-[`relay`](./choosing-a-store#relay-vs-self) CRDT store — [`store-sync-libsql`](./synced-state#make-it-durable)
-for durable, [`store-sync`](./synced-state) for in-memory — rides it with no extra infra. Reach for this one
-specifically to **avoid** standing up a broker.
+[`relay`](./choosing-a-store#relay-vs-self) CRDT — [`store-sync`](./synced-state) (in-memory) or the durable
+[CRDT document collection](./collections#crdt-document-collections) (`collections-crdt-libsql`) — rides it
+with no extra infra. Reach for this one specifically to **avoid** standing up a broker.
 
 ## Set it up
 
@@ -127,10 +127,9 @@ In React, `useResource` is identical to any store — you get the merged value a
 `update`. See [React](./react).
 
 ::: tip Coming from another CRDT store?
-Because the client and the wire are identical, switching from [`store-sync`](./synced-state) (in-memory) or
-[`store-sync-libsql`](./synced-state#make-it-durable) (durable `relay`) is a **server-only swap** — replace
-the store factory and drop the `adapter`. Existing Resources aren't auto-migrated into the op-log; re-seed
-them with `create` / `open`.
+Because the client and the wire are identical, switching from [`store-sync`](./synced-state) (in-memory
+`relay`) is a **server-only swap** — replace the store factory and drop the `adapter`. Existing Resources
+aren't auto-migrated into the op-log; re-seed them with `create` / `open`.
 :::
 
 ## How it works

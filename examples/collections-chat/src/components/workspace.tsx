@@ -1,35 +1,22 @@
-import { useEffect, useMemo, useState } from 'react'
-import { createSuperLineClient } from '@super-line/client'
-import { webSocketClientTransport } from '@super-line/transport-websocket'
-import { chat } from '@/contract'
+import type { SuperLineClient } from '@super-line/client'
 import { Provider } from '@/lib/superline'
 import { ChatProvider } from '@/lib/chat'
-import { slug } from '@/lib/identity'
 import { Shell } from '@/components/shell'
+import type { chat } from '@/contract'
 
-const WS_URL = `ws://${location.hostname}:8791`
-
+// The authenticated workspace. The live client comes from @super-line/plugin-auth (its lifecycle — connect,
+// reconnect, close on sign-out — is owned there); here we just wire it into the super-line + chat providers.
 export function Workspace({
+  client,
+  me,
   name,
   onSignOut,
 }: {
+  client: SuperLineClient<typeof chat, 'user'>
+  me: string
   name: string
   onSignOut: () => void
 }): React.JSX.Element {
-  // Create the client once; it connects immediately and reconnects on its own. No store client half —
-  // durable state is TanStack DB collections synced by super-line (see lib/chat.tsx).
-  const [client] = useState(() =>
-    createSuperLineClient(chat, {
-      transport: webSocketClientTransport({ url: WS_URL }),
-      role: 'user',
-      params: { name },
-    }),
-  )
-  useEffect(() => () => client.close(), [client])
-
-  // my user id — the principal the server's row policies check
-  const me = useMemo(() => slug(name), [name])
-
   return (
     <Provider client={client}>
       <ChatProvider me={me}>

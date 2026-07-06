@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { defineContract, type RowOf } from '@super-line/core'
+import { authContract } from '@super-line/plugin-auth'
 
 /**
  * The wire contract. Unlike the store-based `advanced-chat-app`, the durable state here lives in typed
@@ -12,13 +13,8 @@ import { defineContract, type RowOf } from '@super-line/core'
  */
 export const chat = defineContract({
   collections: {
-    // The user directory. World-readable (needed for the messages⋈users author join); the server
-    // upserts your row on connect, so clients never write it.
-    users: {
-      schema: z.object({ id: z.string(), name: z.string() }),
-      key: 'id',
-    },
     // The public channel directory — every channel is visible so you can discover + join it.
+    // (The `users` directory is provided by @super-line/plugin-auth via `plugins` below.)
     channels: {
       schema: z.object({ id: z.string(), name: z.string(), createdAt: z.number() }),
       key: 'id',
@@ -66,6 +62,9 @@ export const chat = defineContract({
       },
     },
   },
+  // @super-line/plugin-auth: adds the `guest` role, the users/credentials/sessions collections, and
+  // signIn/signUp/signOut/whoami — merged into this contract so the server + both clients share the types.
+  plugins: [authContract()],
 })
 
 /** Typed rows, derived from the contract collections — one source of truth for server + client. */

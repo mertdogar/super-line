@@ -1,27 +1,15 @@
-import { useState } from 'react'
-import { JoinScreen } from '@/components/join-screen'
+import { useAuth } from '@/lib/auth'
+import { LoginScreen } from '@/components/login-screen'
 import { Workspace } from '@/components/workspace'
 
-const NAME_KEY = 'collections-chat:name'
-
-// initial identity: ?name=ada in the URL (handy for opening two windows side by side) or the last
-// name saved to localStorage
-function initialName(): string | null {
-  const fromUrl = new URLSearchParams(location.search).get('name')?.trim()
-  return fromUrl || localStorage.getItem(NAME_KEY)
-}
-
 export function App(): React.JSX.Element {
-  const [name, setName] = useState<string | null>(initialName)
+  const { ready, state, client, signOut } = useAuth()
 
-  const signIn = (n: string) => {
-    localStorage.setItem(NAME_KEY, n)
-    setName(n)
+  // hold the UI until any persisted session has been confirmed, so we don't flash the login screen
+  if (!ready) {
+    return <div className="flex h-full items-center justify-center bg-sidebar text-muted-foreground">Connecting…</div>
   }
-  const signOut = () => {
-    localStorage.removeItem(NAME_KEY)
-    setName(null)
-  }
+  if (state.status !== 'authed') return <LoginScreen />
 
-  return name ? <Workspace name={name} onSignOut={signOut} /> : <JoinScreen onJoin={signIn} />
+  return <Workspace client={client} me={state.userId!} name={state.displayName ?? state.userId!} onSignOut={signOut} />
 }

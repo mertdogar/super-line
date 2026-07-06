@@ -56,7 +56,7 @@ export function ChannelView({
         .select(({ m, u }) => ({
           id: m.id,
           authorId: m.authorId,
-          author: u.name,
+          author: u.displayName,
           text: m.text,
           createdAt: m.createdAt,
         })),

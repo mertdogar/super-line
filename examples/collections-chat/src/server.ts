@@ -3,61 +3,49 @@ import { fileURLToPath } from 'node:url'
 import { eq, isIn } from '@super-line/core'
 import { inspector } from '@super-line/plugin-inspector'
 import { createSuperLineServer, type Conn } from '@super-line/server'
+import { auth } from '@super-line/plugin-auth/server'
 import { sqliteCollections } from '@super-line/collections-sqlite'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { chat } from './contract.js'
-import { memId, slug } from './lib/identity.js'
+import { memId } from './lib/identity.js'
+import type { AuthContext } from '@super-line/plugin-auth'
 
 const PORT = Number(process.env.PORT ?? 8791)
 // the durable workspace lives next to this file: examples/collections-chat/collections-chat.db (gitignored)
 const DB_FILE = fileURLToPath(new URL('../collections-chat.db', import.meta.url))
 
-interface Ctx {
-  userId: string
-  name: string
-}
-const ctxOf = (conn: Conn) => conn.ctx as Ctx
-
+const ctxOf = (conn: Conn) => conn.ctx as AuthContext
 const server = http.createServer()
+
+// One CollectionStore shared by the server AND the auth kit (so authenticate reads sessions/users from it).
+const backend = sqliteCollections({ file: DB_FILE })
+// @super-line/plugin-auth owns identity: it adds the users/credentials/sessions collections + the guest role
+// (see contract.ts), verifies the session token here, and resolves { role, ctx: { userId, roles, sessionId } }.
+const authKit = auth({ contract: chat, collections: backend, defaultRoles: ['user'] })
 
 const srv = createSuperLineServer(chat, {
   transports: [webSocketServerTransport({ server })],
-  collections: sqliteCollections({ file: DB_FILE }),
+  collections: backend,
   nodeName: 'collections-chat', // friendly name in the Control Center
-  plugins: [inspector()],
-  authenticate: (h) => {
-    const name = h.query.name?.trim()
-    if (!name) throw new Error('name is required')
-    return { role: 'user' as const, ctx: { userId: slug(name), name } satisfies Ctx }
-  },
-  // the principal drives every row policy below
-  identify: (conn) => ctxOf(conn).userId,
+  plugins: [authKit.plugin, inspector()],
+  authenticate: authKit.authenticate, // top-level → clean ctx inference; verifies the session token
+  identify: authKit.identify, // principal := userId, so every row policy below keys on the logged-in user
 
   /*
-   * Row-level security — the server-authoritative half TanStack DB can't do on its own. Deny-by-default:
-   * a collection with no `read` can't be read, no `write` can't be written. `read` returns an IR filter
-   * ANDed into every snapshot AND every live change; `write` guards each row op (return false → the whole
-   * optimistic batch rolls back on the client).
+   * Row-level security — the server-authoritative half TanStack DB can't do on its own. Deny-by-default.
+   * `read` returns an IR filter ANDed into every snapshot AND every live change; `write` guards each row op.
+   * (The auth plugin locks credentials/sessions and opens the users directory; these are the APP's own rows.)
    */
   policies: {
-    // The user directory is world-readable (the client needs it for the messages⋈users author join).
-    // No `write` ⇒ clients can't write it; the server upserts your row on connect (see register()).
-    users: { read: () => undefined },
-
-    // Every channel is publicly visible so you can discover and join it. Anyone may create one, but
-    // clients can only INSERT — no renames/deletes over the wire.
+    // Every channel is publicly visible so you can discover and join it. Anyone may INSERT — no renames/deletes.
     channels: { read: () => undefined, write: (_principal, op) => op === 'insert' },
-
     // You only ever see and change your OWN membership rows — self-service join/leave.
     memberships: {
       read: (principal) => eq('userId', principal),
       write: (principal, op, next, prev) =>
         op === 'delete' ? prev?.userId === principal : next?.userId === principal,
     },
-
-    // THE headline. Read: only messages in channels you've joined, resolved from your membership rows.
-    // Write: you must be the author AND a member of the channel (both checks — the second one queries the
-    // memberships collection). Either way an illegal optimistic insert rolls back on the client.
+    // THE headline. Read: only messages in channels you've joined. Write: author AND a member of the channel.
     messages: {
       read: async (principal) => isIn('channelId', await memberChannels(principal)),
       write: async (principal, op, next, prev) => {
@@ -69,18 +57,20 @@ const srv = createSuperLineServer(chat, {
   },
 
   onConnection: (_conn, ctx) => {
-    const c = ctx as Ctx
-    bumpPresence(c.name, +1)
-    // upsert + auto-join is async; onConnection isn't awaited, so run it fire-and-forget with a catch
-    void register(c).catch((err) => console.error('connect setup failed', err))
+    const { userId } = ctx as AuthContext
+    if (!userId) return // a guest connection (signing in) — not present, no auto-join
+    void onUserConnected(userId).catch((err) => console.error('connect setup failed', err))
   },
-  onDisconnect: (conn) => bumpPresence(ctxOf(conn).name, -1),
+  onDisconnect: (conn) => {
+    const { userId } = ctxOf(conn)
+    const name = userId && nameOf.get(userId)
+    if (name) bumpPresence(name, -1)
+  },
 })
 
 /*
- * Resolve a user's visible channels from their membership rows — server-side, policy-free. The messages
- * read policy calls this on every (re)subscribe. It's captured at subscribe time, so joining a channel
- * needs the client to re-subscribe (which it does automatically — see the README's "how RLS re-subscribes").
+ * Resolve a user's visible channels from their membership rows — server-side, policy-free. The messages read
+ * policy calls this on every (re)subscribe (captured at subscribe time; joining re-subscribes automatically).
  */
 function memberChannels(userId: string): Promise<string[]> {
   return srv
@@ -89,15 +79,16 @@ function memberChannels(userId: string): Promise<string[]> {
     .then((rows) => rows.map((r) => r.channelId))
 }
 
-// Upsert the connecting user into the directory, and drop first-timers into #general so nobody lands on
-// an empty workspace. Server co-writes bypass row policy but are still schema-validated.
-async function register(c: Ctx): Promise<void> {
-  const existing = await srv.collection('users').read(c.userId)
-  if (!existing) await srv.collection('users').insert({ id: c.userId, name: c.name })
-  else if (existing.name !== c.name) await srv.collection('users').update({ id: c.userId, name: c.name })
-
-  if ((await memberChannels(c.userId)).length === 0) {
-    await srv.collection('memberships').insert({ id: memId(c.userId, 'general'), userId: c.userId, channelId: 'general' })
+// On an authenticated connection: resolve the display name for presence, then drop first-timers into #general
+// so nobody lands on an empty workspace. The user row itself is created by the auth plugin at sign-up.
+const nameOf = new Map<string, string>() // userId → displayName, for the name-keyed presence list
+async function onUserConnected(userId: string): Promise<void> {
+  const user = await srv.collection('users').read(userId)
+  const name = user?.displayName ?? userId
+  nameOf.set(userId, name)
+  bumpPresence(name, +1)
+  if ((await memberChannels(userId)).length === 0) {
+    await srv.collection('memberships').insert({ id: memId(userId, 'general'), userId, channelId: 'general' })
   }
 }
 
@@ -145,7 +136,8 @@ srv.implement({
   user: {
     hello: async () => ({ users: [...online.keys()].sort() }),
     typing: async ({ channel }, ctx) => {
-      markTyping(channel, (ctx as Ctx).name)
+      const { userId } = ctx as AuthContext
+      markTyping(channel, (userId && nameOf.get(userId)) || 'someone')
       return { ok: true }
     },
   },

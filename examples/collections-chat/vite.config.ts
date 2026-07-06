@@ -18,6 +18,10 @@ export default defineConfig({
       '@super-line/react': src('../../packages/react/src/index.ts'),
       '@super-line/tanstack-db': src('../../packages/tanstack-db/src/index.ts'),
       '@super-line/transport-websocket': src('../../packages/transport-websocket/src/index.ts'),
+      // plugin-auth (browser halves only — /server pulls in node crypto). Subpaths before the bare alias.
+      '@super-line/plugin-auth/client': src('../../packages/plugin-auth/src/client.ts'),
+      '@super-line/plugin-auth/react': src('../../packages/plugin-auth/src/react.tsx'),
+      '@super-line/plugin-auth': src('../../packages/plugin-auth/src/index.ts'),
     },
   },
 })

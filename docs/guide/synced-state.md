@@ -139,28 +139,15 @@ receive and recovers by re-snapshotting on reconnect (which the handle does for 
 ## Make it durable
 
 `syncStoreServer()` keeps the canonical CRDT documents in memory — restart the server and they're gone.
-For state that **survives a restart**, swap the server half for `@super-line/store-sync-libsql` (a `relay`
-store), or — to survive a restart *and* cluster across nodes with no message broker — for the `self`-clustering
-[`@super-line/store-sync-pglite`](./store-sync-pglite). The libsql route
-snapshots every Resource to a [libsql](https://github.com/tursodatabase/libsql) database — a local file,
-[Turso](https://turso.tech) Cloud, or a self-hosted `sqld`:
+For state that **survives a restart**, use a `self`-clustering store — the broker-free
+[`@super-line/store-sync-pglite`](./store-sync-pglite) (central Postgres + Electric).
 
-```bash
-npm install @super-line/store-sync-libsql
-```
-
-```ts
-// server — durable drop-in for syncStoreServer()
-import { libsqlSyncStore } from '@super-line/store-sync-libsql'
-
-stores: {
-  docs: await libsqlSyncStore({ url: 'file:docs.db' }), // local file
-  // or Turso: libsqlSyncStore({
-  //   url: 'libsql://your-db.turso.io',
-  //   authToken: process.env.TURSO_TOKEN,
-  // })
-}
-```
+::: tip Durable CRDT has moved to collections
+The CRDT doc-store family is being folded into [collections](./collections) (ADR-0007): a durable, mergeable
+document is now a **CRDT document collection** — declared on the contract, validated on every write, and
+served by `@super-line/collections-crdt-libsql` (libsql/Turso) via `crdtCollections:` rather than `stores:`.
+See [Collections → CRDT document collections](./collections#crdt-document-collections).
+:::
 
 The client stays `syncStoreClient()` — durability is a server-half concern, so the wire and the merge
 model are unchanged. `libsqlSyncStore` is an **async factory** (`await` it): on boot it rehydrates every

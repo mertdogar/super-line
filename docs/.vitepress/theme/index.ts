@@ -26,7 +26,6 @@ const GUIDE_ALIASES: Record<string, string> = {
   'store-memory': 'store',
   'store-sqlite': 'store',
   'store-sync': 'synced-state',
-  'store-sync-libsql': 'synced-state',
   'store-pglite': 'choosing-a-store',
   'store-sync-pglite': 'store-sync-pglite',
 }

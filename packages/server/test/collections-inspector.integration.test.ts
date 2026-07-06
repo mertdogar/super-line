@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { defineContract, eq } from '@super-line/core'
 import type { CollectionInfo } from '@super-line/core'
 import { memoryCollections } from '@super-line/collections-memory'
+import { crdtMemoryCollections } from '@super-line/collections-crdt-memory'
 import { inspector as inspectorPlugin } from '@super-line/plugin-inspector'
 import { connectInspector, createHarness } from './harness.js'
 
@@ -49,6 +50,30 @@ describe('collection inspection RPCs', () => {
     expect(all.map((r) => r.id).sort()).toEqual(['m1', 'm2'])
 
     await expect(inspector.request('queryCollection', { collection: 'ghost' })).rejects.toThrow()
+
+    inspector.close()
+  })
+
+  it('surfaces CRDT document collections: listed + browsable as { id, ...snapshot } rows', async () => {
+    const canvas = defineContract({
+      collections: { scene: { schema: z.object({ title: z.string().optional() }), crdt: { mode: 'document' } } },
+      roles: { user: { clientToServer: {} } },
+    })
+    const { srv, url } = await h.server(canvas, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      plugins: [inspectorPlugin()],
+      crdtCollections: crdtMemoryCollections(),
+      policies: { scene: { read: () => true, write: () => true } },
+    })
+    await srv.collection('scene').create('board', { title: 'hello' })
+
+    const inspector = await connectInspector(url)
+    const cols = (await inspector.request('listCollections')) as CollectionInfo[]
+    expect(cols.map((c) => c.name)).toContain('scene') // CRDT collection now visible in the CC
+    expect(cols.find((c) => c.name === 'scene')?.key).toBe('id')
+
+    const docs = (await inspector.request('queryCollection', { collection: 'scene' })) as Array<{ id: string; title?: string }>
+    expect(docs).toEqual([{ id: 'board', title: 'hello' }]) // synthesized doc-row
 
     inspector.close()
   })

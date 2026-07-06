@@ -1,12 +1,12 @@
 {
-  "name": "@super-line/store-sync-libsql",
-  "version": "0.2.0",
+  "name": "@super-line/collections-crdt-memory",
+  "version": "0.1.0",
   "type": "module",
-  "description": "Durable CRDT Store for super-line — store-sync's Yjs merge engine backed by libsql (Turso / sqld).",
+  "description": "In-memory CRDT (Yjs, via super-store) document collection backend for super-line — merging collaborative docs under the collection API (ADR-0007).",
   "license": "MIT",
   "author": "Mert",
-  "keywords": ["super-line", "store", "crdt", "yjs", "libsql", "turso", "persistence", "durable", "sync"],
-  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/store-sync-libsql" },
+  "keywords": ["super-line", "collections", "crdt", "yjs", "super-store", "sync", "collaboration"],
+  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/collections-crdt-memory" },
   "homepage": "https://mertdogar.github.io/super-line/",
   "bugs": "https://github.com/mertdogar/super-line/issues",
   "main": "./dist/index.cjs",
@@ -28,7 +28,6 @@
   },
   "dependencies": {
     "@super-line/core": "workspace:^",
-    "@super-line/store-sync": "workspace:^",
-    "@libsql/client": "^0.15.0"
+    "@super-store/store": "^0.3.0"
   }
 }

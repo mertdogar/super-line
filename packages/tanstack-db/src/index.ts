@@ -1,5 +1,6 @@
+import { isCrdtCollection } from '@super-line/core'
 import type { Contract, RoleOf, CollectionName, RowOf, CollectionQuery } from '@super-line/core'
-import type { SuperLineClient } from '@super-line/client'
+import type { SuperLineClient, CollectionHandle } from '@super-line/client'
 import type { CollectionConfig } from '@tanstack/db'
 
 /** Options for {@link superLineCollectionOptions}. */
@@ -35,9 +36,11 @@ export function superLineCollectionOptions<C extends Contract, R extends RoleOf<
   opts: SuperLineCollectionOptions = {},
 ): CollectionConfig<RowOf<C, N> & object, string> {
   type Row = RowOf<C, N> & object
-  const key = contract.collections?.[name]?.key
-  if (!key) throw new Error(`superLineCollectionOptions: collection '${String(name)}' is not declared on the contract`)
-  const handle = client.collection(name)
+  const def = contract.collections?.[name]
+  if (!def) throw new Error(`superLineCollectionOptions: collection '${String(name)}' is not declared on the contract`)
+  if (isCrdtCollection(def)) throw new Error(`superLineCollectionOptions: collection '${String(name)}' is a CRDT document collection — TanStack DB serves LWW row collections only`)
+  const key = def.key
+  const handle = client.collection(name) as CollectionHandle<Row> // guarded LWW above; TanStack is the row surface
 
   return {
     id: `superline:${String(name)}`,

@@ -4,6 +4,7 @@ import {
   SuperLineError,
   matchesFilter,
   applyQuery,
+  isCrdtCollection,
   type Schema,
   type Serializer,
   type Contract,
@@ -28,9 +29,12 @@ import {
   type TapEvent,
   type CollectionQuery,
   type CChangeFrame,
+  type CrdtCollectionClient,
   type RowOp,
   type CollectionName,
+  type CrdtCollectionName,
   type RowOf,
+  type DocOf,
 } from '@super-line/core'
 import { backoffDelay } from './backoff.js'
 
@@ -89,8 +93,14 @@ export type SuperLineClient<C extends Contract, R extends RoleOf<C>> = ClientMet
   implement(handlers: ServerHandlers<C, R>): void
   /** Client-side handle for a configured Store (`client.store('scene').open(id)`). Throws if the name isn't configured. */
   store(name: string): ClientStoreHandle
-  /** Client-side handle for a contract collection (`client.collection('messages').subscribe(...)`), typed by the contract. */
-  collection<N extends CollectionName<C>>(name: N): CollectionHandle<RowOf<C, N>>
+  /**
+   * Client-side handle for a contract collection, typed by the contract: an LWW row collection gives a
+   * `CollectionHandle` (`subscribe`/`insert`/`batch`), a CRDT document collection gives a
+   * `CrdtCollectionHandle` (`open(id)` → reactive doc).
+   */
+  collection<N extends CollectionName<C>>(
+    name: N,
+  ): N extends CrdtCollectionName<C> ? CrdtCollectionHandle<DocOf<C, N>> : CollectionHandle<RowOf<C, N>>
   /** Close the connection and stop reconnecting. */
   close(): void
   /** Whether the socket is currently open. */
@@ -172,6 +182,36 @@ export interface CollectionHandle<Row = unknown> {
   batch(ops: Array<{ type: 'insert' | 'update'; row: Row } | { type: 'delete'; id: string }>): Promise<void>
 }
 
+/**
+ * A reactive handle over one opened CRDT document (ADR-0007) — the typed mirror of {@link ResourceHandle}.
+ * `set`/`update` mutate the local replica and write the resulting delta through to the server, which
+ * validate-before-commits it; on rejection the server resyncs this replica.
+ */
+export interface DocHandle<Doc = unknown> {
+  /** The current snapshot (`undefined` until the catch-up snapshot arrives). */
+  getSnapshot(): Doc | undefined
+  /** Subscribe to changes (local writes + remote merges). Returns an unsubscribe fn. */
+  subscribe(cb: () => void): () => void
+  /** Replace the document (mutates the local CRDT doc); the delta is sent to the server. */
+  set(data: Doc): void
+  /** Merge a partial update; the delta is sent to the server. */
+  update(partial: Partial<Doc>): void
+  /** Surgically remove the value at `path` (merges, unlike a full-doc `set`); sent to the server. */
+  delete(path: (string | number)[]): void
+  /** Resolves once the catch-up snapshot has been applied; rejects if the open is denied or the doc is absent. */
+  readonly ready: Promise<void>
+  /** True once the server fans out a delete for this document. */
+  readonly deleted: boolean
+  /** Stop receiving changes and tell the server to unsubscribe. */
+  close(): void
+}
+
+/** Client-side handle for one CRDT document collection, reached via `client.collection(name)` (opened by id). */
+export interface CrdtCollectionHandle<Doc = unknown> {
+  /** Open a reactive handle for a document (catch-up snapshot + live merges + write-through). */
+  open(id: string): DocHandle<Doc>
+}
+
 /** What went wrong, passed to the client `onError` sink alongside the caught error. */
 export interface ClientErrorInfo {
   /** Which lifecycle hook threw. */
@@ -229,6 +269,12 @@ export interface SuperLineClientOptions<C extends Contract, R extends RoleOf<C>>
    * (`{ scene: crdtStoreClient(), config: memoryStoreClient() }`). Surfaced as `client.store(name)`.
    */
   stores?: Record<string, ClientStore>
+  /**
+   * The client-side CRDT engine for CRDT document collections (ADR-0007), e.g.
+   * `crdtCollections: crdtCollectionsClient()`. Universal across backend tiers — the client only merges
+   * opaque deltas. Required to `open` any CRDT collection.
+   */
+  crdtCollections?: CrdtCollectionClient
   /** Called when a store write is rejected by the server (e.g. FORBIDDEN). Default: logs to console. */
   onStoreError?: (error: unknown, info: { store: string; id: string }) => void
   /** Client plugin halves (lifecycle, stores, server→client handlers). See {@link SuperLineClientPlugin}. */
@@ -320,6 +366,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   const subAckById = new Map<number, string>() // outstanding sub frame id -> topic
   const serverHandlers = new Map<string, (input: unknown) => unknown>() // answer server→client requests
   const storeMap = { ...opts.stores } as Record<string, ClientStore> // copy: plugin stores merge in below
+  const crdtClient = opts.crdtCollections // client-side CRDT engine for CRDT document collections (ADR-0007)
 
   const clientPlugins = opts.plugins ?? []
   const pluginNames = new Set<string>()
@@ -375,6 +422,16 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     deleted: boolean
   }
   const openResources = new Map<string, OpenEntry>()
+  // opened CRDT documents (ADR-0007), keyed `n\0id`: routes inbound `cdchg` to local replicas, re-opens on reconnect
+  interface OpenDocEntry {
+    n: string
+    id: string
+    replicas: Set<ResourceReplica>
+    ready: Deferred
+    settled: boolean
+    deleted: boolean
+  }
+  const openDocs = new Map<string, OpenDocEntry>()
   // live collection subscriptions: `cchg` frames route here by collection name; all re-subscribe (+ re-diff) on reconnect
   interface LiveSub {
     n: string
@@ -429,6 +486,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     }
     for (const topic of topicListeners.keys()) sendSub(topic)
     for (const entry of openResources.values()) sendOpen(entry) // re-snapshot opened Resources (at-most-once recovery)
+    for (const entry of openDocs.values()) sendDocOpen(entry) // re-open CRDT docs → fresh full Yjs state (client re-merges)
     for (const sub of collectionSubs.values()) sendCollectionSub(sub) // re-snapshot collection subscriptions (client re-diffs)
     if (connectedOnce) fireLifecycle(reconnectHooks, 'reconnect', 0)
     else {
@@ -535,6 +593,18 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     } else if (frame.t === 'cchg') {
       const subs = collectionSubsByName.get(frame.n)
       if (subs) for (const sub of subs) applyCollectionChange(sub, frame) // client re-filters per subscription
+    } else if (frame.t === 'cdchg') {
+      const entry = openDocs.get(docKey(frame.n, frame.id))
+      if (entry) {
+        const change = { id: frame.id, update: frame.u, origin: frame.o }
+        for (const replica of entry.replicas) replica.applyRemote(change) // own-origin merges are no-ops
+      }
+    } else if (frame.t === 'cddel') {
+      const entry = openDocs.get(docKey(frame.n, frame.id))
+      if (entry) {
+        entry.deleted = true
+        for (const replica of entry.replicas) replica.applyDelete()
+      }
     }
   }
 
@@ -773,6 +843,97 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     }
   }
 
+  // ---- CRDT document collections (ADR-0007): open-by-id merging docs ----
+  const docKey = (n: string, id: string): string => n + ' ' + id
+
+  function sendDocWrite(n: string, change: StoreChange): void {
+    void trackRequest('collection:doc-write', (i) => ({ t: 'cdwr', i, n, id: change.id, u: change.update, o: change.origin })).catch(
+      (err) => {
+        if (opts.onStoreError) opts.onStoreError(err, { store: n, id: change.id })
+        else console.error(`[super-line] CRDT collection write rejected for ${n}/${change.id}`, err)
+      },
+    )
+  }
+
+  function sendDocOpen(entry: OpenDocEntry): void {
+    if (!rawConn?.writable) return // onOpen re-sends for every entry on (re)connect
+    void trackRequest('collection:doc-open', (i) => ({ t: 'cdopen', i, n: entry.n, id: entry.id }))
+      .then((snapshot) => {
+        for (const replica of entry.replicas) replica.seed(snapshot)
+        if (!entry.settled) {
+          entry.settled = true
+          entry.ready.resolve()
+        }
+      })
+      .catch((err) => {
+        if (err instanceof SuperLineError && err.code === 'DISCONNECTED') return // reconnect retries
+        if (!entry.settled) {
+          entry.settled = true
+          entry.ready.reject(err)
+        }
+      })
+  }
+
+  function openDoc(n: string, id: string): DocHandle {
+    if (!crdtClient)
+      throw new SuperLineError('NOT_FOUND', `No CRDT collection engine configured — pass crdtCollections: crdtCollectionsClient()`)
+    const def = c.collections?.[n]
+    const docOpts = def && isCrdtCollection(def) ? def.crdt : undefined
+    const replica = crdtClient.open(n, id, docOpts)
+    const key = docKey(n, id)
+    let entry = openDocs.get(key)
+    if (!entry) {
+      entry = { n, id, replicas: new Set(), ready: deferred(), settled: false, deleted: false }
+      openDocs.set(key, entry)
+    }
+    entry.replicas.add(replica)
+    sendDocOpen(entry)
+    return {
+      getSnapshot: () => replica.getSnapshot(),
+      subscribe: (cb) => replica.subscribe(cb),
+      set: (data) => {
+        const change = replica.set(data)
+        if (change) sendDocWrite(n, change)
+      },
+      update: (partial) => {
+        const change = replica.update(partial)
+        if (change) sendDocWrite(n, change)
+      },
+      delete: (path) => {
+        const change = replica.delete(path)
+        if (change) sendDocWrite(n, change)
+      },
+      ready: entry.ready.promise,
+      get deleted() {
+        return entry.deleted
+      },
+      close: () => {
+        const e = openDocs.get(key)
+        if (!e) return
+        e.replicas.delete(replica)
+        if (e.replicas.size === 0) {
+          openDocs.delete(key)
+          if (rawConn?.writable) rawConn.send(serializer.encode({ t: 'cdclose', n, id }))
+        }
+      },
+    }
+  }
+
+  function crdtCollectionHandle(name: string): CrdtCollectionHandle {
+    return { open: (id) => openDoc(name, id) }
+  }
+
+  // Route client.collection(n) by the contract's declared mode: CRDT doc collections → open-by-id handle,
+  // LWW row collections → the query/batch handle.
+  function collectionDispatch<N extends CollectionName<C>>(
+    name: N,
+  ): N extends CrdtCollectionName<C> ? CrdtCollectionHandle<DocOf<C, N>> : CollectionHandle<RowOf<C, N>> {
+    const def = c.collections?.[name]
+    if (!def) throw new SuperLineError('NOT_FOUND', `Collection not declared: ${name}`)
+    const handle = isCrdtCollection(def) ? crdtCollectionHandle(name) : collectionHandle(name)
+    return handle as N extends CrdtCollectionName<C> ? CrdtCollectionHandle<DocOf<C, N>> : CollectionHandle<RowOf<C, N>>
+  }
+
   // ---- Collections --------------------------------------------------------
   const recomputeView = (sub: LiveSub): void => {
     sub.view = applyQuery([...sub.map.values()], sub.query) // filter (redundant, already matched) + sort + window
@@ -845,8 +1006,10 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     trackRequest('collection:batch', (i) => ({ t: 'cbat', i, ops })).then(() => undefined)
 
   function collectionHandle(name: string): CollectionHandle {
-    const key = c.collections?.[name]?.key
-    if (!key) throw new SuperLineError('NOT_FOUND', `Collection not declared: ${name}`)
+    const def = c.collections?.[name]
+    if (!def) throw new SuperLineError('NOT_FOUND', `Collection not declared: ${name}`)
+    if (isCrdtCollection(def)) throw new SuperLineError('NOT_FOUND', `Collection ${name} is a CRDT document collection — use collection(n).open(id)`) // routed away by collectionDispatch; narrows def to LWW
+    const key = def.key
     const idOf = (row: unknown): string => {
       const v = (row as Record<string, unknown>)[key]
       if (typeof v !== 'string') throw new SuperLineError('VALIDATION', `Collection ${name} row is missing string key '${key}'`)
@@ -915,7 +1078,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     },
     subscribe,
     store: storeHandle,
-    collection: collectionHandle,
+    collection: collectionDispatch,
     implement(handlers: Record<string, (input: unknown) => unknown>): void {
       for (const [name, handler] of Object.entries(handlers)) {
         if (handler) registerServerHandler(name, handler) // throws on a collision (plugin or a prior implement)

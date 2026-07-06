@@ -6,7 +6,7 @@ export type { Serializer } from './serializer.js'
 
 export type { Adapter, PresenceStore, ConnDescriptor, NodeStat } from './adapter.js'
 
-export { defineContract, defineContractPlugin, defineSurface, mergeSurfaces, validate, validateSync } from './contract.js'
+export { defineContract, defineContractPlugin, defineSurface, mergeSurfaces, validate, validateSync, isCrdtCollection } from './contract.js'
 export type {
   Contract,
   ContractFragment,
@@ -15,12 +15,18 @@ export type {
   Directional,
   RoleBlock,
   CollectionDef,
+  LwwCollectionDef,
+  CrdtCollectionDef,
+  DocOptions,
   CollectionsOf,
   CollectionName,
+  CrdtCollectionName,
+  LwwCollectionName,
   CollectionRow,
   CollectionRowInput,
   RowOf,
   RowInputOf,
+  DocOf,
   DataOf,
   AnyData,
   RequestDef,
@@ -101,6 +107,11 @@ export type {
   RowOp,
   CBatchFrame,
   CChangeFrame,
+  CDOpenFrame,
+  CDWriteFrame,
+  CDCloseFrame,
+  CDChangeFrame,
+  CDDeleteFrame,
   PingFrame,
   PongFrame,
 } from './wire.js'
@@ -121,6 +132,7 @@ export type {
 } from './store.js'
 
 export type { CollectionStore, ResolvedRowOp, RowChange } from './collections.js'
+export type { CrdtCollectionStore, DocChange, DocSummary, DocListOpts, CrdtServerReplica, CrdtCollectionClient } from './crdt-collections.js'
 
 export {
   and,

@@ -57,11 +57,21 @@ export interface RoleBlock extends Directional {
 }
 
 /**
- * A typed row collection (the relational store family; see ADR-0006). Rows are validated against
- * `schema` on every write — restoring super-line's end-to-end-types + validate-every-message promise
- * for row data, the promise ADR-0003 gave up for opaque CRDT deltas.
+ * Per-document super-store config for a CRDT collection (ADR-0007). `mode: 'document'` makes the doc a
+ * recursive CRDT (nested-field merge); `opaque` keeps named subtrees atomic (discriminated-union blobs).
+ * Lives on the contract so both halves derive it from one source — the drift-free replacement for
+ * store-sync's "supply the SAME resolver to both halves" footgun.
  */
-export interface CollectionDef {
+export interface DocOptions {
+  mode?: 'shallow' | 'document'
+  opaque?: string[]
+}
+
+/**
+ * A typed row collection (the relational store family; see ADR-0006). Rows are validated against
+ * `schema` on every write — end-to-end types + validate-every-message for row data.
+ */
+export interface LwwCollectionDef {
   /** Row schema — any Standard Schema (Zod/Valibot/ArkType). The server validates every row write against it. */
   schema: Schema
   /**
@@ -76,6 +86,27 @@ export interface CollectionDef {
    * opt-in existence check on write. No cascades in core (unsound under masterless relay clustering).
    */
   references?: Record<string, string>
+}
+
+/**
+ * A CRDT document collection (ADR-0007). Opened by id (whole-doc merge, not queryable); the presence of the
+ * `crdt` key discriminates it from an {@link LwwCollectionDef}. No `key` — the doc id is external (passed to
+ * `open(id)`), not extracted from the doc body. `schema` types the doc end-to-end AND is the ingress
+ * validation gate (validate-before-commit against the post-merge plaintext snapshot).
+ */
+export interface CrdtCollectionDef {
+  /** Doc schema — any Standard Schema. Types `open(id)` and gates every write at ingress. */
+  schema: Schema
+  /** Marks the collection CRDT; carries the super-store {@link DocOptions}. */
+  crdt: DocOptions
+}
+
+/** A collection is either a typed LWW row table (ADR-0006) or a CRDT document store (ADR-0007). */
+export type CollectionDef = LwwCollectionDef | CrdtCollectionDef
+
+/** Runtime + type guard: a CRDT document collection (has a `crdt` key) vs an LWW row collection. */
+export function isCrdtCollection(def: CollectionDef): def is CrdtCollectionDef {
+  return 'crdt' in def
 }
 
 /**
@@ -353,10 +384,18 @@ export type CollectionsOf<C extends Contract> = C extends {
 }
   ? M
   : {}
-/** Union of a contract's collection names. */
+/** Union of a contract's collection names (both families). */
 export type CollectionName<C extends Contract> = keyof CollectionsOf<C> & string
-/** The validated row type of a collection def (what handlers and clients read). */
+/** Names of a contract's CRDT document collections (those declared with a `crdt` key). */
+export type CrdtCollectionName<C extends Contract> = {
+  [N in CollectionName<C>]: CollectionsOf<C>[N] extends CrdtCollectionDef ? N : never
+}[CollectionName<C>]
+/** Names of a contract's LWW row collections (everything that isn't CRDT). */
+export type LwwCollectionName<C extends Contract> = Exclude<CollectionName<C>, CrdtCollectionName<C>>
+/** The validated row/doc type of a collection def (what handlers and clients read). */
 export type CollectionRow<D> = D extends CollectionDef ? InferOut<D['schema']> : never
+/** The validated document type of CRDT collection `N` in contract `C` (alias of {@link RowOf} — the doc is the value). */
+export type DocOf<C extends Contract, N extends CollectionName<C>> = CollectionRow<CollectionsOf<C>[N]>
 /** The input row type of a collection def (what a client passes to insert, pre-validation). */
 export type CollectionRowInput<D> = D extends CollectionDef ? InferIn<D['schema']> : never
 /** The validated row type of collection `N` in contract `C`. */

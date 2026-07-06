@@ -1,4 +1,4 @@
-import type { Expr, CollectionQuery } from '@super-line/core'
+import type { Expr, CollectionQuery, CrdtServerReplica, DocListOpts, DocSummary } from '@super-line/core'
 
 type Awaitable<T> = T | Promise<T>
 
@@ -41,4 +41,34 @@ export interface ServerCollectionHandle<Row = unknown> {
   read(id: string): Promise<Row | undefined>
   /** Materialize a snapshot (filter/sort/limit); omit the query for the whole collection. Server-side, policy-free. */
   snapshot(query?: CollectionQuery): Promise<Row[]>
+}
+
+/**
+ * Access policy for a CRDT document collection (ADR-0007, Q7). Guard-shaped — not the RLS filter shape of
+ * {@link CollectionPolicy}, because CRDT collections are opened by id (no subset to filter). **Deny-by-default**.
+ * Server co-writes via `srv.collection(n)` bypass both.
+ */
+export interface CrdtCollectionPolicy<Ctx = unknown, Doc = unknown> {
+  /** May this principal open `id`? Gets the post-merge plaintext `snapshot` (content-based auth like RLS reading a row). */
+  read?: (principal: string, id: string, snapshot: Doc | undefined, ctx: Ctx) => Awaitable<boolean>
+  /** May this principal write to `id`? (Creation is server-authoritative — Q10 — so there is no `create` op here.) */
+  write?: (principal: string, id: string, ctx: Ctx) => Awaitable<boolean>
+}
+
+/**
+ * Server-authoritative handle for a CRDT document collection (`srv.collection('scenes')`). Creation is
+ * server-only (Q10): `create` validates the initial doc and materializes it; `open` returns a reactive
+ * co-writer whose mutations fan out like a relayed client delta. Policy-free (server is authoritative).
+ */
+export interface ServerCrdtCollectionHandle<Doc = unknown> {
+  /** Create a document with pre-validated initial data. Throws `CONFLICT` if the id exists. */
+  create(id: string, data: Doc): Promise<void>
+  /** Open a reactive co-writer over an existing document. `origin` (default `"server"`) attributes its writes. */
+  open(id: string, opts?: { origin?: string }): CrdtServerReplica
+  /** Read the current plaintext snapshot of a document, or undefined if absent. */
+  read(id: string): Promise<Doc | undefined>
+  /** Delete a document (idempotent), fanning the deletion cluster-wide. */
+  delete(id: string): Promise<void>
+  /** Enumerate document ids + summaries (no content query). */
+  list(opts?: DocListOpts): Promise<DocSummary[]>
 }

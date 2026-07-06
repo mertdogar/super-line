@@ -1,6 +1,6 @@
 import { generateText, stepCountIs, tool } from 'ai'
 import { z } from 'zod'
-import { SuperLineError, type ServerReplica } from '@super-line/core'
+import { SuperLineError, type CrdtServerReplica } from '@super-line/core'
 import { COLORS, newShapeId, readShapes, topOrder, type Scene } from './scene.js'
 
 // Cheap, env-overridable. Plain "provider/model" string → AI SDK routes it through the AI Gateway.
@@ -15,7 +15,7 @@ export interface AgentAction {
 // to a Store primitive — update() (merge) or delete(path) (the only key-removing op) — so the agent's
 // edits land as Store deltas that fan out to every tab and merge with whatever a human is doing live.
 export async function runAgent(
-  replica: ServerReplica,
+  replica: CrdtServerReplica,
   prompt: string,
 ): Promise<{ summary: string; actions: AgentAction[] }> {
   if (!process.env.AI_GATEWAY_API_KEY) {

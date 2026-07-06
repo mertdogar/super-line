@@ -33,7 +33,6 @@ store is mostly a one-line swap of the server half.
 | [`@super-line/store-memory`](./store) | LWW | in-memory | `relay` | `memoryStoreClient` |
 | [`@super-line/store-sync`](./synced-state) | CRDT | in-memory | `relay` | `syncStoreClient` |
 | [`@super-line/store-sqlite`](./store) | LWW | SQLite file (better-sqlite3, WAL) | `relay` | `memoryStoreClient` |
-| [`@super-line/store-sync-libsql`](./synced-state) | CRDT | libsql / Turso / sqld | `relay` | `syncStoreClient` |
 | [`@super-line/store-pglite`](./store) | LWW | Postgres (central) + Electric→PGlite | `self` | `memoryStoreClient` |
 | [`@super-line/store-sync-pglite`](./store-sync-pglite) | CRDT | Postgres (central) + Electric→PGlite | `self` | `syncStoreClient` |
 
@@ -64,8 +63,9 @@ and `opaque` paths. See [Synced state](./synced-state).
 - **Multiplayer** — concurrent edits to one Resource must merge, not clobber → a CRDT store; start with
   **`store-sync`**.
 - **State must survive a restart, single backend, LWW** → **`store-sqlite`**.
-- **State must survive a restart, multiplayer** → **`store-sync-libsql`** (a managed/edge SQLite via
-  Turso; snapshot-per-resource, history-preserving rehydrate).
+- **State must survive a restart, multiplayer** → a **durable CRDT document collection**,
+  [`@super-line/collections-crdt-libsql`](./collections#crdt-document-collections) (the CRDT store family
+  is being folded into collections — ADR-0007).
 - **A multi-node cluster with no message broker to run** → a **`self`** store: **`store-pglite`** (LWW)
   or **`store-sync-pglite`** (CRDT). Central Postgres + Electric is the fan-out; you add **no**
   [adapter](./scaling-adapters).
@@ -76,7 +76,7 @@ and `opaque` paths. See [Synced state](./synced-state).
 
 Every store declares a clustering mode; super-line picks the right fan-out automatically:
 
-- **`relay`** (`store-memory`, `store-sync`, `store-sqlite`, `store-sync-libsql`) — node-local backend.
+- **`relay`** (`store-memory`, `store-sync`, `store-sqlite`) — node-local backend.
   super-line relays every change across nodes over the [adapter](./scaling-adapters) and converges each
   node's replica. One process needs no adapter at all; add a backbone only when you scale out.
 - **`self`** (`store-pglite`, `store-sync-pglite`) — the store owns a central Postgres and a per-node

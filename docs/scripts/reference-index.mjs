@@ -38,7 +38,6 @@ ${guide('transport-loopback', 'transport-loopback', 'in-memory wire for tests')}
 ${guide('store-memory', 'store', 'plain LWW in-memory store, the default')}
 ${guide('store-sync', 'synced-state', 'CRDT (Yjs) synced store engine')}
 ${guide('store-sqlite', 'store', 'durable LWW on better-sqlite3')}
-${guide('store-sync-libsql', 'synced-state', 'durable CRDT on libsql / Turso')}
 ${guide('store-pglite', 'choosing-a-store', 'LWW over Postgres + Electric — no adapter needed')}
 ${guide('store-sync-pglite', 'store-sync-pglite', 'CRDT over Postgres + Electric — no adapter needed')}
 

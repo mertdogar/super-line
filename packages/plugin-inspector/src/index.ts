@@ -5,6 +5,7 @@ import {
   InspectorContract,
   classifyContract,
   eventPayload,
+  isCrdtCollection,
   type Contract,
   type Schema,
   type InspectorEvent,
@@ -18,7 +19,7 @@ import {
   type ListOpts,
   type SearchOpts,
 } from '@super-line/core'
-import type { SuperLinePlugin, PluginChannel } from '@super-line/server'
+import type { SuperLinePlugin, PluginChannel, ServerCrdtCollectionHandle } from '@super-line/server'
 
 /** Options for {@link inspector}. */
 export interface InspectorOptions {
@@ -224,8 +225,18 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
         listCollections: () => buildCollectionInfos(ctx.contract, ctx.collectionInfos()),
         queryCollection: async (input) => {
           const { collection, ...query } = input as { collection: string } & CollectionQuery
-          if (!ctx.collectionInfos().some((c) => c.name === collection))
-            throw new SuperLineError('NOT_FOUND', `Unknown collection: ${collection}`)
+          const def = ctx.contract.collections?.[collection]
+          if (!def) throw new SuperLineError('NOT_FOUND', `Unknown collection: ${collection}`)
+          if (isCrdtCollection(def)) {
+            // CRDT document collection: open-by-id, not row-queryable — synthesize `{ id, ...snapshot }` rows
+            // from the doc enumeration so the Collections view can browse them like any table.
+            const handle = ctx.collection(collection) as unknown as ServerCrdtCollectionHandle
+            const docs = await handle.list({ limit: query.limit, offset: query.offset })
+            const rows = await Promise.all(
+              docs.map(async (d) => ({ id: d.id, ...((await handle.read(d.id)) as Record<string, unknown> | undefined) })),
+            )
+            return rows.map((r) => safeSnapshot(r))
+          }
           const rows = await ctx.collection(collection).snapshot(query) // ACL/policy bypassed — the inspector is a trusted observer
           return rows.map((r) => safeSnapshot(r))
         },

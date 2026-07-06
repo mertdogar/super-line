@@ -1,10 +1,12 @@
 import {
   jsonSerializer,
   validate,
+  validateSync,
   SuperLineError,
   andFilters,
   orFilters,
   matchesFilter,
+  isCrdtCollection,
   type Adapter,
   type Serializer,
   type Schema,
@@ -12,9 +14,18 @@ import {
   type Directional,
   type CtsOf,
   type CollectionDef,
+  type CrdtCollectionDef,
   type CollectionName,
+  type CrdtCollectionName,
   type RowOf,
+  type DocOf,
   type CollectionStore,
+  type CrdtCollectionStore,
+  type CDOpenFrame,
+  type CDWriteFrame,
+  type CDCloseFrame,
+  type CDChangeFrame,
+  type CDDeleteFrame,
   type ResolvedRowOp,
   type RowChange,
   type Expr,
@@ -70,11 +81,11 @@ import {
 } from '@super-line/core'
 import { Conn, resolvePrincipal } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
-import type { CollectionPolicy, ServerCollectionHandle, WriteOp } from './collections.js'
+import type { CollectionPolicy, ServerCollectionHandle, WriteOp, CrdtCollectionPolicy, ServerCrdtCollectionHandle } from './collections.js'
 
 export { Conn, resolvePrincipal } from './conn.js'
 export { MemoryBus, createInMemoryAdapter } from './memory-adapter.js'
-export type { CollectionPolicy, ServerCollectionHandle, WriteOp } from './collections.js'
+export type { CollectionPolicy, ServerCollectionHandle, WriteOp, CrdtCollectionPolicy, ServerCrdtCollectionHandle } from './collections.js'
 
 // Web Crypto UUID — available in every browser and Node 19+. Keeps the server
 // runnable in-browser (e.g. a loopback-transport demo) with no node:crypto import.
@@ -100,6 +111,7 @@ const USER = 'u:' // personal channel per user key (cross-node fan-out)
 const REPLY = 'reply:' // per-node channel carrying server→client request replies back to the origin
 const PLUGIN = 'x:' // reserved prefix for plugin-private channels: `x:<plugin>:<name>`
 const STORE = 's:' // per-Resource fan-out channel: `s:<name>:<id>`
+const CDOC = 'd:' // per-CRDT-document fan-out channel: `d:<collection>:<id>`
 const SERVER_ORIGIN = 'server' // origin stamped on server co-writes (distinct from any client writer id)
 
 // Envelope carried on personal (c:/u:) channels — distinct from the raw frame fan-out of rooms/topics.
@@ -452,7 +464,7 @@ export interface PluginContext {
   store(name: string): ServerStoreHandle
   /** Configured stores (host + plugin) and their models. */
   storeInfos(): StoreInfo[]
-  /** Server-authoritative handle for a contract collection (loosely typed here); throws if none is configured. */
+  /** Server-authoritative handle for a contract collection (loosely typed here as the LWW row handle — the surface plugins/inspector use); throws if none is configured. */
   collection(name: string): ServerCollectionHandle
   /** Declared collections (name + key + advisory references) for the schema graph. */
   collectionInfos(): { name: string; key: string; references: Record<string, string> }[]
@@ -513,10 +525,21 @@ export interface SuperLineServerOptions<
    */
   collections?: CollectionStore
   /**
-   * Row-security policies per collection (see {@link CollectionPolicy}). Deny-by-default: a collection with no
-   * policy is server-only (clients can neither read nor write it). Server co-writes via `srv.collection(n)` bypass them.
+   * The {@link CrdtCollectionStore} backend serving this contract's CRDT document collections (ADR-0007),
+   * e.g. `crdtCollections: crdtMemoryCollections()`. A backend per family: CRDT docs never join a
+   * cross-collection atomic batch, so they get their own backend, separate from `collections`.
    */
-  policies?: { [N in CollectionName<C>]?: CollectionPolicy<CtxUnion<A>, RowOf<C, N>> }
+  crdtCollections?: CrdtCollectionStore
+  /**
+   * Access policies per collection. Deny-by-default: a collection with no policy is server-only. LWW row
+   * collections take an RLS-style {@link CollectionPolicy} (read → filter); CRDT document collections take a
+   * guard-shaped {@link CrdtCollectionPolicy} (read → bool). Server co-writes via `srv.collection(n)` bypass them.
+   */
+  policies?: {
+    [N in CollectionName<C>]?: N extends CrdtCollectionName<C>
+      ? CrdtCollectionPolicy<CtxUnion<A>, DocOf<C, N>>
+      : CollectionPolicy<CtxUnion<A>, RowOf<C, N>>
+  }
   /**
    * Opt-in advisory foreign-key checks (see ADR-0006, decision 8). When true, an insert/update whose
    * `references` field points at a non-existent row is rejected at the accepting node. Best-effort under
@@ -568,8 +591,15 @@ export interface SuperLineServer<C extends Contract, A extends AuthResult<C>, HK
   forRole<R extends RoleOf<C>>(role: R): RoleLens<C, R>
   /** Server-authoritative handle for a configured Store (`srv.store('scene').create(...)`). Throws `NOT_FOUND` if the name isn't configured. */
   store(name: string): ServerStoreHandle
-  /** Server-authoritative handle for a contract collection (`srv.collection('messages').insert(...)`), typed by the contract. Throws `NOT_FOUND` if no collection backend is configured or the name isn't declared. */
-  collection<N extends CollectionName<C>>(name: N): ServerCollectionHandle<RowOf<C, N>>
+  /**
+   * Server-authoritative handle for a contract collection, typed by the contract: an LWW row collection gives
+   * `ServerCollectionHandle` (`insert`/`update`/`batch`), a CRDT document collection gives
+   * `ServerCrdtCollectionHandle` (`create`/`open`). Throws `NOT_FOUND` if no matching backend is configured
+   * or the name isn't declared.
+   */
+  collection<N extends CollectionName<C>>(
+    name: N,
+  ): N extends CrdtCollectionName<C> ? ServerCrdtCollectionHandle<DocOf<C, N>> : ServerCollectionHandle<RowOf<C, N>>
   close(): Promise<void>
 }
 
@@ -642,6 +672,13 @@ export function createSuperLineServer<
   }
   const checkReferences = opts.checkReferences ?? false
   const collIsRelay = collectionStore?.clustering === 'relay'
+  // CRDT document collections (ADR-0007): a separate backend, routed by mode. `collectionPolicies` holds both
+  // families keyed by name; CRDT sites read it as a CrdtCollectionPolicy.
+  const crdtStore = opts.crdtCollections
+  const crdtDefOf = (n: string): CrdtCollectionDef | undefined => {
+    const d = collectionDefs[n]
+    return d && isCrdtCollection(d) ? d : undefined
+  }
   const COLL_CHANNEL = 'cbatch' // fixed cluster channel carrying relayed collection batches (compared by ===)
   type ConnCollState = { subs: Map<string, Map<number, CollectionQuery>>; policy: Map<string, Expr | undefined> }
   const collSubscribers = new Map<string, Set<Conn>>() // collection name → conns with ≥1 live subscription (routing index)
@@ -770,6 +807,10 @@ export function createSuperLineServer<
     }
     if (channel.startsWith(STORE)) {
       handleStoreRelay(channel, payload)
+      return
+    }
+    if (channel.startsWith(CDOC)) {
+      handleCrdtRelay(channel, payload)
       return
     }
     if (channel === COLL_CHANNEL) {
@@ -1108,6 +1149,9 @@ export function createSuperLineServer<
     else if (frame.t === 'csub') await handleCollectionSub(conn, frame)
     else if (frame.t === 'cuns') handleCollectionUnsub(conn, frame)
     else if (frame.t === 'cbat') await handleCollectionBatch(conn, frame)
+    else if (frame.t === 'cdopen') await handleCrdtOpen(conn, frame)
+    else if (frame.t === 'cdwr') await handleCrdtWrite(conn, frame)
+    else if (frame.t === 'cdclose') handleCrdtClose(conn, frame)
     else if (frame.t === 'sres') {
       await handleClientReply(conn, frame.i, { ok: true, d: frame.d })
     } else if (frame.t === 'serr') {
@@ -1282,6 +1326,120 @@ export function createSuperLineServer<
     if (taps.length) emitTap({ type: 'store.unsubscribe', connId: conn.id, store: frame.n, id: frame.id })
   }
 
+  // ---- CRDT document collections (ADR-0007) -------------------------------------------------------------
+  // The store machinery re-surfaced under the collection API: per-doc fan-out channel (d:<n>:<id>), opaque
+  // base64 deltas, validate-before-commit at ingress, guard-shaped policies (no stored ACL). Creation is
+  // server-authoritative (Q10) — a client opens an existing doc; a missing doc is NOT_FOUND.
+  function crdtMissing(conn: Conn, i: number, n: string): boolean {
+    if (crdtStore && crdtDefOf(n)) return false
+    conn.send({ t: 'err', i, code: 'NOT_FOUND', m: `Unknown CRDT collection: ${n}` })
+    return true
+  }
+
+  async function handleCrdtOpen(conn: Conn, frame: CDOpenFrame): Promise<void> {
+    if (crdtMissing(conn, frame.i, frame.n)) return
+    const store = crdtStore!
+    await dispatchOp(conn, frame.i, { kind: 'subscribe', name: `collection:${frame.n}/${frame.id}`, conn }, async () => {
+      const state = await store.read(frame.n, frame.id)
+      if (state === undefined) throw new SuperLineError('NOT_FOUND', `No document: ${frame.n}/${frame.id}`)
+      const principal = conn.principal ?? conn.id
+      const policy = collectionPolicies[frame.n] as CrdtCollectionPolicy<unknown, unknown> | undefined
+      if (!policy?.read) throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}/${frame.id}`) // deny-by-default
+      const replica = store.open(frame.n, frame.id)
+      const snapshot = replica.getSnapshot()
+      replica.close()
+      if (!(await policy.read(principal, frame.id, snapshot, conn.ctx)))
+        throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}/${frame.id}`)
+      await joinChannel(conn, CDOC + frame.n + ':' + frame.id)
+      conn.send({ t: 'res', i: frame.i, d: state }) // catch-up: full Yjs state
+    })
+  }
+
+  async function handleCrdtWrite(conn: Conn, frame: CDWriteFrame): Promise<void> {
+    if (crdtMissing(conn, frame.i, frame.n)) return
+    const store = crdtStore!
+    const def = crdtDefOf(frame.n)!
+    await dispatchOp(conn, frame.i, { kind: 'request', name: `collection:${frame.n}/${frame.id}`, conn }, async () => {
+      const principal = conn.principal ?? conn.id
+      const policy = collectionPolicies[frame.n] as CrdtCollectionPolicy<unknown, unknown> | undefined
+      if (!policy?.write) throw new SuperLineError('FORBIDDEN', `Write denied: ${frame.n}/${frame.id}`) // deny-by-default
+      if (!(await policy.write(principal, frame.id, conn.ctx)))
+        throw new SuperLineError('FORBIDDEN', `Write denied: ${frame.n}/${frame.id}`)
+      // validate-before-commit: the backend merges onto a scratch copy and calls this with the post-merge
+      // plaintext; a throw aborts the commit (nothing fanned) and surfaces as an err → the client resyncs.
+      await store.apply({ n: frame.n, id: frame.id, update: frame.u as string, origin: frame.o }, def.crdt, (snapshot) =>
+        validateSync(def.schema, snapshot),
+      )
+      conn.send({ t: 'res', i: frame.i, d: null })
+    })
+  }
+
+  function handleCrdtClose(conn: Conn, frame: CDCloseFrame): void {
+    if (!crdtDefOf(frame.n)) return
+    leaveChannel(conn, CDOC + frame.n + ':' + frame.id)
+  }
+
+  // crdtStore.onChange is the single fan-out source for CRDT docs — the mirror of the storeMap loop below.
+  if (crdtStore) {
+    const isSelf = crdtStore.clustering === 'self'
+    crdtStore.onChange((change) => {
+      const channel = CDOC + change.n + ':' + change.id
+      if (isSelf) {
+        const set = members.get(channel)
+        if (!set) return
+        const payload = serializer.encode({ t: 'cdchg', n: change.n, id: change.id, u: change.update, o: change.origin } satisfies CDChangeFrame)
+        for (const conn of set) conn.sendRaw(payload)
+        return
+      }
+      if (relaying) return
+      void adapter.publish(
+        channel,
+        serializer.encode({ t: 'cdchg', n: change.n, id: change.id, u: change.update, o: change.origin, nd: instanceId } satisfies CDChangeFrame),
+      )
+    })
+    if (isSelf)
+      crdtStore.onDelete?.((n, id) => {
+        const set = members.get(CDOC + n + ':' + id)
+        if (!set) return
+        const payload = serializer.encode({ t: 'cddel', n, id } satisfies CDDeleteFrame)
+        for (const conn of set) conn.sendRaw(payload)
+      })
+  }
+
+  // A CRDT delta/delete arriving on a d: channel from the adapter: forward raw to local subscribers, and — for
+  // a relay backend that didn't originate it — apply the delta locally so this node converges. Remote deltas
+  // were already validated at their originating node (Q3), so the local apply trusts them (no-op validate).
+  function handleCrdtRelay(channel: string, payload: string | Uint8Array): void {
+    const set = members.get(channel)
+    if (set) for (const conn of set) conn.sendRaw(payload)
+    let frame: CDChangeFrame | CDDeleteFrame
+    try {
+      frame = serializer.decode(payload) as CDChangeFrame | CDDeleteFrame
+    } catch {
+      return
+    }
+    if (frame.nd === instanceId) return // our own publish looped back; already applied locally
+    if (!crdtStore || crdtStore.clustering !== 'relay') return
+    const def = crdtDefOf(frame.n)
+    if (!def) return
+    if (frame.t === 'cddel') {
+      try {
+        void crdtStore.delete(frame.n, frame.id)
+      } catch {
+        // absent — nothing to delete
+      }
+      return
+    }
+    relaying = true
+    try {
+      void crdtStore.apply({ n: frame.n, id: frame.id, update: frame.u as string, origin: frame.o }, def.crdt, () => {})
+    } catch {
+      // doc not present on this node yet (creates are node-local) — drop; it catches up on next open
+    } finally {
+      relaying = false
+    }
+  }
+
   // Each Store's onChange is core's single fan-out source. A `relay` store has no shared backend, so core
   // publishes its Change over the adapter (loopback locally, real fan-out cross-node); `relaying` suppresses
   // re-publishing a Change that arrived FROM another node (echo-loop). A `self` store owns its own cross-node
@@ -1406,6 +1564,7 @@ export function createSuperLineServer<
     for (const op of ops) {
       const def = collectionDefs[op.n]
       if (!def) throw new SuperLineError('NOT_FOUND', `Unknown collection: ${op.n}`)
+      if (isCrdtCollection(def)) throw new SuperLineError('NOT_FOUND', `Collection ${op.n} is a CRDT document collection — use collection(n).open(id), not a row batch`)
       const policy = collectionPolicies[op.n]
       if (!policy?.write) throw new SuperLineError('FORBIDDEN', `Write denied: ${op.n}`) // deny-by-default
       const prev = await store.read(op.n, op.id)
@@ -1858,10 +2017,45 @@ export function createSuperLineServer<
       if (!handle) throw new SuperLineError('NOT_FOUND', `Store not configured: ${name}`)
       return handle
     },
-    collection<N extends CollectionName<C>>(name: N): ServerCollectionHandle<RowOf<C, N>> {
-      if (!collectionStore) throw new SuperLineError('NOT_FOUND', 'No collection backend configured')
+    collection<N extends CollectionName<C>>(
+      name: N,
+    ): N extends CrdtCollectionName<C> ? ServerCrdtCollectionHandle<DocOf<C, N>> : ServerCollectionHandle<RowOf<C, N>> {
+      type Ret = N extends CrdtCollectionName<C> ? ServerCrdtCollectionHandle<DocOf<C, N>> : ServerCollectionHandle<RowOf<C, N>>
       const def = collectionDefs[name]
       if (!def) throw new SuperLineError('NOT_FOUND', `Collection not declared: ${name}`)
+      // CRDT document collection: server-authoritative create + reactive co-writer (Q10). Policy-free.
+      if (isCrdtCollection(def)) {
+        if (!crdtStore) throw new SuperLineError('NOT_FOUND', 'No CRDT collection backend configured')
+        const cstore = crdtStore
+        const handle: ServerCrdtCollectionHandle<unknown> = {
+          async create(id, data) {
+            const v = await validate(def.schema, data)
+            await cstore.create(name, id, v, def.crdt)
+          },
+          open(id, o) {
+            return cstore.open(name, id, { ...o, doc: def.crdt })
+          },
+          async read(id) {
+            const state = await cstore.read(name, id)
+            if (state === undefined) return undefined
+            const r = cstore.open(name, id, { doc: def.crdt })
+            const s = r.getSnapshot()
+            r.close()
+            return s
+          },
+          async delete(id) {
+            await cstore.delete(name, id)
+            // relay backends fan the delete over the adapter; self backends fan it via onDelete on every node
+            if (cstore.clustering !== 'self')
+              void adapter.publish(CDOC + name + ':' + id, serializer.encode({ t: 'cddel', n: name, id, nd: instanceId } satisfies CDDeleteFrame))
+          },
+          list(o) {
+            return Promise.resolve(cstore.list(name, o))
+          },
+        }
+        return handle as unknown as Ret
+      }
+      if (!collectionStore) throw new SuperLineError('NOT_FOUND', 'No collection backend configured')
       const store = collectionStore
       // Server co-writes: schema-validated, policy-free (server-authoritative), fan out + relay like a client batch.
       const resolve = async (row: unknown): Promise<{ id: string; row: unknown }> => {
@@ -1871,7 +2065,7 @@ export function createSuperLineServer<
           throw new SuperLineError('VALIDATION', `Collection ${name} row is missing string key '${def.key}'`)
         return { id: key, row: v }
       }
-      return {
+      const handle: ServerCollectionHandle<unknown> = {
         async insert(row) {
           const { id, row: v } = await resolve(row)
           await commitCollectionBatch([{ op: 'insert', n: name, id, row: v }], SERVER_ORIGIN, true)
@@ -1884,12 +2078,13 @@ export function createSuperLineServer<
           await commitCollectionBatch([{ op: 'delete', n: name, id }], SERVER_ORIGIN, true)
         },
         read(id) {
-          return Promise.resolve(store.read(name, id)) as Promise<RowOf<C, N> | undefined>
+          return Promise.resolve(store.read(name, id))
         },
         snapshot(query) {
-          return Promise.resolve(store.snapshot(name, query ?? {})) as Promise<RowOf<C, N>[]>
+          return Promise.resolve(store.snapshot(name, query ?? {}))
         },
       }
+      return handle as unknown as Ret
     },
     async close() {
       if (closing) return
@@ -1952,9 +2147,15 @@ export function createSuperLineServer<
       },
       store: (name) => api.store(name),
       storeInfos: () => Object.entries(storeMap).map(([name, store]) => ({ name, model: store.model })),
-      collection: (name) => api.collection(name as CollectionName<C>),
+      collection: (name) => api.collection(name as CollectionName<C>) as ServerCollectionHandle,
       collectionInfos: () =>
-        Object.entries(collectionDefs).map(([name, def]) => ({ name, key: def.key, references: def.references ?? {} })),
+        // CRDT document collections surface with a synthetic `id` key + no references — the inspector's
+        // queryCollection synthesizes doc-rows for them (they're open-by-id, not row-queryable).
+        Object.entries(collectionDefs).map(([name, def]) =>
+          isCrdtCollection(def)
+            ? { name, key: 'id', references: {} }
+            : { name, key: def.key, references: def.references ?? {} },
+        ),
       describe: (conn) => buildDescriptor(conn),
       connectionById: (id) => Promise.resolve(presenceOrThrow().get(id)),
       channel: (name) => pluginChannel(pluginName, name),

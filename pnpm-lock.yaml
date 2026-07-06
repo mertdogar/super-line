@@ -148,6 +148,9 @@ importers:
       '@super-line/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@super-line/collections-crdt-memory':
+        specifier: workspace:*
+        version: link:../../packages/collections-crdt-memory
       '@super-line/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -160,9 +163,6 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
-      '@super-line/store-sync':
-        specifier: workspace:*
-        version: link:../../packages/store-sync
       '@super-line/transport-websocket':
         specifier: workspace:*
         version: link:../../packages/transport-websocket
@@ -1506,6 +1506,31 @@ importers:
         specifier: workspace:^
         version: link:../core
 
+  packages/collections-crdt-libsql:
+    dependencies:
+      '@libsql/client':
+        specifier: ^0.15.0
+        version: 0.15.15
+      '@super-line/collections-crdt-memory':
+        specifier: workspace:^
+        version: link:../collections-crdt-memory
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+    devDependencies:
+      '@super-store/store':
+        specifier: ^0.3.0
+        version: 0.3.0
+
+  packages/collections-crdt-memory:
+    dependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+      '@super-store/store':
+        specifier: ^0.3.0
+        version: 0.3.0
+
   packages/collections-memory:
     dependencies:
       '@super-line/core':
@@ -1842,18 +1867,6 @@ importers:
       '@super-store/store':
         specifier: ^0.3.0
         version: 0.3.0
-
-  packages/store-sync-libsql:
-    dependencies:
-      '@libsql/client':
-        specifier: ^0.15.0
-        version: 0.15.15
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
-      '@super-line/store-sync':
-        specifier: workspace:^
-        version: link:../store-sync
 
   packages/store-sync-pglite:
     dependencies:

@@ -76,7 +76,7 @@ replica.delete('title')           // surgical key delete (the only way to remove
 replica.close()
 ```
 
-`open` requires a store with reactive support (throws `UNSUPPORTED` otherwise). CRDT stores (`store-sync`, `store-sync-libsql`, `store-sync-pglite`) and the LWW stores both back it.
+`open` requires a store with reactive support (throws `UNSUPPORTED` otherwise). CRDT stores (`store-sync`, `store-sync-pglite`) and the LWW stores both back it.
 
 ### Control Center inspector
 

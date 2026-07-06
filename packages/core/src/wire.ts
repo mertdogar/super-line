@@ -97,6 +97,29 @@ export interface CBatchFrame {
   i: number // correlation id — acked via res (ok) / err. The whole batch applies atomically on the handling node.
   ops: RowOp[] // may span collections; applied in order, all-or-nothing
 }
+// CRDT document collection frames (ADR-0007). A CRDT collection is opened by id (whole-doc merge, not
+// queryable); these mirror the store frames 1:1 but ride the collection API. `cdopen` catches up with full
+// Yjs state on the `res` ack; `cdwr` carries an opaque base64 delta gated by validate-before-commit; live
+// deltas push via `cdchg`, deletions via `cddel`.
+export interface CDOpenFrame {
+  t: 'cdopen'
+  i: number // correlation id — acked via res (full Yjs state) / err
+  n: string // collection name
+  id: string // document id
+}
+export interface CDWriteFrame {
+  t: 'cdwr'
+  i: number // correlation id — acked via res (null) / err (validation → client resync)
+  n: string
+  id: string
+  u: unknown // opaque base64 Yjs delta
+  o: string // writer origin (echo-break)
+}
+export interface CDCloseFrame {
+  t: 'cdclose'
+  n: string
+  id: string
+}
 export type ClientFrame =
   | ReqFrame
   | SubFrame
@@ -110,6 +133,9 @@ export type ClientFrame =
   | CSubFrame
   | CUnsubFrame
   | CBatchFrame
+  | CDOpenFrame
+  | CDWriteFrame
+  | CDCloseFrame
   | PingFrame
   | PongFrame
 
@@ -173,6 +199,23 @@ export interface CChangeFrame {
   d?: unknown // the row for insert/update; absent for delete
   nd?: string // origin NODE id; stamped for cross-node relay dedup, ignored by clients
 }
+// a server→client CRDT document change (fan-out of an applied delta on a doc the client has open) — the
+// collection-family mirror of `sch`.
+export interface CDChangeFrame {
+  t: 'cdchg'
+  n: string // collection name
+  id: string // document id
+  u: unknown // opaque base64 Yjs delta
+  o: string // writer origin (echo-break)
+  nd?: string // origin NODE id; stamped for cross-node relay dedup, ignored by clients
+}
+// a server→client CRDT document delete (fan-out) — the collection-family mirror of `sdel`.
+export interface CDDeleteFrame {
+  t: 'cddel'
+  n: string
+  id: string
+  nd?: string
+}
 export type ServerFrame =
   | ResFrame
   | ErrFrame
@@ -182,6 +225,8 @@ export type ServerFrame =
   | SChangeFrame
   | SDeleteFrame
   | CChangeFrame
+  | CDChangeFrame
+  | CDDeleteFrame
   | PingFrame
   | PongFrame
 

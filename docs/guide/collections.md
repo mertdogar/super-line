@@ -182,6 +182,71 @@ the `self` backend owns a central Postgres and a per-node Electric-synced replic
 `collections-sqlite` compiles the query IR to SQL to narrow snapshots; `collections-pglite` is the collection
 analogue of [`store-pglite`](./choosing-a-store). All three are drop-in — swapping is a one-line change.
 
+## CRDT document collections
+
+Some state doesn't want to be a row table — a collaborative canvas, a rich-text doc, a scene graph. Those
+want **merge** (two people editing different fields converge) rather than last-writer-wins. Collections cover
+this too: a **CRDT document collection** is one `collection(n)` concept away from a row collection, declared
+with a `crdt` key instead of a `key`:
+
+```ts
+const contract = defineContract({
+  collections: {
+    messages: { schema: messageSchema, key: 'id' },                 // LWW rows (queryable)
+    scenes:   { schema: sceneSchema, crdt: { mode: 'document' } },   // CRDT docs (opened by id)
+  },
+})
+```
+
+A CRDT collection is **opened by id, not queried** — `collection(n).open(id)` returns a reactive document
+handle (`getSnapshot`/`subscribe`/`set`/`update`/`delete`), and concurrent edits merge instead of clobbering.
+Unlike the old off-contract doc stores, **the schema is enforced**: every write is validated *before it
+commits* — the server merges the incoming delta onto a scratch copy, snapshots it to plaintext, validates
+against the contract schema, and only then commits and fans it out. An invalid write is rejected server-side
+and never reaches other clients. (Keep CRDT schemas to per-field/structural checks: validation runs against
+the *post-merge* state, so aggregate constraints like `maxItems` can reject a writer under concurrency — put
+those invariants in a request handler.)
+
+```ts
+// server
+createSuperLineServer(contract, {
+  crdtCollections: crdtMemoryCollections(),        // the CRDT backend (a backend per family)
+  policies: {
+    scenes: {                                       // guard-shaped, deny-by-default
+      read:  (principal, id, snapshot) => snapshot?.ownerId === principal,
+      write: (principal, id) => true,
+    },
+  },
+})
+await srv.collection('scenes').create('board', { shapes: {} })  // creation is server-authoritative
+
+// client
+const client = createSuperLineClient(contract, {
+  transport, role: 'user',
+  crdtCollections: crdtCollectionsClient(),         // the universal client engine
+})
+const doc = client.collection('scenes').open('board')
+await doc.ready
+doc.update({ title: 'hello' })                      // merges + syncs to every open handle
+// react: const { data, update } = useDoc('scenes', 'board')
+```
+
+**Backends** (same durability/clustering axes as row collections):
+
+| Package | Durability | Clustering |
+|---|---|---|
+| **`@super-line/collections-crdt-memory`** | in-memory | `relay` |
+| **`@super-line/collections-crdt-libsql`** | libsql / Turso (snapshot-per-doc) | `relay` |
+
+`collections-crdt-memory` also exports the universal `crdtCollectionsClient()` — one client engine pairs with
+every backend tier (the client only merges opaque deltas). Creation is server-only: clients open existing
+documents, and a client-initiated create routes through a request handler.
+
+**Rows or docs?** Reach for a **row collection** when you want to query/filter/join across many records
+(messages, users, orders). Reach for a **CRDT document collection** when one resource is edited concurrently
+and must merge (a canvas, a document, a shared config). Both live under `collection(n)`, both are typed and
+validated on the contract.
+
 ## Advisory foreign keys
 
 `references` on a contract collection is metadata: it feeds the Control Center schema graph and the TanStack

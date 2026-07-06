@@ -1,38 +1,37 @@
 import http from 'node:http'
 import { inspector } from '@super-line/plugin-inspector'
 import { createSuperLineServer } from '@super-line/server'
-import { syncStoreServer } from '@super-line/store-sync'
+import { crdtMemoryCollections } from '@super-line/collections-crdt-memory'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { api } from './contract.js'
 import { runAgent } from './agent.js'
-import { resolveOptions, SCENE_ID } from './scene.js'
+import { SCENE_ID } from './scene.js'
 
 const PORT = Number(process.env.PORT ?? 8796)
 const server = http.createServer()
 
 const srv = createSuperLineServer(api, {
   transports: [webSocketServerTransport({ server })],
-  // Surface traffic + store values to the Control Center (dev/trusted only).
+  // Surface traffic + collection values to the Control Center (dev/trusted only).
   plugins: [inspector()],
-  // the handshake `name` becomes the ACL principal (stable across reconnects)
+  // the handshake `name` becomes the principal (stable across reconnects)
   authenticate: (h) => {
     const name = h.query.name?.trim()
     if (!name) throw new Error('name is required')
     return { role: 'user' as const, ctx: { name } }
   },
   identify: (conn) => (conn.ctx as { name: string }).name,
-  // The CRDT Store, in `document` mode (recursive merge) via the shared resolver — so the agent and
-  // humans can edit different shapes at the same time without clobbering each other.
-  stores: { scene: syncStoreServer({ resolveOptions }) },
-  // Deny-by-default: grant every connection read+write on the shared board as it arrives.
-  onConnection: (conn) => {
-    const principal = conn.principal ?? conn.id
-    void srv.store('scene').grant(SCENE_ID, principal, { read: true, write: true })
+  // The CRDT document collection backend. `document` mode (on the contract's `crdt` option) makes the
+  // scene a recursive CRDT — the agent and humans edit different shapes at once without clobbering.
+  crdtCollections: crdtMemoryCollections(),
+  // Guard-shaped, deny-by-default: this shared board is open to every authenticated connection.
+  policies: {
+    scene: { read: () => true, write: () => true },
   },
 })
 
-// Seed an empty board once, server-authoritative, before anyone connects.
-await srv.store('scene').create(SCENE_ID, { shapes: {} }, {})
+// Seed an empty board once, server-authoritative, before anyone connects (creation is server-only).
+await srv.collection('scene').create(SCENE_ID, { shapes: {} })
 
 let runs = 0
 srv.implement({
@@ -40,7 +39,7 @@ srv.implement({
     // The AI co-writer: open a reactive replica over the canonical scene, let the agent edit it via
     // tools, then release the handle. `origin` stamps the agent's writes (visible in the Control Center).
     agentEdit: async ({ prompt }) => {
-      const replica = srv.store('scene').open(SCENE_ID, { origin: `agent:${++runs}` })
+      const replica = srv.collection('scene').open(SCENE_ID, { origin: `agent:${++runs}` })
       try {
         return await runAgent(replica, prompt)
       } finally {

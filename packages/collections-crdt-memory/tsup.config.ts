@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   target: 'es2022',
   clean: true,
-  external: ['@super-line/core', '@super-line/store-sync', '@libsql/client'],
+  external: ['@super-line/core', '@super-store/store', 'yjs'],
 })

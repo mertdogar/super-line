@@ -14,7 +14,7 @@
     "@super-line/core": "workspace:*",
     "@super-line/react": "workspace:*",
     "@super-line/plugin-inspector": "workspace:*",
-    "@super-line/server": "workspace:*",    "@super-line/store-sync": "workspace:*",
+    "@super-line/server": "workspace:*",    "@super-line/collections-crdt-memory": "workspace:*",
     "@super-line/transport-websocket": "workspace:*",
     "ai": "^6.0.0",
     "react": "^18.3.1",

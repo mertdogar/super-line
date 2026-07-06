@@ -6,6 +6,7 @@ import type { SuperLineClient } from '@super-line/client'
 export interface AuthState {
   status: 'guest' | 'authed'
   userId: string | null
+  displayName: string | null
   roles: string[]
 }
 
@@ -45,6 +46,7 @@ interface Identity {
   token: string
   userId: string
   roles: string[]
+  displayName: string
 }
 /** The auth requests as they appear on a live client, regardless of role (they're on the contract via the fragment). */
 interface Dyn {
@@ -64,7 +66,7 @@ export function authClient<C extends Contract, R extends RoleOf<C>>(options: Aut
   const storage = options.storage ?? browserStorage()
   const listeners = new Set<(s: AuthState) => void>()
   let current: SuperLineClient<C, R>
-  let state: AuthState = { status: 'guest', userId: null, roles: [] }
+  let state: AuthState = { status: 'guest', userId: null, displayName: null, roles: [] }
 
   const dyn = (c: SuperLineClient<C, R>): Dyn => c as unknown as Dyn
   const setState = (s: AuthState): void => {
@@ -81,11 +83,11 @@ export function authClient<C extends Contract, R extends RoleOf<C>>(options: Aut
   }
   const toGuest = (): void => {
     storage.set(null)
-    swap(guestClient(), { status: 'guest', userId: null, roles: [] })
+    swap(guestClient(), { status: 'guest', userId: null, displayName: null, roles: [] })
   }
   const login = (id: Identity): void => {
     storage.set(id.token)
-    swap(authedClient(id.token), { status: 'authed', userId: id.userId, roles: id.roles })
+    swap(authedClient(id.token), { status: 'authed', userId: id.userId, displayName: id.displayName, roles: id.roles })
   }
 
   const saved = storage.get()
@@ -95,7 +97,7 @@ export function authClient<C extends Contract, R extends RoleOf<C>>(options: Aut
     ? dyn(current)
         .whoami()
         .then((me) => {
-          if (me) setState({ status: 'authed', userId: me.userId, roles: me.roles })
+          if (me) setState({ status: 'authed', userId: me.userId, displayName: me.displayName, roles: me.roles })
           else toGuest()
         })
         .catch(() => toGuest())

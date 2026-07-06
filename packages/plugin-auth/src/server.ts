@@ -159,7 +159,7 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
           await creds().insert({ email, userId, passwordHash } satisfies AuthCredential)
           await users().insert({ id: userId, displayName: input.displayName, roles: [...defaultRoles], createdAt: Date.now() } satisfies AuthUser)
           const token = await mint(userId)
-          return { token, userId, roles: [...defaultRoles] }
+          return { token, userId, roles: [...defaultRoles], displayName: input.displayName }
         },
         signIn: async (input) => {
           const email = input.email.toLowerCase()
@@ -169,7 +169,7 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
           const user = await readUser(cred.userId)
           if (!user) throw new SuperLineError('INTERNAL', 'credential without a user')
           const token = await mint(user.id)
-          return { token, userId: user.id, roles: user.roles }
+          return { token, userId: user.id, roles: user.roles, displayName: user.displayName }
         },
         signOut: async (_input, connCtx) => {
           const { sessionId } = connCtx as AuthContext

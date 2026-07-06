@@ -18,6 +18,7 @@ export default defineConfig({
       // subpath aliases must precede the bare one — vite matches string aliases by prefix, in order
       '@super-line/plugin-auth/server': src('packages/plugin-auth/src/server.ts'),
       '@super-line/plugin-auth/client': src('packages/plugin-auth/src/client.ts'),
+      '@super-line/plugin-auth/react': src('packages/plugin-auth/src/react.tsx'),
       '@super-line/plugin-auth': src('packages/plugin-auth/src/index.ts'),
       '@super-line/collections-memory': src('packages/collections-memory/src/index.ts'),
       '@super-line/collections-sqlite': src('packages/collections-sqlite/src/index.ts'),

@@ -58,7 +58,7 @@ export interface AuthContext {
 
 // ── request defs (shared by the contract fragment AND the server plugin's paired surface) ─────────
 
-const identityOut = z.object({ token: z.string(), userId: z.string(), roles: z.array(z.string()) })
+const identityOut = z.object({ token: z.string(), userId: z.string(), roles: z.array(z.string()), displayName: z.string() })
 const signUpDef = {
   input: z.object({ email: z.string().email(), password: z.string().min(6), displayName: z.string().min(1) }),
   output: identityOut,

@@ -24,6 +24,10 @@
     "./client": {
       "import": { "types": "./dist/client.d.ts", "default": "./dist/client.js" },
       "require": { "types": "./dist/client.d.cts", "default": "./dist/client.cjs" }
+    },
+    "./react": {
+      "import": { "types": "./dist/react.d.ts", "default": "./dist/react.js" },
+      "require": { "types": "./dist/react.d.cts", "default": "./dist/react.cjs" }
     }
   },
   "files": ["dist"],
@@ -41,16 +45,20 @@
   },
   "peerDependencies": {
     "@super-line/client": "workspace:^",
-    "@super-line/server": "workspace:^"
+    "@super-line/server": "workspace:^",
+    "react": ">=18"
   },
   "peerDependenciesMeta": {
     "@super-line/client": { "optional": true },
-    "@super-line/server": { "optional": true }
+    "@super-line/server": { "optional": true },
+    "react": { "optional": true }
   },
   "devDependencies": {
     "@super-line/client": "workspace:^",
     "@super-line/collections-memory": "workspace:*",
     "@super-line/server": "workspace:^",
-    "@super-line/transport-websocket": "workspace:*"
+    "@super-line/transport-websocket": "workspace:*",
+    "@types/react": "^18.3.0",
+    "react": "^18.3.0"
   }
 }

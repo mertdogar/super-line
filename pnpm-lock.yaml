@@ -452,6 +452,9 @@ importers:
       '@super-line/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@super-line/plugin-auth':
+        specifier: workspace:*
+        version: link:../../packages/plugin-auth
       '@super-line/plugin-inspector':
         specifier: workspace:*
         version: link:../../packages/plugin-inspector
@@ -1641,6 +1644,12 @@ importers:
       '@super-line/transport-websocket':
         specifier: workspace:*
         version: link:../transport-websocket
+      '@types/react':
+        specifier: ^18.3.0
+        version: 18.3.31
+      react:
+        specifier: ^18.3.0
+        version: 18.3.1
 
   packages/plugin-inspector:
     dependencies:

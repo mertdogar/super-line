@@ -34,6 +34,11 @@ export function randomToken(): string {
   return randomBytes(32).toString('base64url')
 }
 
+/** A fresh API key. The `slp_` prefix makes it recognizable in logs; the server stores only its hash. */
+export function apiKeyToken(): string {
+  return `slp_${randomBytes(32).toString('base64url')}`
+}
+
 /** SHA-256 (hex) of a token — the stored primary key, so a DB/inspector leak never exposes a usable token. */
 export function tokenHash(token: string): string {
   return createHash('sha256').update(token).digest('hex')

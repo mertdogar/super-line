@@ -6,7 +6,7 @@ import { memoryCollections } from '@super-line/collections-memory'
 import { authContract } from '@super-line/plugin-auth'
 import { auth } from '@super-line/plugin-auth/server'
 import { authClient } from '@super-line/plugin-auth/client'
-import { createHarness } from '../../server/test/harness.js'
+import { createHarness, waitFor } from '../../server/test/harness.js'
 
 // A tiny app: a protected `secret` on `user`, an `adminOnly` on `admin`, plus the auth plugin (adds
 // the `guest` role, users/credentials/sessions collections, and signIn/signUp/signOut/whoami).
@@ -50,9 +50,9 @@ void _authTypeCheck
 const h = createHarness()
 afterEach(() => h.dispose())
 
-async function boot() {
+async function boot(jwt?: { secret: string }, sendPasswordReset?: (args: { user: { id: string }; token: string }) => void) {
   const backend = memoryCollections()
-  const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
+  const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'], jwt, sendPasswordReset })
   const { srv, url } = await h.server(app, {
     authenticate: authKit.authenticate,
     identify: authKit.identify,
@@ -63,7 +63,7 @@ async function boot() {
     user: { secret: async (_i: unknown, ctx: { userId: string | null }) => ({ me: ctx.userId ?? 'anon' }) },
     admin: { adminOnly: async () => ({ ok: true }) },
   } as never)
-  return { srv, url }
+  return { srv, url, authKit }
 }
 
 describe('plugin-auth — sign-up / login / roles', () => {
@@ -166,5 +166,125 @@ describe('plugin-auth — sign-up / login / roles', () => {
     await a.signOut()
     expect(a.state.status).toBe('guest')
     expect(await a.client.whoami()).toBeNull()
+  })
+})
+
+describe('plugin-auth — API keys', () => {
+  it('creates a key, authenticates a connection with it (no session), then revokes it', async () => {
+    const { url } = await boot()
+    const guest = h.client(app, { url, role: 'guest' })
+    const { token, userId } = await guest.signUp({ email: 'ka@x.com', password: 'passpass', displayName: 'Ka' })
+    guest.close()
+
+    const user = h.client(app, { url, role: 'user', params: { token } })
+    const key = await user.createApiKey({ label: 'ci', role: 'user' })
+    expect(key.key).toMatch(/^slp_/) // raw key returned once
+    expect(await user.listApiKeys()).toHaveLength(1)
+    user.close()
+
+    // connect with ONLY the API key (no session token) → authorized as the key's role
+    const svc = h.client(app, { url, role: 'user', params: { apiKey: key.key } })
+    expect(await svc.secret()).toEqual({ me: userId })
+    svc.close()
+
+    // revoke → the key no longer authenticates (degrades to guest)
+    const owner = h.client(app, { url, role: 'user', params: { token } })
+    await owner.revokeApiKey({ id: key.id })
+    owner.close()
+    const stale = h.client(app, { url, role: 'user', params: { apiKey: key.key } })
+    expect(await stale.whoami()).toBeNull()
+    stale.close()
+  })
+
+  it('refuses an API key for a role the user does not hold', async () => {
+    const { url } = await boot()
+    const guest = h.client(app, { url, role: 'guest' })
+    const { token } = await guest.signUp({ email: 'kb@x.com', password: 'passpass', displayName: 'Kb' })
+    guest.close()
+    const user = h.client(app, { url, role: 'user', params: { token } })
+    await expect(user.createApiKey({ label: 'x', role: 'admin' })).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    user.close()
+  })
+})
+
+describe('plugin-auth — JWT', () => {
+  it('issues a JWT and accepts it for a stateless connect', async () => {
+    const { url } = await boot({ secret: 'shhhh-a-very-secret-signing-key' })
+    const guest = h.client(app, { url, role: 'guest' })
+    const { token, userId } = await guest.signUp({ email: 'jw@x.com', password: 'passpass', displayName: 'Jw' })
+    guest.close()
+
+    const user = h.client(app, { url, role: 'user', params: { token } })
+    const { jwt } = await user.getToken()
+    expect(jwt.split('.')).toHaveLength(3) // header.payload.signature
+    user.close()
+
+    // connect with ONLY the JWT (no session token) → verified statelessly, no DB lookup
+    const svc = h.client(app, { url, role: 'user', params: { jwt } })
+    expect(await svc.secret()).toEqual({ me: userId })
+    svc.close()
+  })
+
+  it('rejects getToken when JWT is disabled on the server', async () => {
+    const { url } = await boot() // no jwt config
+    const guest = h.client(app, { url, role: 'guest' })
+    const { token } = await guest.signUp({ email: 'jx@x.com', password: 'passpass', displayName: 'Jx' })
+    guest.close()
+    const user = h.client(app, { url, role: 'user', params: { token } })
+    await expect(user.getToken()).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+    user.close()
+  })
+})
+
+describe('plugin-auth — revoke-and-kick', () => {
+  it('revoke(userId) deletes the sessions AND disconnects the live connection', async () => {
+    const { srv, url, authKit } = await boot()
+    const guest = h.client(app, { url, role: 'guest' })
+    const { token, userId } = await guest.signUp({ email: 're@x.com', password: 'passpass', displayName: 'Re' })
+    guest.close()
+
+    const user = h.client(app, { url, role: 'user', params: { token }, reconnect: false })
+    expect(await user.whoami()).not.toBeNull()
+    await waitFor(() => srv.local.connections.length === 1) // the live user connection
+
+    await authKit.revoke(userId)
+    await waitFor(() => srv.local.connections.length === 0) // kicked
+    user.close()
+
+    // the session is gone too: the old token can no longer authenticate
+    const stale = h.client(app, { url, role: 'user', params: { token } })
+    expect(await stale.whoami()).toBeNull()
+    stale.close()
+  })
+})
+
+describe('plugin-auth — password reset (host callback)', () => {
+  it('resets the password via the emailed token, invalidating the old password + existing sessions', async () => {
+    let captured: string | undefined
+    const { url } = await boot(undefined, ({ token }) => void (captured = token))
+    const g = h.client(app, { url, role: 'guest' })
+    const { token: oldSession } = await g.signUp({ email: 'pr@x.com', password: 'oldpassword', displayName: 'Pr' })
+
+    expect(await g.requestPasswordReset({ email: 'PR@x.com' })).toEqual({ ok: true })
+    expect(captured).toBeDefined()
+    await g.confirmPasswordReset({ token: captured!, newPassword: 'newpassword' })
+
+    await expect(g.signIn({ email: 'pr@x.com', password: 'oldpassword' })).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    expect((await g.signIn({ email: 'pr@x.com', password: 'newpassword' })).userId).toBeDefined()
+    g.close()
+
+    // the pre-reset session was flushed
+    const stale = h.client(app, { url, role: 'user', params: { token: oldSession } })
+    expect(await stale.whoami()).toBeNull()
+    stale.close()
+  })
+
+  it('never reveals whether an email exists (constant response, no callback for an unknown email)', async () => {
+    const calls: string[] = []
+    const { url } = await boot(undefined, ({ user }) => void calls.push(user.id))
+    const g = h.client(app, { url, role: 'guest' })
+    expect(await g.requestPasswordReset({ email: 'nobody@x.com' })).toEqual({ ok: true })
+    expect(calls).toHaveLength(0)
+    g.close()
   })
 })

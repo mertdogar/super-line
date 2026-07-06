@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   target: 'es2022',
   clean: true,
-  external: ['@super-line/core', '@super-line/server', '@super-line/client', 'zod'],
+  external: ['@super-line/core', '@super-line/server', '@super-line/client', 'zod', 'jose'],
 })

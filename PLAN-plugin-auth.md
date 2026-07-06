@@ -51,13 +51,21 @@ Now a permanent test: `packages/core/test/plugin-contract.test.ts`.
 - **`examples/auth`**: replaced the toy hardcoded-token demo with a full showcase (sign-up / login / RLS notes /
   public directory / data-driven admin promotion / sign-out). Runs green via tsx.
 
-## Phase 2 — extras (NOT STARTED)
+## Phase 2 — extras
 
-- **JWT** (`jose` HS256, on-demand `getToken`, 15m; asymmetric/JWKS later).
-- **API keys** (`slp_` prefix, sha256 pk, fixed role; `createApiKey`/`revokeApiKey`).
-- **Instant revoke-and-kick** (plugin closes conns by `ctx.sessionId` — needs a small core capability to close a
-  conn from plugin context).
-- **Email verify + password reset** via host callbacks (`verifications` collection, `sendVerificationEmail`/`sendResetPassword`).
-- **`/react`** half (`AuthProvider`/`useAuth`) + **upgrade `collections-chat`** to real login (retire its slug-identity).
+Auth-server features ✅ DONE (13 tests):
+- **API keys** ✅ — `slp_` prefix, sha256 pk, ONE fixed role; `createApiKey`/`listApiKeys`/`revokeApiKey`;
+  `authenticate` routes a `?apiKey=` handshake param (validates key role ∈ contract; requested role must match).
+- **JWT** ✅ — `jose` HS256, on-demand `getToken` (15m default), enabled via `jwt: { secret }`; `authenticate`
+  accepts a `?jwt=` param for stateless connect (no DB lookup). Asymmetric/JWKS later.
+- **Revoke-and-kick** ✅ — `authKit.revoke(userId)` deletes the user's sessions (relay-safe co-writer) + a
+  cluster-wide `toUser().disconnect()`. **No core change needed** — reused existing PluginContext capabilities.
+- **Password reset** ✅ — host `sendPasswordReset({ user, token })` callback + a `passwordResets` collection;
+  `requestPasswordReset` (constant response, no email-existence leak) / `confirmPasswordReset` (flushes sessions).
+
+Remaining:
+- **Email verification** — deferred (would add a required `userSchema` field / blocking-login policy). Fold in
+  with the same host-callback shape when needed.
+- **`/react`** half (`AuthProvider`/`useAuth`) + **upgrade `collections-chat`** to real login (retire slug-identity).
 - **DX niceties:** `extendCtx` + bare `authenticate` escape hatch; configurable guest-role name; extensible user fields.
 - **Docs:** guide page + skill update; changesets/version bumps; publish (ASK first).

@@ -393,28 +393,36 @@ h.close()
 - **Off-contract + unknown** — `data` is never schema-validated; assert the shape (`open<T>`). Route hard typed gates through a request (ADR-0003).
 - **Merge vs delete** — `update`/`write` merge top-level keys (never remove one); `delete(path)` is the only key removal. On the CRDT store it's surgical and merge-safe; use `set` only for a whole-document replace.
 - **In-process actor?** Use the server co-writer (`srv.store(ns).open(id)`), not a loopback client — reactive reads + delete, server-authoritative, no grant.
-- Runnable: the [`store`](https://github.com/mertdogar/super-line/tree/main/examples/store) (LWW) and [`store-sync-json`](https://github.com/mertdogar/super-line/tree/main/examples/store-sync-json) (CRDT) examples; [`ai-canvas`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas) is the agent co-writer end-to-end — a server-side LLM edits a shared canvas via `open(id)` (`update` + `delete(path)`), merging with users' concurrent edits.
+- Runnable: the [`store`](https://github.com/mertdogar/super-line/tree/main/examples/store) (LWW) and [`store-sync-json`](https://github.com/mertdogar/super-line/tree/main/examples/store-sync-json) (CRDT) examples. For an agent co-writer end-to-end, [`ai-canvas`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas) — a server-side LLM edits a shared canvas via `srv.collection(n).open(id)` (`update` + `delete(path)`), merging with users' concurrent edits — now runs on a **CRDT document collection** (↓), not a store.
 
-## Durable CRDT store (libsql / Turso)
+## Durable CRDT document collection (libsql / Turso)
 
-Same `syncStoreServer` CRDT merge engine as `store-sync`, snapshotted per Resource to libsql so state survives a restart. The factory is **async** — it rehydrates every Resource (history-preserving) before returning. Client half is the plain `syncStoreClient()`.
+The CRDT store family folded into collections (ADR-0007): a durable, mergeable document is now a **CRDT document collection** — declared on the contract (so every delta is **validate-before-commit** schema-checked), opened by id, and persisted to libsql/Turso. This **replaces `store-sync-libsql`**. The factory is **async** — it rehydrates every doc (history-preserving) before returning.
 
 ```ts
-// server — npm i @super-line/store-sync-libsql
-import { libsqlSyncStore } from '@super-line/store-sync-libsql'
+// CONTRACT — a `crdt` collection (no `key`; the id is external):
+const api = defineContract({
+  collections: { scenes: { schema: z.object({ shapes: z.record(z.any()) }), crdt: { mode: 'document' } } },
+  roles: { user: { clientToServer: {} } },
+})
+
+// server — npm i @super-line/collections-crdt-libsql
+import { crdtLibsqlCollections } from '@super-line/collections-crdt-libsql'
 const srv = createSuperLineServer(api, {
   transports: [webSocketServerTransport({ server })], authenticate, identify: (c) => c.ctx.uid,
-  stores: {
-    docs: await libsqlSyncStore({                       // ASYNC — await it
-      url: 'libsql://my-db.turso.io', authToken: process.env.TURSO_TOKEN, // or url:'file:store.db' / ':memory:'
-      // table: 'resources', debounceMs: 250,           // coalesce rapid edits into one snapshot write
-      // resolveOptions: (id) => ({ mode: 'document' }), // MUST match the client's (the store-sync rule)
-    }),
-  },
+  crdtCollections: await crdtLibsqlCollections({          // ASYNC — await it
+    url: 'libsql://my-db.turso.io', authToken: process.env.TURSO_TOKEN, // or url:'file:crdt.db' / ':memory:'
+    // table: 'crdt_docs', debounceMs: 250,               // snapshot-per-doc, coalesced
+    // docOptions: (n) => ({ mode: 'document' }),         // per-collection DocOptions
+  }),
+  policies: { scenes: { read: (p, id, snap) => true, write: (p, id) => true } }, // guard shape, deny-by-default
 })
-// client — the SAME CRDT half as store-sync (durability is a server-side concern)
-import { syncStoreClient } from '@super-line/store-sync'
-const client = createSuperLineClient(api, { transport, role: 'user', params: { uid: 'alice' }, stores: { docs: syncStoreClient() } })
+await srv.collection('scenes').create('s1', { shapes: {} }) // creation is server-authoritative
+
+// client — the universal CRDT engine (pairs with every tier)
+import { crdtCollectionsClient } from '@super-line/collections-crdt-memory'
+const client = createSuperLineClient(api, { transport, role: 'user', params: { uid: 'alice' }, crdtCollections: crdtCollectionsClient() })
+const doc = client.collection('scenes').open('s1'); await doc.ready // → DocHandle { getSnapshot, set, update, delete(path), deleted, close }
 ```
 
 ## Self-clustering store (central Postgres + Electric — no adapter)

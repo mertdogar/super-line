@@ -290,9 +290,9 @@ createSuperLineHooks<C, R extends keyof C['roles']>(): {
 ```
 Create the client once (e.g. `useState(() => createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user' }))`, `webSocketClientTransport` from `@super-line/transport-websocket`), wrap with `<Provider client={client}>`, then use the hooks inside.
 
-## Stores (6: store-memory · store-sync · store-sqlite · store-sync-libsql · store-pglite · store-sync-pglite)
+## Stores (5: store-memory · store-sync · store-sqlite · store-pglite · store-sync-pglite)
 
-> **The LWW stores (store-memory · store-sqlite · store-pglite) are DEPRECATED** in favor of [Collections](#collections-typed-rows-the-relational-store-successor) (typed rows, on-contract) — see below. The CRDT stores (store-sync*) remain the tool for a single collaborative document.
+> **The LWW stores (store-memory · store-sqlite · store-pglite) are DEPRECATED** in favor of [Collections](#collections-typed-rows-the-relational-store-successor) (typed rows, on-contract) — see below. The durable-`relay` CRDT store `store-sync-libsql` has been **deleted**; its role is now a [CRDT document collection](#crdt-document-collections-adr-0007) (`collections-crdt-libsql`, ADR-0007). The in-memory/self CRDT stores (store-sync, store-sync-pglite) remain for a single collaborative document.
 
 A Store is super-line's **off-contract** persisted-state seam: named, permissioned JSON Resources `{ id, accessRules, data }`. Configure a server + client pair under matching `stores:` keys. `data` is `unknown` end-to-end (not schema-validated). ACL is **deny-by-default**, keyed by the principal (`identify(conn) ?? conn.id`).
 
@@ -303,7 +303,6 @@ Each `ServerStore` declares two static traits the inspector surfaces: `model: 'l
 | store-memory | lww | in-memory | relay | `memoryStoreClient` |
 | store-sync | crdt (Yjs) | in-memory | relay | `syncStoreClient` |
 | store-sqlite | lww | better-sqlite3 (WAL) | relay | `memoryStoreClient` |
-| store-sync-libsql | crdt (Yjs) | libsql / Turso / sqld | relay | `syncStoreClient` |
 | store-pglite | lww | Postgres + Electric→PGlite | **self** | `memoryStoreClient` |
 | store-sync-pglite | crdt (Yjs op-log) | Postgres + Electric→PGlite | **self** | `syncStoreClient` |
 
@@ -314,10 +313,7 @@ memoryStoreClient(opts?: { origin?: string }): ClientStore
 syncStoreServer(opts?: { resolveOptions?: (id) => { mode?: 'shallow' | 'document'; opaque?: string[] } }): ServerStore  // CRDT (Yjs)
 syncStoreClient(opts?: { origin?; resolveOptions? }): ClientStore  // pass the SAME resolveOptions to BOTH halves (no config drift)
 sqliteStoreServer(opts: { file: string; table?: string }): ServerStore  // durable LWW (better-sqlite3); pair with memoryStoreClient()
-
-// durable CRDT — ASYNC factory (rehydrates every Resource before returning); pair with syncStoreClient()
-await libsqlSyncStore(opts: { url: string; authToken?: string; table?: string; debounceMs?: number; resolveOptions? }): Promise<ServerStore>
-//   url: file:x.db | :memory: | libsql:// (Turso) | http(s):// (sqld). snapshot-per-resource (debounced), history-preserving rehydrate.
+//   durable CRDT · relay is no longer a store — it's a CRDT document collection (crdtLibsqlCollections, ↓ Collections).
 
 // self-clustering — NO adapter; central Postgres + per-node Electric→PGlite replica. ASYNC factories.
 await pgliteStoreServer(opts: { pgUrl: string; electricUrl?: string; table?: string; db?: PGliteWithLive }): Promise<ServerStore>   // LWW; pair with memoryStoreClient()
@@ -379,7 +375,7 @@ Notes:
 - **Deny-by-default.** `grant` a principal before it can read/write. Server-side ops (`create`/`grant`/`open`/`write`) are server-authoritative and bypass ACL.
 - **Merge vs delete.** `update`/`write` MERGE and can't remove a key; `delete(path)` is the only key removal. On the CRDT store it's surgical — a concurrent edit to another key survives; a full-document `set` would clobber it.
 - **In-process co-writer.** `srv.store(ns).open(id)` is the right tool for a server-side AI agent / bot: reactive reads + delete, no loopback client and no grant. `origin` (default `'server'`) tags writes for echo-break + Control Center.
-- **Clustering.** `relay` stores (memory, sync, sqlite, sync-libsql) are node-local — super-line relays their Changes across nodes over the **Adapter** (so >1 node needs one). `self` stores (pglite, sync-pglite) own a central Postgres + per-node Electric→PGlite replica and fan only to local subscribers — they need **NO adapter**. For LWW, cross-node writes resolve last-writer-wins; CRDT stores merge.
+- **Clustering.** `relay` stores (memory, sync, sqlite) are node-local — super-line relays their Changes across nodes over the **Adapter** (so >1 node needs one). `self` stores (pglite, sync-pglite) own a central Postgres + per-node Electric→PGlite replica and fan only to local subscribers — they need **NO adapter**. For LWW, cross-node writes resolve last-writer-wins; CRDT stores merge.
 - **Deletion fan-out.** `srv.store(ns).delete(id)` removes the whole Resource and propagates cluster-wide as an `sdel` frame: subscribers see `ResourceHandle.deleted` / `useResource().deleted` go `true` (a `subscribe` fires). Without it a deleted Resource just reads as a silent empty snapshot. Distinct from `delete(path)`, which is a surgical key removal within a Resource.
 - React: `useResource<T>(name, id)` wraps open + subscribe + write-through + unmount-close, and exposes `deleted` (see above).
 
@@ -431,3 +427,31 @@ createLiveQueryCollection((q) => q.from({ m: messages }).join({ u: users }, ({ m
 ```
 
 Backends (all drop-in, one line to swap): `@super-line/collections-memory` (in-memory · relay) · `collections-sqlite` (SQLite · relay, IR→SQL snapshot pushdown) · `collections-pglite` (central Postgres + Electric→PGlite · **self**, no adapter). Inspector: `listCollections` / `queryCollection` + a Control Center **Collections** view (schema graph + row browser). Guide: `docs/guide/collections.md`; example: `examples/collections`.
+
+### CRDT document collections (ADR-0007)
+
+CRDT documents fold INTO collections: one `collection(n)` concept, **two consistency models** — LWW **rows** (above, queryable) and CRDT **docs** (whole-document merge, opened by id). A CRDT collection is declared with a `crdt` key (**no `key`** — the id is external) and is **opened by id, not queried**. It replaces the deleted `store-sync-libsql` and the CRDT store family generally.
+
+```ts
+// CONTRACT — the `crdt` key discriminates (DocOptions: { mode?: 'shallow'|'document'; opaque?: string[] }):
+defineContract({ collections: { scenes: { schema: z.object({ shapes: z.record(z.any()) }), crdt: { mode: 'document' } } } })
+
+// SERVER — a SEPARATE backend (crdtCollections:, NOT collections:) + guard-shaped policies (deny-by-default):
+createSuperLineServer(api, {
+  crdtCollections: crdtMemoryCollections(),           // relay · in-memory (ships the universal crdtCollectionsClient)
+  //             or await crdtLibsqlCollections({ url, authToken?, table?, debounceMs?, docOptions? })  // durable · relay (libsql/Turso)
+  policies: { scenes: { read: (principal, id, snapshot?) => true, write: (principal, id) => true } },  // guard shape, NOT the RLS filter
+})
+await srv.collection('scenes').create(id, data)       // creation is SERVER-authoritative; clients open EXISTING docs (nonexistent → NOT_FOUND)
+const co = srv.collection('scenes').open(id, { origin? })  // reactive server co-writer: getSnapshot/subscribe/set/update/delete(path)/close
+
+// CLIENT — needs crdtCollections: crdtCollectionsClient() (the universal client engine, any tier):
+const doc = client.collection('scenes').open(id)      // → DocHandle { getSnapshot, subscribe, set, update, delete(path), deleted, ready, close }
+await doc.ready
+// React: const { data, set, update, delete: del, deleted } = useDoc('scenes', id)
+```
+
+- **Validate-before-commit** (overturns ADR-0003 — opaque CRDT deltas ARE now validated). The ingress node merges each delta onto a scratch copy, snapshots to plaintext, validates against the contract schema, then commits + fans out **only if valid**; relay nodes trust the already-validated relayed delta. So a CRDT doc is schema-enforced end-to-end — unlike an off-contract store.
+- **Reject → resync.** A rejected write (schema or write-policy) was applied optimistically, so the client re-opens and hard-**resets** its replica to authoritative, discarding the bad edit (`onStoreError` still fires). Validation runs on the **post-merge** state, so keep CRDT schemas to per-field/structural rules — an aggregate/cross-field constraint (maxItems, sum-of-fields) can reject a valid-looking concurrent write; put those in requests.
+- Access = guard-shaped `CrdtCollectionPolicy` (`read(principal,id,snapshot?)→bool`, `write(principal,id)→bool`), deny-by-default — NOT the RLS filter shape LWW rows use. Wire: per-doc channel `d:<n>:<id>`, frames `cdopen/cdwr/cdchg/cddel/cdclose`.
+- Backends: `collections-crdt-memory` (relay + the universal `crdtCollectionsClient`) · `collections-crdt-libsql` (durable · relay, `await crdtLibsqlCollections`, snapshot-per-doc). `collections-crdt-pglite` (self) not yet built. Inspector surfaces them in `listCollections` (synthetic `id` key) + `queryCollection` synthesizes `{ id, ...snapshot }` doc-rows (browsable in the Control Center Collections view). Guide: `docs/guide/collections.md#crdt-document-collections`; example: `examples/ai-canvas`.

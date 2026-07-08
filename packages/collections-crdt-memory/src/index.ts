@@ -169,9 +169,13 @@ const randomId = (): string => Math.random().toString(36).slice(2) + Math.random
 
 /** A CRDT local replica: a super-store `StoreValue`. Local writes produce a delta; remote changes merge. */
 class CrdtDocReplica implements ResourceReplica {
-  private readonly sv: Doc
+  private sv: Doc
   private pendingLocal: Uint8Array | null = null
-  private readonly off: () => void
+  private off!: () => void
+  private svOff!: () => void
+  // We own the subscriber set (rather than delegating to `sv`) so subscriptions survive a reset(), which
+  // swaps `sv` for a fresh doc — a bare `sv.subscribe` would be orphaned on the disposed doc.
+  private readonly subs = new Set<() => void>()
 
   constructor(
     private readonly id: string,
@@ -179,8 +183,14 @@ class CrdtDocReplica implements ResourceReplica {
     private readonly opts: DocOptions | undefined,
   ) {
     this.sv = new StoreValue<Record<string, unknown>, StoreMode>({}, opts)
+    this.bind()
+  }
+  private bind(): void {
     this.off = this.sv.onUpdate((update, meta) => {
       if (meta.local) this.pendingLocal = update
+    })
+    this.svOff = this.sv.subscribe(() => {
+      for (const cb of this.subs) cb()
     })
   }
 
@@ -188,7 +198,8 @@ class CrdtDocReplica implements ResourceReplica {
     return this.sv.getSnapshot()
   }
   subscribe(cb: () => void): () => void {
-    return this.sv.subscribe(cb)
+    this.subs.add(cb)
+    return () => this.subs.delete(cb)
   }
   private take(changed: boolean): StoreChange | null {
     const delta = this.pendingLocal
@@ -216,17 +227,19 @@ class CrdtDocReplica implements ResourceReplica {
     if (typeof snapshot === 'string') this.sv.applyUpdate(fromB64(snapshot)) // catch-up = full Yjs state
   }
   reset(snapshot: unknown): void {
-    // Reject→resync (ADR-0007): diff-patch the doc back to authoritative plaintext IN PLACE — super-store
-    // `set` is a recursive diff-and-patch, so subscriptions survive — discarding the rejected optimistic edit.
-    // (A plain `applyUpdate` merge can't remove an already-integrated op; only a value-replace reverts it.)
-    const scratch = new StoreValue<Record<string, unknown>, StoreMode>({}, this.opts)
-    try {
-      if (typeof snapshot === 'string') scratch.applyUpdate(fromB64(snapshot))
-      this.sv.set(scratch.getSnapshot() as Record<string, unknown>)
-    } finally {
-      scratch.dispose()
-    }
-    this.pendingLocal = null // the compensating diff is not a user edit — never forward it
+    // Reject→resync (ADR-0007): REBUILD the doc from the authoritative Yjs *state* so it's byte-identical to the
+    // server's. A `set()`-based value patch (the old approach) leaves client-only compensating ops AND stale
+    // nested child handles, so the replica stays structurally divergent — every later write is malformed, fails
+    // validation, and re-triggers resync (an endless loop). A fresh doc discards the rejected edit cleanly.
+    // We re-point our subscribers at the new sv (we own the subscriber set), so `useDoc` keeps working.
+    this.off()
+    this.svOff()
+    this.sv.dispose()
+    this.pendingLocal = null
+    this.sv = new StoreValue<Record<string, unknown>, StoreMode>({}, this.opts)
+    if (typeof snapshot === 'string') this.sv.applyUpdate(fromB64(snapshot))
+    this.bind()
+    for (const cb of this.subs) cb() // notify: the value snapped back to authoritative
   }
   applyDelete(): void {
     this.sv.emitChange()

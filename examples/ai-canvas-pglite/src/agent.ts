@@ -1,6 +1,6 @@
 import { generateText, stepCountIs, tool } from 'ai'
 import { z } from 'zod'
-import { SuperLineError, type ServerReplica } from '@super-line/core'
+import { SuperLineError, type CrdtServerReplica } from '@super-line/core'
 import { COLORS, newShapeId, readShapes, topOrder, type Scene } from './scene.js'
 
 // Cheap, env-overridable. Plain "provider/model" string → AI SDK routes it through the AI Gateway.
@@ -11,11 +11,11 @@ export interface AgentAction {
   detail: string
 }
 
-// Run one agent turn against a server-side ServerReplica (srv.store('scene').open(id)). Each tool maps
-// to a Store primitive — update() (merge) or delete(path) (the only key-removing op) — so the agent's
-// edits land as Store deltas that fan out to every tab and merge with whatever a human is doing live.
+// Run one agent turn against a server-side CrdtServerReplica (srv.collection('scene').open(id)). Each tool
+// maps to a doc primitive — update() (merge) or delete(path) (the only key-removing op) — so the agent's
+// edits land as CRDT deltas that fan out to every tab and merge with whatever a human is doing live.
 export async function runAgent(
-  replica: ServerReplica,
+  replica: CrdtServerReplica,
   prompt: string,
 ): Promise<{ summary: string; actions: AgentAction[] }> {
   if (!process.env.AI_GATEWAY_API_KEY) {

@@ -17,7 +17,7 @@ export default defineConfig({
       '@super-line/core': r('../../packages/core/src/index.ts'),
       '@super-line/client': r('../../packages/client/src/index.ts'),
       '@super-line/react': r('../../packages/react/src/index.ts'),
-      '@super-line/store-sync': r('../../packages/store-sync/src/index.ts'),
+      '@super-line/collections-crdt-memory': r('../../packages/collections-crdt-memory/src/index.ts'),
       // resolve to source so the SPA bundles without a publish/build step
       '@super-line/transport-websocket': r('../../packages/transport-websocket/src/index.ts'),
     },

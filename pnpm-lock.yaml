@@ -224,6 +224,12 @@ importers:
       '@super-line/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@super-line/collections-crdt-memory':
+        specifier: workspace:*
+        version: link:../../packages/collections-crdt-memory
+      '@super-line/collections-crdt-pglite':
+        specifier: workspace:*
+        version: link:../../packages/collections-crdt-pglite
       '@super-line/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -236,12 +242,6 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
-      '@super-line/store-sync':
-        specifier: workspace:*
-        version: link:../../packages/store-sync
-      '@super-line/store-sync-pglite':
-        specifier: workspace:*
-        version: link:../../packages/store-sync-pglite
       '@super-line/transport-websocket':
         specifier: workspace:*
         version: link:../../packages/transport-websocket
@@ -1222,6 +1222,9 @@ importers:
       '@super-line/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@super-line/collections-crdt-memory':
+        specifier: workspace:*
+        version: link:../../packages/collections-crdt-memory
       '@super-line/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -1231,9 +1234,6 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
-      '@super-line/store-sync':
-        specifier: workspace:*
-        version: link:../../packages/store-sync
       '@super-line/transport-websocket':
         specifier: workspace:*
         version: link:../../packages/transport-websocket

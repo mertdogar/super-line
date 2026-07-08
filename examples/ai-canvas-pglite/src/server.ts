@@ -10,10 +10,10 @@ import { inspector } from '@super-line/plugin-inspector'
 import { createSuperLineServer } from '@super-line/server'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createLibp2pAdapter, type PubSubLibp2p } from '@super-line/adapter-libp2p'
-import { syncPgliteStoreServer } from '@super-line/store-sync-pglite'
+import { crdtPgliteCollections } from '@super-line/collections-crdt-pglite'
 import { api } from './contract.js'
 import { runAgent } from './agent.js'
-import { resolveOptions, SCENE_ID } from './scene.js'
+import { SCENE_ID } from './scene.js'
 
 // One cluster node. compose boots node-1 + node-2 from the same image, differing only by env.
 const PORT = Number(process.env.PORT ?? 8801)
@@ -21,14 +21,15 @@ const NODE = process.env.NODE_NAME ?? `node-${PORT}`
 const PG_URL = process.env.PG_URL ?? 'postgres://postgres:password@localhost:54321/electric'
 const ELECTRIC_URL = process.env.ELECTRIC_URL ?? 'http://localhost:3000/v1/shape'
 
-// The CRDT scene store: each write appends a Yjs delta to the central op-log; Electric streams the op-log to
-// this node's in-memory replica, folded into a super-store doc and fanned to LOCAL subscribers (clustering:
-// 'self'). Two nodes editing different shapes MERGE — true CRDT, not last-writer-wins. The SAME `resolveOptions`
-// (document mode) feeds the client's syncStoreClient, so the two halves can't disagree on doc structure.
-const store = await syncPgliteStoreServer({ pgUrl: PG_URL, electricUrl: ELECTRIC_URL, resolveOptions })
+// The CRDT scene collection: each write is validated against the contract schema, then appended as a Yjs delta
+// to the central op-log; Electric streams the op-log to this node's in-memory replica, folded into a super-store
+// doc and fanned to LOCAL subscribers (clustering: 'self'). Two nodes editing different shapes MERGE — true CRDT,
+// not last-writer-wins. `document` mode makes concurrent field-level edits merge; it must match the contract's
+// `crdt` option (and the client's crdtCollectionsClient reads it from the same contract, so they can't drift).
+const scenes = await crdtPgliteCollections({ pgUrl: PG_URL, electricUrl: ELECTRIC_URL, docOptions: () => ({ mode: 'document' }) })
 
-// The STORE needs no adapter — Electric is its CRDT bus. This broker-less libp2p mesh is a SEPARATE plane
-// carrying presence + inspector so the Control Center sees the whole cluster (the store never touches it).
+// The collection needs no adapter — Electric is its CRDT bus. This broker-less libp2p mesh is a SEPARATE plane
+// carrying presence + inspector so the Control Center sees the whole cluster (the collection never touches it).
 // No extra container, and NO cluster-size knowledge: every node runs identical code and finds its peers over
 // mDNS on the shared network — no node list, no bootstrap, no peer IDs to pre-compute.
 const node = (await createLibp2p({
@@ -58,13 +59,14 @@ const srv = createSuperLineServer(api, {
   authenticate: (h) => ({ role: 'user' as const, ctx: { name: h.query.name?.trim() || 'anon' } }),
   identify: () => 'demo',
   adapter: await createLibp2pAdapter({ node }), // reuse the BYO node for the presence/inspector plane
-  stores: { scene: store },
+  crdtCollections: scenes,
+  policies: { scene: { read: () => true, write: () => true } }, // demo: everyone co-edits one board
 })
 
 // Seed the shared board once, server-authoritative. All nodes share the central Postgres, so the first wins;
 // the rest get CONFLICT (expected) and fold the seed via Electric.
 try {
-  await srv.store('scene').create(SCENE_ID, { shapes: {} }, { demo: { read: true, write: true } })
+  await srv.collection('scene').create(SCENE_ID, { shapes: {} })
   console.log(`[${NODE}] seeded board`)
 } catch {
   console.log(`[${NODE}] board already exists`)
@@ -78,8 +80,8 @@ srv.implement({
     agentEdit: async ({ prompt }) => {
       // Strong-fold the board first so the agent's getSnapshot() is current even on a node whose Electric replica
       // hasn't caught up yet (open() is synchronous and can't await the fold itself).
-      await srv.store('scene').read(SCENE_ID)
-      const replica = srv.store('scene').open(SCENE_ID, { origin: `agent:${++runs}` })
+      await srv.collection('scene').read(SCENE_ID)
+      const replica = srv.collection('scene').open(SCENE_ID, { origin: `agent:${++runs}` })
       try {
         return await runAgent(replica, prompt)
       } finally {

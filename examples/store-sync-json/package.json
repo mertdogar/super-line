@@ -14,7 +14,7 @@
     "@super-line/core": "workspace:*",
     "@super-line/react": "workspace:*",
     "@super-line/server": "workspace:*",
-    "@super-line/store-sync": "workspace:*",
+    "@super-line/collections-crdt-memory": "workspace:*",
     "@super-line/transport-websocket": "workspace:*",
     "@visual-json/core": "^0.4.0",
     "@visual-json/react": "^0.4.0",

@@ -1,12 +1,12 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { createSuperLineClient } from '@super-line/client'
 import { createSuperLineHooks } from '@super-line/react'
-import { syncStoreClient } from '@super-line/store-sync'
+import { crdtCollectionsClient } from '@super-line/collections-crdt-memory'
 import { webSocketClientTransport } from '@super-line/transport-websocket'
 import { api } from './contract.js'
-import { COLORS, newShapeId, readShapes, resolveOptions, SCENE_ID, topOrder, type Scene, type ScenePatch } from './scene.js'
+import { COLORS, newShapeId, readShapes, SCENE_ID, topOrder, type ScenePatch } from './scene.js'
 
-const { Provider, useResource, useRequest } = createSuperLineHooks<typeof api, 'user'>()
+const { Provider, useDoc, useRequest } = createSuperLineHooks<typeof api, 'user'>()
 
 // Connect back to a cluster node: ?node=2 → node-2 (:8802), else node-1 (:8801). Open two windows on two
 // different nodes to watch edits CRDT-converge across nodes through Electric. Uses location.hostname so it
@@ -26,7 +26,7 @@ export function App() {
       transport: webSocketClientTransport({ url: WS_URL }),
       role: 'user',
       params: { name },
-      stores: { scene: syncStoreClient({ resolveOptions }) },
+      crdtCollections: crdtCollectionsClient(),
     }),
   )
   return (
@@ -44,7 +44,7 @@ interface LogEntry {
 }
 
 function Board({ me }: { me: string }) {
-  const { data, update, delete: del } = useResource<Scene>('scene', SCENE_ID)
+  const { data, update, delete: del } = useDoc('scene', SCENE_ID)
   const { call: agentEdit, isLoading } = useRequest('agentEdit')
   const [prompt, setPrompt] = useState('')
   const [log, setLog] = useState<LogEntry[]>([])

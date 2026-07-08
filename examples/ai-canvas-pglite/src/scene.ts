@@ -1,26 +1,26 @@
-import type { DocOptions } from '@super-line/store-sync'
+import { z } from 'zod'
 
 // One shared, server-seeded scene everybody (and the agent) edits.
 export const SCENE_ID = 'board'
 
-export interface Shape {
-  x: number
-  y: number
-  color: string
-  label: string
-  order: number
-}
+// The scene lives in a CRDT document collection (ADR-0007): declared on the contract with this schema, so
+// the server validate-before-commits every write against it. `document` mode (on the contract's `crdt`
+// option) makes it a recursive CRDT — concurrent edits to different shapes/fields MERGE, not clobber.
+export const shapeSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  color: z.string(),
+  label: z.string(),
+  order: z.number(),
+})
+export const sceneSchema = z.object({ shapes: z.record(z.string(), shapeSchema) })
 
-export type Scene = { shapes: Record<string, Shape> }
+export type Shape = z.infer<typeof shapeSchema>
+export type Scene = z.infer<typeof sceneSchema>
 
-// A partial scene write — what update() merges in. The Store merges deeply, so a write
+// A partial scene write — what update() merges in. The doc merges deeply, so a write
 // can carry just the changed fields of one shape.
 export type ScenePatch = { shapes: Record<string, Partial<Shape>> }
-
-// The SAME resolver feeds both store halves: `document` mode = recursive CRDT, so concurrent
-// edits to different shapes (or different fields of one shape) MERGE instead of clobbering.
-// Import this from both syncStoreServer() and syncStoreClient() so the two halves can't drift.
-export const resolveOptions = (_id: string): DocOptions => ({ mode: 'document' })
 
 export const COLORS = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899']
 

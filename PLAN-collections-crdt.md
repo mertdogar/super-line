@@ -27,7 +27,19 @@ scope (solo user, pre-adoption). Companion ADR: `docs/adr/0007-crdt-docs-are-typ
   family never validates/rejects); `CrdtDocReplica.reset` diff-patches back to authoritative plaintext IN
   PLACE via super-store `set` (subscriptions survive). Proof: the writer's own replica now returns to
   authoritative in the validate-before-commit test (extended). Typecheck + oxlint + suite green.
-- **Phases 2–4 — not started.**
+- **Phase 2 (pglite self-tier) — BUILT & GREEN (2026-07-08).** `@super-line/collections-crdt-pglite`:
+  `crdtPgliteCollections({ pgUrl, electricUrl?, table?, docOptions?, compact?, onError? })` — the relocated
+  `store-sync-pglite` engine reshaped to `CrdtCollectionStore`: central Postgres Yjs op-log + meta keyed by
+  `(collection, id)`, per-node Electric→PGlite replica folding the op-log into in-memory super-store docs, ACL
+  stripped (policies are server-side), and **validate-before-commit at the ingress node** (fold central state +
+  the incoming delta on a scratch → validate → only then append to the op-log). Compaction (baseline + trim +
+  materialized `<table>.data`) re-keyed per `(collection, id)`. No server change — the `isSelf` branch already
+  handles a `self` CRDT backend. Tests: `collections-crdt-pglite.test.ts` (9, socket harness + hand-fed op-log,
+  incl. the validate gate & compaction) + `collections-crdt-pglite.integration.test.ts` (3, **real 2-node
+  Electric via testcontainers** — concurrent co-writes MERGE no-clobber, `delete(path)` + doc-delete propagate).
+  typecheck + oxlint clean. **Not yet: migrate `ai-canvas-pglite` off `store-sync-pglite` (rolls into Phase 3).**
+- **Phase 3 (store sunset) — UNBLOCKED (pglite relocated), not started.** Retire `store(n)` + delete
+  `store-{memory,sqlite,pglite}` + `store-sync`/`-pglite`; migrate the LWW-store examples + `ai-canvas-pglite`.
 
 ## The reframe that makes this possible
 

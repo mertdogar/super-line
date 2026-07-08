@@ -23,6 +23,7 @@ export default defineConfig({
       '@super-line/collections-memory': src('packages/collections-memory/src/index.ts'),
       '@super-line/collections-crdt-memory': src('packages/collections-crdt-memory/src/index.ts'),
       '@super-line/collections-crdt-libsql': src('packages/collections-crdt-libsql/src/index.ts'),
+      '@super-line/collections-crdt-pglite': src('packages/collections-crdt-pglite/src/index.ts'),
       '@super-line/collections-sqlite': src('packages/collections-sqlite/src/index.ts'),
       '@super-line/collections-pglite': src('packages/collections-pglite/src/index.ts'),
       '@super-line/tanstack-db': src('packages/tanstack-db/src/index.ts'),

@@ -30,6 +30,7 @@
       "@super-line/collections-memory": ["./packages/collections-memory/src/index.ts"],
       "@super-line/collections-crdt-memory": ["./packages/collections-crdt-memory/src/index.ts"],
       "@super-line/collections-crdt-libsql": ["./packages/collections-crdt-libsql/src/index.ts"],
+      "@super-line/collections-crdt-pglite": ["./packages/collections-crdt-pglite/src/index.ts"],
       "@super-line/collections-sqlite": ["./packages/collections-sqlite/src/index.ts"],
       "@super-line/collections-pglite": ["./packages/collections-pglite/src/index.ts"],
       "@super-line/tanstack-db": ["./packages/tanstack-db/src/index.ts"],

@@ -1531,6 +1531,31 @@ importers:
         specifier: ^0.3.0
         version: 0.3.0
 
+  packages/collections-crdt-pglite:
+    dependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.3
+        version: 0.5.3
+      '@electric-sql/pglite-sync':
+        specifier: ^0.6.3
+        version: 0.6.3(@electric-sql/pglite@0.5.3)
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+      '@super-store/store':
+        specifier: ^0.3.0
+        version: 0.3.0
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
+    devDependencies:
+      '@electric-sql/pglite-socket':
+        specifier: ^0.2.6
+        version: 0.2.6(@electric-sql/pglite-age@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_hashids@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_ivm@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_textsearch@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_uuidv7@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgtap@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgvector@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite@0.5.3)
+      testcontainers:
+        specifier: ^10.13.2
+        version: 10.28.0
+
   packages/collections-memory:
     dependencies:
       '@super-line/core':

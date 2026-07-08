@@ -203,9 +203,24 @@ handle (`getSnapshot`/`subscribe`/`set`/`update`/`delete`), and concurrent edits
 Unlike the old off-contract doc stores, **the schema is enforced**: every write is validated *before it
 commits* — the server merges the incoming delta onto a scratch copy, snapshots it to plaintext, validates
 against the contract schema, and only then commits and fans it out. An invalid write is rejected server-side
-and never reaches other clients. (Keep CRDT schemas to per-field/structural checks: validation runs against
-the *post-merge* state, so aggregate constraints like `maxItems` can reject a writer under concurrency — put
-those invariants in a request handler.)
+and never reaches other clients.
+
+::: warning Keep CRDT schemas tolerant
+Validation runs against the *post-merge* state, which a concurrent merge can leave **momentarily incomplete** —
+an overwrite of a field is internally a delete-then-insert, and under interleaved cross-node folds the delete
+can land a beat before the insert. Two consequences:
+
+- **Aggregate constraints** (`maxItems`, cross-field invariants) can reject an honest writer under concurrency —
+  put those in a request handler, not the schema.
+- **A required field that is concurrently overwritten can transiently be absent.** If the schema hard-requires
+  it, that transient state is rejected, the writer resyncs, and the resync churn can diverge the document's Yjs
+  lineage until the field is dropped for good — permanently wedging the collection (every later write then fails
+  the same check).
+
+So for any field that is concurrently mutated, prefer `z.number().catch(0)` / `.optional()` over a bare
+`z.number()`: validation coerces a transient gap to a default instead of rejecting, and the next write restores
+the real value. Reserve strict/required only for fields written once and never concurrently overwritten.
+:::
 
 ```ts
 // server

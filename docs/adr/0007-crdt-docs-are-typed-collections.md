@@ -67,11 +67,20 @@ Fold CRDT documents **into** collections as a second consistency model, and dele
   no longer distinguishes anything, since collections already configure backends in server options.
 - **The typed-contract spine now covers CRDT documents.** A buggy or malicious client can no longer
   merge a schema-invalid document; the validation gate rejects it and resyncs the writer.
-- **Enforcement carries real, accepted costs.** Per-write server validation; a rejected write forces
-  a full-state client resync (optimistic CRDT edits can't be cleanly rolled back); and because
-  validation is against the *post-merge* state, concurrent individually-valid deltas can collide on
-  aggregate/cross-field constraints and reject the second writer. Guidance: keep CRDT schemas to
-  per-field/structural validation and put aggregate invariants in request handlers.
+- **Enforcement carries real, accepted costs — and one sharp edge.** Per-write server validation; a
+  rejected write forces a full-state client resync (optimistic CRDT edits can't be cleanly rolled back);
+  and because validation is against the *post-merge* state, concurrent individually-valid deltas can
+  collide on aggregate/cross-field constraints and reject the second writer. The sharp edge, learned the
+  hard way: an overwrite of a field is internally *delete-then-insert*, so under interleaved cross-node
+  folds a **required scalar field can be transiently absent** post-merge. Hard-requiring such a field
+  turns a transient into a rejection; the ensuing resync churn diverges the document's Yjs lineage until
+  the field is dropped for good — a committed field-removing delta then folds into every node and
+  **permanently wedges the collection** (every subsequent write fails the same required-field check).
+  Guidance: keep CRDT schemas to per-field/structural validation, put aggregate invariants in request
+  handlers, and make any **concurrently-overwritten** field tolerant (`.catch(default)` / `.optional()`)
+  rather than strictly required — reserve `required` for write-once fields. (Verified end-to-end in the
+  `ai-canvas-pglite` example: strict `x/y/order` wedged the board under two-tab dragging; `.catch()`
+  made it converge with zero rejections.)
 - **Two access models still coexist** — RLS predicate filters for LWW rows, boolean guards for CRDT
   docs — because they subscribe differently (subset-query vs open-by-id). They are unified in config
   shape (`policies`), not in return type.

@@ -71,7 +71,11 @@ function Board({ me }: { me: string }) {
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>, id: string, x: number, y: number): void => {
     patch({ shapes: { [id]: { order: topOrder(data) } } }) // bring to front
     const rect = boardRef.current?.getBoundingClientRect()
-    drag.current = { id, dx: e.clientX - (rect?.left ?? 0) - x, dy: e.clientY - (rect?.top ?? 0) - y }
+    // Coerce a non-finite coordinate to 0: a CRDT merge can transiently leave x/y absent, and an undefined/NaN
+    // grab offset would make every subsequent move NaN (a stuck shape). Starting from 0 lets the drag heal it.
+    const sx = Number.isFinite(x) ? x : 0
+    const sy = Number.isFinite(y) ? y : 0
+    drag.current = { id, dx: e.clientX - (rect?.left ?? 0) - sx, dy: e.clientY - (rect?.top ?? 0) - sy }
     e.currentTarget.setPointerCapture(e.pointerId)
   }
 

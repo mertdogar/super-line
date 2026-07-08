@@ -1,15 +1,8 @@
 import http from 'node:http'
-import { createLibp2p } from 'libp2p'
-import { tcp } from '@libp2p/tcp'
-import { noise } from '@chainsafe/libp2p-noise'
-import { yamux } from '@chainsafe/libp2p-yamux'
-import { identify } from '@libp2p/identify'
-import { gossipsub } from '@libp2p/gossipsub'
-import { mdns } from '@libp2p/mdns'
 import { inspector } from '@super-line/plugin-inspector'
 import { createSuperLineServer } from '@super-line/server'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
-import { createLibp2pAdapter, type PubSubLibp2p } from '@super-line/adapter-libp2p'
+import { createLibp2pAdapter } from '@super-line/adapter-libp2p'
 import { crdtPgliteCollections } from '@super-line/collections-crdt-pglite'
 import { api } from './contract.js'
 import { runAgent } from './agent.js'
@@ -28,28 +21,11 @@ const ELECTRIC_URL = process.env.ELECTRIC_URL ?? 'http://localhost:3000/v1/shape
 // `crdt` option (and the client's crdtCollectionsClient reads it from the same contract, so they can't drift).
 const scenes = await crdtPgliteCollections({ pgUrl: PG_URL, electricUrl: ELECTRIC_URL, docOptions: () => ({ mode: 'document' }) })
 
-// The collection needs no adapter — Electric is its CRDT bus. This broker-less libp2p mesh is a SEPARATE plane
-// carrying presence + inspector so the Control Center sees the whole cluster (the collection never touches it).
-// No extra container, and NO cluster-size knowledge: every node runs identical code and finds its peers over
-// mDNS on the shared network — no node list, no bootstrap, no peer IDs to pre-compute.
-const node = (await createLibp2p({
-  addresses: { listen: ['/ip4/0.0.0.0/tcp/0'] },
-  transports: [tcp()],
-  connectionEncrypters: [noise()],
-  streamMuxers: [yamux()],
-  peerDiscovery: [mdns()],
-  services: {
-    identify: identify(),
-    pubsub: gossipsub({ allowPublishToZeroTopicPeers: true }),
-  },
-})) as unknown as PubSubLibp2p
-// mDNS only emits discovery — it does NOT auto-dial (unlike bootstrap). Dial discovered peers so the gossipsub
-// mesh (and presence/inspector fan-out) actually forms. Re-dials to a live peer are no-ops.
-node.addEventListener('peer:discovery', (e) => {
-  console.log(`[${NODE}] mDNS discovered peer ${e.detail.id.toString().slice(-8)}`)
-  void node.dial(e.detail.multiaddrs).catch(() => {})
-})
-
+// The collection needs no adapter — Electric is its CRDT bus. The libp2p adapter below is a SEPARATE, broker-less
+// plane carrying presence + inspector so the Control Center sees the whole cluster (the collection never touches
+// it). `discovery: 'mdns'` lets the adapter build AND coordinate its own node — it finds peers over mDNS on the
+// shared network and dials them itself: every node runs identical code, with no node list, bootstrap, peer IDs,
+// or cluster-size knowledge to pre-compute.
 const server = http.createServer()
 const srv = createSuperLineServer(api, {
   nodeName: NODE,
@@ -58,7 +34,7 @@ const srv = createSuperLineServer(api, {
   // the handshake `name` is for the UI only; the ACL principal is shared so every client co-edits one board
   authenticate: (h) => ({ role: 'user' as const, ctx: { name: h.query.name?.trim() || 'anon' } }),
   identify: () => 'demo',
-  adapter: await createLibp2pAdapter({ node }), // reuse the BYO node for the presence/inspector plane
+  adapter: await createLibp2pAdapter({ discovery: 'mdns' }), // broker-less presence/inspector plane; the adapter builds + mDNS-discovers its own node
   crdtCollections: scenes,
   policies: { scene: { read: () => true, write: () => true } }, // demo: everyone co-edits one board
 })
@@ -75,7 +51,7 @@ try {
 let runs = 0
 srv.implement({
   user: {
-    // The AI co-writer: open a reactive ServerReplica over the canonical scene, let the agent edit it via
+    // The AI co-writer: open a reactive CrdtServerReplica over the canonical scene, let the agent edit it via
     // tools, then release. `origin` stamps the agent's writes (distinct from human edits in the Control Center).
     agentEdit: async ({ prompt }) => {
       // Strong-fold the board first so the agent's getSnapshot() is current even on a node whose Electric replica

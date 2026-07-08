@@ -225,9 +225,9 @@ pnpm --filter @super-line/example-chat start
 # Browser React chat (Vite + WS server; open two tabs to chat live):
 pnpm --filter @super-line/example-react-chat dev   # http://localhost:5173
 
-# Slack-like chat (Vite + React 19 + shadcn) — channels, presence, typing, unread badges, with
-# channels + history persisted to SQLite via store-sqlite (survives a server restart):
-pnpm --filter @super-line/example-advanced-chat-app dev   # http://localhost:5173
+# Slack-like chat (Vite + React 19 + shadcn) — channels, presence, typing, unread badges, on
+# typed Collections (channels/messages/users as rows), persisted to SQLite:
+pnpm --filter @super-line/example-collections-chat dev   # http://localhost:5173
 
 # Collaborative canvas — synced JSON state over super-line, backed by a CRDT (open two tabs;
 # server is a co-writer, with a live state + patch debug panel). Run one at a time:
@@ -277,10 +277,8 @@ cd examples/react-chat-cluster-rabbitmq && docker compose up --build
 # React chat with a live transport dial — switch WebSocket / HTTP / libp2p at runtime (needs Docker):
 cd examples/react-chat-transports && docker compose up --build
 
-# Self-clustering store, NO adapter: central Postgres + per-node Electric→PGlite replica (needs Docker):
-cd examples/store-pglite && docker compose up
-
-# AI co-writer canvas on a self-clustering CRDT store (Postgres + Electric). Needs an AI Gateway key:
+# AI co-writer canvas on a self-clustering CRDT document collection (Postgres + Electric, NO adapter).
+# Needs an AI Gateway key:
 cd examples/ai-canvas-pglite && docker compose up   # set AI_GATEWAY_API_KEY
 
 # Bus across a cluster: Redis + Caddy + 3 nodes converge a shared tally over the event bus (needs Docker):

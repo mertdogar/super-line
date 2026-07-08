@@ -20,35 +20,15 @@ A live React chat (Vite + a WS server). Open two browser tabs to chat in real ti
 pnpm --filter @super-line/example-react-chat dev   # http://localhost:5173
 ```
 
-## advanced-chat-app — a Slack-like app, persisted to SQLite
-
-A polished Slack clone (Vite + React 19 + Tailwind v4 + shadcn/ui, using the [shadcn-chat](https://shadcn-chat.vercel.app) blocks): a channel sidebar with **live unread badges**, presence, typing indicators, and a create-channel button. Channels and message history live in a [Store](/guide/store) and are **persisted to SQLite** via [`@super-line/store-sqlite`](/guide/store) — so the workspace survives a server restart and streams live to every client. The server is the sole writer (`createChannel`/`send` requests); clients read the channel index and per-channel message Resources with [`useResource`](/guide/react). Open two windows (`?name=ada`, `?name=bob`).
-
-```bash
-pnpm --filter @super-line/example-advanced-chat-app dev   # http://localhost:5173
-```
-
-Demonstrates: [stores](/guide/store) + durable persistence, [requests](/guide/requests), [topics](/guide/topics), [React hooks](/guide/react).
-
-## store — a permissioned document store
-
-A scripted, single-process demo of the [Store](/guide/store) primitive on the in-memory LWW backend. The server creates a permissioned note and assigns per-user access; two users open it and one's write reaches the other live; a read-only user is denied a write (`FORBIDDEN`); a third user can't open the doc until the server grants access at runtime; and the server co-writes the document.
-
-```bash
-pnpm --filter @super-line/example-store start
-```
-
-Demonstrates: [stores](/guide/store), [roles](/guide/roles-auth), [errors](/guide/errors).
-
 ## store-sync-json — a collaborative JSON editor (CRDT)
 
-A React app over the [CRDT Store](/guide/synced-state) (`@super-line/store-sync` — Yjs via super-store): a [`@visual-json`](https://visual-json.dev) editor bound to one shared Resource via [`useResource`](/guide/react). Open two tabs (or add `?name=bob`), edit any field, and watch edits **merge** live — concurrent edits to different fields both survive, unlike last-writer-wins. **Server nudge** triggers a server co-write.
+A React app over a [CRDT document collection](/guide/collections#crdt-document-collections) (`@super-line/collections-crdt-memory` — Yjs via super-store): a [`@visual-json`](https://visual-json.dev) editor bound to one shared document via [`useDoc`](/guide/react). Open two tabs (or add `?name=bob`), edit any field, and watch edits **merge** live — concurrent edits to different fields both survive, unlike last-writer-wins. **Server nudge** triggers a server co-write.
 
 ```bash
 pnpm --filter @super-line/example-store-sync-json dev   # http://localhost:5273
 ```
 
-Demonstrates: [synced state (CRDT)](/guide/synced-state), [stores](/guide/store), [React hooks](/guide/react).
+Demonstrates: [CRDT document collections](/guide/collections#crdt-document-collections), [React hooks](/guide/react).
 
 ## synced-canvas — roll-your-own CRDT (no Store seam)
 
@@ -63,18 +43,18 @@ Demonstrates: [synced state (CRDT)](/guide/synced-state), [events & rooms](/guid
 
 ## ai-canvas — a server-side AI agent as a co-writer
 
-The [synced-canvas](#synced-canvas-roll-your-own-crdt-no-store-seam) board rebuilt on the [CRDT Store](/guide/synced-state) (`@super-line/store-sync` in `document` mode), with a **server-side LLM agent that co-edits the same board**. Type a prompt ("add three blue squares in a row, then delete the red one") — a single `agentEdit` request opens a [reactive co-writer](/guide/store#a-reactive-server-side-co-writer) (`srv.store('scene').open(id)`), reads the live board (`getSnapshot`), and drives it with four tools mapped onto Store primitives — `update` to add/move/recolor, `delete(path)` to remove. The agent's edits fan out to every tab and **merge** with your concurrent drags (document-mode CRDT), so you can keep editing while it works. Built with the [AI SDK](https://ai-sdk.dev) over the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway); the board itself is a fully working collaborative canvas even without a key. Open two windows (`?name=ada`, `?name=bob`) — server and web bind `0.0.0.0`, so a phone on the same network can join too.
+The [synced-canvas](#synced-canvas-roll-your-own-crdt-no-store-seam) board rebuilt on a [CRDT document collection](/guide/collections#crdt-document-collections) (`@super-line/collections-crdt-memory` in `document` mode — typed and validated on every write), with a **server-side LLM agent that co-edits the same board**. Type a prompt ("add three blue squares in a row, then delete the red one") — a single `agentEdit` request opens a reactive co-writer (`srv.collection('scene').open(id)`), reads the live board (`getSnapshot`), and drives it with four tools mapped onto doc primitives — `update` to add/move/recolor, `delete(path)` to remove. The agent's edits fan out to every tab and **merge** with your concurrent drags (document-mode CRDT), so you can keep editing while it works. Built with the [AI SDK](https://ai-sdk.dev) over the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway); the board itself is a fully working collaborative canvas even without a key. Open two windows (`?name=ada`, `?name=bob`) — server and web bind `0.0.0.0`, so a phone on the same network can join too.
 
 ```bash
 cp examples/ai-canvas/.env.example examples/ai-canvas/.env   # set AI_GATEWAY_API_KEY
 pnpm --filter @super-line/example-ai-canvas dev   # http://localhost:5373
 ```
 
-Demonstrates: [the reactive server-side co-writer](/guide/store#a-reactive-server-side-co-writer), [synced state (CRDT)](/guide/synced-state), [stores](/guide/store), [React hooks](/guide/react).
+Demonstrates: [CRDT document collections](/guide/collections#crdt-document-collections), the reactive server-side co-writer, [React hooks](/guide/react).
 
 ## ai-canvas-pglite — the AI canvas, re-clustered over Postgres + Electric
 
-The [ai-canvas](#ai-canvas-a-server-side-ai-agent-as-a-co-writer) board re-clustered across **two nodes** on the [`@super-line/store-sync-pglite`](/guide/choosing-a-store) **CRDT** store. Same UX — drag shapes, ask a server-side AI agent ("add three blue circles in a row, then delete the red one") — but CRDT convergence rides **central Postgres + Electric**, not super-line's adapter. Every write appends an opaque Yjs delta to an append-only op-log in Postgres; Electric streams it to each node's in-memory PGlite replica, which folds the deltas and fans them to its local tabs. Concurrent edits to *different* shapes merge across nodes (`clustering: 'self'`). A separate broker-less libp2p mesh carries presence/inspector so the Control Center sees the whole cluster. Needs Docker; the board works without an AI Gateway key (only the agent request needs one).
+The [ai-canvas](#ai-canvas-a-server-side-ai-agent-as-a-co-writer) board re-clustered across **two nodes** on the self-clustering [`@super-line/collections-crdt-pglite`](/guide/collections#crdt-document-collections) **CRDT document collection**. Same UX — drag shapes, ask a server-side AI agent ("add three blue circles in a row, then delete the red one") — but CRDT convergence rides **central Postgres + Electric**, not super-line's adapter. Every write is validated against the contract schema, then appended as an opaque Yjs delta to an append-only op-log in Postgres; Electric streams it to each node's in-memory PGlite replica, which folds the deltas and fans them to its local tabs. Concurrent edits to *different* shapes merge across nodes (`clustering: 'self'`). A separate broker-less libp2p mesh carries presence/inspector so the Control Center sees the whole cluster. Needs Docker; the board works without an AI Gateway key (only the agent request needs one).
 
 ```bash
 cp examples/ai-canvas-pglite/.env.example examples/ai-canvas-pglite/.env   # set AI_GATEWAY_API_KEY
@@ -83,19 +63,7 @@ docker compose -f examples/ai-canvas-pglite/docker-compose.yml up --build
 
 Open `http://localhost:8200` (node-1) and `http://localhost:8200/?node=2` (node-2); Control Center at `http://localhost:8201`.
 
-Demonstrates: [synced state (CRDT)](/guide/synced-state), [the reactive server-side co-writer](/guide/store#a-reactive-server-side-co-writer), [choosing a store](/guide/choosing-a-store).
-
-## store-pglite — a self-clustering store over Postgres + Electric
-
-A cluster where the **store owns its cross-node sync** (`clustering: 'self'`) — the store needs **no super-line adapter**; central Postgres + Electric is its only fan-out. Writes, strong reads, and ACL go to Postgres via `postgres.js`; each node keeps an in-memory PGlite replica that Electric streams to, and `live.changes` fans changes to that node's local clients only. A write round-trips `node → Postgres → Electric → every node's replica`. Every node runs identical code with **no cluster-size knowledge** — peers find each other over mDNS, so adding a node-3 needs zero config. A separate broker-less libp2p mesh carries presence/inspector so the Control Center sees the whole cluster. Needs Docker.
-
-```bash
-cd examples/store-pglite && docker compose up --build
-```
-
-Watch `writer@node-1 → set count=N` and `reader@node-2 ← room count=N` cross nodes through Electric; Control Center at `http://localhost:8081`.
-
-Demonstrates: [stores](/guide/store), [choosing a store](/guide/choosing-a-store), [scaling & adapters](/guide/scaling-adapters).
+Demonstrates: [CRDT document collections](/guide/collections#crdt-document-collections), the reactive server-side co-writer, self-clustering (Postgres + Electric).
 
 ## hono — one server for HTTP + WebSockets
 

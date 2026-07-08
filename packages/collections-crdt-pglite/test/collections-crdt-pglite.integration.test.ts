@@ -148,4 +148,34 @@ describe.skipIf(!dockerAvailable)('collections-crdt-pglite — co-writers over r
     await waitFor(() => bDeletes.some(([n, id]) => n === 'scenes' && id === 'gone'))
     expect(await b.read('scenes', 'gone')).toBeUndefined()
   }, 60_000)
+
+  it('a late-booting node syncs a heavily-churned shape without losing deltas', async () => {
+    const table = `crdt_${seq++}`
+    // Aggressive compaction so the writes churn the central op-log (repeated fold→baseline→trim = many DELETEs).
+    // A node that then boots and syncs this shape from scratch gets Electric's full re-sync batch — which delivers
+    // partial-column live.changes rows (the divergence bug: the op-log feed crashes on null routing columns).
+    const compact = { everyNUpdates: 5, debounceMs: 50 }
+    const a = await crdtPgliteCollections({ pgUrl, electricUrl, docOptions: () => docMode, table, compact })
+    stores.push(a)
+
+    await a.create('scenes', 'board', { shapes: {} }, docMode)
+    const ra = a.open('scenes', 'board', { origin: 'agent:1' })
+    for (let i = 0; i < 40; i++) {
+      ra.update({ shapes: { [`S${i}`]: { x: i, y: i } } })
+      await sleep(30) // let each delta round-trip central → Electric → replica, and compaction fire + trim
+    }
+    ra.close()
+    await waitFor(() => Object.keys((a.open('scenes', 'board').getSnapshot() as { shapes: Record<string, unknown> }).shapes).length === 40)
+
+    // Now a fresh node boots and syncs the churned shape — the re-sync batch is where partial rows arrive.
+    const b = await crdtPgliteCollections({ pgUrl, electricUrl, docOptions: () => docMode, table, compact })
+    stores.push(b)
+
+    // b must fold the whole shape and converge to a's 40-shape state — a dropped/misrouted partial delta shows up
+    // as a missing shape or b != a.
+    await waitFor(() => sameDoc(b.open('scenes', 'board').getSnapshot(), a.open('scenes', 'board').getSnapshot()), 20_000)
+    const finalB = b.open('scenes', 'board').getSnapshot() as { shapes: Record<string, unknown> }
+    expect(Object.keys(finalB.shapes)).toHaveLength(40)
+    expect(b.open('scenes', 'board').getSnapshot()).toEqual(a.open('scenes', 'board').getSnapshot())
+  }, 90_000)
 })

@@ -76,12 +76,12 @@ afterEach(async () => {
 })
 
 let seq = 0
-async function makeStore(compact: CrdtPgliteCollectionsOptions['compact'] = false) {
+async function makeStore(compact: CrdtPgliteCollectionsOptions['compact'] = false, onError: CrdtPgliteCollectionsOptions['onError'] = () => {}) {
   const table = `crdt_${seq++}`
   const db = (await PGlite.create({ extensions: { live } })) as PGliteWithLive
-  // onError silenced: PGLiteSocketServer shares one unnamed prepared statement across connections, so a
+  // onError silenced by default: PGLiteSocketServer shares one unnamed prepared statement across connections, so a
   // fire-and-forget append racing an awaited query trips a spurious bind error (real Postgres is per-connection).
-  const store = await crdtPgliteCollections({ pgUrl, db, table, docOptions: () => docMode, compact, onError: () => {} }) // no electricUrl: feed driven manually
+  const store = await crdtPgliteCollections({ pgUrl, db, table, docOptions: () => docMode, compact, onError }) // no electricUrl: feed driven manually
   cleanups.push(async () => {
     await store.close?.()
     await db.close()
@@ -222,6 +222,26 @@ describe('collections-crdt-pglite — open()/CrdtServerReplica (the agent co-wri
 })
 
 describe('collections-crdt-pglite — fold robustness', () => {
+  it('survives a partial-column live.changes row (Electric re-sync delivers only changed cols + the key)', async () => {
+    const errs: Array<{ n: string; id: string }> = []
+    const { store, db, ups } = await makeStore(false, (_e, ctx) => errs.push({ n: ctx.n, id: ctx.id }))
+    store.onChange(() => {})
+    const { seed } = makeSeedAndDelta({ ok: 1 }, () => {})
+
+    // Feed a real delta row (full columns) — folds fine.
+    await db.query(`INSERT INTO "${ups}" (collection, res_id, update, origin) VALUES ('scenes', 'p', '${seed}', 'w')`)
+    await waitFor(() => (store.open('scenes', 'p').getSnapshot() as { ok?: number }).ok === 1)
+
+    // Now UPDATE only that row's `origin`: live.changes delivers a partial change carrying just the KEY (seq) +
+    // the changed column — collection / res_id / update come back NULL, exactly like Electric's re-sync batch.
+    // The op-log feed must NOT crash on the null routing columns (the ai-canvas-pglite divergence bug).
+    await db.query(`UPDATE "${ups}" SET origin = 'w2' WHERE res_id = 'p'`)
+    await sleep(150)
+
+    expect(errs).toHaveLength(0) // no dkey(null) crash
+    expect(store.open('scenes', 'p').getSnapshot()).toEqual({ ok: 1 }) // doc intact
+  })
+
   it('skips a poison op-log row without wedging the feed', async () => {
     const { store, db, ups } = await makeStore()
     const changes: DocChange[] = []
@@ -237,6 +257,8 @@ describe('collections-crdt-pglite — fold robustness', () => {
 })
 
 describe('collections-crdt-pglite — compaction + materialized snapshot', () => {
+  // 20s cap: the debounced materialize is slow when this (last, heaviest) test runs under the shared
+  // PGLiteSocketServer's accumulated load — it's fast in isolation and over real Electric.
   it('folds the op-log into <table>.data and trims to a baseline', async () => {
     const { store, db, table, ups } = await makeStore({ everyNUpdates: 100, debounceMs: 60 })
     await store.create('scenes', 'c', { v: 0 }, docMode)
@@ -261,7 +283,7 @@ describe('collections-crdt-pglite — compaction + materialized snapshot', () =>
     await waitFor(async () => {
       const r = await host.query<{ data: unknown }>(`SELECT data FROM "${table}" WHERE collection='scenes' AND id='c'`)
       return JSON.stringify(r.rows[0]?.data) === JSON.stringify({ v: 4 })
-    })
+    }, 16_000)
 
     // and the op-log was trimmed to a baseline (was seed + 4 = 5 rows) that still folds to the same state.
     const rows = await host.query<{ update: string }>(`SELECT update FROM "${ups}" WHERE collection='scenes' AND res_id='c' ORDER BY seq`)
@@ -269,5 +291,5 @@ describe('collections-crdt-pglite — compaction + materialized snapshot', () =>
     const fold = new StoreValue<Record<string, unknown>, StoreMode>({}, docMode)
     for (const r of rows.rows) fold.applyUpdate(fromB64(r.update))
     expect(fold.getSnapshot()).toEqual({ v: 4 })
-  })
+  }, 20_000)
 })

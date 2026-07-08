@@ -27,7 +27,9 @@ const BASELINE_ORIGIN = 'sl-baseline'
 type Doc = StoreValue<Record<string, unknown>, StoreMode>
 /** A local PGlite with the `live` extension; `sync` is present when the backend creates its own Electric replica. */
 type StoreDb = PGliteWithLive & { sync?: PGliteWithSync['sync'] }
-type UpdateRow = { seq: number; collection: string; res_id: string; update: string; origin: string | null }
+// Electric's re-sync/compaction can deliver a PARTIAL live.changes row (only the key + changed columns), so the
+// routing columns and delta come back null on those — model them nullable and skip such rows (they carry no delta).
+type UpdateRow = { seq: number; collection: string | null; res_id: string | null; update: string | null; origin: string | null }
 type MetaRow = { pk: string; collection: string; id: string }
 
 /** Options for {@link crdtPgliteCollections}. */
@@ -226,6 +228,10 @@ export async function crdtPgliteCollections(opts: CrdtPgliteCollectionsOptions):
   const upsSub = await db.live.changes<UpdateRow>(`SELECT seq, collection, res_id, update, origin FROM "${ups}"`, [], 'seq', (changes: Array<Change<UpdateRow>>) => {
     for (const ch of changes) {
       if (ch.__op__ !== 'INSERT' && ch.__op__ !== 'UPDATE') continue
+      // A partial re-sync row (only the key + a changed column like `origin`/`updated_at`) carries no delta and no
+      // routing columns — `collection`/`res_id`/`update` are null. Skip it: a real op-log row always arrives
+      // full-column, and `getDoc(null)` would otherwise throw and drop the rest of this batch's real deltas.
+      if (ch.collection == null || ch.res_id == null || ch.update == null) continue
       try {
         getDoc(ch.collection, ch.res_id).applyUpdate(fromB64(ch.update))
         if (ch.origin === BASELINE_ORIGIN) continue // baseline: folded for state, but not a user change — don't fan or count

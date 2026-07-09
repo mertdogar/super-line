@@ -9,7 +9,7 @@ import type { CrdtCollectionStore, CrdtServerReplica, DocChange, DocOptions, Doc
 import { StoreValue, type StoreMode } from '@super-store/store'
 
 // The self-clustering CRDT-document-collection backend (ADR-0007): the `clustering:'self'` sibling of
-// `collections-crdt-memory`/`-libsql`, and the relocation of `@super-line/store-sync-pglite` onto the
+// `collections-crdt-memory`/`-libsql` — a central-Postgres Yjs op-log engine on the
 // CrdtCollectionStore seam — one backend serving every CRDT collection, keyed by (collection, id), with the
 // stored ACL removed (access is server-side policy callbacks) and a **validate-before-commit** gate added to
 // `apply`. Single-row + Electric can't merge (Electric ships whole rows; concurrent writers clobber), so the

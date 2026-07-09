@@ -47,9 +47,8 @@
 | ↔️ **Req/res** | Unary `await client.x()` with typed errors, timeout & `AbortSignal`. |
 | 📣 **Events & rooms** | Server-pushed events; server-controlled room broadcasts. |
 | 📡 **Topics** | Client-subscribed pub/sub streams, authorized server-side. |
-| 🧩 **Collections** | Typed, relational **rows** declared on the contract — the server validates every write, enforces row-level security, and streams each client a live subset; [TanStack DB](https://tanstack.com/db) does client-side joins & optimistic mutations via the first-party adapter. The typed successor to the LWW stores. **Backends:** in-memory · SQLite · self-clustering (Postgres + Electric). |
-| 🗄️ **Stores** | Permissioned, real-time JSON documents — a pluggable persisted-state primitive with per-client access rules, a reactive client handle, and a reactive in-process server co-writer (`srv.store(ns).open(id)`) that reads, merges, and surgically deletes. **Backends:** the CRDT stores (in-memory · Postgres+Electric) for collaborative documents; the durable libsql/Turso tier and the LWW stores are superseded by Collections. |
-| 🧹 **Cluster-wide delete** | `srv.store(ns).delete(id)` fans a deletion across every node (wire `sdel`); observe it via `ServerStore.onDelete`, the client `ResourceHandle.deleted` flag, and React `useResource().deleted`. |
+| 🧩 **Collections** | Typed persisted state declared on the contract, validated on every write. Two kinds: relational **rows** — row-level security + live subsets, with [TanStack DB](https://tanstack.com/db) joins & optimistic mutations via the first-party adapter — and CRDT **documents** — a single doc opened by id whose concurrent edits merge (validate-before-commit; keep schemas presence-tolerant, ADR-0008). **Backends:** in-memory · SQLite/libSQL · self-clustering (Postgres + Electric). The typed successor to the retired Store family. |
+| 🧹 **Cluster-wide delete** | Deleting a CRDT document fans out across every node (wire `cddel`); observe it via the client `collection(n).open(id)` `deleted` flag and React `useDoc().deleted` — until then a deleted doc reads as a silent empty snapshot. |
 | 🚌 **Cluster event bus** | `server.publish` / `server.subscribe` on a shared topic — cluster-wide pub/sub to server listeners (every node, local echo) and subscribed clients at once. |
 | 📨 **Server→client req/res** | `await srv.toConn(id).request(...)` — ask a client and await a typed reply, across nodes. |
 | 🛰️ **Presence & introspection** | `srv.local.*` (sync) + `srv.cluster.*` (counts, topology, `isOnline`) backed by a Redis registry. |
@@ -81,12 +80,6 @@ pnpm add @super-line/collections-sqlite  # durable (better-sqlite3) · relay
 pnpm add @super-line/collections-pglite  # self-clustering (Postgres + Electric)
 pnpm add @super-line/tanstack-db         # the TanStack DB adapter (joins, live queries)
 
-# stores — permissioned, real-time documents (CRDT for collab docs; LWW deprecated → collections)
-pnpm add @super-line/store-memory       # LWW · in-memory · relay
-pnpm add @super-line/store-sync         # CRDT · in-memory · relay
-pnpm add @super-line/store-sqlite       # LWW · durable (better-sqlite3) · relay
-pnpm add @super-line/store-pglite       # LWW · self-clustering (Postgres + Electric)
-pnpm add @super-line/store-sync-pglite  # CRDT · self-clustering (Postgres + Electric)
 
 pnpm add @super-line/react             # React hooks
 ```
@@ -235,7 +228,7 @@ pnpm --filter @super-line/example-synced-canvas-yjs dev         # Yjs        · 
 pnpm --filter @super-line/example-synced-canvas-automerge dev   # Automerge  · http://localhost:5173
 
 # AI co-writer canvas — a server-side LLM agent co-edits the same CRDT board as you, via
-# srv.store('scene').open(id) (reactive read + update + surgical delete). Needs an AI Gateway key:
+# srv.collection('scene').open(id) (reactive read + update + surgical delete). Needs an AI Gateway key:
 pnpm --filter @super-line/example-ai-canvas dev   # http://localhost:5373 (set AI_GATEWAY_API_KEY)
 
 # Hono (HTTP) + super-line (WS) on ONE port — uptime topic, shared todos, live cursors + a curl→WS bridge:
@@ -334,10 +327,10 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 
 | Package | Purpose |
 | --- | --- |
-| [`@super-line/core`](packages/core) | `defineContract` (roles + direction), validation, wire protocol, the `Serializer` / `Adapter` / transport (`RawConn`·`ServerTransport`·`ClientTransport`·`Handshake`) / store (`ServerStore`·`ServerReplica`·`SDeleteFrame`) interfaces, `SuperLineError` |
-| [`@super-line/server`](packages/server) | `createSuperLineServer` over any transport: role-keyed `implement`, rooms, topics, `forRole`, the cluster event bus (`publish`/`subscribe`), server→client requests (`toConn`/`toUser`), the in-process store co-writer (`srv.store(ns).open(id)`), local + cluster introspection, heartbeat, middleware, in-memory adapter |
-| [`@super-line/client`](packages/client) | `createSuperLineClient` (role-scoped surface, reconnect, typed calls, `on` / `subscribe`, the store handle `store(ns).open(id)` with `set`/`update`/`delete`/`deleted`) |
-| [`@super-line/react`](packages/react) | `createSuperLineHooks<C, Role>` → `useRequest` / `useEvent` / `useSubscription` / `useResource` |
+| [`@super-line/core`](packages/core) | `defineContract` (roles + direction), validation, wire protocol, the `Serializer` / `Adapter` / transport (`RawConn`·`ServerTransport`·`ClientTransport`·`Handshake`) / collection (`CollectionStore`·`CrdtCollectionStore`) interfaces, `SuperLineError` |
+| [`@super-line/server`](packages/server) | `createSuperLineServer` over any transport: role-keyed `implement`, rooms, topics, `forRole`, the cluster event bus (`publish`/`subscribe`), server→client requests (`toConn`/`toUser`), the in-process collection co-writer (`srv.collection(ns).open(id)`), local + cluster introspection, heartbeat, middleware, in-memory adapter |
+| [`@super-line/client`](packages/client) | `createSuperLineClient` (role-scoped surface, reconnect, typed calls, `on` / `subscribe`, the collection handles — `collection(n).subscribe(query)` rows, `collection(n).open(id)` CRDT docs) |
+| [`@super-line/react`](packages/react) | `createSuperLineHooks<C, Role>` → `useRequest` / `useEvent` / `useSubscription` / `useCollection` / `useDoc` |
 | [`@super-line/control-center`](packages/control-center) | Debugging webapp (`npx`): live topology, contract, roles & per-conn ctx/state, transport/wire, `msg.*` live feed |
 | **Transports** — client↔server wire ||
 | [`@super-line/transport-websocket`](packages/transport-websocket) | Default WebSocket transport: HTTP upgrade, 401 rejection, inspector subprotocol, backpressure (`webSocketServerTransport`/`webSocketClientTransport`) |
@@ -349,12 +342,6 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 | [`@super-line/adapter-rabbitmq`](packages/adapter-rabbitmq) | RabbitMQ (AMQP) adapter for multi-node fan-out |
 | [`@super-line/adapter-zeromq`](packages/adapter-zeromq) | ZeroMQ adapter for multi-node fan-out — brokerless mesh or a lightweight forwarder, with gossip presence |
 | [`@super-line/adapter-libp2p`](packages/adapter-libp2p) | Decentralized, broker-less libp2p (gossipsub) adapter — fan-out + presence, no broker |
-| **Stores** — permissioned, real-time documents ||
-| [`@super-line/store-memory`](packages/store-memory) | LWW · in-memory · relay — the default store pair (`memoryStoreServer`/`memoryStoreClient`) |
-| [`@super-line/store-sync`](packages/store-sync) | CRDT (Yjs/super-store) · in-memory · relay (`syncStoreServer`/`syncStoreClient`) |
-| [`@super-line/store-sqlite`](packages/store-sqlite) | LWW · durable (better-sqlite3 WAL) · relay (`sqliteStoreServer`; pair with `memoryStoreClient`) |
-| [`@super-line/store-pglite`](packages/store-pglite) | LWW · self-clustering (central Postgres + per-node Electric→PGlite, **no adapter**) (`pgliteStoreServer`) |
-| [`@super-line/store-sync-pglite`](packages/store-sync-pglite) | CRDT · self-clustering (Postgres op-log + Electric→PGlite, **no adapter**) (`syncPgliteStoreServer`) |
 
 ## Status
 

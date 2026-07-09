@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { defineContract, type Schema } from '@super-line/core'
 import { createSuperLineClient } from '@super-line/client'
 import { createSuperLineServer, type SuperLineServer } from '@super-line/server'
-import { memoryStoreClient } from '@super-line/store-memory'
 import { createLoopbackTransport } from '@super-line/transport-loopback'
 
 // passthrough Standard Schema (client package has no zod dep) — validate returns the value unchanged
@@ -92,15 +91,4 @@ describe('client plugins (phase 1 · client pair)', () => {
     ).toThrow(/duplicate server→client handler.*confirm/i)
   })
 
-  it('merges a plugin-contributed client store into client.store(name)', () => {
-    const loop = createLoopbackTransport()
-    const cl = createSuperLineClient(contract, {
-      transport: loop.client(),
-      role: 'user',
-      plugins: [{ name: 'p', stores: { plog: memoryStoreClient() } }],
-    })
-    clients.push(cl)
-    expect(() => cl.store('plog')).not.toThrow()
-    expect(() => cl.store('nope')).toThrow(/not configured/i)
-  })
 })

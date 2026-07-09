@@ -45,7 +45,6 @@ const CATEGORIES: { id: FeedCategory; label: string }[] = [
   { id: 'lifecycle', label: 'Lifecycle' },
   { id: 'requests', label: 'Requests' },
   { id: 'events', label: 'Events' },
-  { id: 'stores', label: 'Store' },
 ]
 
 const WIRE_LABELS: Record<TransportFamily, string> = {

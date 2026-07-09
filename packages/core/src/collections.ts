@@ -1,10 +1,10 @@
 /**
  * CollectionStore — the persistence seam for the typed-row collection family (ADR-0006).
  *
- * Unlike {@link ServerStore} (one namespace = many independent documents), ONE CollectionStore serves
+ * Unlike a per-id document store (one namespace = many independent documents), ONE CollectionStore serves
  * every collection a server declares, so a cross-collection batch commits in a single transaction domain
- * (decision 13). The backend is deliberately dumb about policy and schema — exactly as {@link ServerStore}
- * is dumb about ACLs. Core validates rows against the contract schema and enforces row policies BEFORE
+ * (decision 13). The backend is deliberately dumb about policy and schema. Core validates rows against the
+ * contract schema and enforces row policies BEFORE
  * calling {@link CollectionStore.apply}; the backend only persists rows and reports what changed.
  *
  * Change routing lives in the server and is stateless per subscription: it evaluates each {@link RowChange}

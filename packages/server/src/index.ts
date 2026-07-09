@@ -36,7 +36,6 @@ import {
   type CChangeFrame,
   type InspectorEvent,
   type TapEvent,
-  type StoreInfo,
   type ServerTransport,
   type RawConn,
   type Handshake,
@@ -46,20 +45,6 @@ import {
   type ReqFrame,
   type EvtFrame,
   type PubFrame,
-  type SOpenFrame,
-  type SCloseFrame,
-  type SWriteFrame,
-  type SReadFrame,
-  type SChangeFrame,
-  type SDeleteFrame,
-  type ServerStore,
-  type ServerReplica,
-  type ResourceSummary,
-  type ListOpts,
-  type SearchOpts,
-  type Resource,
-  type AccessRules,
-  type Perms,
   type EventData,
   type RoleOf,
   type Events,
@@ -110,7 +95,6 @@ const CONN = 'c:' // personal channel per connection (targeted cross-node send)
 const USER = 'u:' // personal channel per user key (cross-node fan-out)
 const REPLY = 'reply:' // per-node channel carrying server→client request replies back to the origin
 const PLUGIN = 'x:' // reserved prefix for plugin-private channels: `x:<plugin>:<name>`
-const STORE = 's:' // per-Resource fan-out channel: `s:<name>:<id>`
 const CDOC = 'd:' // per-CRDT-document fan-out channel: `d:<collection>:<id>`
 const SERVER_ORIGIN = 'server' // origin stamped on server co-writes (distinct from any client writer id)
 
@@ -269,43 +253,6 @@ export interface RoleLens<C extends Contract, R extends RoleOf<C>> {
 }
 
 /**
- * Server-side handle for one configured Store, reached via `srv.store.<name>`. The server is
- * authoritative: it creates Resources, grants/revokes access, and may co-write. `data` is untyped
- * (stores are off-contract — see ADR-0003); callers assert the shape.
- */
-export interface ServerStoreHandle {
-  /** Create a Resource with initial data + access rules (deny-by-default for everyone unlisted). */
-  create(id: string, data: unknown, accessRules: AccessRules): Promise<void>
-  /** Read a Resource (data + accessRules), or undefined if absent. */
-  read(id: string): Promise<Resource | undefined>
-  /**
-   * Server co-write: replace the Resource's value (LWW), fanned out to subscribers stamped with `origin`
-   * (default `"server"`) for echo-break + inspector attribution — mirrors {@link ServerStore.open}'s origin.
-   */
-  write(id: string, data: unknown, opts?: { origin?: string }): Promise<void>
-  /** Grant a principal read/write on a Resource. */
-  grant(id: string, principal: string, perms: Perms): Promise<void>
-  /** Revoke a principal's access to a Resource entirely. */
-  revoke(id: string, principal: string): Promise<void>
-  /** Delete a Resource. */
-  delete(id: string): Promise<void>
-  /**
-   * Summaries of this store's Resources, server-side filtered / sorted / paginated per {@link ListOpts}
-   * (omit `opts` for every Resource, id-ascending). Forwards to {@link ServerStore.list}.
-   */
-  list(opts?: ListOpts): Promise<ResourceSummary[]>
-  /** Distinct principals granted anywhere in this store (store-global). Forwards to {@link ServerStore.searchPrincipals}. */
-  searchPrincipals(opts: SearchOpts): Promise<string[]>
-  /**
-   * Open a reactive in-process co-writer over a Resource's canonical state — the server half's mirror of
-   * `client.store(name).open(id)`. Reactive reads, merging `update`, and surgical `delete(path)` (the only
-   * way to remove a key server-side), all server-authoritative and fanned out to subscribers. `origin`
-   * (default `"server"`) tags its Changes for inspector attribution. Throws if the store has no `open`.
-   */
-  open(id: string, opts?: { origin?: string }): ServerReplica
-}
-
-/**
  * Handlers a plugin provides for its paired surface `S` (ADR-0004): one per `clientToServer` key,
  * typed from `S`. `ctx`/`conn` are loose — a plugin is written independently of the host's per-role ctx.
  */
@@ -363,11 +310,6 @@ export interface SuperLinePlugin<S extends Directional = {}> {
    * throws at construction.
    */
   handlers?: (ctx: PluginContext) => HandlersFor<S>
-  /**
-   * Server halves of Store pairs the plugin contributes, merged into the host's `stores` and reachable
-   * via `srv.store(name)`. A name colliding with a host store or another plugin's store throws at construction.
-   */
-  stores?: Record<string, ServerStore>
   /**
    * Row-security policies for the collections the plugin's contract fragment declares (see {@link CollectionPolicy}).
    * Merged into the host's `policies`; a collection already policied by the host or another plugin throws at
@@ -460,10 +402,6 @@ export interface PluginContext {
     readonly size: number
     readonly connections: readonly Conn[]
   }
-  /** Server-authoritative handle for a configured store (incl. plugin-contributed stores). */
-  store(name: string): ServerStoreHandle
-  /** Configured stores (host + plugin) and their models. */
-  storeInfos(): StoreInfo[]
   /** Server-authoritative handle for a contract collection (loosely typed here as the LWW row handle — the surface plugins/inspector use); throws if none is configured. */
   collection(name: string): ServerCollectionHandle
   /** Declared collections (name + key + advisory references) for the schema graph. */
@@ -512,12 +450,6 @@ export interface SuperLineServerOptions<
    * Defaults to `{ interval: 30_000 }` (no reaping).
    */
   heartbeat?: { interval?: number; maxMissed?: number } | false
-  /**
-   * Pluggable persisted-state Stores, keyed by name (`{ scene: crdtStoreServer(), config: memoryStoreServer() }`).
-   * Each is the server half of a Store pair; the client passes the matching client halves. Surfaced as
-   * `srv.store.<name>` and `client.store.<name>`. Stores are off-contract and untyped (ADR-0003).
-   */
-  stores?: Record<string, ServerStore>
   /**
    * The single {@link CollectionStore} backend serving every collection this contract declares (typed rows;
    * ADR-0006), e.g. `collections: memoryCollections()`. One backend ⇒ one transaction domain, so a
@@ -589,8 +521,6 @@ export interface SuperLineServer<C extends Contract, A extends AuthResult<C>, HK
   ): () => void
   /** Lens for role-scoped sends, e.g. forRole('user').publish('feed', data). */
   forRole<R extends RoleOf<C>>(role: R): RoleLens<C, R>
-  /** Server-authoritative handle for a configured Store (`srv.store('scene').create(...)`). Throws `NOT_FOUND` if the name isn't configured. */
-  store(name: string): ServerStoreHandle
   /**
    * Server-authoritative handle for a contract collection, typed by the contract: an LWW row collection gives
    * `ServerCollectionHandle` (`insert`/`update`/`batch`), a CRDT document collection gives
@@ -636,21 +566,11 @@ export function createSuperLineServer<
   const c: Contract = contract
   const serializer = opts.serializer ?? jsonSerializer
   const adapter = opts.adapter ?? createInMemoryAdapter()
-  const storeMap = (opts.stores ?? {}) as Record<string, ServerStore>
   const plugins = opts.plugins ?? []
   const pluginNames = new Set<string>()
   for (const p of plugins) {
     if (pluginNames.has(p.name)) throw new Error(`Duplicate plugin name: ${p.name}`)
     pluginNames.add(p.name)
-  }
-  // merge plugin-contributed stores into the host's store map; a name collision throws (never silent)
-  for (const p of plugins) {
-    if (!p.stores) continue
-    for (const [name, store] of Object.entries(p.stores)) {
-      if (name in storeMap)
-        throw new Error(`Plugin '${p.name}' store '${name}' collides with an existing store of that name`)
-      storeMap[name] = store
-    }
   }
 
   // ---- Collections: the single backend + row policies + filter-based routing registry ----
@@ -765,7 +685,7 @@ export function createSuperLineServer<
   const replyChannel = REPLY + instanceId
   let impl: Impl = {}
   let closing = false // close() is idempotent
-  let relaying = false // true while applying a relayed Store Change, so its onChange doesn't re-publish (echo loop)
+  let relaying = false // true while applying a relayed CRDT change, so its onChange doesn't re-publish (echo loop)
 
   // server→client request bookkeeping (one counter, two roles a node can play)
   let nextSReq = 1
@@ -803,10 +723,6 @@ export function createSuperLineServer<
     }
     if (channel.startsWith(CONN) || channel.startsWith(USER)) {
       handlePersonal(channel, payload)
-      return
-    }
-    if (channel.startsWith(STORE)) {
-      handleStoreRelay(channel, payload)
       return
     }
     if (channel.startsWith(CDOC)) {
@@ -1142,11 +1058,7 @@ export function createSuperLineServer<
     else if (frame.t === 'unsub') {
       const ns = topicNamespace(conn.role, frame.c)
       if (ns) leaveChannel(conn, TOPIC + ns + ':' + frame.c)
-    } else if (frame.t === 'sopen') await handleStoreOpen(conn, frame)
-    else if (frame.t === 'srd') await handleStoreRead(conn, frame)
-    else if (frame.t === 'swr') await handleStoreWrite(conn, frame)
-    else if (frame.t === 'sclose') handleStoreClose(conn, frame)
-    else if (frame.t === 'csub') await handleCollectionSub(conn, frame)
+    } else if (frame.t === 'csub') await handleCollectionSub(conn, frame)
     else if (frame.t === 'cuns') handleCollectionUnsub(conn, frame)
     else if (frame.t === 'cbat') await handleCollectionBatch(conn, frame)
     else if (frame.t === 'cdopen') await handleCrdtOpen(conn, frame)
@@ -1258,74 +1170,6 @@ export function createSuperLineServer<
     })
   }
 
-  // ---- Stores -------------------------------------------------------------
-  // ACL is enforced here (core); the Store persists + decides the consistency model and never sees `principal`.
-  // Fan-out reuses the channel machinery: subscribing a Resource joins `s:<name>:<id>`; a Change is published
-  // to that channel and delivered to members by the generic adapter.onMessage path. Echo-break is client-side
-  // (the client half skips its own `origin`), so no server-side origin-skip is needed.
-  function storeOrErr(conn: Conn, id: number, name: string): ServerStore | undefined {
-    const store = storeMap[name]
-    if (!store) conn.send({ t: 'err', i: id, code: 'NOT_FOUND', m: `Unknown store: ${name}` })
-    return store
-  }
-
-  async function handleStoreOpen(conn: Conn, frame: SOpenFrame): Promise<void> {
-    const store = storeOrErr(conn, frame.i, frame.n)
-    if (!store) return
-    await dispatchOp(conn, frame.i, { kind: 'subscribe', name: `store:${frame.n}/${frame.id}`, conn }, async () => {
-      const resource = await store.read(frame.id)
-      if (!resource) throw new SuperLineError('NOT_FOUND', `No resource: ${frame.n}/${frame.id}`)
-      const principal = conn.principal ?? conn.id
-      if (!resource.accessRules[principal]?.read)
-        throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}/${frame.id}`)
-      await joinChannel(conn, STORE + frame.n + ':' + frame.id)
-      if (taps.length) emitTap({ type: 'store.subscribe', connId: conn.id, store: frame.n, id: frame.id })
-      conn.send({ t: 'res', i: frame.i, d: resource.data }) // catch-up snapshot
-    })
-  }
-
-  async function handleStoreRead(conn: Conn, frame: SReadFrame): Promise<void> {
-    const store = storeOrErr(conn, frame.i, frame.n)
-    if (!store) return
-    await dispatchOp(conn, frame.i, { kind: 'request', name: `store:${frame.n}/${frame.id}`, conn }, async () => {
-      const resource = await store.read(frame.id)
-      if (!resource) throw new SuperLineError('NOT_FOUND', `No resource: ${frame.n}/${frame.id}`)
-      const principal = conn.principal ?? conn.id
-      if (!resource.accessRules[principal]?.read)
-        throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}/${frame.id}`)
-      conn.send({ t: 'res', i: frame.i, d: resource.data })
-    })
-  }
-
-  async function handleStoreWrite(conn: Conn, frame: SWriteFrame): Promise<void> {
-    const store = storeOrErr(conn, frame.i, frame.n)
-    if (!store) return
-    await dispatchOp(conn, frame.i, { kind: 'request', name: `store:${frame.n}/${frame.id}`, conn }, async () => {
-      const resource = await store.read(frame.id)
-      if (!resource) throw new SuperLineError('NOT_FOUND', `No resource: ${frame.n}/${frame.id}`)
-      const principal = conn.principal ?? conn.id
-      if (!resource.accessRules[principal]?.write)
-        throw new SuperLineError('FORBIDDEN', `Write denied: ${frame.n}/${frame.id}`)
-      await store.apply({ id: frame.id, update: frame.u, origin: frame.o }) // → store.onChange → fan-out
-      if (taps.length)
-        emitTap({
-          type: 'store.write',
-          store: frame.n,
-          id: frame.id,
-          origin: frame.o,
-          connId: conn.id,
-          data: frame.u,
-        })
-      conn.send({ t: 'res', i: frame.i, d: null })
-    })
-  }
-
-  function handleStoreClose(conn: Conn, frame: SCloseFrame): void {
-    if (!storeMap[frame.n]) return
-    leaveChannel(conn, STORE + frame.n + ':' + frame.id)
-    if (taps.length) emitTap({ type: 'store.unsubscribe', connId: conn.id, store: frame.n, id: frame.id })
-  }
-
   // ---- CRDT document collections (ADR-0007) -------------------------------------------------------------
   // The store machinery re-surfaced under the collection API: per-doc fan-out channel (d:<n>:<id>), opaque
   // base64 deltas, validate-before-commit at ingress, guard-shaped policies (no stored ACL). Creation is
@@ -1379,7 +1223,7 @@ export function createSuperLineServer<
     leaveChannel(conn, CDOC + frame.n + ':' + frame.id)
   }
 
-  // crdtStore.onChange is the single fan-out source for CRDT docs — the mirror of the storeMap loop below.
+  // crdtStore.onChange is the single fan-out source for CRDT docs.
   if (crdtStore) {
     const isSelf = crdtStore.clustering === 'self'
     crdtStore.onChange((change) => {
@@ -1440,71 +1284,8 @@ export function createSuperLineServer<
     }
   }
 
-  // Each Store's onChange is core's single fan-out source. A `relay` store has no shared backend, so core
-  // publishes its Change over the adapter (loopback locally, real fan-out cross-node); `relaying` suppresses
-  // re-publishing a Change that arrived FROM another node (echo-loop). A `self` store owns its own cross-node
-  // sync (its backend fans changes to every node), so core delivers to LOCAL subscribers ONLY — publishing
-  // over the adapter would double-deliver against the store's own propagation.
-  for (const [name, store] of Object.entries(storeMap)) {
-    const isSelf = store.clustering === 'self'
-    store.onChange((change) => {
-      const channel = STORE + name + ':' + change.id
-      if (isSelf) {
-        const set = members.get(channel)
-        if (!set) return
-        const payload = serializer.encode({ t: 'sch', n: name, id: change.id, u: change.update, o: change.origin } satisfies SChangeFrame)
-        for (const conn of set) conn.sendRaw(payload)
-        return
-      }
-      if (relaying) return
-      void adapter.publish(
-        channel,
-        serializer.encode({ t: 'sch', n: name, id: change.id, u: change.update, o: change.origin, nd: instanceId } satisfies SChangeFrame),
-      )
-    })
-    // A self store surfaces deletes through onDelete (its backend signals the delete on every node); fan it to
-    // LOCAL subscribers as sdel. relay stores omit onDelete — their deletes fan over the adapter (storeApi.delete).
-    if (isSelf)
-      store.onDelete?.((id) => {
-        const set = members.get(STORE + name + ':' + id)
-        if (!set) return
-        const payload = serializer.encode({ t: 'sdel', n: name, id } satisfies SDeleteFrame)
-        for (const conn of set) conn.sendRaw(payload)
-      })
-  }
-
-  // A Change arriving on a Store channel from the adapter: forward it to local subscriber conns, and — for
-  // a `relay`-mode store that didn't originate it — apply it to the local replica so this node stays
-  // converged (a one-shot read / fresh open here reflects it). `self`-mode stores own their cross-node sync.
-  // NB: relay-mode stores must apply synchronously (apply → onChange before apply returns) for the guard.
-  function handleStoreRelay(channel: string, payload: string | Uint8Array): void {
-    const set = members.get(channel)
-    if (set) for (const conn of set) conn.sendRaw(payload)
-    let frame: SChangeFrame | SDeleteFrame
-    try {
-      frame = serializer.decode(payload) as SChangeFrame | SDeleteFrame
-    } catch {
-      return
-    }
-    if (frame.nd === instanceId) return // our own publish looped back; already applied locally
-    const store = storeMap[frame.n]
-    if (!store || store.clustering !== 'relay') return
-    if (frame.t === 'sdel') {
-      void store.delete(frame.id) // idempotent: drops the local replica so this node stays converged
-      return
-    }
-    relaying = true
-    try {
-      void store.apply({ id: frame.id, update: frame.u, origin: frame.o })
-    } catch {
-      // resource not present on this node yet (creates are node-local) — drop; it catches up on next open/read
-    } finally {
-      relaying = false
-    }
-  }
-
   // ---- Collections --------------------------------------------------------
-  // Typed rows (ADR-0006). Unlike stores (per-Resource channels), routing is FILTER-based: each row change is
+  // Typed rows (ADR-0006). Routing is FILTER-based: each row change is
   // evaluated against every subscribed connection's effective visibility (policy read-filter ∧ the OR of its
   // subscription filters), so the server keeps only predicates per connection — never per-row membership. The
   // CLIENT re-filters per subscription. Writes are atomic batches; under relay the whole batch fans as ONE
@@ -1833,82 +1614,6 @@ export function createSuperLineServer<
     })
   }
 
-  // server-authoritative per-store handles: create/grant/revoke are server-only; write is the LWW co-write
-  const storeApi: Record<string, ServerStoreHandle> = {}
-  for (const [name, store] of Object.entries(storeMap)) {
-    const readOrThrow = async (id: string): Promise<Resource> => {
-      const r = await store.read(id)
-      if (!r) throw new SuperLineError('NOT_FOUND', `No resource: ${name}/${id}`)
-      return r
-    }
-    storeApi[name] = {
-      async create(id, data, accessRules) {
-        await store.create(id, data, accessRules)
-        if (taps.length) emitTap({ type: 'store.create', store: name, id })
-      },
-      read(id) {
-        return Promise.resolve(store.read(id))
-      },
-      async write(id, data, opts) {
-        const origin = opts?.origin ?? SERVER_ORIGIN
-        await store.apply({ id, update: data, origin })
-        if (taps.length) emitTap({ type: 'store.write', store: name, id, origin, data })
-      },
-      async grant(id, principal, perms) {
-        const r = await readOrThrow(id)
-        await store.setAccess(id, { ...r.accessRules, [principal]: perms })
-        if (taps.length) emitTap({ type: 'store.grant', store: name, id, principal, perms })
-      },
-      async revoke(id, principal) {
-        const r = await readOrThrow(id)
-        const next = { ...r.accessRules }
-        delete next[principal]
-        await store.setAccess(id, next)
-        if (taps.length) emitTap({ type: 'store.revoke', store: name, id, principal })
-      },
-      async delete(id) {
-        await store.delete(id)
-        // self stores fan their own deletes (backend → onDelete → local subscribers); relay stores fan over the adapter
-        if (store.clustering !== 'self')
-          void adapter.publish(
-            STORE + name + ':' + id,
-            serializer.encode({ t: 'sdel', n: name, id, nd: instanceId } satisfies SDeleteFrame),
-          )
-        if (taps.length) emitTap({ type: 'store.delete', store: name, id })
-      },
-      list(opts) {
-        return Promise.resolve(store.list(opts))
-      },
-      searchPrincipals(opts) {
-        return Promise.resolve(store.searchPrincipals(opts))
-      },
-      open(id, openOpts) {
-        if (!store.open)
-          throw new SuperLineError('UNSUPPORTED', `Store ${name} does not support reactive open()`)
-        const replica = store.open(id, openOpts)
-        if (!taps.length) return replica
-        // Surface server co-writes to taps (reusing store.write), attributed to this handle's origin.
-        const origin = openOpts?.origin ?? SERVER_ORIGIN
-        const emit = (data: unknown): void => emitTap({ type: 'store.write', store: name, id, origin, data })
-        return {
-          ...replica,
-          set: (d) => {
-            replica.set(d)
-            emit(d)
-          },
-          update: (p) => {
-            replica.update(p)
-            emit(p)
-          },
-          delete: (path) => {
-            replica.delete(path)
-            emit({ delete: path })
-          },
-        }
-      },
-    }
-  }
-
   const pluginDisposers: Array<() => void> = [] // populated after `api` is built (plugin setup() returns)
   const pluginHandlers: Record<string, AnyHandler> = {} // plugin request handlers, keyed by method name
 
@@ -2011,11 +1716,6 @@ export function createSuperLineServer<
           publishTo(role, String(topic), data)
         },
       }
-    },
-    store(name) {
-      const handle = storeApi[name]
-      if (!handle) throw new SuperLineError('NOT_FOUND', `Store not configured: ${name}`)
-      return handle
     },
     collection<N extends CollectionName<C>>(
       name: N,
@@ -2145,8 +1845,6 @@ export function createSuperLineServer<
           },
         }
       },
-      store: (name) => api.store(name),
-      storeInfos: () => Object.entries(storeMap).map(([name, store]) => ({ name, model: store.model })),
       collection: (name) => api.collection(name as CollectionName<C>) as ServerCollectionHandle,
       collectionInfos: () =>
         // CRDT document collections surface with a synthetic `id` key + no references — the inspector's

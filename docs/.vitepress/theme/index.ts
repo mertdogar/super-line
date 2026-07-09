@@ -23,11 +23,6 @@ const GUIDE_ALIASES: Record<string, string> = {
   'transport-libp2p': 'transport-libp2p',
   'transport-loopback': 'transport-loopback',
   'control-center': 'control-center',
-  'store-memory': 'store',
-  'store-sqlite': 'store',
-  'store-sync': 'synced-state',
-  'store-pglite': 'choosing-a-store',
-  'store-sync-pglite': 'store-sync-pglite',
 }
 
 function redirectAliases() {

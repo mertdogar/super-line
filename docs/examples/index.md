@@ -39,7 +39,7 @@ pnpm --filter @super-line/example-synced-canvas-yjs dev         # http://localho
 pnpm --filter @super-line/example-synced-canvas-automerge dev   # http://localhost:5173
 ```
 
-Demonstrates: [synced state (CRDT)](/guide/synced-state), [events & rooms](/guide/events-rooms), [requests](/guide/requests).
+Demonstrates: [CRDT document collections](/guide/collections), [events & rooms](/guide/events-rooms), [requests](/guide/requests).
 
 ## ai-canvas — a server-side AI agent as a co-writer
 

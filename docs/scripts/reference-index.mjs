@@ -21,10 +21,10 @@ are documented as hands-on guides rather than extracted API pages.
 
 ## Core
 
-${api('core', '`defineContract`, wire types, `SuperLineError`, transport & store interfaces')}
-${api('server', '`createSuperLineServer` — implements the contract, owns rooms/topics/auth, cluster bus, `ServerStore`')}
-${api('client', '`createSuperLineClient` — calls the contract with full inference, reconnection, stores')}
-${api('react', '`createSuperLineHooks` — typed hooks over the client (requests, events, `useResource`)')}
+${api('core', '`defineContract`, wire types, `SuperLineError`, transport & collection interfaces')}
+${api('server', '`createSuperLineServer` — implements the contract, owns rooms/topics/auth, cluster bus, collection co-writers')}
+${api('client', '`createSuperLineClient` — calls the contract with full inference, reconnection, collections')}
+${api('react', '`createSuperLineHooks` — typed hooks over the client (requests, events, `useCollection`/`useDoc`)')}
 
 ## Transports — the client ↔ server wire
 
@@ -33,15 +33,15 @@ ${guide('transport-http', 'transport-http', 'HTTP wire — SSE stream or long-po
 ${guide('transport-libp2p', 'transport-libp2p', 'libp2p wire — WebRTC, NAT traversal, bring-your-own node')}
 ${guide('transport-loopback', 'transport-loopback', 'in-memory wire for tests')}
 
-## Stores — durable & synced state
+## Collections — typed, contract-declared persisted state
 
-${guide('store-memory', 'store', 'plain LWW in-memory store, the default')}
-${guide('store-sync', 'synced-state', 'CRDT (Yjs) synced store engine')}
-${guide('store-sqlite', 'store', 'durable LWW on better-sqlite3')}
-${guide('store-pglite', 'choosing-a-store', 'LWW over Postgres + Electric — no adapter needed')}
-${guide('store-sync-pglite', 'store-sync-pglite', 'CRDT over Postgres + Electric — no adapter needed')}
-
-Not sure which store fits? [Choosing a store](/guide/choosing-a-store).
+${guide('collections-memory', 'collections', 'typed LWW rows — in-memory · relay')}
+${guide('collections-sqlite', 'collections', 'typed LWW rows — durable (better-sqlite3) · relay')}
+${guide('collections-pglite', 'collections', 'typed LWW rows — self-clustering (Postgres + Electric)')}
+${guide('collections-crdt-memory', 'collections', 'CRDT documents — in-memory + the universal client engine')}
+${guide('collections-crdt-libsql', 'collections', 'CRDT documents — durable (libSQL/Turso) · relay')}
+${guide('collections-crdt-pglite', 'collections', 'CRDT documents — self-clustering (Postgres op-log + Electric)')}
+${guide('tanstack-db', 'collections', 'TanStack DB sync adapter — client joins + optimistic mutations')}
 
 ## Adapters — server ↔ server fan-out
 

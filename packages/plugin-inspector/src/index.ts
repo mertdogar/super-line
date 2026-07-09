@@ -13,11 +13,8 @@ import {
   type InspectedContract,
   type ConnView,
   type NodeView,
-  type StoreResourceView,
   type CollectionInfo,
   type CollectionQuery,
-  type ListOpts,
-  type SearchOpts,
 } from '@super-line/core'
 import type { SuperLinePlugin, PluginChannel, ServerCrdtCollectionHandle } from '@super-line/server'
 
@@ -90,7 +87,7 @@ async function buildCollectionInfos(
 }
 
 /**
- * The Control Center inspector, packaged as a plugin. It taps every request/event/store write, snapshots +
+ * The Control Center inspector, packaged as a plugin. It taps every request/event, snapshots +
  * field-redacts the payloads, and publishes them (cluster-wide) on its own plugin channel; and it declares a
  * plugin-owned, observer-invisible connection class (the `superline.inspector.v1` subprotocol) that serves
  * Control Center clients the `InspectorContract` — `getContract`, `getTopology`, `getConn`, … and the
@@ -138,7 +135,6 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
       case 'msg.event':
       case 'msg.broadcast':
       case 'msg.publish':
-      case 'store.write':
         return { ...event, data: safeSnapshot(event.data) }
       default:
         return event
@@ -194,33 +190,6 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
           const remote = await ctx.connectionById(id) // on another node: descriptor only, no ctx
           if (!remote) throw new SuperLineError('NOT_FOUND', `Unknown connection: ${id}`)
           return { descriptor: remote, ctxAvailable: false } satisfies ConnView
-        },
-        listStores: async () => ctx.storeInfos(),
-        listResources: async (input) => {
-          const { store: name, ...opts } = input as { store: string } & ListOpts
-          if (!ctx.storeInfos().some((s) => s.name === name)) throw new SuperLineError('NOT_FOUND', `Unknown store: ${name}`)
-          return ctx.store(name).list(opts)
-        },
-        searchPrincipals: async (input) => {
-          const { store: name, ...opts } = input as { store: string } & SearchOpts
-          if (!ctx.storeInfos().some((s) => s.name === name)) throw new SuperLineError('NOT_FOUND', `Unknown store: ${name}`)
-          return ctx.store(name).searchPrincipals(opts)
-        },
-        readResource: async (input) => {
-          const { store: name, id } = input as { store: string; id: string }
-          if (!ctx.storeInfos().some((s) => s.name === name)) throw new SuperLineError('NOT_FOUND', `Unknown store: ${name}`)
-          const handle = ctx.store(name)
-          const resource = await handle.read(id) // ACL bypassed — the inspector is a trusted observer
-          if (!resource) throw new SuperLineError('NOT_FOUND', `No resource: ${name}/${id}`)
-          let data = resource.data
-          try {
-            const replica = handle.open(id) // materialize a readable snapshot (LWW: plain; CRDT: decoded)
-            data = replica.getSnapshot()
-            replica.close()
-          } catch {
-            // store has no reactive open() — the plain resource data is the snapshot
-          }
-          return { data: safeSnapshot(data), accessRules: resource.accessRules } satisfies StoreResourceView
         },
         listCollections: () => buildCollectionInfos(ctx.contract, ctx.collectionInfos()),
         queryCollection: async (input) => {

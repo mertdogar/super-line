@@ -76,16 +76,6 @@ export function eventWire(event: InspectorEvent, r?: FeedResolver): WireAttribut
     case 'msg.serverRequest':
     case 'msg.serverReply':
       return undefined
-    case 'store.subscribe':
-    case 'store.unsubscribe':
-      return connWire(event.connId, r)
-    case 'store.write':
-      return event.connId ? connWire(event.connId, r) : undefined
-    case 'store.create':
-    case 'store.delete':
-    case 'store.grant':
-    case 'store.revoke':
-      return undefined
   }
 }
 
@@ -129,29 +119,15 @@ export function summarizeEvent(event: InspectorEvent, r?: FeedResolver): string 
       return `→ ${who(event.target, r)} · ${event.name}`
     case 'msg.serverReply':
       return `← ${who(event.target, r)} · ${event.name} · ${event.ok ? 'ok' : event.error?.code ?? 'error'}`
-    case 'store.create':
-      return `+ ${event.store}/${event.id}`
-    case 'store.delete':
-      return `− ${event.store}/${event.id}`
-    case 'store.write':
-      return `${event.store}/${event.id}`
-    case 'store.grant':
-      return `${event.store}/${event.id} +${event.principal}`
-    case 'store.revoke':
-      return `${event.store}/${event.id} −${event.principal}`
-    case 'store.subscribe':
-    case 'store.unsubscribe':
-      return `${who(event.connId, r)} · ${event.store}/${event.id}`
   }
 }
 
 /** Coarse feed category, for the live-feed filter toggles. */
-export type FeedCategory = 'lifecycle' | 'requests' | 'events' | 'stores'
+export type FeedCategory = 'lifecycle' | 'requests' | 'events'
 
 export function eventCategory(type: InspectorEvent['type']): FeedCategory {
   if (type === 'msg.request' || type === 'msg.response' || type === 'msg.serverRequest' || type === 'msg.serverReply')
     return 'requests'
-  if (type.startsWith('store.')) return 'stores'
   if (type.startsWith('msg.')) return 'events'
   return 'lifecycle'
 }
@@ -162,7 +138,6 @@ export function eventColor(type: InspectorEvent['type']): string {
   if (type === 'disconnect') return 'bg-destructive'
   if (type.startsWith('room')) return 'bg-violet-400'
   if (type.startsWith('topic')) return 'bg-amber-400'
-  if (type.startsWith('store')) return 'bg-orange-400'
   if (type === 'msg.request' || type === 'msg.serverRequest') return 'bg-cyan-400'
   if (type === 'msg.response' || type === 'msg.serverReply') return 'bg-emerald-400'
   if (type === 'msg.event' || type === 'msg.broadcast' || type === 'msg.publish') return 'bg-sky-400'
@@ -273,7 +248,7 @@ export function latencyOf(en: InspectorEnvelope, reqTimes: Map<string, number>):
   return t0 === undefined ? undefined : Math.max(0, en.ts - t0)
 }
 
-/** The wire families a row is attributable to ([] when none — publish/server-axis/store-admin). */
+/** The wire families a row is attributable to ([] when none — publish/server-axis). */
 export function eventWireFamilies(event: InspectorEvent, r?: FeedResolver): TransportFamily[] {
   const w = eventWire(event, r)
   if (!w) return []
@@ -295,13 +270,6 @@ export const ALL_EVENT_TYPES: InspectorEvent['type'][] = [
   'msg.publish',
   'msg.serverRequest',
   'msg.serverReply',
-  'store.create',
-  'store.delete',
-  'store.write',
-  'store.grant',
-  'store.revoke',
-  'store.subscribe',
-  'store.unsubscribe',
 ]
 
 /** The relative trailing-window presets for the time filter (null = All). */

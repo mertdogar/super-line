@@ -73,8 +73,6 @@ export type {
   InspectorEvent,
   InspectorEnvelope,
   TapEvent,
-  StoreInfo,
-  StoreResourceView,
   CollectionInfo,
   SchemaConverter,
 } from './inspector.js'
@@ -96,12 +94,6 @@ export type {
   SReqFrame,
   SResFrame,
   SErrFrame,
-  SOpenFrame,
-  SCloseFrame,
-  SWriteFrame,
-  SReadFrame,
-  SChangeFrame,
-  SDeleteFrame,
   CSubFrame,
   CUnsubFrame,
   RowOp,
@@ -116,20 +108,7 @@ export type {
   PongFrame,
 } from './wire.js'
 
-export type {
-  Principal,
-  Perms,
-  AccessRules,
-  Resource,
-  StoreChange,
-  ServerStore,
-  ResourceSummary,
-  ListOpts,
-  SearchOpts,
-  ClientStore,
-  ResourceReplica,
-  ServerReplica,
-} from './store.js'
+export type { StoreChange, ResourceReplica } from './store.js'
 
 export type { CollectionStore, ResolvedRowOp, RowChange } from './collections.js'
 export type { CrdtCollectionStore, DocChange, DocSummary, DocListOpts, CrdtServerReplica, CrdtCollectionClient } from './crdt-collections.js'

@@ -37,19 +37,15 @@ The client↔server wire is a **pluggable transport** — WebSocket is just the 
 
 Implementations: [`@super-line/transport-websocket`](https://www.npmjs.com/package/@super-line/transport-websocket) (default), [`/transport-http`](https://www.npmjs.com/package/@super-line/transport-http) (SSE / long-poll), [`/transport-libp2p`](https://www.npmjs.com/package/@super-line/transport-libp2p), and [`/transport-loopback`](https://www.npmjs.com/package/@super-line/transport-loopback) (in-memory, for tests).
 
-## Store seam
+## Persisted state — collections
 
-Synced state ships as a pluggable **Store** pair, like a transport. Core relays opaque `StoreChange`s between the halves and enforces access — it never parses `update`. The type spine lives here:
+Persisted, synced state ships as **collections** — declared on the contract and validated on every write: typed **rows** (`CollectionStore`: [`/collections-memory`](https://www.npmjs.com/package/@super-line/collections-memory), [`/collections-sqlite`](https://www.npmjs.com/package/@super-line/collections-sqlite), [`/collections-pglite`](https://www.npmjs.com/package/@super-line/collections-pglite)) and CRDT **documents** (`CrdtCollectionStore`: [`/collections-crdt-memory`](https://www.npmjs.com/package/@super-line/collections-crdt-memory), [`/collections-crdt-libsql`](https://www.npmjs.com/package/@super-line/collections-crdt-libsql), [`/collections-crdt-pglite`](https://www.npmjs.com/package/@super-line/collections-crdt-pglite)). ADR-0007/0008 retired the legacy off-contract `store(n)` family.
 
-- `ServerStore` — persistence + consistency model + change-notify (`read` / `create` / `apply` / `delete` / `onChange`, optional `onDelete` / `open`); `clustering: 'relay' | 'self'` and optional `model: 'lww' | 'crdt'`.
-- `ServerReplica` — a reactive **server-side** co-writer over one Resource (`set` / `update` / `delete` / `subscribe`), returned by `ServerStore.open` and surfaced to apps as `srv.store(ns).open(id)`.
-- `ClientStore` / `ResourceReplica` — the reactive client half: a local replica per opened Resource (`set` / `update` / `delete(path)` / `applyRemote` / `seed` / `applyDelete`).
-- `Resource` / `AccessRules` / `Perms` / `Principal` / `StoreChange` — the persisted unit, its deny-by-default ACL, and the opaque change envelope.
-- Wire frames `SChangeFrame` (mutation relay) and `SDeleteFrame` (cluster-wide deletion fan-out), plus the `removeAtPath(root, path)` helper for surgical, merge-friendly key removal.
+Core retains three small primitives the CRDT client `DocHandle` reuses:
 
-Store implementations (the legacy `ServerStore` family, **being retired** in favor of collections — see ADR-0007): [`@super-line/store-memory`](https://www.npmjs.com/package/@super-line/store-memory), [`/store-sqlite`](https://www.npmjs.com/package/@super-line/store-sqlite), [`/store-sync`](https://www.npmjs.com/package/@super-line/store-sync) (CRDT), [`/store-pglite`](https://www.npmjs.com/package/@super-line/store-pglite), and [`/store-sync-pglite`](https://www.npmjs.com/package/@super-line/store-sync-pglite).
-
-The successor: **collections** — typed rows (`CollectionStore`: [`/collections-memory`](https://www.npmjs.com/package/@super-line/collections-memory), [`/collections-sqlite`](https://www.npmjs.com/package/@super-line/collections-sqlite), [`/collections-pglite`](https://www.npmjs.com/package/@super-line/collections-pglite)) and CRDT documents (`CrdtCollectionStore`: [`/collections-crdt-memory`](https://www.npmjs.com/package/@super-line/collections-crdt-memory), [`/collections-crdt-libsql`](https://www.npmjs.com/package/@super-line/collections-crdt-libsql)), both declared on the contract and validated on every write.
+- `StoreChange` — the opaque change envelope core relays between the doc replica halves without parsing (`{ id, update, origin }`).
+- `ResourceReplica` — the reactive local-replica shape (`set` / `update` / `delete(path)` / `applyRemote` / `seed` / `reset` / `applyDelete`).
+- `removeAtPath(root, path)` — surgical, merge-friendly key removal.
 
 - 📖 Docs: <https://mertdogar.github.io/super-line/>
 - 📚 The contract model: <https://mertdogar.github.io/super-line/guide/the-contract>

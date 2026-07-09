@@ -55,28 +55,42 @@ function Room({ room }: { room: string }) {
 - **`useEvent(event, handler)`** → invokes `handler` for each pushed event (the latest handler is always used; no stale closures).
 - **`useClient()`** → the underlying `SuperLineClient<C, R>`.
 
-## Synced state
+## Persisted state — collections
 
-For [Stores](./synced-state) (durable, off-contract resources), `useResource` opens a Resource and tracks it reactively. It returns `data` (untyped — pass `T` to assert the shape; `undefined` until the catch-up snapshot arrives), the `deleted` signal, and `set`/`update`/`delete` to write through. The handle is opened on mount and closed on unmount.
+The contract's [collections](./collections) get two reactive hooks.
+
+**`useCollection(name, query)`** tracks a live row set (LWW row collection): the filtered snapshot re-renders as
+the server pushes matching inserts/updates/deletes, and `insert`/`update`/`delete`/`batch` write through.
 
 ```tsx
-function Doc({ id }: { id: string }) {
-  const { data, deleted, set, update, delete: del } = useResource<{ title: string; tags: string[] }>('docs', id)
-
-  if (deleted) return <p>This doc was deleted.</p>
-  if (!data) return <p>Loading…</p>
-
+function Channel({ id }: { id: string }) {
+  const { rows, insert } = useCollection('messages', { filter: eq('channelId', id) })
   return (
     <>
-      <input value={data.title} onChange={(e) => update({ title: e.target.value })} />
-      <button onClick={() => del(['tags', 0])}>drop first tag</button>
+      {rows.map((m) => <p key={m.id}>{m.text}</p>)}
+      <button onClick={() => insert({ id: crypto.randomUUID(), channelId: id, text: 'hi' })}>send</button>
     </>
   )
 }
 ```
 
-- **`set(value)`** replaces the whole document; **`update(partial)`** merges a partial; **`delete(path)`** surgically removes the value at a key path. All three write the local replica and send the Change to the server.
-- **`deleted`** flips to `true` once the server fans the Resource's deletion out across the cluster (an `SDeleteFrame` reaches this node), and the component re-renders. This is the cross-node deletion signal: a Resource deleted on any node — or directly on the server via `ServerStore.onDelete`/`delete` — turns `deleted` true everywhere. Until then a deleted Resource would read as a silent empty snapshot, so branch on `deleted` to tell "deleted" apart from "still loading".
+**`useDoc(name, id)`** opens a CRDT document collection by id and tracks it reactively — `data` (`undefined` until
+the catch-up snapshot arrives), the `deleted` signal, and `update`/`delete` to write through (edits merge).
+
+```tsx
+function Doc({ id }: { id: string }) {
+  const { data, deleted, update, delete: del } = useDoc('scenes', id)
+  if (deleted) return <p>This doc was deleted.</p>
+  if (!data) return <p>Loading…</p>
+  return <input value={data.title} onChange={(e) => update({ title: e.target.value })} />
+}
+```
+
+- **`update(partial)`** merges a partial; **`delete(path)`** surgically removes the value at a key path — concurrent
+  edits to sibling keys merge instead of clobbering.
+- **`deleted`** flips to `true` once the server fans the document's deletion across the cluster (a `cddel` reaches
+  this node). Until then a deleted doc reads as a silent empty snapshot, so branch on `deleted` to tell "deleted"
+  apart from "still loading".
 
 ## StrictMode
 

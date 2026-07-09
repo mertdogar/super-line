@@ -2,7 +2,6 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { ConnDescriptor, NodeStat } from './adapter.js'
 import { defineContract } from './contract.js'
 import type { Contract, Directional, Schema } from './contract.js'
-import type { ListOpts, ResourceSummary, SearchOpts } from './store.js'
 import type { CollectionQuery } from './query.js'
 
 /** WS subprotocol the Control Center connects with; the server short-circuits auth for it. */
@@ -59,18 +58,6 @@ export interface ConnView {
   ctxAvailable: boolean
 }
 
-/** A configured Store — what `listStores` returns. `model` is the backend's declared consistency model, if any. */
-export interface StoreInfo {
-  name: string
-  model?: 'lww' | 'crdt'
-}
-
-/** A Resource's current value — what `readResource` returns. Materialized + safe-serialized server-side. */
-export interface StoreResourceView {
-  data: unknown
-  accessRules: Record<string, { read: boolean; write: boolean }>
-}
-
 /**
  * A declared collection — what `listCollections` returns, for the Control Center schema graph. `references`
  * are the advisory foreign keys (graph edges); `schema` is best-effort JSON Schema of the row (node fields),
@@ -114,14 +101,6 @@ export type InspectorEvent =
   // server→client request and the client's reply. `reqId` pairs reply↔request, as above.
   | { type: 'msg.serverRequest'; target: string; name: string; input: unknown; reqId: number }
   | { type: 'msg.serverReply'; target: string; name: string; ok: boolean; output?: unknown; error?: MessageError; reqId: number }
-  // Store traffic: lifecycle (create/delete), a write (client or server co-write), access changes, subscribe
-  | { type: 'store.create'; store: string; id: string }
-  | { type: 'store.delete'; store: string; id: string }
-  | { type: 'store.write'; store: string; id: string; origin: string; connId?: string; data: unknown }
-  | { type: 'store.grant'; store: string; id: string; principal: string; perms: { read: boolean; write: boolean } }
-  | { type: 'store.revoke'; store: string; id: string; principal: string }
-  | { type: 'store.subscribe'; connId: string; store: string; id: string }
-  | { type: 'store.unsubscribe'; connId: string; store: string; id: string }
 
 /**
  * The public taxonomy a plugin `onEvent` tap observes: an {@link InspectorEvent} with live
@@ -160,10 +139,6 @@ export function eventPayload(event: InspectorEvent): unknown {
     case 'msg.broadcast':
     case 'msg.publish':
       return event.data
-    case 'store.write':
-      return event.data
-    case 'store.grant':
-      return event.perms
     default:
       return undefined
   }
@@ -195,10 +170,6 @@ export const InspectorContract = defineContract({
         listConnections: { input: s<void>(), output: s<ConnDescriptor[]>() },
         getNode: { input: s<void>(), output: s<NodeView>() },
         getConn: { input: s<{ id: string }>(), output: s<ConnView>() },
-        listStores: { input: s<void>(), output: s<StoreInfo[]>() },
-        listResources: { input: s<{ store: string } & ListOpts>(), output: s<ResourceSummary[]>() },
-        searchPrincipals: { input: s<{ store: string } & SearchOpts>(), output: s<string[]>() },
-        readResource: { input: s<{ store: string; id: string }>(), output: s<StoreResourceView>() },
         listCollections: { input: s<void>(), output: s<CollectionInfo[]>() },
         queryCollection: { input: s<{ collection: string } & CollectionQuery>(), output: s<unknown[]>() },
       },

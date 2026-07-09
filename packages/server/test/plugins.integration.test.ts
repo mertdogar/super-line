@@ -3,7 +3,6 @@ import { z } from 'zod'
 import { WebSocket } from 'ws'
 import { defineContract, defineContractPlugin, defineSurface, jsonSerializer, mergeSurfaces, SuperLineError, type TapEvent } from '@super-line/core'
 import { MemoryBus, createInMemoryAdapter, createSuperLineServer, type PluginContext, type SuperLinePlugin } from '@super-line/server'
-import { memoryStoreServer } from '@super-line/store-memory'
 import { memoryCollections } from '@super-line/collections-memory'
 import { inspector } from '@super-line/plugin-inspector'
 import { connectInspector, createHarness, waitFor } from './harness.js'
@@ -377,25 +376,6 @@ describe('plugin handlers + typed subtraction (phase 1 · handlers)', () => {
     await expect(
       h.server(bareContract, { authenticate: hAuth, plugins: [harnessPlugin()] }),
     ).rejects.toThrow(/forget to merge its surface/i)
-  })
-})
-
-describe('plugin stores (phase 1 · stores)', () => {
-  it('merges a plugin-contributed store into srv.store(name)', async () => {
-    const plugin: SuperLinePlugin = { name: 'p', stores: { plog: memoryStoreServer() } }
-    const { srv } = await h.server(contract, { authenticate: auth, plugins: [plugin] })
-    await srv.store('plog').create('x', { n: 1 }, {})
-    expect((await srv.store('plog').read('x'))?.data).toEqual({ n: 1 })
-  })
-
-  it('throws when a plugin store name collides with a host store', async () => {
-    await expect(
-      h.server(contract, {
-        authenticate: auth,
-        stores: { dup: memoryStoreServer() },
-        plugins: [{ name: 'p', stores: { dup: memoryStoreServer() } }],
-      }),
-    ).rejects.toThrow(/store 'dup' collides/i)
   })
 })
 

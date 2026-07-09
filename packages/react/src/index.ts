@@ -23,7 +23,7 @@ import type {
   DocOf,
   CollectionQuery,
 } from '@super-line/core'
-import type { ResourceHandle, SuperLineClient, CollectionHandle, DocHandle, CrdtCollectionHandle } from '@super-line/client'
+import type { SuperLineClient, CollectionHandle, DocHandle, CrdtCollectionHandle } from '@super-line/client'
 
 /** State returned by `useRequest`. */
 export interface RequestState<T> {
@@ -119,46 +119,6 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
   }
 
   /**
-   * Open a Store Resource and track it reactively: returns its latest `data` (`undefined` until the
-   * catch-up snapshot arrives) plus `set`/`update`/`delete` to write through. `data` is untyped — stores are
-   * off-contract (ADR-0003) — so pass `T` to assert its shape. The handle is closed on unmount.
-   */
-  function useResource<T = unknown>(
-    name: string,
-    id: string,
-  ): {
-    data: T | undefined
-    deleted: boolean
-    set: (value: T) => void
-    update: (partial: Partial<T>) => void
-    delete: (path: (string | number)[]) => void
-  } {
-    const client = useClient()
-    const [data, setData] = useState<T>()
-    const [deleted, setDeleted] = useState(false)
-    const handleRef = useRef<ResourceHandle | undefined>(undefined)
-    useEffect(() => {
-      const handle = client.store(name).open(id)
-      handleRef.current = handle
-      setData(handle.getSnapshot() as T | undefined) // reset to the fresh handle's state on id/name change
-      setDeleted(handle.deleted)
-      const unsub = handle.subscribe(() => {
-        setData(handle.getSnapshot() as T | undefined)
-        setDeleted(handle.deleted)
-      })
-      return () => {
-        unsub()
-        handle.close()
-        handleRef.current = undefined
-      }
-    }, [client, name, id])
-    const set = useCallback((value: T) => handleRef.current?.set(value), [])
-    const update = useCallback((partial: Partial<T>) => handleRef.current?.update(partial), [])
-    const del = useCallback((path: (string | number)[]) => handleRef.current?.delete(path), [])
-    return { data, deleted, set, update, delete: del }
-  }
-
-  /**
    * Open a CRDT document collection (ADR-0007) by id and track it reactively: returns its latest `data`
    * (`undefined` until the catch-up snapshot arrives, typed from the contract) plus `set`/`update`/`delete`
    * to write through. The document merges concurrent edits; the handle is closed on unmount.
@@ -242,5 +202,5 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     return { rows, error, insert, update, delete: del }
   }
 
-  return { Provider, useClient, useEvent, useSubscription, useRequest, useResource, useDoc, useCollection }
+  return { Provider, useClient, useEvent, useSubscription, useRequest, useDoc, useCollection }
 }

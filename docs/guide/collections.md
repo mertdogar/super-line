@@ -1,10 +1,12 @@
 # Collections
 
 A **Collection** is super-line's typed, relational persisted-state primitive: a named set of **rows**,
-each validated against a schema you declare **on the contract**. Unlike a [Store](./store) — one opaque
-JSON document per id — a collection is a table: many small rows you filter, subscribe to in subsets, join,
-and secure per-row. It's the relational successor to the last-writer-wins Store family (see
-[ADR-0006](https://github.com/mertdogar/super-line/blob/main/docs/adr/0006-collections-are-on-contract-typed-rows.md)).
+each validated against a schema you declare **on the contract**. A collection is a table: many small rows
+you filter, subscribe to in subsets, join, and secure per-row — the counterpart to a [CRDT document
+collection](#crdt-document-collections) (one opaque, merging document opened by id). It's the successor to
+the retired last-writer-wins Store family (see
+[ADR-0006](https://github.com/mertdogar/super-line/blob/main/docs/adr/0006-collections-are-on-contract-typed-rows.md)
+and [ADR-0007](https://github.com/mertdogar/super-line/blob/main/docs/adr/0007-crdt-docs-are-typed-collections.md)).
 
 The division of labor is the whole idea:
 
@@ -16,11 +18,12 @@ The division of labor is the whole idea:
   [`@super-line/tanstack-db`](#tanstack-db-the-query-engine) adapter. super-line does not ship a query engine
   of its own.
 
-::: tip Collections vs Stores — rows vs documents
-Use a **collection** for tabular data: messages, users, tasks — anything you'd filter, paginate, join, or
-secure per-row. Use a **[Store](./store)** for a single collaborative document (a canvas, a rich-text doc)
-where concurrent edits must **merge** — that's the CRDT family, and it stays off-contract because a merge
-delta can't be schema-validated. Rows = collections; documents = stores.
+::: tip Rows vs documents — two collection kinds
+Use an **LWW row collection** for tabular data: messages, users, tasks — anything you'd filter, paginate,
+join, or secure per-row. Use a **[CRDT document collection](#crdt-document-collections)** for a single
+collaborative document (a canvas, a rich-text doc) where concurrent edits must **merge**. Both are declared
+on the contract and validated per write (ADR-0007 overturned the old "merge deltas are unvalidatable" premise);
+they differ only in consistency model — last-writer-wins rows vs merging whole-doc CRDT.
 :::
 
 ## Declare collections on the contract
@@ -179,8 +182,9 @@ exactly like the store family:
 
 `relay` backends replicate over the server↔server [adapter](./scaling-adapters) (each node a full replica);
 the `self` backend owns a central Postgres and a per-node Electric-synced replica and needs **no adapter**.
-`collections-sqlite` compiles the query IR to SQL to narrow snapshots; `collections-pglite` is the collection
-analogue of [`store-pglite`](./choosing-a-store). All three are drop-in — swapping is a one-line change.
+`collections-sqlite` compiles the query IR to SQL to narrow snapshots; `collections-pglite` is the
+self-clustering tier (central Postgres + per-node Electric replica). All three are drop-in — swapping is a
+one-line change.
 
 ## CRDT document collections
 
@@ -290,6 +294,5 @@ handler.
 
 ## See also
 
-- [Choosing a store](./choosing-a-store) — collections vs the doc-store families
 - [Control Center](./control-center) — the Collections view: schema graph + row browser
 - [The contract](./the-contract) · [React](./react)

@@ -11,7 +11,7 @@ export interface AgentAction {
   detail: string
 }
 
-// Run one agent turn against a server-side ServerReplica (srv.store('scene').open(id)). Each tool maps
+// Run one agent turn against a server-side CrdtServerReplica (srv.collection('scene').open(id)). Each tool maps
 // to a Store primitive — update() (merge) or delete(path) (the only key-removing op) — so the agent's
 // edits land as Store deltas that fan out to every tab and merge with whatever a human is doing live.
 export async function runAgent(

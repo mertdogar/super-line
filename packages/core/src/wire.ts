@@ -45,33 +45,6 @@ export interface PingFrame {
 export interface PongFrame {
   t: 'pong'
 }
-// Store frames (off-contract, reserved). `n` = store name, `id` = Resource id, `u` = opaque update, `o` = writer origin.
-// Open + read are acked via res (snapshot) / err; write via res (ok) / err (e.g. FORBIDDEN).
-export interface SOpenFrame {
-  t: 'sopen'
-  i: number // correlation id (acked via res with the catch-up snapshot / err)
-  n: string // store name
-  id: string // resource id
-}
-export interface SCloseFrame {
-  t: 'sclose'
-  n: string
-  id: string
-}
-export interface SWriteFrame {
-  t: 'swr'
-  i: number // correlation id (acked via res / err)
-  n: string
-  id: string
-  u: unknown // opaque update (CRDT delta | full JSON value)
-  o: string // writer origin (echo-break)
-}
-export interface SReadFrame {
-  t: 'srd'
-  i: number // correlation id (acked via res with the snapshot / err)
-  n: string
-  id: string
-}
 // Collection frames (on-contract typed rows; see ADR-0006). A subscribe carries a query IR; the initial
 // snapshot rides the `res` ack. `s` is a client-assigned subscription id (durable routing handle, distinct
 // from the per-request correlation `i`). Live row changes push via `cchg`; writes go up as an atomic `cbat`.
@@ -126,10 +99,6 @@ export type ClientFrame =
   | UnsubFrame
   | SResFrame
   | SErrFrame
-  | SOpenFrame
-  | SCloseFrame
-  | SWriteFrame
-  | SReadFrame
   | CSubFrame
   | CUnsubFrame
   | CBatchFrame
@@ -170,22 +139,6 @@ export interface SReqFrame {
   m: string // request name
   d: unknown // input
 }
-// a server→client Store Change push (fan-out of an applied mutation on a Resource the client subscribes to)
-export interface SChangeFrame {
-  t: 'sch'
-  n: string // store name
-  id: string // resource id
-  u: unknown // opaque update
-  o: string // writer origin (echo-break)
-  nd?: string // origin NODE id; stamped for cross-node relay dedup, ignored by clients
-}
-// a server→client Store delete push (fan-out of a delete on a Resource the client subscribes to)
-export interface SDeleteFrame {
-  t: 'sdel'
-  n: string // store name
-  id: string // resource id
-  nd?: string // origin NODE id; stamped for cross-node relay dedup, ignored by clients
-}
 // a server→client Collection row change. The server sends it to a connection when the row (post-op for
 // insert/update, pre-op for delete) crosses that connection's effective visibility (policy read-filter ∧
 // the OR of its subscription filters on `n`). The CLIENT then re-filters per subscription: a provided `d`
@@ -199,8 +152,7 @@ export interface CChangeFrame {
   d?: unknown // the row for insert/update; absent for delete
   nd?: string // origin NODE id; stamped for cross-node relay dedup, ignored by clients
 }
-// a server→client CRDT document change (fan-out of an applied delta on a doc the client has open) — the
-// collection-family mirror of `sch`.
+// a server→client CRDT document change (fan-out of an applied delta on a doc the client has open).
 export interface CDChangeFrame {
   t: 'cdchg'
   n: string // collection name
@@ -209,7 +161,7 @@ export interface CDChangeFrame {
   o: string // writer origin (echo-break)
   nd?: string // origin NODE id; stamped for cross-node relay dedup, ignored by clients
 }
-// a server→client CRDT document delete (fan-out) — the collection-family mirror of `sdel`.
+// a server→client CRDT document delete (fan-out to every client that has the doc open).
 export interface CDDeleteFrame {
   t: 'cddel'
   n: string
@@ -222,8 +174,6 @@ export type ServerFrame =
   | EvtFrame
   | PubFrame
   | SReqFrame
-  | SChangeFrame
-  | SDeleteFrame
   | CChangeFrame
   | CDChangeFrame
   | CDDeleteFrame

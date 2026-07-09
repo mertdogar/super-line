@@ -188,24 +188,35 @@ const totals = await client['activity.totals']({})   // the paired request, full
 
 The matching bare options live on the client too — `onConnect` / `onDisconnect` / `onReconnect`, plus a new `onError(error, info)` sink that catches any throw from a lifecycle hook (host or plugin; it logs to console by default). These are the client's **first** lifecycle hooks — before plugins, a reconnect was unobservable.
 
-## 6 · Optional: persist with a store
+## 6 · Optional: contribute a collection
 
-If the plugin needs durable state, contribute a [store](./store) under `stores`. It merges into the host's store map and is reachable as `srv.store(name)` (and inside the plugin via `ctx.store(name)`) like any other — no app wiring.
+If the plugin needs durable, typed state, contribute a [collection](./collections) on the **contract** via a
+contract-fragment plugin, and lock it down with server-side `policies`. The fragment merges into the host's
+contract (so `RowOf` / `client.collection(name)` infer it end-to-end), and the collection is reachable as
+`srv.collection(name)` / `client.collection(name)` like any other — deny-by-default until the plugin's policy
+opens it. This is the `@super-line/plugin-auth` shape in miniature.
 
 ```ts
-import { memoryStoreServer } from '@super-line/store-memory'
+import { defineContractPlugin } from '@super-line/core'
+import { z } from 'zod'
 
-return {
+// contract-time half: declare the collection (merges into the host contract)
+export const activityContract = () =>
+  defineContractPlugin('activity', {
+    collections: { 'activity.daily': { schema: z.object({ id: z.string(), count: z.number() }), key: 'id' } },
+  })
+
+// server-time half: own its access — deny-by-default, so the host can't accidentally expose it
+export const activityPlugin: SuperLinePlugin = {
   name: 'activity',
-  stores: { 'activity.daily': memoryStoreServer() },   // swap for store-sqlite to persist
+  policies: { 'activity.daily': { read: () => undefined, write: (principal) => principal === 'system' } },
   setup(ctx) {
-    const daily = ctx.store('activity.daily')
-    // roll the day's totals into the store on a timer…
+    // ctx.server.collection('activity.daily').insert(...) — roll the day's totals on a timer…
   },
 }
 ```
 
-A store name that collides with a host store — or another plugin's — throws at construction.
+A collection name that collides with a host collection — or another plugin's — throws at construction.
 
 ## 7 · Optional: a plugin-owned connection
 

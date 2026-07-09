@@ -35,8 +35,8 @@ export interface PgliteCollectionsOptions {
 }
 
 /**
- * The self-clustering CollectionStore (ADR-0006, `clustering: 'self'`) — the collection analogue of
- * {@link "@super-line/store-pglite"}. Writes + strong reads hit a central Postgres; each node mirrors the row
+ * The self-clustering CollectionStore (ADR-0006, `clustering: 'self'`) — central Postgres + a per-node
+ * Electric-synced replica. Writes + strong reads hit a central Postgres; each node mirrors the row
  * table into an in-memory PGlite replica via **Electric** (one-way) and turns its `live.changes` feed into
  * {@link CollectionStore.onChange}, which core fans to LOCAL subscribers only. Postgres+Electric is the only
  * fan-out infra — no super-line adapter. A write round-trips central PG → Electric → every node's feed; the

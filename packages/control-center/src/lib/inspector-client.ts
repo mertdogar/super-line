@@ -5,13 +5,8 @@ import {
   type ConnView,
   type InspectedContract,
   type InspectorEnvelope,
-  type ListOpts,
   type NodeStat,
   type NodeView,
-  type ResourceSummary,
-  type SearchOpts,
-  type StoreInfo,
-  type StoreResourceView,
   type CollectionInfo,
   type CollectionQuery,
 } from '@super-line/core'
@@ -25,12 +20,6 @@ export interface InspectorClient {
   listConnections(): Promise<ConnDescriptor[]>
   getNode(): Promise<NodeView>
   getConn(id: string): Promise<ConnView>
-  listStores(): Promise<StoreInfo[]>
-  /** Server-side filtered / sorted / paginated Resource summaries for one store. */
-  listResources(store: string, opts?: ListOpts): Promise<ResourceSummary[]>
-  /** Store-global principal lookup (substring, principal-ascending) for the Users filter. */
-  searchPrincipals(store: string, opts?: SearchOpts): Promise<string[]>
-  readResource(store: string, id: string): Promise<StoreResourceView>
   /** Declared collections (name + key + advisory references + best-effort JSON Schema) for the schema graph. */
   listCollections(): Promise<CollectionInfo[]>
   /** Browse a collection's rows via the query IR (policy-bypassed, trusted observer). */
@@ -140,10 +129,6 @@ export function createInspector(opts: InspectorOptions): InspectorClient {
     listConnections: () => request<ConnDescriptor[]>('listConnections'),
     getNode: () => request<NodeView>('getNode'),
     getConn: (id) => request<ConnView>('getConn', { id }),
-    listStores: () => request<StoreInfo[]>('listStores'),
-    listResources: (store, opts) => request<ResourceSummary[]>('listResources', { store, ...opts }),
-    searchPrincipals: (store, opts) => request<string[]>('searchPrincipals', { store, ...opts }),
-    readResource: (store, id) => request<StoreResourceView>('readResource', { store, id }),
     listCollections: () => request<CollectionInfo[]>('listCollections'),
     queryCollection: (collection, query) => request<unknown[]>('queryCollection', { collection, ...query }),
     onEvent(cb) {

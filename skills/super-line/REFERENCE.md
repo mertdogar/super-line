@@ -80,8 +80,11 @@ interface SuperLineServerOptions<C, A> {
   identify?: (conn) => string | undefined      // stable user key -> cluster.byUser / isOnline / toUser
   describeConn?: (conn) => Record<string, unknown>  // extra fields merged into the cluster descriptor (ctx never auto-serialized)
   heartbeat?: { interval?: number; maxMissed?: number } | false  // default { interval: 30_000 }; maxMissed -> reap
-  inspector?: boolean                          // gate msg.* telemetry; also pass inspector:true to webSocketServerTransport
-  stores?: Record<string, ServerStore>         // configured Stores, keyed by name (match the client). See Stores below.
+  collections?: CollectionStore                // ONE row-collection backend for ALL row collections (single tx domain → atomic cross-collection batches). See Collections.
+  crdtCollections?: CrdtCollectionStore        // SEPARATE backend for CRDT document collections (never joins a cross-collection batch). See CRDT document collections.
+  policies?: Record<string, CollectionPolicy>  // per-collection access; DENY-BY-DEFAULT (omit read/write ⇒ that op is server-only). Row shape (read→IR filter) vs CRDT guard shape (read/write→bool).
+  checkReferences?: boolean                    // opt-in advisory FK existence check on row writes (no cascades)
+  plugins?: SuperLinePlugin[]                  // runtime plugins: inspector() (Control Center), authKit.plugin (@super-line/plugin-auth), your own
 }
 // path + backpressure now live on the transport: webSocketServerTransport({ server, path, backpressure })
 // The Backpressure type lives in @super-line/transport-websocket (no longer in @super-line/server).
@@ -103,7 +106,7 @@ interface SuperLineServer<C, A> {
   // targeted cross-node send (no registry lookup on the delivery path)
   toConn(id: string): ConnTarget<C>                                  // one connection, any node
   toUser(userId: string): UserTarget<C>                              // all of a user's connections, any node
-  store(name: string): ServerStoreHandle                             // configured Store (off-contract); throws NOT_FOUND if unconfigured. See Stores below.
+  collection(name: string): ServerCollectionHandle                   // server-authoritative: co-write rows (insert/update/delete/read/snapshot) or create+open CRDT docs; typed by the contract. See Collections.
   close(): Promise<void>                                              // idempotent; closes conns + cleans registry + adapter + ws
 }
 
@@ -194,8 +197,8 @@ interface SuperLineClientOptions<C, R> {
   reconnectBaseMs?: number                      // default 500
   reconnectMaxMs?: number                       // default 30000
   reconnectFactor?: number                      // default 2
-  stores?: Record<string, ClientStore>         // client halves of the Store pairs, keyed to match the server
-  onStoreError?: (error, info: { store: string; id: string }) => void   // a rejected store write (e.g. FORBIDDEN)
+  crdtCollections?: CrdtCollectionClient       // universal client CRDT engine — `crdtCollectionsClient()`; REQUIRED to open any CRDT document collection. Row collections need no client backend (driven by the contract + server).
+  onStoreError?: (error, info: { store: string; id: string }) => void   // a rejected CRDT-doc write (schema/policy); the client then hard-resyncs its replica
 }
 // url + a custom WebSocket impl now live on the transport: webSocketClientTransport({ url, WebSocket }).
 // Other transports (HTTP/SSE, libp2p) are available — see the Transports guide.
@@ -207,7 +210,7 @@ type SuperLineClient<C, R> = {
   on<E extends keyof Events<C, R>>(event: E, handler: (data) => void): () => void   // returns unsubscribe
   subscribe<T extends keyof Topics<C, R>>(topic: T, handler: (data) => void): Subscription
   implement(handlers: { [K in keyof ServerRequests<C, R>]?: (input) => Awaitable<output> }): void  // answer server→client requests; throw SuperLineError for typed failure
-  store(name: string): ClientStoreHandle           // configured Store; throws NOT_FOUND if unconfigured. See Stores below.
+  collection(name: string): CollectionHandle | DocHandle   // typed by the contract: a row collection → query handle (subscribe/insert/update/delete/batch); a CRDT collection → open-by-id DocHandle. See Collections.
   close(): void
   readonly connected: boolean
   readonly role: R
@@ -230,7 +233,7 @@ Pass to `transports: [...]` (server) / `transport:` (client). WebSocket is the d
 
 ```ts
 // @super-line/transport-websocket — default
-webSocketServerTransport(opts?: { server?; path?; backpressure?; inspector?: boolean }): ServerTransport
+webSocketServerTransport(opts?: { server?; path?; backpressure? }): ServerTransport   // inspector is now a plugin — plugins: [inspector()], not a transport option
 webSocketClientTransport(opts: { url: string; WebSocket?: typeof WebSocket }): ClientTransport
 wsServerRawConn(ws, backpressure?): RawConn        // adopt a raw ws (e.g. attach to an existing server)
 
@@ -265,7 +268,7 @@ createRabbitmqAdapter(opts?: { url?; connection?; exchange?; queuePrefix?; prese
 // @super-line/adapter-zeromq — brokerless mesh / central proxy / BYO sockets
 createZeroMqAdapter(opts: { bind; peers? } | { mode: 'proxy'; frontendUrl; backendUrl } | { pub; sub }): Promise<Adapter>
 ```
-Redis: Pub/Sub (two connections) + a presence store. All adapters are at-most-once. Run more than one server process? Every server needs an adapter (the SAME backend). They carry rooms, topics (including cluster-bus `server.publish`/`server.subscribe`), targeted `toConn`/`toUser` sends, server→client request replies, store-Change/`sdel` relay for `relay` stores, AND the cluster presence registry (redis/libp2p/rabbitmq/zeromq all ship a `PresenceStore`).
+Redis: Pub/Sub (two connections) + a presence store. All adapters are at-most-once. Run more than one server process? Every server needs an adapter (the SAME backend). They carry rooms, topics (including cluster-bus `server.publish`/`server.subscribe`), targeted `toConn`/`toUser` sends, server→client request replies, change/delete fan-out for `relay` collection backends, AND the cluster presence registry (redis/libp2p/rabbitmq/zeromq all ship a `PresenceStore`).
 
 ## @super-line/react
 
@@ -279,109 +282,26 @@ createSuperLineHooks<C, R extends keyof C['roles']>(): {
     data?; error?: unknown; isLoading: boolean
     call: (input) => Promise<output>
   }
-  useResource<T>(name: string, id: string): {       // open a Store Resource; closes on unmount
-    data: T | undefined                              // undefined until catch-up
-    deleted: boolean                                 // true once the server fans out a delete for this Resource
-    set: (value: T) => void                          // replace
-    update: (partial: Partial<T>) => void            // merge
-    delete: (path: (string | number)[]) => void      // surgical key removal
+  useCollection<N>(name: N, query?: CollectionQuery): {   // live row-set for a ROW collection; subscribes + closes on unmount
+    rows: RowOf<C, N>[]                                    // current rows, ordered + limited by the query
+    insert: (row: RowOf<C, N>) => Promise<void>
+    update: (row: RowOf<C, N>) => Promise<void>
+    delete: (id: string) => Promise<void>
+  }
+  useDoc<N>(name: N, id: string): {                        // open a CRDT DOCUMENT by id; closes on unmount
+    data: SnapshotOf<C, N> | undefined                     // undefined until ready
+    deleted: boolean                                       // true once the doc is deleted server-side
+    set: (value) => void                                   // whole-doc replace
+    update: (partial) => void                              // merge keys
+    delete: (path: (string | number)[]) => void            // surgical key removal
   }
 }
 ```
 Create the client once (e.g. `useState(() => createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user' }))`, `webSocketClientTransport` from `@super-line/transport-websocket`), wrap with `<Provider client={client}>`, then use the hooks inside.
 
-## Stores (5: store-memory · store-sync · store-sqlite · store-pglite · store-sync-pglite)
+## Collections (typed rows)
 
-> **The LWW stores (store-memory · store-sqlite · store-pglite) are DEPRECATED** in favor of [Collections](#collections-typed-rows-the-relational-store-successor) (typed rows, on-contract) — see below. The durable-`relay` CRDT store `store-sync-libsql` has been **deleted**; its role is now a [CRDT document collection](#crdt-document-collections-adr-0007) (`collections-crdt-libsql`, ADR-0007). The in-memory/self CRDT stores (store-sync, store-sync-pglite) remain for a single collaborative document.
-
-A Store is super-line's **off-contract** persisted-state seam: named, permissioned JSON Resources `{ id, accessRules, data }`. Configure a server + client pair under matching `stores:` keys. `data` is `unknown` end-to-end (not schema-validated). ACL is **deny-by-default**, keyed by the principal (`identify(conn) ?? conn.id`).
-
-Each `ServerStore` declares two static traits the inspector surfaces: `model: 'lww' | 'crdt'` (replace vs merge) and `clustering: 'relay' | 'self'`. **`relay`** = the store does no networking; core relays its Changes/deletes across nodes over the server↔server Adapter (so >1 node needs an adapter). **`self`** = the store owns a shared backend + a per-node replica and fans only to LOCAL subscribers — it needs **NO adapter** (it IS the fan-out). Match model on both halves: LWW server ↔ `memoryStoreClient`, CRDT server ↔ `syncStoreClient`.
-
-| package | model | durability | clustering | client half |
-|---|---|---|---|---|
-| store-memory | lww | in-memory | relay | `memoryStoreClient` |
-| store-sync | crdt (Yjs) | in-memory | relay | `syncStoreClient` |
-| store-sqlite | lww | better-sqlite3 (WAL) | relay | `memoryStoreClient` |
-| store-pglite | lww | Postgres + Electric→PGlite | **self** | `memoryStoreClient` |
-| store-sync-pglite | crdt (Yjs op-log) | Postgres + Electric→PGlite | **self** | `syncStoreClient` |
-
-```ts
-// each store package ships a server (and, for relay LWW/CRDT, a client) half:
-memoryStoreServer(): ServerStore                                   // LWW, in-memory (default)
-memoryStoreClient(opts?: { origin?: string }): ClientStore
-syncStoreServer(opts?: { resolveOptions?: (id) => { mode?: 'shallow' | 'document'; opaque?: string[] } }): ServerStore  // CRDT (Yjs)
-syncStoreClient(opts?: { origin?; resolveOptions? }): ClientStore  // pass the SAME resolveOptions to BOTH halves (no config drift)
-sqliteStoreServer(opts: { file: string; table?: string }): ServerStore  // durable LWW (better-sqlite3); pair with memoryStoreClient()
-//   durable CRDT · relay is no longer a store — it's a CRDT document collection (crdtLibsqlCollections, ↓ Collections).
-
-// self-clustering — NO adapter; central Postgres + per-node Electric→PGlite replica. ASYNC factories.
-await pgliteStoreServer(opts: { pgUrl: string; electricUrl?: string; table?: string; db?: PGliteWithLive }): Promise<ServerStore>   // LWW; pair with memoryStoreClient()
-await syncPgliteStoreServer(opts: { pgUrl; electricUrl?; table?; db?; resolveOptions?; compact?: false | { everyNUpdates?; debounceMs? }; onError? }): Promise<ServerStore>  // CRDT op-log; open()→ServerReplica; pair with syncStoreClient()
-
-// SERVER — srv.store(name): server-authoritative; create/grant/revoke/delete have NO client wire
-interface ServerStoreHandle {
-  create(id, data, accessRules: Record<Principal, { read: boolean; write: boolean }>): Promise<void>
-  read(id): Promise<Resource | undefined>            // admin read, bypasses ACL
-  write(id, data): Promise<void>                      // one-shot co-write; LWW replace / CRDT MERGE; origin 'server'
-  grant(id, principal, { read, write }): Promise<void>
-  revoke(id, principal): Promise<void>
-  delete(id): Promise<void>                           // remove the WHOLE Resource
-  list(opts?: ListOpts): Promise<ResourceSummary[]>   // filter/sort/paginate; ResourceSummary { id, principalCount, createdAt, updatedAt }
-  searchPrincipals(opts: SearchOpts): Promise<string[]> // distinct principals granted anywhere; substring, principal-asc
-  open(id, opts?: { origin?: string }): ServerReplica // reactive in-process co-writer ↓
-}
-// ListOpts  { idContains?; principals?: string[] (OR/union); sort?: { by: 'id'|'createdAt'|'updatedAt'|'principalCount'; dir: 'asc'|'desc' }; limit?; offset? }
-// SearchOpts { query?; limit?; offset? }  — both run server-side over a reverse ACL index; they back the Control Center store filters
-// reactive co-writer over canonical state — server-authoritative, no transport, no ACL:
-interface ServerReplica {
-  getSnapshot(): unknown
-  subscribe(cb: () => void): () => void               // fires on every applied change, incl. client edits (the reactive read side)
-  set(data): void                                     // replace
-  update(partial): void                               // MERGE top-level keys
-  delete(path: (string | number)[]): void             // remove a key — the ONLY server-side key removal; atomic in-process
-  close(): void
-}
-
-// CLIENT — client.store(name):
-interface ClientStoreHandle {
-  open(id): ResourceHandle                            // reactive: catch-up snapshot + live changes + write-through
-  read(id): Promise<unknown>                          // one-shot
-  write(id, data): Promise<void>                      // one-shot
-}
-interface ResourceHandle {
-  getSnapshot(): unknown                              // undefined until `ready`
-  subscribe(cb: () => void): () => void
-  set(data): void                                     // optimistic + fire-and-forget (rejection → onStoreError, no rollback)
-  update(partial): void
-  delete(path: (string | number)[]): void            // surgical key removal (merges on CRDT, unlike a full-doc set)
-  readonly ready: Promise<void>                       // resolves after catch-up; rejects FORBIDDEN/NOT_FOUND
-  readonly deleted: boolean                           // true once the server fans out a delete for this id (a subscribe fires; re-read this + snapshot)
-  close(): void                                       // drops the server subscription when the last handle for this id closes
-}
-// ServerStore (core) declares: readonly clustering: 'relay' | 'self'; readonly model?: 'lww' | 'crdt';
-//   read/create/apply/setAccess/delete/list/onChange + optional onDelete?(cb: (id) => void) and open?(id, { origin? }).
-//   onDelete is the delete-side mirror of onChange — `self` stores fire it from their backend's delete feed; core fans
-//   each id to LOCAL subscribers. `relay` stores omit onDelete (core fans their deletes over the adapter from srv.store(n).delete).
-// Deletion fan-out: srv.store(ns).delete(id) propagates cluster-wide as the wire SDeleteFrame ('sdel': { t:'sdel', n: store, id, nd?: origin node });
-//   subscribed clients flip ResourceHandle.deleted / useResource().deleted true and fire their subscribe.
-// core types: Resource<T> { id, accessRules: AccessRules, data: T }; AccessRules = Record<Principal, Perms>;
-//   Perms { read, write }; Principal = string; StoreChange { id, update, origin }; ServerStore / ClientStore / ServerReplica / ResourceReplica.
-//   removeAtPath(root, path: (string|number)[]): unknown — structural-clone delete helper, exported from core; used by both halves.
-```
-
-Notes:
-- **Off-contract + unknown.** `data` is never schema-validated (a CRDT delta can't be); pass a type to `open<T>` / `useResource<T>` and assert it. Route hard typed gates through a request (ADR-0003).
-- **Deny-by-default.** `grant` a principal before it can read/write. Server-side ops (`create`/`grant`/`open`/`write`) are server-authoritative and bypass ACL.
-- **Merge vs delete.** `update`/`write` MERGE and can't remove a key; `delete(path)` is the only key removal. On the CRDT store it's surgical — a concurrent edit to another key survives; a full-document `set` would clobber it.
-- **In-process co-writer.** `srv.store(ns).open(id)` is the right tool for a server-side AI agent / bot: reactive reads + delete, no loopback client and no grant. `origin` (default `'server'`) tags writes for echo-break + Control Center.
-- **Clustering.** `relay` stores (memory, sync, sqlite) are node-local — super-line relays their Changes across nodes over the **Adapter** (so >1 node needs one). `self` stores (pglite, sync-pglite) own a central Postgres + per-node Electric→PGlite replica and fan only to local subscribers — they need **NO adapter**. For LWW, cross-node writes resolve last-writer-wins; CRDT stores merge.
-- **Deletion fan-out.** `srv.store(ns).delete(id)` removes the whole Resource and propagates cluster-wide as an `sdel` frame: subscribers see `ResourceHandle.deleted` / `useResource().deleted` go `true` (a `subscribe` fires). Without it a deleted Resource just reads as a silent empty snapshot. Distinct from `delete(path)`, which is a surgical key removal within a Resource.
-- React: `useResource<T>(name, id)` wraps open + subscribe + write-through + unmount-close, and exposes `deleted` (see above).
-
-## Collections (typed rows — the relational store successor)
-
-Collections (ADR-0006) are the **typed, on-contract** successor to the LWW stores: named sets of **rows**, each schema-validated. super-line is the server-authoritative **sync source**; **TanStack DB is the client query engine** (joins/live-queries/optimism) via `@super-line/tanstack-db`. Unlike stores, rows are declared IN the contract, so the server validates every write and types flow end-to-end. Deletion/routing is filter-based, not per-id channels.
+Collections are super-line's **typed, on-contract** persisted state: named sets of **rows**, each schema-validated. super-line is the server-authoritative **sync source**; **TanStack DB is the client query engine** (joins/live-queries/optimism) via `@super-line/tanstack-db`. Rows are declared IN the contract, so the server validates every write and types flow end-to-end (`RowOf<C,N>`). Deletion/routing is filter-based, not per-id channels.
 
 ```ts
 // CONTRACT — a top-level `collections` block (rows flow end-to-end via RowOf<C,N>):
@@ -428,9 +348,9 @@ createLiveQueryCollection((q) => q.from({ m: messages }).join({ u: users }, ({ m
 
 Backends (all drop-in, one line to swap): `@super-line/collections-memory` (in-memory · relay) · `collections-sqlite` (SQLite · relay, IR→SQL snapshot pushdown) · `collections-pglite` (central Postgres + Electric→PGlite · **self**, no adapter). Inspector: `listCollections` / `queryCollection` + a Control Center **Collections** view (schema graph + row browser). Guide: `docs/guide/collections.md`; example: `examples/collections`.
 
-### CRDT document collections (ADR-0007)
+### CRDT document collections
 
-CRDT documents fold INTO collections: one `collection(n)` concept, **two consistency models** — LWW **rows** (above, queryable) and CRDT **docs** (whole-document merge, opened by id). A CRDT collection is declared with a `crdt` key (**no `key`** — the id is external) and is **opened by id, not queried**. It replaces the deleted `store-sync-libsql` and the CRDT store family generally.
+A collection has **two consistency models** — LWW **rows** (above, queryable) and CRDT **docs** (whole-document merge, opened by id). A CRDT collection is declared with a `crdt` key (**no `key`** — the id is external) and is **opened by id, not queried**.
 
 ```ts
 // CONTRACT — the `crdt` key discriminates (DocOptions: { mode?: 'shallow'|'document'; opaque?: string[] }):
@@ -451,7 +371,102 @@ await doc.ready
 // React: const { data, set, update, delete: del, deleted } = useDoc('scenes', id)
 ```
 
-- **Validate-before-commit** (overturns ADR-0003 — opaque CRDT deltas ARE now validated). The ingress node merges each delta onto a scratch copy, snapshots to plaintext, validates against the contract schema, then commits + fans out **only if valid**; relay nodes trust the already-validated relayed delta. So a CRDT doc is schema-enforced end-to-end — unlike an off-contract store.
+- **Validate-before-commit** — CRDT deltas ARE schema-validated. The ingress node merges each delta onto a scratch copy, snapshots to plaintext, validates against the contract schema, then commits + fans out **only if valid**; relay nodes trust the already-validated relayed delta. So a CRDT doc is schema-enforced end-to-end.
 - **Reject → resync.** A rejected write (schema or write-policy) was applied optimistically, so the client re-opens and hard-**resets** its replica to authoritative, discarding the bad edit (`onStoreError` still fires). Validation runs on the **post-merge** state, so keep CRDT schemas to per-field/structural rules — an aggregate/cross-field constraint (maxItems, sum-of-fields) can reject a valid-looking concurrent write; put those in requests.
 - Access = guard-shaped `CrdtCollectionPolicy` (`read(principal,id,snapshot?)→bool`, `write(principal,id)→bool`), deny-by-default — NOT the RLS filter shape LWW rows use. Wire: per-doc channel `d:<n>:<id>`, frames `cdopen/cdwr/cdchg/cddel/cdclose`.
 - Backends: `collections-crdt-memory` (relay + the universal `crdtCollectionsClient`) · `collections-crdt-libsql` (durable · relay, `await crdtLibsqlCollections`, snapshot-per-doc) · `collections-crdt-pglite` (**self**: `await crdtPgliteCollections({ pgUrl, electricUrl?, docOptions? })` — central Postgres Yjs op-log + per-node Electric→PGlite replica, validate-before-commit at ingress, no adapter). Inspector surfaces them in `listCollections` (synthetic `id` key) + `queryCollection` synthesizes `{ id, ...snapshot }` doc-rows (browsable in the Control Center Collections view). Guide: `docs/guide/collections.md#crdt-document-collections`; example: `examples/ai-canvas`.
+
+## @super-line/plugin-auth
+
+First-party authentication as a **paired plugin** — a contract fragment + a runtime server plugin + a client. Subpath exports: `.` (contract half), `/server`, `/client`, `/react`. Identity lives in collections (`users` public; `credentials`/`sessions`/`apiKeys`/`passwordResets` deny-all). Only the `guest` role is hardcoded; every other role is data-driven from the user's `roles[]`.
+
+```ts
+// . (contract half)
+authContract(): ContractPlugin        // merges the `guest` role + the identity collections + the shared/guest auth requests INTO the contract
+GUEST_ROLE = 'guest'
+// schemas + types: userSchema/credentialSchema/sessionSchema/apiKeySchema/passwordResetSchema;
+//   AuthUser, AuthCredential, AuthSession, AuthApiKey, AuthContext { userId: string|null; roles: string[]; sessionId: string|null }
+
+// /server — the factory is `auth`; bind the result to `authKit`
+auth<C>(opts: AuthServerOptions<C>): AuthServer<C>
+interface AuthServerOptions<C> {
+  contract: C
+  collections: CollectionStore          // MUST be the SAME store instance passed to createSuperLineServer
+  defaultRoles?: string[]               // default ['user']; must be contract roles
+  sessionTtlMs?: number                 // default 30 days
+  usersReadable?: boolean               // default true (open read on `users`)
+  jwt?: { secret: string; ttlMs?: number }   // enables getToken + stateless ?jwt= connect; ttl default 15 min
+  sendPasswordReset?: (a: { user: AuthUser; token: string }) => void | Promise<void>
+  passwordResetTtlMs?: number           // default 1 hour
+}
+interface AuthServer<C> {
+  authenticate: (h: Handshake) => Promise<AuthResult<C>>   // → { role, ctx: { userId, roles, sessionId } }
+  identify: (conn) => string | undefined                   // principal = ctx.userId
+  plugin: SuperLinePlugin                                  // runtime half: auth handlers + row policies for the identity collections
+  revoke: (userId: string) => Promise<void>               // delete the user's sessions + toUser(userId).disconnect() cluster-wide
+}
+
+// /client
+authClient<C, R>(opts: AuthClientOptions<C, R>): AuthClient<C, R>
+interface AuthClientOptions<C, R> {
+  authedRole: R
+  connect: (a: { role: string; params: Record<string, string> }) => SuperLineClient<C, R>   // build a client for the given role + params
+  storage?: TokenStorage                // default localStorage key 'superline.auth.token'
+}
+interface AuthClient<C, R> {
+  readonly client: SuperLineClient<C, R>   // swaps guest↔authed under the hood
+  readonly state: AuthState                // { status: 'guest' | 'authed'; userId; displayName; roles }
+  readonly ready: Promise<void>            // await before reading state on load (confirms a persisted token via whoami)
+  subscribe(cb: (s: AuthState) => void): () => void
+  signUp(i: { email; password; displayName }): Promise<void>
+  signIn(i: { email; password }): Promise<void>
+  signOut(): Promise<void>
+}
+
+// /react
+createAuth<C, R>(opts: AuthClientOptions<C, R>): { AuthProvider, useAuth, auth }
+//   useAuth() → { client, state, ready: boolean, signUp, signIn, signOut }
+```
+
+Shared requests (every role): `signOut` / `whoami` / `createApiKey` / `listApiKeys` / `revokeApiKey` / `getToken`. Guest-only: `signIn` / `signUp` / `requestPasswordReset` / `confirmPasswordReset`.
+
+Notes:
+- **The factory is `auth()`**, not `createAuthKit`. Pass the **same `CollectionStore`** to `auth({ collections })` and `createSuperLineServer({ collections })` — `authenticate` reads sessions/users/apiKeys directly off it.
+- **Login is a reconnect, not an upgrade.** A connection's role is frozen at connect, so `signIn`/`signUp` tear down the guest socket and reconnect as `authedRole` with `params: { token }`. Token persisted at `superline.auth.token`; `authClient` hides the guest↔authed swap.
+- **Handshake precedence in `authenticate`:** `role === 'guest'` → guest; else `params.apiKey` (`slp_…`, one fixed role, stateful + revocable); else `params.jwt` (only if `jwt.secret` set — stateless, unrevocable pre-expiry); else `params.token` (session). Token/JWT paths throw `BAD_REQUEST` if no role requested, `FORBIDDEN` if the role isn't granted.
+- `getToken()` throws `BAD_REQUEST` unless the server enabled `jwt`. `createApiKey` returns the raw `slp_…` value **once** and requires you already hold the requested role. `revoke(userId)` deletes sessions + disconnects cluster-wide but does NOT revoke API keys (do those per-key). `requestPasswordReset` is a silent no-op without `sendPasswordReset` and always returns `{ ok: true }` (never leaks email existence); `confirmPasswordReset` flushes all the user's sessions.
+
+## Contract plugins (compile-time contract merge)
+
+`defineContract({ plugins: [...] })` merges each plugin's fragment INTO the contract by plain intersection, so `RowOf` / `client.collection` / per-role `Requests` all infer from the single materialized contract with zero type-threading. Existing no-plugin callers are untouched (the overload is identity).
+
+```ts
+defineContract<const C extends Contract & { plugins: readonly ContractPlugin[] }>(c: C): ResolveContract<C>
+defineContract<const C extends Contract>(c: C): C            // no-plugins overload = identity
+
+// author a plugin — ALWAYS via the helper (a plain const widens `subscribe: true` → boolean, degrading a topic to a push event):
+defineContractPlugin<const F>(name: string, fragment: F): ContractPlugin<F>
+interface ContractFragment { shared?: Directional; roles?: Record<string, RoleBlock>; collections?: Record<string, CollectionDef> }
+```
+
+- **Merge is collision-throwing:** a duplicate collection name, or a duplicate direction key in a role/shared block, throws at construction (`rename or prefix`). The same key in **opposite** directions is not a collision.
+- **Handler subtraction (`SubtractHandlers`):** a block a plugin **fully** owns collapses to `{}` and becomes **optional** in `implement` — the host needn't pass `shared: {}` / `guest: {}`. A **partially**-owned block still requires its remaining keys; double-implementing a plugin's key is a compile error + a runtime throw naming the key.
+- **Contract half vs runtime half are separate objects.** `defineContract({ plugins })` merges the *types/surface* only; the plugin's runtime `SuperLinePlugin` (handlers, policies, taps) must still be listed in `createSuperLineServer({ plugins })`. A paired plugin ships both (e.g. `authContract()` + `authKit.plugin`).
+- A runtime plugin may contribute `policies` (merged into the host's, deny-by-default); a policy for a collection **no fragment declared** throws at construction.
+
+## Composition (`defineSurface` / `mergeSurfaces`)
+
+Embed a library's surface into a host role under **one** connection / session / identity — namespacing is a key-prefix convention plus two collision-proof helpers.
+
+```ts
+defineSurface<const D extends Directional>(surface: D): D    // identity; preserves literal keys + subscribe:true
+mergeSurfaces<A, B>(a: A, b: B): MergedSurface<A, B>         // merges per direction; a duplicate key is a COMPILE error naming the key + a runtime throw
+// MergedSurface = { clientToServer: CtsOf<A> & CtsOf<B>; serverToClient: StcOf<A> & StcOf<B> }
+```
+
+- `mergeSurfaces` merges `clientToServer` / `serverToClient` only, and **rejects any other key** — a role's `data` schema is banned from the merge, so add it **beside** the merge: `user: { ...mergeSurfaces(lib, app), data: schema }`. The same key in opposite directions is allowed.
+- Wrap surfaces in `defineSurface(...)` for the same literal-preservation reason as `defineContractPlugin`.
+
+## Control Center inspector (plugin)
+
+`inspector(opts?: { redact?: string[] }): SuperLinePlugin` from `@super-line/plugin-inspector` is the **only** way to enable the Control Center — pass it in `plugins: [inspector()]`. The server no longer takes an `inspector` option and the WS transport no longer takes an `inspector` field. It taps every event (safe-snapshot + field-redact), publishes cluster-wide on its plugin channel, and serves the `InspectorContract` (`getContract` / `getTopology` / `listConnections` / `getNode` / `getConn` / `listCollections` / `queryCollection` + an `events` topic) over a reserved connection class. Dev / trusted-network only.

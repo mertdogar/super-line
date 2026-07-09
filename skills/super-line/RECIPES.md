@@ -344,60 +344,163 @@ const srv = createSuperLineServer(api, { transports: [loopback.server], authenti
 const client = createSuperLineClient(api, { transport: loopback.client(), role: 'user' })
 ```
 
-## Stores (permissioned real-time documents)
+## Collections (typed rows)
 
-A **Store** is the built-in, off-contract persisted-state seam: named, permissioned JSON Resources `{ id, accessRules, data }` with a reactive client handle, a server-side co-writer, and a pluggable backend (in-memory LWW, a merging CRDT, or durable SQLite). Configure a server + client **pair** under matching keys.
+A **collection** is server-authoritative, on-contract persisted state — typed **rows**, schema-validated, with deny-by-default row security. super-line syncs the rows; **TanStack DB** is the query engine (joins, live queries). Declare rows on the contract, pick one backend, write `policies`.
 
 ```ts
-// server — pick a backend per name; everything else is identical
-import { memoryStoreServer } from '@super-line/store-memory'      // LWW (default)
-// import { syncStoreServer } from '@super-line/store-sync'       // CRDT (merging) — one-line swap
-// import { sqliteStoreServer } from '@super-line/store-sqlite'   // durable LWW
+// contract.ts — a top-level `collections` block; rows flow end-to-end as RowOf<C, 'messages'>
+export const api = defineContract({
+  collections: {
+    users:    { schema: z.object({ id: z.string(), name: z.string() }), key: 'id' },
+    messages: { schema: z.object({ id: z.string(), channelId: z.string(), authorId: z.string(), text: z.string(), createdAt: z.number() }),
+                key: 'id', references: { authorId: 'users' } },   // advisory FK (opt-in checkReferences)
+  },
+  roles: { user: { clientToServer: {} } },
+})
+```
+
+```ts
+// server.ts — ONE backend for ALL row collections + deny-by-default policies
+import { memoryCollections } from '@super-line/collections-memory'  // or sqliteCollections({ file }) · await pgliteCollections({ pgUrl })
+import { isIn, eq } from '@super-line/core'
 const srv = createSuperLineServer(api, {
   transports: [webSocketServerTransport({ server })],
-  authenticate: (h) => ({ role: 'user' as const, ctx: { uid: h.query.uid } }),
-  identify: (conn) => conn.ctx.uid,                                // the ACL principal
-  stores: { docs: memoryStoreServer() },
+  authenticate: (h) => ({ role: 'user' as const, ctx: { uid: h.query.uid, channels: ['general'] } }),
+  identify: (conn) => conn.ctx.uid,
+  collections: memoryCollections(),
+  policies: {
+    messages: {
+      read:  (principal, ctx) => isIn('channelId', ctx.channels),  // → an IR filter ANDed into every snapshot + live change (undefined = whole collection)
+      write: (principal, op, next, prev) => op === 'delete' ? prev?.authorId === principal : next?.authorId === principal,
+    },
+    users: { read: () => undefined },                              // everyone reads all users; writes stay server-only (write omitted)
+  },
 })
-// server-authoritative lifecycle (NO client wire for these); deny-by-default
-await srv.store('docs').create('note-1', { title: 'Draft', body: '' }, { alice: { read: true, write: true } })
-await srv.store('docs').grant('note-1', 'bob', { read: true, write: false })   // open access at runtime
+await srv.collection('messages').insert({ id: nano(), channelId: 'general', authorId: 'system', text: 'welcome', createdAt: Date.now() }) // co-write: policy-free, still schema-validated
 ```
 
 ```ts
-// client — the matching half under the same key
-import { memoryStoreClient } from '@super-line/store-memory'
-const client = createSuperLineClient(api, {
-  transport: webSocketClientTransport({ url }), role: 'user', params: { uid: 'alice' },
-  stores: { docs: memoryStoreClient() },
-  onStoreError: (err, { store, id }) => console.warn('write denied', store, id, err),  // optimistic: no rollback
-})
-const note = client.store('docs').open<{ title: string; body: string }>('note-1')
-await note.ready                              // getSnapshot() is undefined until catch-up
-note.subscribe(() => render(note.getSnapshot()))
-note.update({ title: 'Shipping plan' })       // optimistic + fanned to other subscribers
-note.delete(['body'])                         // surgical key removal (merges; a full `set` would clobber a peer)
-note.close()
+// client.ts — a live, ordered, filtered row-set
+const sub = client.collection('messages').subscribe({ filter: eq('channelId', 'general'), orderBy: [{ field: 'createdAt', dir: 'asc' }], limit: 50 })
+await sub.ready                                    // AWAIT before depending on live delivery (frames process concurrently)
+sub.subscribe((ev) => render(sub.rows()))         // ev: { type: 'insert'|'update'|'delete', id, row } — NON-optimistic (optimism is TanStack's job)
+await client.collection('messages').insert({ id: nano(), channelId: 'general', authorId: uid, text: 'hi', createdAt: Date.now() })
+// React: const { rows, insert, update, delete: del } = useCollection('messages', { filter: eq('channelId', id) })
 ```
 
 ```ts
-// server-side co-writer — for an IN-PROCESS AI agent / bot / validator. NOT a loopback client:
-const h = srv.store('docs').open('note-1', { origin: 'agent:42' })
-h.subscribe(() => render(h.getSnapshot()))    // reactive reads — sees clients' edits live
-h.update({ title: 'Curated' })                // merge a co-write
-h.delete(['body'])                            // the ONLY way to delete a key server-side (write/update merge)
-h.close()
+// joins + live queries — TanStack DB is the query engine
+import { createCollection, createLiveQueryCollection, eq as teq } from '@tanstack/db'
+import { superLineCollectionOptions } from '@super-line/tanstack-db'
+const messages = createCollection(superLineCollectionOptions(client, api, 'messages', { query: { filter: eq('channelId', 'general') } }))
+const users    = createCollection(superLineCollectionOptions(client, api, 'users'))
+const enriched = createLiveQueryCollection((q) =>
+  q.from({ m: messages }).join({ u: users }, ({ m, u }) => teq(u.id, m.authorId), 'inner')
+   .select(({ m, u }) => ({ id: m.id, text: m.text, author: u.name })))
 ```
 
-- **One plumbing, two consistency models** — swap the `memory*` pair for `syncStoreServer()`/`syncStoreClient()` to go from last-writer-wins to a **merging CRDT** (concurrent edits to different fields converge). Nothing else changes; for document-mode merge pass the SAME `resolveOptions` to both halves.
-- **Off-contract + unknown** — `data` is never schema-validated; assert the shape (`open<T>`). Route hard typed gates through a request (ADR-0003).
-- **Merge vs delete** — `update`/`write` merge top-level keys (never remove one); `delete(path)` is the only key removal. On the CRDT store it's surgical and merge-safe; use `set` only for a whole-document replace.
-- **In-process actor?** Use the server co-writer (`srv.store(ns).open(id)`), not a loopback client — reactive reads + delete, server-authoritative, no grant.
-- Runnable: the [`store`](https://github.com/mertdogar/super-line/tree/main/examples/store) (LWW) and [`store-sync-json`](https://github.com/mertdogar/super-line/tree/main/examples/store-sync-json) (CRDT) examples. For an agent co-writer end-to-end, [`ai-canvas`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas) — a server-side LLM edits a shared canvas via `srv.collection(n).open(id)` (`update` + `delete(path)`), merging with users' concurrent edits — now runs on a **CRDT document collection** (↓), not a store.
+- **Deny-by-default.** Omit a collection's `read`/`write` and that op is server-only. `read` returns an IR filter (ANDed into snapshots + live routing); `write` returns a bool.
+- **One backend, atomic batches.** All row collections share one `collections:` backend (one transaction domain), so a cross-collection `batch([...])` is atomic.
+- **Backends:** `collections-memory` (relay) · `collections-sqlite` (durable · relay, IR→SQL pushdown) · `collections-pglite` (**self**: central Postgres + Electric→PGlite, no adapter). Runnable: `examples/collections` · `examples/collections-chat`.
+
+## First-party auth (`@super-line/plugin-auth`)
+
+Real login without hand-rolling sessions: email/password, server-issued sessions, data-driven roles, API keys, JWT. It's a **paired plugin** — a contract fragment + a server plugin + a client — and stores all identity in collections, so it needs a collection backend. Three touch-points.
+
+```ts
+// 1 · contract.ts — merge the auth fragment (adds the `guest` role + identity collections). Do NOT declare `guest` yourself.
+import { authContract } from '@super-line/plugin-auth'
+export const app = defineContract({
+  roles: { user: {}, admin: {} },
+  collections: { messages: { schema: messageSchema, key: 'id', references: { authorId: 'users' } } }, // your rows can FK the auth `users`
+  plugins: [authContract()],
+})
+```
+
+```ts
+// 2 · server.ts — build the kit over the SAME collection backend, then wire 3 fields
+import { auth } from '@super-line/plugin-auth/server'
+import { sqliteCollections } from '@super-line/collections-sqlite'
+const backend = sqliteCollections({ file: 'app.db' })
+const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'], jwt: { secret: process.env.JWT_SECRET! } })
+const srv = createSuperLineServer(app, {
+  transports: [webSocketServerTransport({ server })],
+  collections: backend,                 // SAME instance passed to auth()
+  authenticate: authKit.authenticate,   // resolves guest / session token / API key / JWT
+  identify: authKit.identify,           // principal = userId
+  plugins: [authKit.plugin],            // the runtime half: auth handlers + identity-collection policies
+})
+// later, from anywhere: await authKit.revoke(userId)   // delete sessions + kick every device cluster-wide
+```
+
+```ts
+// 3 · client — authClient owns the guest↔authed reconnect (role is frozen at connect, so login is a reconnect)
+import { authClient } from '@super-line/plugin-auth/client'
+const a = authClient({
+  authedRole: 'user',
+  connect: ({ role, params }) =>
+    createSuperLineClient(app, { transport: webSocketClientTransport({ url }), role: role as 'user', params }),
+})
+await a.ready                                  // confirms any persisted token (localStorage 'superline.auth.token')
+if (a.state.status === 'guest') await a.signIn({ email, password })   // or a.signUp({ email, password, displayName })
+a.client.collection('messages').subscribe(/* … */)                   // a.client is the live (authed) client
+await a.signOut()
+```
+
+```tsx
+// React — createAuth wraps the same client
+import { createAuth } from '@super-line/plugin-auth/react'
+export const { AuthProvider, useAuth } = createAuth({ authedRole: 'user', connect })
+function Gate() {
+  const { ready, state, signIn, signOut } = useAuth()
+  if (!ready) return <Spinner />
+  return state.status === 'authed' ? <App onSignOut={signOut} /> : <Login onSubmit={signIn} />
+}
+```
+
+- Pass the **same `CollectionStore`** to `auth({ collections })` and `createSuperLineServer({ collections })` — `authenticate` reads sessions/users off it directly.
+- `jwt` is opt-in: without it `getToken()` throws and only session tokens / API keys connect. An API key (`slp_…`) carries one fixed role and is revocable; a JWT is stateless and unrevocable until it expires.
+- `sendPasswordReset` is a host callback; without it `requestPasswordReset` is a silent no-op (never leaks whether an email exists). Runnable: `examples/auth` (CLI) · `examples/collections-chat` (real login).
+
+## Author a plugin · compose a library
+
+Two ways to ship reusable super-line surface: a **contract plugin** (merged into a host's contract, like auth) or a **composed surface** (spliced into one role). Both keep types end-to-end.
+
+```ts
+// A CONTRACT PLUGIN — a fragment (collections + roles + shared) authored with the helper (never a plain const)
+import { defineContractPlugin } from '@super-line/core'
+export function chatPlugin() {
+  return defineContractPlugin('chat', {
+    collections: { chatMessages: { schema: msgSchema, key: 'id' } },
+    roles: { guest: { clientToServer: { 'chat.send': { input: sendIn, output: sendOut } } } },
+    shared: { serverToClient: { 'chat.tick': { payload: tickSchema, subscribe: true } } },
+  })
+}
+// the host merges the fragment's TYPES and separately lists the runtime plugin (handlers/policies live there):
+const api = defineContract({ roles: { guest: {}, user: {} }, plugins: [chatPlugin()] })
+createSuperLineServer(api, { /* … */ plugins: [chatRuntime()] })  // a fully-owned block (e.g. guest) becomes OPTIONAL in implement()
+```
+
+```ts
+// A COMPOSED SURFACE — splice a library's requests/events into ONE role, under one connection
+import { defineSurface, mergeSurfaces } from '@super-line/core'
+export const libSurface = defineSurface({
+  clientToServer: { 'lib.join': { input: joinIn, output: joinOut } },
+  serverToClient: { 'lib.feed': { payload: feedSchema, subscribe: true } },
+})
+const api = defineContract({
+  roles: { user: { ...mergeSurfaces(libSurface, defineSurface({ clientToServer: { say: sayDef } })), data: userData } },
+})                                        // ^ a role's `data:` schema goes BESIDE the merge, never inside it
+// mergeSurfaces merges per direction; a duplicate key is a COMPILE error. Prefix keys ('lib.*') to avoid clashes.
+```
+
+- A **contract plugin** ships collections + roles + policies as a bundle (a paired runtime plugin carries the handlers); **`mergeSurfaces`** grafts a library's requests/events into an existing role.
+- Always wrap with `defineContractPlugin` / `defineSurface` — a plain const widens `subscribe: true` to `boolean` and silently downgrades a topic to a push event.
 
 ## Durable CRDT document collection (libsql / Turso)
 
-The CRDT store family folded into collections (ADR-0007): a durable, mergeable document is now a **CRDT document collection** — declared on the contract (so every delta is **validate-before-commit** schema-checked), opened by id, and persisted to libsql/Turso. This **replaces `store-sync-libsql`**. The factory is **async** — it rehydrates every doc (history-preserving) before returning.
+A durable, mergeable document is a **CRDT document collection** — declared on the contract (so every delta is **validate-before-commit** schema-checked), opened by id, and persisted to libsql/Turso. The factory is **async** — it rehydrates every doc (history-preserving) before returning.
 
 ```ts
 // CONTRACT — a `crdt` collection (no `key`; the id is external):
@@ -425,49 +528,36 @@ const client = createSuperLineClient(api, { transport, role: 'user', params: { u
 const doc = client.collection('scenes').open('s1'); await doc.ready // → DocHandle { getSnapshot, set, update, delete(path), deleted, close }
 ```
 
-## Self-clustering store (central Postgres + Electric — no adapter)
+## Self-clustering collection (central Postgres + Electric — no adapter)
 
-`store-pglite` / `store-sync-pglite` set `clustering: 'self'`: writes hit a central Postgres, ElectricSQL streams the table to each node's in-memory PGlite replica, and `live.changes` drives `onChange`/`onDelete`. The store owns its own cross-node sync, so **no `adapter:` is needed** for these Resources to fan out across nodes.
+The `-pglite` collection backends set `clustering: 'self'`: writes hit a central Postgres, ElectricSQL streams each table to every node's in-memory PGlite replica, and that replica drives live delivery. The backend owns its own cross-node sync, so **no `adapter:` is needed** for these collections to fan out across nodes.
 
 ```ts
-// LWW — npm i @super-line/store-pglite ; pair with memoryStoreClient()
-import { pgliteStoreServer } from '@super-line/store-pglite'
+// rows — npm i @super-line/collections-pglite
+import { pgliteCollections } from '@super-line/collections-pglite'
 const srv = createSuperLineServer(api, {                 // note: no adapter
   transports: [webSocketServerTransport({ server })], authenticate, identify: (c) => c.ctx.uid,
-  stores: {
-    docs: await pgliteStoreServer({
-      pgUrl: 'postgres://localhost:5432/app',            // source of truth (writes + strong reads + ACL)
-      electricUrl: 'http://localhost:3000/v1/shape',     // Electric shape endpoint streaming the table in
-    }),
-  },
+  collections: await pgliteCollections({
+    pgUrl: 'postgres://localhost:5432/app',              // source of truth (writes + strong reads)
+    electricUrl: 'http://localhost:3000/v1/shape',       // Electric shape endpoint streaming the tables in
+  }),
+  policies: { /* per-collection read→filter / write→bool */ },
 })
 
-// CRDT sibling — npm i @super-line/store-sync-pglite ; pair with syncStoreClient(); supports open()→ServerReplica
-import { syncPgliteStoreServer } from '@super-line/store-sync-pglite'
-const docs = await syncPgliteStoreServer({ pgUrl, electricUrl, resolveOptions: (id) => ({ mode: 'document' }) })
-const replica = srv.store('docs').open('note-1')         // reactive in-process co-writer (CRDT op-log under the hood)
+// CRDT documents — npm i @super-line/collections-crdt-pglite (central Yjs op-log + per-node Electric→PGlite replica)
+import { crdtPgliteCollections } from '@super-line/collections-crdt-pglite'
+const srv2 = createSuperLineServer(api, {
+  transports: [webSocketServerTransport({ server })], authenticate, identify: (c) => c.ctx.uid,
+  crdtCollections: await crdtPgliteCollections({ pgUrl, electricUrl }),  // validate-before-commit at the ingress node before op-log append
+  policies: { scenes: { read: (p, id) => true, write: (p, id) => true } },
+})
 ```
 
-## Observe deletion on the client (the `deleted` flag)
-
-`srv.store(ns).delete(id)` fans a deletion cluster-wide (wire `sdel`); every open client handle flips `deleted: true` and fires its `subscribe` so the UI can re-read. Works on any backend, any node.
-
-```ts
-// server — authoritative deletion (no client wire for this)
-await srv.store('docs').delete('note-1')      // fans out everywhere; ServerStore.onDelete also fires server-side
-
-// client (vanilla)
-const note = client.store('docs').open('note-1')
-note.subscribe(() => { if (note.deleted) showTombstone(); else render(note.getSnapshot()) })
-
-// React
-const { data, deleted } = useResource('docs', 'note-1')
-if (deleted) return <Tombstone />
-```
+Runnable: `examples/ai-canvas-pglite` (CRDT self-tier).
 
 ## Synced state with a CRDT (Yjs / Automerge) — roll your own
 
-For most apps, prefer the built-in **Store** seam above — `store-sync` is exactly this CRDT relay, batteries-included. Roll your own only when you need to **own the wire** (custom rooms, your own message shapes, no Store abstraction). super-line has no built-in shared-document type, but it's an ideal transport for one: keep a CRDT doc per room and relay **opaque** update bytes (base64-wrapped, so they ride the default JSON serializer). The **server holds the canonical doc** — so it persists state and can be a **co-writer** — and the doc's update observer is the single fan-out point. An `origin` tag marks who wrote each update so clients can break the echo.
+For most apps, prefer a built-in **CRDT document collection** (above) — a validated, mergeable, persisted document with a client `DocHandle` and a server co-writer, batteries-included. Roll your own only when you need to **own the wire** (custom rooms, your own message shapes, no collection abstraction). super-line is an ideal transport for a hand-rolled CRDT: keep a doc per room and relay **opaque** update bytes (base64-wrapped, so they ride the default JSON serializer). The **server holds the canonical doc** — so it persists state and can be a **co-writer** — and the doc's update observer is the single fan-out point. An `origin` tag marks who wrote each update so clients can break the echo.
 
 ```ts
 // contract.ts — carries opaque base64 CRDT bytes
@@ -855,4 +945,3 @@ it('useRequest performs a typed call and exposes state', async () => {
 - `backoffDelay` is a **pure function** — unit-test it directly (no timers or sockets): `expect(backoffDelay(0, opts)).toBeLessThanOrEqual(opts.maxMs)`.
 - Prefer a small `reconnectBaseMs` + `waitFor` over fake timers — `vi.useFakeTimers()` is brittle alongside real sockets (real I/O isn't faked).
 - For **real cross-process** tests, use `testcontainers` + `createRedisAdapter(url)`, and skip cleanly when Docker is absent (`describe.skipIf`). For a cross-node **room** broadcast, `room.add → adapter.subscribe` is fire-and-forget, so poll the broadcast until it lands (the SUBSCRIBE-propagation window is a non-issue in real apps).
-```

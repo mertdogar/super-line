@@ -228,6 +228,39 @@ samp {
   color: var(--sl-cyan-strong);
 }
 
+/* Tutorial series breadcrumb — a light step marker above the lesson hero. */
+.vp-doc .sl-qs-crumb {
+  margin: 0 0 1.1rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--vp-c-text-2);
+}
+.vp-doc .sl-qs-crumb strong {
+  color: var(--sl-cyan-strong);
+  font-weight: 600;
+}
+
+/* Two-up split (Collections overview: rows vs. documents). */
+.vp-doc .sl-two ul {
+  max-width: none;
+  list-style: none;
+  padding: 0;
+  margin: 1.25rem 0;
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+}
+.vp-doc .sl-two li {
+  max-width: none;
+  margin: 0;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
 /* The "it works" moment — the emotional payoff of onboarding. */
 .vp-doc .sl-result {
   margin: 1.6rem 0;

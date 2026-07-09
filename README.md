@@ -197,15 +197,17 @@ const { ok } = await srv.toConn(connId).request('confirm', { q: 'Deploy now?' })
 // client side: client.implement({ confirm: async ({ q }) => ({ ok: true }) })
 ```
 
-See [Introspection & presence](https://super-line.dogar.biz/guide/introspection-and-presence) for the full surface.
+See [Introspection & presence](https://super-line.dogar.biz/how-to/introspection-and-presence) for the full surface.
 
 ## Documentation
 
 The full docs live at **[super-line.dogar.biz](https://super-line.dogar.biz/)**:
 
-- **Start here** — [Getting started](https://super-line.dogar.biz/guide/getting-started) · [The contract](https://super-line.dogar.biz/guide/the-contract) (roles, direction & the five flavors)
-- **Guides** — [Requests](https://super-line.dogar.biz/guide/requests) · [Events & rooms](https://super-line.dogar.biz/guide/events-rooms) · [Topics](https://super-line.dogar.biz/guide/topics) · [Collections](https://super-line.dogar.biz/guide/collections) · [Stores](https://super-line.dogar.biz/guide/store) · [Synced state (CRDT)](https://super-line.dogar.biz/guide/synced-state) · [Roles & auth](https://super-line.dogar.biz/guide/roles-auth) · [Middleware & lifecycle](https://super-line.dogar.biz/guide/middleware-lifecycle) · [Error handling](https://super-line.dogar.biz/guide/errors) · [Reconnection & delivery](https://super-line.dogar.biz/guide/reconnection-delivery) · [Serialization](https://super-line.dogar.biz/guide/serialization) · [Scaling & adapters](https://super-line.dogar.biz/guide/scaling-adapters) · [React](https://super-line.dogar.biz/guide/react) · [Testing](https://super-line.dogar.biz/guide/testing)
-- **[API reference](https://super-line.dogar.biz/reference/)** — generated from source: every export, option, and type across the five packages.
+- **Learn** — [Your first typed round-trip](https://super-line.dogar.biz/tutorials/first-round-trip) · [Your first collection](https://super-line.dogar.biz/tutorials/first-collection) · [Go collaborative (CRDT)](https://super-line.dogar.biz/tutorials/go-collaborative)
+- **How-to** — [Requests](https://super-line.dogar.biz/how-to/requests) · [Events & rooms](https://super-line.dogar.biz/how-to/events-rooms) · [Topics](https://super-line.dogar.biz/how-to/topics) · [Roles & auth](https://super-line.dogar.biz/how-to/roles-auth) · [Middleware & lifecycle](https://super-line.dogar.biz/how-to/middleware-lifecycle) · [Errors](https://super-line.dogar.biz/how-to/errors) · [Serialization](https://super-line.dogar.biz/how-to/serialization) · [React](https://super-line.dogar.biz/how-to/react) · [Choose an adapter](https://super-line.dogar.biz/how-to/choose-an-adapter) · [Testing](https://super-line.dogar.biz/how-to/testing)
+- **Collections** — [Overview](https://super-line.dogar.biz/collections/) · [Row collections](https://super-line.dogar.biz/collections/row-collections) · [CRDT documents](https://super-line.dogar.biz/collections/crdt-documents) · [Policies](https://super-line.dogar.biz/collections/policies) · [TanStack DB](https://super-line.dogar.biz/collections/tanstack-db) · [Backends](https://super-line.dogar.biz/collections/backends)
+- **Concepts** — [Why super-line](https://super-line.dogar.biz/concepts/why-super-line) · [The contract](https://super-line.dogar.biz/concepts/the-contract) (roles, direction & the five flavors) · [Server-authoritative](https://super-line.dogar.biz/concepts/server-authoritative) · [Transports vs. adapters](https://super-line.dogar.biz/concepts/transports-and-adapters) · [Reconnection & delivery](https://super-line.dogar.biz/concepts/reconnection-delivery)
+- **[API reference](https://super-line.dogar.biz/reference/)** — generated from source: every export, option, and type.
 
 ## Examples
 
@@ -289,7 +291,7 @@ super-line ships an **agent guide** — the role + direction model, the interact
 npx degit mertdogar/super-line/skills/super-line .claude/skills/super-line
 ```
 
-For **Cursor, GitHub Copilot, and other agents** (one condensed file + where to put it), see the guide: **[Use with your AI agent](https://super-line.dogar.biz/guide/ai-agents)**.
+For **Cursor, GitHub Copilot, and other agents** (one condensed file + where to put it), see the guide: **[Use with your AI agent](https://super-line.dogar.biz/how-to/ai-agents)**.
 
 ## Comparison & FAQ
 
@@ -307,7 +309,7 @@ For **Cursor, GitHub Copilot, and other agents** (one condensed file + where to 
 | Multi-node | ✅ adapter | ✅ adapter | ❌ | ❌ |
 | Zero codegen | ✅ | ✅ | ✅ | n/a |
 
-**Why not Socket.IO?** Socket.IO splits its types into `ClientToServerEvents` / `ServerToClientEvents` / `InterServerEvents` interfaces you maintain by hand as **positional generics** (easy to swap), with no runtime validation. super-line keeps the same directional split but in **one shared object** (can't misorder, can't drift), validates inbound automatically, and adds something Socket.IO doesn't have: **per-role contracts**. More in the [comparison & FAQ](https://super-line.dogar.biz/guide/comparison-faq).
+**Why not Socket.IO?** Socket.IO splits its types into `ClientToServerEvents` / `ServerToClientEvents` / `InterServerEvents` interfaces you maintain by hand as **positional generics** (easy to swap), with no runtime validation. super-line keeps the same directional split but in **one shared object** (can't misorder, can't drift), validates inbound automatically, and adds something Socket.IO doesn't have: **per-role contracts**. More in the [comparison & FAQ](https://super-line.dogar.biz/concepts/comparison-faq).
 
 **Do I need Redis?** No — a single node uses the in-memory adapter. Add Redis only when you run more than one process.
 

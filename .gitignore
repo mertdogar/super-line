@@ -7,6 +7,8 @@ coverage
 # docs site: vitepress build artifacts + generated API reference
 docs/.vitepress/cache
 docs/.vitepress/dist
-docs/reference/
+# reference/ is typedoc-generated, EXCEPT the hand-authored cheatsheets (kept + preserved by typedoc cleanOutputDir:false)
+docs/reference/*
+!docs/reference/cheatsheets/
 .impeccable/
 .super-talk/

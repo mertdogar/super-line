@@ -1,6 +1,6 @@
 # @super-line/transport-http
 
-HTTP client↔server transport for [**super-line**](https://mertdogar.github.io/super-line/) — runs the
+HTTP client↔server transport for [**super-line**](https://super-line.dogar.biz/) — runs the
 full data bus (requests · events · subscriptions · synced state) over plain HTTP for
 **WebSocket-hostile networks**: SSE or long-poll downstream + `POST` upstream over one logical connection.
 A drop-in alternative to the default [`@super-line/transport-websocket`](https://www.npmjs.com/package/@super-line/transport-websocket).
@@ -71,8 +71,8 @@ In the browser `EventSource` and `fetch` are globals, so `httpClientTransport({ 
 | `EventSource` | EventSource implementation — undefined in Node, so pass the [`eventsource`](https://www.npmjs.com/package/eventsource) package. |
 | `fetch` | fetch implementation (defaults to `globalThis.fetch`, present in Node 18+ and browsers). |
 
-- 📖 Docs: <https://mertdogar.github.io/super-line/>
-- 📚 Guide: [HTTP transport](https://mertdogar.github.io/super-line/guide/transport-http)
+- 📖 Docs: <https://super-line.dogar.biz/>
+- 📚 Guide: [HTTP transport](https://super-line.dogar.biz/how-to/transport-http)
 - 🧩 Example: [`react-chat-transports`](https://github.com/mertdogar/super-line/tree/main/examples/react-chat-transports) — flip between WebSocket, HTTP (SSE), and libp2p live in the browser
 - 🧩 Source: <https://github.com/mertdogar/super-line>
 

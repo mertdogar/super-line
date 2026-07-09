@@ -1,0 +1,96 @@
+# Inspect a cluster with Control Center
+
+One screen for your entire cluster: which node owns which socket, who's in which room, the live contract, and every message crossing the bus in real time. No `console.log`s, no extra instrumentation — mount one plugin and point the **Control Center** at any node.
+
+It ships as `@super-line/control-center` and runs with `npx` — no install.
+
+<img src="/control-center/topology.png" alt="Control Center topology view — a hub-and-spoke graph with the Adapter bus at the center, server nodes around it, and connections grouped by their owning node" class="sl-shot" />
+
+## Enable the inspector
+
+The inspector ships as the [plugin](/concepts/plugins) `@super-line/plugin-inspector`. Mount it with `plugins: [inspector()]` on any node — it contributes a node-local tap (the `msg.*` telemetry) and a plugin-owned connection class the Control Center attaches to over the reserved `superline.inspector.v1` subprotocol. The server is the single authority: the WS transport advertises that subprotocol **only** because the plugin declared it. It is **off by default**:
+
+```ts
+import { createSuperLineServer } from '@super-line/server'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
+import { inspector } from '@super-line/plugin-inspector'
+
+const srv = createSuperLineServer(contract, {
+  transports: [webSocketServerTransport({ server })],
+  authenticate,
+  plugins: [inspector()],
+})
+```
+
+Inspector connections **bypass `authenticate`**, are **read-only**, and are kept out of presence, the heartbeat, and `local`/`cluster` results — so the observer never shows up in what it observes.
+
+::: details Migrating from `inspector: true`
+Earlier versions enabled the inspector with an `inspector: true` server option (and a matching transport option). Both are gone — the inspector is now a [plugin](/concepts/plugins). Add the dependency and mount it:
+
+```ts
+// before
+const srv = createSuperLineServer(contract, { transports, authenticate, inspector: true })
+
+// after — pnpm add @super-line/plugin-inspector
+import { inspector } from '@super-line/plugin-inspector'
+const srv = createSuperLineServer(contract, { transports, authenticate, plugins: [inspector()] })
+```
+
+The old `inspector.redact` option becomes `inspector({ redact: ['token'] })`. The wire, the `superline.inspector.v1` subprotocol, and the Control Center are unchanged — only the mount point moved.
+:::
+
+::: warning Dev / trusted-network only
+The inspector channel is unauthenticated in v1. Never mount `inspector()` on an internet-facing production node. (A `redact` option masks specific `ctx`/`data` field names: `inspector({ redact: ['token'] })`.)
+:::
+
+## Run it
+
+```sh
+npx @super-line/control-center --url ws://localhost:3000
+```
+
+This serves the app on a local port and opens your browser. Change the endpoint from the Settings page at any time, or pass `--port` to pick the local port.
+
+## The views
+
+### Topology
+
+A hub-and-spoke graph of the whole cluster. The `Adapter · bus` sits at the center (multi-node clusters only — nodes have no direct sockets, they coordinate through the bus), server nodes around it, and each connection around its owning node. Connection nodes are colored by their **wire family** (WebSocket / HTTP / libp2p / loopback), and each server node labels its wire mix (e.g. `3 ws / 2 http`). A side lens lists roles as a color legend, the wire families in play with live counts, the rooms, and this node's topics — click a room or a wire family to highlight its connections across every node. The graph updates on every live event.
+
+### Connections
+
+A table of every connection cluster-wide — role, **transport**, id, user, owning node, rooms, and uptime. The transport column is the **wire** each connection was accepted on, shown with a friendly label (`WebSocket`, `HTTP · SSE`, `HTTP · long-poll`, `libp2p`, `Loopback`) and color-keyed to the same wire-family palette as the topology graph — so a mixed-transport cluster is legible at a glance.
+
+<img src="/control-center/connections.png" alt="Control Center connections view — a table of every connection across the cluster with role, id, user, node, rooms, and connected time" class="sl-shot" />
+
+Click a row to open its descriptor — including the wire it came in over — plus a best-effort, **node-local** snapshot of `ctx` and `conn.data`. A connection owned by another node shows descriptor-only — point the Control Center at that node to read its `ctx`.
+
+### Contract
+
+The full contract surface: `shared` and each role, split by direction with a flavor badge (`request` / `event` / `topic`) and an expandable best-effort JSON Schema per message.
+
+<img src="/control-center/contract.png" alt="Control Center contract view — shared and per-role messages grouped by direction, each with a flavor badge and an expandable JSON Schema payload" class="sl-shot" />
+
+### Live feed
+
+Lifecycle churn — `connect` / `disconnect` / `room.add` / `room.remove` / `topic.sub` / `topic.unsub` — published on a reserved channel and fanned out cluster-wide via your Adapter, so an inspector on any one node sees events from every node.
+
+<img src="/control-center/live-feed.png" alt="Control Center live feed — a real-time stream of lifecycle and message events with Lifecycle, Requests, and Events filters" class="sl-shot" />
+
+It also streams **message traffic** — `msg.request` / `msg.response` / `msg.broadcast` / `msg.publish` / `msg.event`, plus `msg.serverRequest` / `msg.serverReply` between nodes. Filter by **Lifecycle**, **Requests**, or **Events**, pause the stream, and expand any row to inspect its payload (redacted per your `inspector({ redact })` config).
+
+<img src="/control-center/live-feed-payload.png" alt="Control Center live feed with a broadcast row expanded to show its JSON payload" class="sl-shot" />
+
+### Settings
+
+Point the Control Center at a different node. The inspector-connection URL is saved to your browser and reused next time; the status dot shows the live socket state.
+
+<img src="/control-center/settings.png" alt="Control Center settings — the inspector connection panel with a WebSocket URL field, reconnect button, and live status indicator" class="sl-shot" />
+
+### Resources
+
+A handful of jump-off cards — the home page, the documentation, the GitHub repo, and the `@super-line/*` packages on npm — so you can get from inspecting a cluster to the docs or source in one click.
+
+## How it works
+
+Everything rides the WebSocket transport super-line already owns — the Control Center is itself a super-line-style client on the reserved channel. Contract structure comes from the in-process contract object; field-level schemas use the optional [`@standard-community/standard-json`](https://github.com/standard-community/standard-json) bridge when present, falling back to structure-only otherwise. Cluster reads come from the [presence registry](/how-to/introspection-and-presence); live events — both lifecycle and message traffic — reuse the same Adapter pub/sub fan-out as rooms and topics, so a single inspector sees the whole cluster.

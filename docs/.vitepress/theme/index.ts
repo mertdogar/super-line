@@ -17,21 +17,22 @@ const EXTRACTED = new Set([
   'adapter-rabbitmq',
 ])
 
-const GUIDE_ALIASES: Record<string, string> = {
-  'transport-websocket': 'transport-websocket',
-  'transport-http': 'transport-http',
-  'transport-libp2p': 'transport-libp2p',
-  'transport-loopback': 'transport-loopback',
-  'control-center': 'control-center',
+// @-less reference slugs that live as how-to recipes rather than extracted API.
+const REFERENCE_GUIDE_ALIASES: Record<string, string> = {
+  'transport-websocket': '/how-to/transport-websocket',
+  'transport-http': '/how-to/transport-http',
+  'transport-libp2p': '/how-to/transport-libp2p',
+  'transport-loopback': '/how-to/transport-loopback',
+  'control-center': '/how-to/control-center',
 }
 
 function redirectAliases() {
   const path = location.pathname.replace(/\.html$/, '').replace(/\/$/, '')
-  if (path === '/guide/why') return location.replace('/guide/introduction')
+  if (path === '/guide/why') return location.replace('/concepts/why-super-line')
   const m = path.match(/^\/reference\/([\w-]+)$/)
   if (!m) return
   if (EXTRACTED.has(m[1])) location.replace(`/reference/@super-line/${m[1]}/`)
-  else if (GUIDE_ALIASES[m[1]]) location.replace(`/guide/${GUIDE_ALIASES[m[1]]}`)
+  else if (REFERENCE_GUIDE_ALIASES[m[1]]) location.replace(REFERENCE_GUIDE_ALIASES[m[1]])
 }
 
 export default {

@@ -44,94 +44,136 @@ export default defineConfig({
   },
   themeConfig: {
     logo: '/mark.svg',
+    // Diátaxis quadrants across the top: learn (Tutorials), do (How-to),
+    // understand (Concepts), look up (Reference) — with Collections lifted out
+    // as its own flagship section.
     nav: [
-      { text: 'Guide', link: '/guide/getting-started' },
+      { text: 'Tutorials', link: '/tutorials/', activeMatch: '/tutorials/' },
+      { text: 'How-to', link: '/how-to/', activeMatch: '/how-to/' },
+      { text: 'Concepts', link: '/concepts/', activeMatch: '/concepts/' },
+      { text: 'Collections', link: '/collections/', activeMatch: '/collections/' },
       { text: 'Reference', link: '/reference/' },
       { text: 'Examples', link: '/examples/' },
     ],
     sidebar: {
-      '/guide/': [
+      // ── Tutorials — the curated learning spine (few, guaranteed-success) ──
+      '/tutorials/': [
         {
-          text: 'Introduction',
-          collapsed: true,
+          text: 'Tutorials',
           items: [
-            { text: 'Why super-line', link: '/guide/introduction' },
-            { text: 'Getting started', link: '/guide/getting-started' },
-            { text: 'The contract', link: '/guide/the-contract' },
+            { text: 'The learning path', link: '/tutorials/' },
+            { text: '1 · Your first typed round-trip', link: '/tutorials/first-round-trip' },
+            { text: '2 · Your first collection', link: '/tutorials/first-collection' },
+            { text: '3 · Go collaborative (a CRDT doc)', link: '/tutorials/go-collaborative' },
+          ],
+        },
+      ],
+      // ── How-to — task-oriented recipes, grouped by area ──────────────────
+      '/how-to/': [
+        {
+          text: 'Contract & interactions',
+          collapsed: false,
+          items: [
+            { text: 'Implement requests', link: '/how-to/requests' },
+            { text: 'Push events & broadcast to rooms', link: '/how-to/events-rooms' },
+            { text: 'Subscribe to topics', link: '/how-to/topics' },
+            { text: 'Use the cluster event bus', link: '/how-to/cluster-event-bus' },
           ],
         },
         {
           text: 'Transports',
           collapsed: true,
           items: [
-            { text: 'Choose your wire', link: '/guide/transports' },
-            { text: 'WebSocket', link: '/guide/transport-websocket' },
-            { text: 'HTTP — SSE & long-poll', link: '/guide/transport-http' },
-            { text: 'libp2p & WebRTC', link: '/guide/transport-libp2p' },
-            { text: 'Loopback (testing)', link: '/guide/transport-loopback' },
+            { text: 'Choose a transport', link: '/how-to/choose-a-transport' },
+            { text: 'WebSocket', link: '/how-to/transport-websocket' },
+            { text: 'HTTP — SSE & long-poll', link: '/how-to/transport-http' },
+            { text: 'libp2p & WebRTC', link: '/how-to/transport-libp2p' },
+            { text: 'Loopback (for tests)', link: '/how-to/transport-loopback' },
           ],
-        },
-        {
-          text: 'Interaction flavors',
-          collapsed: true,
-          items: [
-            { text: 'Requests', link: '/guide/requests' },
-            { text: 'Events & rooms', link: '/guide/events-rooms' },
-            { text: 'Topics', link: '/guide/topics' },
-            { text: 'The cluster event bus', link: '/guide/cluster-event-bus' },
-          ],
-        },
-        {
-          text: 'Persisted state',
-          collapsed: true,
-          items: [{ text: 'Collections (typed rows + CRDT docs)', link: '/guide/collections' }],
         },
         {
           text: 'Server',
           collapsed: true,
           items: [
-            { text: 'Roles & auth', link: '/guide/roles-auth' },
-            { text: 'Authentication (plugin)', link: '/guide/plugin-auth' },
-            { text: 'Middleware & lifecycle', link: '/guide/middleware-lifecycle' },
-            { text: 'Error handling', link: '/guide/errors' },
-            { text: 'Introspection & presence', link: '/guide/introspection-and-presence' },
-            { text: 'Control Center', link: '/guide/control-center' },
+            { text: 'Authenticate & assign roles', link: '/how-to/roles-auth' },
+            { text: 'Add authentication (plugin)', link: '/how-to/plugin-auth' },
+            { text: 'Hook the connection lifecycle', link: '/how-to/middleware-lifecycle' },
+            { text: 'Handle errors', link: '/how-to/errors' },
+            { text: 'Query presence & topology', link: '/how-to/introspection-and-presence' },
+            { text: 'Compose / embed a library', link: '/how-to/composition' },
+            { text: 'Build a plugin', link: '/how-to/building-plugins' },
           ],
         },
         {
           text: 'Client',
           collapsed: true,
           items: [
-            { text: 'Reconnection & delivery', link: '/guide/reconnection-delivery' },
-            { text: 'Serialization', link: '/guide/serialization' },
-            { text: 'React', link: '/guide/react' },
+            { text: 'Use the React hooks', link: '/how-to/react' },
+            { text: 'Configure serialization', link: '/how-to/serialization' },
           ],
         },
         {
-          text: 'Adapters',
+          text: 'Scaling',
           collapsed: true,
           items: [
-            { text: 'Choose your backbone', link: '/guide/scaling-adapters' },
-            { text: 'Redis', link: '/guide/adapter-redis' },
-            { text: 'libp2p', link: '/guide/adapter-libp2p' },
-            { text: 'RabbitMQ', link: '/guide/adapter-rabbitmq' },
-            { text: 'ZeroMQ', link: '/guide/adapter-zeromq' },
+            { text: 'Choose an adapter', link: '/how-to/choose-an-adapter' },
+            { text: 'Redis', link: '/how-to/adapter-redis' },
+            { text: 'libp2p', link: '/how-to/adapter-libp2p' },
+            { text: 'RabbitMQ', link: '/how-to/adapter-rabbitmq' },
+            { text: 'ZeroMQ', link: '/how-to/adapter-zeromq' },
           ],
         },
         {
-          text: 'More',
+          text: 'Tooling & workflow',
           collapsed: true,
           items: [
-            { text: 'Composition — embedding a library', link: '/guide/composition' },
-            { text: 'Plugins', link: '/guide/plugins' },
-            { text: 'Building a plugin', link: '/guide/building-plugins' },
-            { text: 'Testing', link: '/guide/testing' },
-            { text: 'Use with your AI agent', link: '/guide/ai-agents' },
-            { text: 'Comparison & FAQ', link: '/guide/comparison-faq' },
+            { text: 'Inspect with Control Center', link: '/how-to/control-center' },
+            { text: 'Test your app', link: '/how-to/testing' },
+            { text: 'Use with your AI agent', link: '/how-to/ai-agents' },
           ],
         },
       ],
-      '/reference/': [{ text: 'Packages', items: typedocSidebar }],
+      // ── Concepts — understanding-oriented (the model and the why) ────────
+      '/concepts/': [
+        {
+          text: 'Concepts',
+          items: [
+            { text: 'Why super-line', link: '/concepts/why-super-line' },
+            { text: 'The contract model', link: '/concepts/the-contract' },
+            { text: 'Server-authoritative design', link: '/concepts/server-authoritative' },
+            { text: 'Transports vs. adapters', link: '/concepts/transports-and-adapters' },
+            { text: 'Reconnection & delivery', link: '/concepts/reconnection-delivery' },
+            { text: 'The plugin model', link: '/concepts/plugins' },
+            { text: 'Comparison & FAQ', link: '/concepts/comparison-faq' },
+          ],
+        },
+      ],
+      // ── Collections — flagship, self-contained (rows + CRDT documents) ───
+      '/collections/': [
+        {
+          text: 'Collections',
+          items: [
+            { text: 'Overview: rows vs. documents', link: '/collections/' },
+            { text: 'Row collections', link: '/collections/row-collections' },
+            { text: 'CRDT document collections', link: '/collections/crdt-documents' },
+            { text: 'Row-level security & policies', link: '/collections/policies' },
+            { text: 'Querying with TanStack DB', link: '/collections/tanstack-db' },
+            { text: 'Backends & clustering', link: '/collections/backends' },
+          ],
+        },
+      ],
+      '/reference/': [
+        {
+          text: 'Cheatsheets',
+          items: [
+            { text: 'Contract entry shapes', link: '/reference/cheatsheets/contract-shapes' },
+            { text: 'Wire frames', link: '/reference/cheatsheets/wire-frames' },
+            { text: 'Error codes', link: '/reference/cheatsheets/errors' },
+            { text: 'Server & client options', link: '/reference/cheatsheets/options' },
+          ],
+        },
+        { text: 'Packages', items: typedocSidebar },
+      ],
     },
     search: { provider: 'local' },
     socialLinks: [{ icon: 'github', link: 'https://github.com/mertdogar/super-line' }],

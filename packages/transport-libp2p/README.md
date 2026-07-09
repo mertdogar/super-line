@@ -1,7 +1,7 @@
 # @super-line/transport-libp2p
 
 [libp2p](https://libp2p.io) client↔server transport for
-[**super-line**](https://mertdogar.github.io/super-line/) — carry the contract (requests · events ·
+[**super-line**](https://super-line.dogar.biz/) — carry the contract (requests · events ·
 subscriptions · synced state) over a libp2p protocol stream instead of a raw WebSocket. Reach servers
 behind NAT over WebRTC, dial by `PeerId` or multiaddr, and authenticate with the peer in the handshake.
 
@@ -85,8 +85,8 @@ needs STUN (`src/ice.ts`), a circuit-relay-v2 relay, pubsub peer discovery, and 
 works under HTTPS. The [`libp2p-nat`](https://github.com/mertdogar/super-line/tree/main/examples/libp2p-nat)
 example wires all of that up, all-docker, verified end to end.
 
-- 📖 Docs: <https://mertdogar.github.io/super-line/>
-- 📚 Guide: [transports](https://mertdogar.github.io/super-line/guide/transports)
+- 📖 Docs: <https://super-line.dogar.biz/>
+- 📚 Guide: [transports](https://super-line.dogar.biz/how-to/choose-a-transport)
 - 🧩 Example: [`libp2p-nat`](https://github.com/mertdogar/super-line/tree/main/examples/libp2p-nat)
 - 🧩 Source: <https://github.com/mertdogar/super-line>
 

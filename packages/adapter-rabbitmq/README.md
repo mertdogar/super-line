@@ -1,6 +1,6 @@
 # @super-line/adapter-rabbitmq
 
-RabbitMQ adapter for [**super-line**](https://mertdogar.github.io/super-line/) — fan out rooms, topics, and the cluster event bus (`server.publish` / `server.subscribe`) across multiple server processes, with the broker doing selective per-channel routing.
+RabbitMQ adapter for [**super-line**](https://super-line.dogar.biz/) — fan out rooms, topics, and the cluster event bus (`server.publish` / `server.subscribe`) across multiple server processes, with the broker doing selective per-channel routing.
 
 ```bash
 pnpm add @super-line/adapter-rabbitmq
@@ -38,8 +38,8 @@ Point every server process at the same RabbitMQ broker. Without an adapter, a si
 | `queuePrefix` | Prefix for this node's exclusive queue, `<prefix>.<uuid>` (default `'sl.node'`). |
 | `presence` | `false` to disable, or `{ snapshotIntervalMs, livenessTtlMs }` to tune. |
 
-- 📖 Docs: <https://mertdogar.github.io/super-line/>
-- 📚 Guide: [scaling & adapters](https://mertdogar.github.io/super-line/guide/scaling-adapters)
+- 📖 Docs: <https://super-line.dogar.biz/>
+- 📚 Guide: [scaling & adapters](https://super-line.dogar.biz/how-to/choose-an-adapter)
 - 🧩 Source: <https://github.com/mertdogar/super-line>
 
 MIT © Mert

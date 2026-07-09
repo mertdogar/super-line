@@ -1,6 +1,6 @@
 # @super-line/transport-websocket
 
-The default client↔server transport for [**super-line**](https://mertdogar.github.io/super-line/) —
+The default client↔server transport for [**super-line**](https://super-line.dogar.biz/) —
 a Node [`ws`](https://github.com/websockets/ws) server transport plus a browser/Node client transport.
 Every other super-line README installs this; reach for [`@super-line/transport-http`](https://www.npmjs.com/package/@super-line/transport-http),
 [`@super-line/transport-libp2p`](https://www.npmjs.com/package/@super-line/transport-libp2p), or
@@ -73,8 +73,8 @@ const client = createSuperLineClient(api, {
 
 Low-level: `wsServerRawConn(ws, backpressure?)` wraps a raw `ws` socket as a `RawConn` (exported mainly for tests).
 
-- 📖 Docs: <https://mertdogar.github.io/super-line/>
-- 📚 Guide: [transports](https://mertdogar.github.io/super-line/guide/transports)
+- 📖 Docs: <https://super-line.dogar.biz/>
+- 📚 Guide: [transports](https://super-line.dogar.biz/how-to/choose-a-transport)
 - 🧩 Example: [`transports`](https://github.com/mertdogar/super-line/tree/main/examples/transports)
 - 🧩 Source: <https://github.com/mertdogar/super-line>
 

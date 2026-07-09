@@ -51,6 +51,26 @@ const lawCode = `srv.<span class="f">implement</span>({
   },
 })`
 
+/* ── collections: the same contract also declares persisted state ────
+   Rows you filter + subscribe to, and CRDT docs that merge. Real
+   super-line surface (verified against collections + collections-crdt). */
+const collectionsCode = `<span class="c">// the SAME contract declares state: rows + a CRDT doc</span>
+<span class="k">const</span> api = <span class="f">defineContract</span>({
+  collections: {
+    messages: { schema: Message, key: <span class="s">'id'</span> },
+    canvas:   { schema: Canvas, crdt: { mode: <span class="s">'document'</span> } },
+  },
+  roles: { user: {} },
+})
+
+<span class="c">// a live, filtered row-set — server-authoritative</span>
+<span class="k">const</span> sub = client.<span class="f">collection</span>(<span class="s">'messages'</span>)
+  .<span class="f">subscribe</span>({ filter: <span class="f">eq</span>(<span class="s">'room'</span>, <span class="s">'lobby'</span>) })
+
+<span class="c">// …and a document whose edits merge everywhere</span>
+<span class="k">const</span> doc = client.<span class="f">collection</span>(<span class="s">'canvas'</span>).<span class="f">open</span>(<span class="s">'board'</span>)
+doc.<span class="f">update</span>({ title: <span class="s">'hi'</span> }) <span class="c">// converges across tabs + nodes</span>`
+
 /* ── transports: same code, any wire ─────────────────────────────────
    One client, one call — only the `transport:` line changes between wires.
    Each wire animates with its own texture (full-duplex line, marching SSE
@@ -148,6 +168,7 @@ const rows: { label: string; cells: Cell[] }[] = [
   { label: 'Cross-node fan-out', cells: [{ kind: 'yes' }, { kind: 'yes' }, { kind: 'no' }, { kind: 'no' }, { kind: 'yes' }] },
   { label: 'Per-role contracts', cells: [{ kind: 'yes' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }] },
   { label: 'Presence / introspection', cells: [{ kind: 'yes', t: 'cluster' }, { kind: 'mid', t: 'rooms' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }] },
+  { label: 'Typed persisted state (rows + CRDT)', cells: [{ kind: 'yes' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }] },
   { label: 'Server-authoritative', cells: [{ kind: 'yes' }, { kind: 'mid' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }] },
 ]
 
@@ -305,11 +326,47 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <!-- ░░ SAME APP, ANY WIRE (TRANSPORTS) ░░ -->
+    <!-- ░░ STATE THAT PERSISTS — AND CONVERGES (COLLECTIONS) ░░ -->
     <section class="sl-sec">
+      <div class="sl-shell sl-split">
+        <div class="sl-split__copy reveal">
+          <p class="sl-kicker"><span class="sl-new">New</span> Collections</p>
+          <h2>State that persists — and converges.</h2>
+          <p>
+            The same contract that types your messages also declares
+            <strong>collections</strong> — typed rows you filter and subscribe to
+            in subsets, and CRDT documents whose concurrent edits merge. Every
+            write is schema-validated at the server before it commits.
+          </p>
+          <p>
+            super-line is the <strong>server-authoritative sync source</strong>:
+            it owns the data, enforces row-level security, and streams each client
+            exactly the slice it's allowed to see.
+            <span class="sl-hl">One node or a cluster, it converges.</span>
+          </p>
+          <p class="sl-real">
+            <code>@super-line/collections-memory</code> ·
+            <code>-sqlite</code> · <code>-pglite</code> — plus CRDT tiers.
+            <a :href="withBase('/collections/')">Collections →</a>
+          </p>
+        </div>
+        <div class="sl-split__code reveal">
+          <div class="sl-win">
+            <div class="sl-win__bar">
+              <span class="sl-win__dot" /><span class="sl-win__dot" /><span class="sl-win__dot" />
+              <span class="sl-win__name">contract.ts + client.ts</span>
+            </div>
+            <pre class="sl-pre"><code v-html="collectionsCode" /></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ░░ SAME APP, ANY WIRE (TRANSPORTS) ░░ -->
+    <section class="sl-sec sl-sec--alt">
       <div class="sl-shell">
         <div class="sl-sec__head reveal">
-          <p class="sl-kicker"><span class="sl-new">New</span> Pluggable transports</p>
+          <p class="sl-kicker">Pluggable transports</p>
           <h2>Same app. Any wire.</h2>
           <p>
             super-line splits <strong>what</strong> travels — your typed
@@ -463,14 +520,14 @@ onBeforeUnmount(() => {
     </section>
 
     <!-- ░░ IT WORKS ON ONE NODE — THEN YOU ADD A SECOND ░░ -->
-    <section id="live-cluster" class="sl-sec sl-sec--alt">
+    <section id="live-cluster" class="sl-sec">
       <div class="sl-shell reveal">
         <ClusterDemo />
       </div>
     </section>
 
     <!-- ░░ CONTROL CENTER ░░ -->
-    <section class="sl-sec">
+    <section class="sl-sec sl-sec--alt">
       <div class="sl-shell sl-split">
         <div class="sl-split__copy reveal">
           <h2>See the whole network.</h2>
@@ -514,7 +571,7 @@ onBeforeUnmount(() => {
     </section>
 
     <!-- ░░ SERVER-AUTHORITATIVE ░░ -->
-    <section class="sl-sec sl-sec--alt">
+    <section class="sl-sec">
       <div class="sl-shell">
         <div class="sl-sec__head reveal">
           <h2>Opinionated, on purpose: the server is in charge.</h2>

@@ -1,6 +1,6 @@
 # @super-line/adapter-redis
 
-Redis Pub/Sub adapter for [**super-line**](https://mertdogar.github.io/super-line/) — fan out rooms, topics, and the cluster event bus (`server.publish` / `server.subscribe`) across multiple server processes.
+Redis Pub/Sub adapter for [**super-line**](https://super-line.dogar.biz/) — fan out rooms, topics, and the cluster event bus (`server.publish` / `server.subscribe`) across multiple server processes.
 
 ```bash
 pnpm add @super-line/adapter-redis
@@ -21,10 +21,10 @@ const srv = createSuperLineServer(api, {
 
 Point every server process at the same Redis. Without an adapter, a single node uses the built-in in-memory adapter — add this only when you scale out. At-most-once delivery; uses two connections (a subscriber connection can't run other commands).
 
-Cluster-wide store deletions (`sdel`) ride the same bus — a relay store's `delete()` on one node fans out over Redis so the resource clears on every node and every subscribed client.
+Collection changes ride the same bus — a `relay` collection backend's writes and deletes on one node fan out over Redis so every node converges and every subscribed client updates.
 
-- 📖 Docs: <https://mertdogar.github.io/super-line/>
-- 📚 Guide: [scaling & adapters](https://mertdogar.github.io/super-line/guide/scaling-adapters)
+- 📖 Docs: <https://super-line.dogar.biz/>
+- 📚 Guide: [scaling & adapters](https://super-line.dogar.biz/how-to/choose-an-adapter)
 - 🧩 Source: <https://github.com/mertdogar/super-line>
 
 MIT © Mert

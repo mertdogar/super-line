@@ -1,6 +1,6 @@
 # @super-line/adapter-zeromq
 
-ZeroMQ adapter for [**super-line**](https://mertdogar.github.io/super-line/) — fan out rooms, topics, and the cluster event bus (`server.publish` / `server.subscribe`) across multiple server processes, broker-free.
+ZeroMQ adapter for [**super-line**](https://super-line.dogar.biz/) — fan out rooms, topics, and the cluster event bus (`server.publish` / `server.subscribe`) across multiple server processes, broker-free.
 
 ```bash
 pnpm add @super-line/adapter-zeromq
@@ -43,8 +43,8 @@ super-line-zeromq-proxy --xsub tcp://0.0.0.0:5555 --xpub tcp://0.0.0.0:5556
 
 **Presence** — a gossip-replicated directory rides a reserved internal channel (no central store, fitting the brokerless mesh) and powers `srv.cluster.*` / `srv.isOnline`. On by default; pass `presence: false` to disable (cluster queries then throw).
 
-- 📖 Docs: <https://mertdogar.github.io/super-line/>
-- 📚 Guide: [scaling & adapters](https://mertdogar.github.io/super-line/guide/scaling-adapters)
+- 📖 Docs: <https://super-line.dogar.biz/>
+- 📚 Guide: [scaling & adapters](https://super-line.dogar.biz/how-to/choose-an-adapter)
 - 🧩 Source: <https://github.com/mertdogar/super-line>
 
 MIT © Mert

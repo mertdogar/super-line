@@ -13,6 +13,7 @@
     "../packages/react"
   ],
   "out": "reference",
+  "cleanOutputDir": false,
   "docsRoot": ".",
   "readme": "none",
   "hideGenerator": true,

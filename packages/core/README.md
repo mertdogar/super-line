@@ -1,6 +1,6 @@
 # @super-line/core
 
-Shared core for [**super-line**](https://mertdogar.github.io/super-line/) — a strictly-typed realtime data bus for TypeScript: one contract for every pattern on the wire (requests · events · subscriptions · synced state). This package holds the pieces both ends import: `defineContract`, runtime validation, the `SuperLineError` model, the wire `Frame` protocol, the `Serializer` / `Adapter` interfaces, and the **transport** and **Store** seams the rest of the ecosystem plugs into.
+Shared core for [**super-line**](https://super-line.dogar.biz/) — a strictly-typed realtime data bus for TypeScript: one contract for every pattern on the wire (requests · events · subscriptions · synced state). This package holds the pieces both ends import: `defineContract`, runtime validation, the `SuperLineError` model, the wire `Frame` protocol, the `Serializer` / `Adapter` interfaces, and the **transport** and **Store** seams the rest of the ecosystem plugs into.
 
 ```bash
 pnpm add @super-line/core zod
@@ -47,8 +47,8 @@ Core retains three small primitives the CRDT client `DocHandle` reuses:
 - `ResourceReplica` — the reactive local-replica shape (`set` / `update` / `delete(path)` / `applyRemote` / `seed` / `reset` / `applyDelete`).
 - `removeAtPath(root, path)` — surgical, merge-friendly key removal.
 
-- 📖 Docs: <https://mertdogar.github.io/super-line/>
-- 📚 The contract model: <https://mertdogar.github.io/super-line/guide/the-contract>
+- 📖 Docs: <https://super-line.dogar.biz/>
+- 📚 The contract model: <https://super-line.dogar.biz/concepts/the-contract>
 - 🧩 Source: <https://github.com/mertdogar/super-line>
 
 MIT © Mert

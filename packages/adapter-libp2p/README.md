@@ -1,7 +1,7 @@
 # @super-line/adapter-libp2p
 
 Decentralized, broker-less [libp2p](https://libp2p.io) (gossipsub) adapter for
-[**super-line**](https://mertdogar.github.io/super-line/) — fan out rooms, topics, the cluster
+[**super-line**](https://super-line.dogar.biz/) — fan out rooms, topics, the cluster
 event bus, and cluster presence across multiple server processes with **no central broker**.
 A drop-in alternative to [`@super-line/adapter-redis`](https://www.npmjs.com/package/@super-line/adapter-redis).
 
@@ -91,8 +91,8 @@ topic and brokers first contact, then servers mesh over their own direct (DCUtR-
 | `presence` | `false` to disable, or `{ snapshotIntervalMs, livenessTtlMs }` to tune. |
 | `topic` | The shared gossipsub topic (default `'super-line/v1'`). |
 
-- 📖 Docs: <https://mertdogar.github.io/super-line/>
-- 📚 Guide: [scaling & adapters](https://mertdogar.github.io/super-line/guide/scaling-adapters)
+- 📖 Docs: <https://super-line.dogar.biz/>
+- 📚 Guide: [scaling & adapters](https://super-line.dogar.biz/how-to/choose-an-adapter)
 - 🧩 Example: [`scaling-libp2p`](https://github.com/mertdogar/super-line/tree/main/examples/scaling-libp2p)
 - 🧩 Source: <https://github.com/mertdogar/super-line>
 

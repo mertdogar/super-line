@@ -124,6 +124,6 @@ throw new SuperLineError('FORBIDDEN', 'not a member')
 ---
 
 **Full guides + generated API reference:** <https://super-line.dogar.biz/>
-- The contract model: <https://super-line.dogar.biz/guide/the-contract>
+- The contract model: <https://super-line.dogar.biz/concepts/the-contract>
 - API reference: <https://super-line.dogar.biz/reference/>
 - Recipes (auth, rooms, presence, scaling, testing): the guides under <https://super-line.dogar.biz/>

@@ -1,6 +1,6 @@
 # @super-line/transport-loopback
 
-In-memory client↔server transport for [**super-line**](https://mertdogar.github.io/super-line/) — a real server and client in one process, exchanging bytes directly with no sockets, ports, or network. The zero-dependency default for tests.
+In-memory client↔server transport for [**super-line**](https://super-line.dogar.biz/) — a real server and client in one process, exchanging bytes directly with no sockets, ports, or network. The zero-dependency default for tests.
 
 ```bash
 pnpm add -D @super-line/transport-loopback
@@ -43,8 +43,8 @@ It mirrors the in-memory `Adapter`: a zero-dependency substrate that also proves
 | `.server` | A `ServerTransport` — put it in `createSuperLineServer(..., { transports: [server] })`. |
 | `.client()` | Factory returning a fresh `ClientTransport` for `createSuperLineClient(..., { transport })`. Call once per client. |
 
-- 📖 Docs: <https://mertdogar.github.io/super-line/>
-- 📚 Guide: [testing](https://mertdogar.github.io/super-line/guide/testing)
+- 📖 Docs: <https://super-line.dogar.biz/>
+- 📚 Guide: [testing](https://super-line.dogar.biz/how-to/testing)
 - 🧩 Source: <https://github.com/mertdogar/super-line>
 
 MIT © Mert

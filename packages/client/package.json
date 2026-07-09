@@ -1,8 +1,8 @@
 {
   "name": "@super-line/client",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "type": "module",
-  "description": "Realtime data-bus client for super-line — typed calls, events, topics, stores, auto-reconnect over any transport.",
+  "description": "Realtime data-bus client for super-line — typed calls, events, topics, collections, auto-reconnect over any transport.",
   "license": "MIT",
   "author": "Mert",
   "keywords": ["websocket", "client", "typesafe", "realtime", "reconnect", "browser"],

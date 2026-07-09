@@ -2,7 +2,7 @@
   "name": "@super-line/collections-crdt-pglite",
   "version": "0.1.0",
   "type": "module",
-  "description": "Self-clustering CRDT (Yjs, via super-store) document collection backend for super-line — an append-only op-log in central Postgres that ElectricSQL ships to a per-node PGlite replica; validate-before-commit at ingress; no adapter (ADR-0007).",
+  "description": "Self-clustering CRDT (Yjs, via super-store) document collection backend for super-line — an append-only op-log in central Postgres that ElectricSQL ships to a per-node PGlite replica; validate-before-commit at ingress; no adapter.",
   "license": "MIT",
   "author": "Mert",
   "keywords": ["super-line", "collections", "crdt", "yjs", "pglite", "postgres", "electric", "sync", "self", "collaboration"],

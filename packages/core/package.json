@@ -1,6 +1,6 @@
 {
   "name": "@super-line/core",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "type": "module",
   "description": "Shared contract, validation, wire protocol and errors for super-line.",
   "license": "MIT",

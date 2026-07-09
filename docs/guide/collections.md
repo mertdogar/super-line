@@ -220,6 +220,12 @@ can land a beat before the insert. Two consequences:
 So for any field that is concurrently mutated, prefer `z.number().catch(0)` / `.optional()` over a bare
 `z.number()`: validation coerces a transient gap to a default instead of rejecting, and the next write restores
 the real value. Reserve strict/required only for fields written once and never concurrently overwritten.
+
+This is also **what makes op-log compaction safe.** A durable/self backend periodically folds a doc's op-log
+into a baseline and trims the folded rows. The reject churn above leaves a permanent gap in the log, and
+compaction **bakes that gap-corrupted fold into the baseline** — turning a transient loss into permanent,
+cluster-wide corruption. A presence-tolerant schema means no rejects → no gaps → every baseline stays complete,
+so compaction just bounds growth. Strict-required fields + compaction is the combination that wedges for good.
 :::
 
 ```ts

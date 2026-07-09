@@ -4,6 +4,7 @@
 - Date: 2026-07-06
 - Supersedes: [ADR-0003](0003-stores-are-off-contract-and-untyped.md)
 - Amends: [ADR-0006](0006-collections-are-on-contract-typed-rows.md) (narrows its "docs are a separate, unvalidatable family" framing)
+- Amended by: [ADR-0008](0008-crdt-validation-is-scoped-to-present-values.md) (scopes the validate-before-commit guarantee to present values)
 - Plan: `PLAN-collections-crdt.md` (repo root)
 
 ## Context
@@ -81,6 +82,19 @@ Fold CRDT documents **into** collections as a second consistency model, and dele
   rather than strictly required — reserve `required` for write-once fields. (Verified end-to-end in the
   `ai-canvas-pglite` example: strict `x/y/order` wedged the board under two-tab dragging; `.catch()`
   made it converge with zero rejections.)
+- **Compaction makes the tolerant-schema rule load-bearing, not ergonomic.** A `self`/relay backend folds a
+  doc's op-log into an `encodeState()` baseline and trims the folded rows. That fold is only lossy when the
+  op-log has a *permanent causal gap* — a struct a later delta references but which was never committed —
+  and such gaps are manufactured by exactly the reject→resync churn above (the rejected write's struct never
+  lands, yet its optimistic successors do). So under a strict-required schema, compaction doesn't just
+  observe the corruption — it **bakes the gap-corrupted fold into a durable baseline** (an empty/partial
+  shape), making the loss permanent and cluster-wide even after the op-log is trimmed. Under a
+  presence-tolerant schema there are no rejects → no gaps → the seq-order fold and every baseline stay
+  complete, and compaction is safe and beneficial (it bounds op-log growth). Verified: after heavy two-tab
+  churn that triggered compaction, a fresh fold of the compacted op-log yields complete, valid shapes. So
+  presence-tolerant CRDT schemas are the precondition for turning compaction on — the same fix, not two.
+  (Compaction bounds *central* growth only; the per-node in-memory doc still accumulates Yjs tombstones under
+  sustained overwrite churn — a separate scalability limit, orthogonal to correctness.)
 - **Two access models still coexist** — RLS predicate filters for LWW rows, boolean guards for CRDT
   docs — because they subscribe differently (subset-query vs open-by-id). They are unified in config
   shape (`policies`), not in return type.

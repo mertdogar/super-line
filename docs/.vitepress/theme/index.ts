@@ -4,7 +4,7 @@ import CopyOrDownloadAsMarkdownButtons from 'vitepress-plugin-llms/vitepress-com
 import SuperHome from './components/SuperHome.vue'
 import './styles/brand.css'
 
-// Friendly aliases for URLs people guess: /guide/why and @-less reference
+// Friendly aliases for legacy /guide/* URLs and @-less reference
 // slugs. Runs in enhanceApp so the 404 shell redirects direct hits too.
 const EXTRACTED = new Set([
   'core',
@@ -28,6 +28,8 @@ const REFERENCE_GUIDE_ALIASES: Record<string, string> = {
 
 function redirectAliases() {
   const path = location.pathname.replace(/\.html$/, '').replace(/\/$/, '')
+  if (path === '/guide/getting-started') return location.replace('/tutorials/first-round-trip')
+  if (path === '/guide/the-contract') return location.replace('/concepts/the-contract')
   if (path === '/guide/why') return location.replace('/concepts/why-super-line')
   const m = path.match(/^\/reference\/([\w-]+)$/)
   if (!m) return

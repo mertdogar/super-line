@@ -241,8 +241,8 @@ onBeforeUnmount(() => {
             transport is one line — on a single node or a cluster.
           </p>
           <div class="sl-cta">
-            <a class="sl-btn sl-btn--primary" :href="withBase('/guide/getting-started')">Get started</a>
-            <a class="sl-btn sl-btn--ghost" :href="withBase('/guide/the-contract')">The contract</a>
+            <a class="sl-btn sl-btn--primary" :href="withBase('/tutorials/first-round-trip')">Get started</a>
+            <a class="sl-btn sl-btn--ghost" :href="withBase('/concepts/the-contract')">The contract</a>
             <a class="sl-btn sl-btn--ghost" :href="withBase('/reference/')">API reference</a>
           </div>
           <p class="sl-install">
@@ -650,7 +650,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="sl-cta">
-            <a class="sl-btn sl-btn--primary" :href="withBase('/guide/getting-started')">Get started</a>
+            <a class="sl-btn sl-btn--primary" :href="withBase('/tutorials/first-round-trip')">Get started</a>
             <a class="sl-btn sl-btn--ghost" href="https://github.com/mertdogar/super-line" target="_blank" rel="noreferrer">GitHub ↗</a>
           </div>
           <p class="sl-status">

@@ -247,7 +247,7 @@ onBeforeUnmount(() => {
           </div>
           <p class="sl-install">
             <span class="sl-install__p">pnpm add</span>
-            @super-line/core @super-line/server @super-line/client @super-line/transport-websocket
+            @super-line/core @super-line/server @super-line/client @super-line/transport-websocket zod
           </p>
           <a class="sl-proof" href="#live-cluster" @click.prevent="scrollToCluster">
             <span class="sl-proof__dot" aria-hidden="true" />
@@ -645,8 +645,8 @@ onBeforeUnmount(() => {
           </p>
           <div class="sl-term sl-term--install" aria-label="Install command">
             <div class="sl-term__line">
-              <span class="sl-term__tag is-cmd">npm</span>
-              <span class="sl-term__txt">pnpm add @super-line/core @super-line/server @super-line/client zod</span>
+              <span class="sl-term__tag is-cmd">pnpm</span>
+              <span class="sl-term__txt">pnpm add @super-line/core @super-line/server @super-line/client @super-line/transport-websocket zod</span>
             </div>
           </div>
           <div class="sl-cta">

@@ -182,7 +182,7 @@ export interface ClientErrorInfo {
 }
 
 /**
- * The client half of a {@link https://…|SuperLinePlugin} pair, registered on `plugins: [...]`. All fields
+ * The client half of a server/client plugin pair, registered on `plugins: [...]`. All fields
  * optional. Mirrors the server half but smaller — no taps in v1 (`onEvent` is type-reserved) and no
  * handler subtraction (client `implement` is already optional per-key).
  */

@@ -36,6 +36,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build docs (typedoc + vitepress)
         run: pnpm docs:build
+      - name: Check links in built docs
+        run: pnpm --filter @super-line/docs check-links
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

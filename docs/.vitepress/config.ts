@@ -52,6 +52,7 @@ export default defineConfig({
       { text: 'How-to', link: '/how-to/', activeMatch: '/how-to/' },
       { text: 'Concepts', link: '/concepts/', activeMatch: '/concepts/' },
       { text: 'Collections', link: '/collections/', activeMatch: '/collections/' },
+      { text: 'Plugins', link: '/plugins/', activeMatch: '/plugins/' },
       { text: 'Reference', link: '/reference/' },
       { text: 'Examples', link: '/examples/' },
     ],
@@ -159,6 +160,18 @@ export default defineConfig({
             { text: 'Row-level security & policies', link: '/collections/policies' },
             { text: 'Querying with TanStack DB', link: '/collections/tanstack-db' },
             { text: 'Backends & clustering', link: '/collections/backends' },
+          ],
+        },
+      ],
+      // ── Plugins — curated ecosystem integrations ──────────────────────────
+      '/plugins/': [
+        {
+          text: 'Plugins',
+          items: [
+            { text: 'Plugin catalog', link: '/plugins/' },
+            { text: 'Authentication', link: '/how-to/plugin-auth' },
+            { text: 'Control Center inspector', link: '/how-to/control-center' },
+            { text: 'Super Harness', link: '/plugins/super-harness' },
           ],
         },
       ],

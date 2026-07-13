@@ -353,7 +353,12 @@ describe('inspector message events (T3.2)', () => {
     const u = h.client(msgContract, { url, role: 'user' })
     await u.echo({ text: 'hi', secret: 's3cr3t' })
 
-    await waitFor(() => insp.events.some((e) => e.type === 'msg.request'))
+    // these fan out over the bus/WS in order and arrive independently; wait for all before asserting
+    await waitFor(() =>
+      ['msg.request', 'msg.response', 'msg.event', 'msg.broadcast', 'msg.publish'].every((t) =>
+        insp.events.some((e) => e.type === t),
+      ),
+    )
     const req = insp.events.find((e) => e.type === 'msg.request')
     expect(req?.name).toBe('echo')
     const input = req?.input as { text: string; secret: string }

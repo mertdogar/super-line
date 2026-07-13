@@ -76,6 +76,19 @@ export interface InspectorEventLike {
   ok?: boolean
   error?: { code: string; message: string }
   reqId?: number
+  // collection / crdt events
+  role?: string
+  n?: string
+  id?: string
+  sid?: number
+  op?: 'insert' | 'update' | 'delete'
+  query?: unknown
+  ops?: unknown
+  row?: unknown
+  count?: number
+  origin?: string
+  snapshot?: unknown
+  deltaBytes?: number
 }
 
 export interface InspectorEnvelopeLike {

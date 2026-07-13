@@ -35,6 +35,7 @@ import {
   type CBatchFrame,
   type CChangeFrame,
   type InspectorEvent,
+  type MessageError,
   type TapEvent,
   type ServerTransport,
   type RawConn,
@@ -1097,6 +1098,8 @@ export function createSuperLineServer<
     id: number,
     info: MiddlewareInfo,
     terminal: () => Promise<void>,
+    // Collection/CRDT ops pass their own dedicated error tap here; it replaces the generic `msg.response`.
+    onError?: (error: MessageError) => void,
   ): Promise<void> {
     let responded = false
     try {
@@ -1108,7 +1111,9 @@ export function createSuperLineServer<
       fireError(err, info)
       const e = err instanceof SuperLineError ? err : new SuperLineError('INTERNAL', 'Internal server error')
       if (!responded) conn.send({ t: 'err', i: id, code: e.code, m: e.message, d: e.data })
-      if (taps.length && info.kind === 'request')
+      if (!taps.length) return
+      if (onError) onError({ code: e.code, message: e.message })
+      else if (info.kind === 'request')
         emitTap({
           type: 'msg.response',
           connId: conn.id,
@@ -1183,52 +1188,75 @@ export function createSuperLineServer<
   async function handleCrdtOpen(conn: Conn, frame: CDOpenFrame): Promise<void> {
     if (crdtMissing(conn, frame.i, frame.n)) return
     const store = crdtStore!
-    await dispatchOp(conn, frame.i, { kind: 'subscribe', name: `collection:${frame.n}/${frame.id}`, conn }, async () => {
-      const state = await store.read(frame.n, frame.id)
-      if (state === undefined) throw new SuperLineError('NOT_FOUND', `No document: ${frame.n}/${frame.id}`)
-      const principal = conn.principal ?? conn.id
-      const policy = collectionPolicies[frame.n] as CrdtCollectionPolicy<unknown, unknown> | undefined
-      if (!policy?.read) throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}/${frame.id}`) // deny-by-default
-      const replica = store.open(frame.n, frame.id)
-      const snapshot = replica.getSnapshot()
-      replica.close()
-      if (!(await policy.read(principal, frame.id, snapshot, conn.ctx)))
-        throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}/${frame.id}`)
-      await joinChannel(conn, CDOC + frame.n + ':' + frame.id)
-      conn.send({ t: 'res', i: frame.i, d: state }) // catch-up: full Yjs state
-    })
+    await dispatchOp(
+      conn,
+      frame.i,
+      { kind: 'subscribe', name: `collection:${frame.n}/${frame.id}`, conn },
+      async () => {
+        const state = await store.read(frame.n, frame.id)
+        if (state === undefined) throw new SuperLineError('NOT_FOUND', `No document: ${frame.n}/${frame.id}`)
+        const principal = conn.principal ?? conn.id
+        const policy = collectionPolicies[frame.n] as CrdtCollectionPolicy<unknown, unknown> | undefined
+        if (!policy?.read) throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}/${frame.id}`) // deny-by-default
+        const replica = store.open(frame.n, frame.id)
+        const snapshot = replica.getSnapshot()
+        replica.close()
+        if (!(await policy.read(principal, frame.id, snapshot, conn.ctx)))
+          throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}/${frame.id}`)
+        await joinChannel(conn, CDOC + frame.n + ':' + frame.id)
+        if (taps.length) emitTap({ type: 'crdt.open', connId: conn.id, n: frame.n, id: frame.id, ok: true, snapshot })
+        conn.send({ t: 'res', i: frame.i, d: state }) // catch-up: full Yjs state
+      },
+      (error) => emitTap({ type: 'crdt.open', connId: conn.id, n: frame.n, id: frame.id, ok: false, error }))
   }
 
   async function handleCrdtWrite(conn: Conn, frame: CDWriteFrame): Promise<void> {
     if (crdtMissing(conn, frame.i, frame.n)) return
     const store = crdtStore!
     const def = crdtDefOf(frame.n)!
-    await dispatchOp(conn, frame.i, { kind: 'request', name: `collection:${frame.n}/${frame.id}`, conn }, async () => {
-      const principal = conn.principal ?? conn.id
-      const policy = collectionPolicies[frame.n] as CrdtCollectionPolicy<unknown, unknown> | undefined
-      if (!policy?.write) throw new SuperLineError('FORBIDDEN', `Write denied: ${frame.n}/${frame.id}`) // deny-by-default
-      if (!(await policy.write(principal, frame.id, conn.ctx)))
-        throw new SuperLineError('FORBIDDEN', `Write denied: ${frame.n}/${frame.id}`)
-      // validate-before-commit: the backend merges onto a scratch copy and calls this with the post-merge
-      // plaintext; a throw aborts the commit (nothing fanned) and surfaces as an err → the client resyncs.
-      await store.apply({ n: frame.n, id: frame.id, update: frame.u as string, origin: frame.o }, def.crdt, (snapshot) =>
-        validateSync(def.schema, snapshot),
-      )
-      conn.send({ t: 'res', i: frame.i, d: null })
-    })
+    const deltaBytes = typeof frame.u === 'string' ? frame.u.length : 0
+    await dispatchOp(
+      conn,
+      frame.i,
+      { kind: 'request', name: `collection:${frame.n}/${frame.id}`, conn },
+      async () => {
+        const principal = conn.principal ?? conn.id
+        const policy = collectionPolicies[frame.n] as CrdtCollectionPolicy<unknown, unknown> | undefined
+        if (!policy?.write) throw new SuperLineError('FORBIDDEN', `Write denied: ${frame.n}/${frame.id}`) // deny-by-default
+        if (!(await policy.write(principal, frame.id, conn.ctx)))
+          throw new SuperLineError('FORBIDDEN', `Write denied: ${frame.n}/${frame.id}`)
+        // validate-before-commit: the backend merges onto a scratch copy and calls this with the post-merge
+        // plaintext; a throw aborts the commit (nothing fanned) and surfaces as an err → the client resyncs.
+        let snapshot: unknown
+        await store.apply({ n: frame.n, id: frame.id, update: frame.u as string, origin: frame.o }, def.crdt, (snap) => {
+          snapshot = snap
+          validateSync(def.schema, snap)
+        })
+        if (taps.length)
+          emitTap({ type: 'crdt.write', connId: conn.id, n: frame.n, id: frame.id, origin: frame.o, deltaBytes, ok: true, snapshot })
+        conn.send({ t: 'res', i: frame.i, d: null })
+      },
+      (error) => emitTap({ type: 'crdt.write', connId: conn.id, n: frame.n, id: frame.id, origin: frame.o, deltaBytes, ok: false, error }))
   }
 
   function handleCrdtClose(conn: Conn, frame: CDCloseFrame): void {
     if (!crdtDefOf(frame.n)) return
     leaveChannel(conn, CDOC + frame.n + ':' + frame.id)
+    if (taps.length) emitTap({ type: 'crdt.close', connId: conn.id, n: frame.n, id: frame.id })
   }
 
-  // crdtStore.onChange is the single fan-out source for CRDT docs.
+  // The delta byte size shown on a `crdt.change`/`crdt.write` event (the opaque base64 Yjs update never crosses).
+  const crdtDeltaBytes = (u: unknown): number => (typeof u === 'string' ? u.length : u instanceof Uint8Array ? u.byteLength : 0)
+
+  // crdtStore.onChange is the single fan-out source for CRDT docs. Emit `crdt.change` once at the origin node
+  // (self: every node's replica; relay: only where the delta wasn't relayed in), before per-conn delivery.
   if (crdtStore) {
     const isSelf = crdtStore.clustering === 'self'
     crdtStore.onChange((change) => {
       const channel = CDOC + change.n + ':' + change.id
       if (isSelf) {
+        if (taps.length)
+          emitTap({ type: 'crdt.change', n: change.n, id: change.id, origin: change.origin, deltaBytes: crdtDeltaBytes(change.update) })
         const set = members.get(channel)
         if (!set) return
         const payload = serializer.encode({ t: 'cdchg', n: change.n, id: change.id, u: change.update, o: change.origin } satisfies CDChangeFrame)
@@ -1236,6 +1264,8 @@ export function createSuperLineServer<
         return
       }
       if (relaying) return
+      if (taps.length)
+        emitTap({ type: 'crdt.change', n: change.n, id: change.id, origin: change.origin, deltaBytes: crdtDeltaBytes(change.update) })
       void adapter.publish(
         channel,
         serializer.encode({ t: 'cdchg', n: change.n, id: change.id, u: change.update, o: change.origin, nd: instanceId } satisfies CDChangeFrame),
@@ -1243,6 +1273,7 @@ export function createSuperLineServer<
     })
     if (isSelf)
       crdtStore.onDelete?.((n, id) => {
+        if (taps.length) emitTap({ type: 'crdt.delete', n, id })
         const set = members.get(CDOC + n + ':' + id)
         if (!set) return
         const payload = serializer.encode({ t: 'cddel', n, id } satisfies CDDeleteFrame)
@@ -1321,8 +1352,11 @@ export function createSuperLineServer<
       let set = collSubscribers.get(frame.n)
       if (!set) collSubscribers.set(frame.n, (set = new Set()))
       set.add(conn)
+      if (taps.length)
+        emitTap({ type: 'collection.sub', connId: conn.id, role: conn.role, n: frame.n, sid: frame.s, query: frame.q, ok: true, count: rows.length })
       conn.send({ t: 'res', i: frame.i, d: rows }) // initial snapshot
-    })
+    },
+    (error) => emitTap({ type: 'collection.sub', connId: conn.id, role: conn.role, n: frame.n, sid: frame.s, query: frame.q, ok: false, error }))
   }
 
   function handleCollectionUnsub(conn: Conn, frame: CUnsubFrame): void {
@@ -1330,6 +1364,7 @@ export function createSuperLineServer<
     const subs = state?.subs.get(frame.n)
     if (!state || !subs) return
     subs.delete(frame.s)
+    if (taps.length) emitTap({ type: 'collection.unsub', connId: conn.id, n: frame.n, sid: frame.s })
     if (subs.size === 0) {
       state.subs.delete(frame.n)
       state.policy.delete(frame.n)
@@ -1393,17 +1428,25 @@ export function createSuperLineServer<
       conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: 'No collection backend configured' })
       return
     }
-    await dispatchOp(conn, frame.i, { kind: 'request', name: 'collection:batch', conn }, async () => {
-      const principal = conn.principal ?? conn.id
-      const resolved = await resolveCollectionOps(frame.ops, principal, conn.ctx)
-      await commitCollectionBatch(resolved, principal, true)
-      conn.send({ t: 'res', i: frame.i, d: null })
-    })
+    await dispatchOp(
+      conn,
+      frame.i,
+      { kind: 'request', name: 'collection:batch', conn },
+      async () => {
+        const principal = conn.principal ?? conn.id
+        const resolved = await resolveCollectionOps(frame.ops, principal, conn.ctx)
+        await commitCollectionBatch(resolved, principal, true)
+        if (taps.length) emitTap({ type: 'collection.write', connId: conn.id, role: conn.role, ops: frame.ops, ok: true })
+        conn.send({ t: 'res', i: frame.i, d: null })
+      },
+      (error) => emitTap({ type: 'collection.write', connId: conn.id, role: conn.role, ops: frame.ops, ok: false, error }))
   }
 
   // The single fan-out source: route one applied row change to local subscribers whose effective filter admits
   // it (pre-op OR post-op — so a row that leaves a filter on update is delivered too, and the client removes it).
   function routeRowChange(change: RowChange): void {
+    if (taps.length)
+      emitTap({ type: 'collection.change', n: change.n, op: change.k, id: change.id, origin: change.origin, row: change.next })
     const conns = collSubscribers.get(change.n)
     if (!conns || conns.size === 0) return
     for (const conn of conns) {
@@ -1745,9 +1788,12 @@ export function createSuperLineServer<
           },
           async delete(id) {
             await cstore.delete(name, id)
-            // relay backends fan the delete over the adapter; self backends fan it via onDelete on every node
-            if (cstore.clustering !== 'self')
+            // relay backends fan the delete over the adapter (emit at this origin); self backends fan it via
+            // onDelete on every node (which already emits crdt.delete) — so only the relay branch taps here.
+            if (cstore.clustering !== 'self') {
+              if (taps.length) emitTap({ type: 'crdt.delete', n: name, id })
               void adapter.publish(CDOC + name + ':' + id, serializer.encode({ t: 'cddel', n: name, id, nd: instanceId } satisfies CDDeleteFrame))
+            }
           },
           list(o) {
             return Promise.resolve(cstore.list(name, o))

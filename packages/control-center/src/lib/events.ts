@@ -76,6 +76,18 @@ export function eventWire(event: InspectorEvent, r?: FeedResolver): WireAttribut
     case 'msg.serverRequest':
     case 'msg.serverReply':
       return undefined
+    // Collection/CRDT client ops resolve to the originating conn's wire; fan-out (change/delete) is unattributed.
+    case 'collection.sub':
+    case 'collection.unsub':
+    case 'collection.write':
+    case 'crdt.open':
+    case 'crdt.write':
+    case 'crdt.close':
+      return connWire(event.connId, r)
+    case 'collection.change':
+    case 'crdt.change':
+    case 'crdt.delete':
+      return undefined
   }
 }
 
@@ -119,13 +131,34 @@ export function summarizeEvent(event: InspectorEvent, r?: FeedResolver): string 
       return `→ ${who(event.target, r)} · ${event.name}`
     case 'msg.serverReply':
       return `← ${who(event.target, r)} · ${event.name} · ${event.ok ? 'ok' : event.error?.code ?? 'error'}`
+    case 'collection.sub':
+      return `${who(event.connId, r)} ⊙ ${event.n}${event.ok ? ` · ${event.count ?? 0} rows` : ` · ✗ ${event.error?.code ?? 'error'}`}`
+    case 'collection.unsub':
+      return `${who(event.connId, r)} ⊘ ${event.n}`
+    case 'collection.write': {
+      const count = Array.isArray(event.ops) ? event.ops.length : 0
+      return `${who(event.connId, r)} ⊕ ${count} op${count === 1 ? '' : 's'} · ${event.ok ? 'ok' : `✗ ${event.error?.code ?? 'error'}`}`
+    }
+    case 'collection.change':
+      return `${event.n} ⇒ ${event.op} · ${event.id}`
+    case 'crdt.open':
+      return `${who(event.connId, r)} ⊙ ${event.n}/${event.id}${event.ok ? '' : ` · ✗ ${event.error?.code ?? 'error'}`}`
+    case 'crdt.write':
+      return `${who(event.connId, r)} → ${event.n}/${event.id} · ${event.ok ? 'ok' : `✗ ${event.error?.code ?? 'error'}`}`
+    case 'crdt.close':
+      return `${who(event.connId, r)} ⊘ ${event.n}/${event.id}`
+    case 'crdt.change':
+      return `${event.n}/${event.id} ⇐ ${event.origin}`
+    case 'crdt.delete':
+      return `${event.n}/${event.id} · deleted`
   }
 }
 
 /** Coarse feed category, for the live-feed filter toggles. */
-export type FeedCategory = 'lifecycle' | 'requests' | 'events'
+export type FeedCategory = 'lifecycle' | 'requests' | 'events' | 'collections'
 
 export function eventCategory(type: InspectorEvent['type']): FeedCategory {
+  if (type.startsWith('collection.') || type.startsWith('crdt.')) return 'collections'
   if (type === 'msg.request' || type === 'msg.response' || type === 'msg.serverRequest' || type === 'msg.serverReply')
     return 'requests'
   if (type.startsWith('msg.')) return 'events'
@@ -138,6 +171,8 @@ export function eventColor(type: InspectorEvent['type']): string {
   if (type === 'disconnect') return 'bg-destructive'
   if (type.startsWith('room')) return 'bg-violet-400'
   if (type.startsWith('topic')) return 'bg-amber-400'
+  if (type.startsWith('collection.')) return 'bg-teal-400'
+  if (type.startsWith('crdt.')) return 'bg-fuchsia-400'
   if (type === 'msg.request' || type === 'msg.serverRequest') return 'bg-cyan-400'
   if (type === 'msg.response' || type === 'msg.serverReply') return 'bg-emerald-400'
   if (type === 'msg.event' || type === 'msg.broadcast' || type === 'msg.publish') return 'bg-sky-400'
@@ -270,6 +305,15 @@ export const ALL_EVENT_TYPES: InspectorEvent['type'][] = [
   'msg.publish',
   'msg.serverRequest',
   'msg.serverReply',
+  'collection.sub',
+  'collection.unsub',
+  'collection.write',
+  'collection.change',
+  'crdt.open',
+  'crdt.write',
+  'crdt.close',
+  'crdt.change',
+  'crdt.delete',
 ]
 
 /** The relative trailing-window presets for the time filter (null = All). */

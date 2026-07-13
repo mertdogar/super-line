@@ -136,6 +136,15 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
       case 'msg.broadcast':
       case 'msg.publish':
         return { ...event, data: safeSnapshot(event.data) }
+      case 'collection.sub':
+        return { ...event, query: safeSnapshot(event.query) }
+      case 'collection.write':
+        return { ...event, ops: safeSnapshot(event.ops) }
+      case 'collection.change':
+        return { ...event, row: safeSnapshot(event.row) }
+      case 'crdt.open':
+      case 'crdt.write':
+        return event.ok ? { ...event, snapshot: safeSnapshot(event.snapshot) } : event
       default:
         return event
     }

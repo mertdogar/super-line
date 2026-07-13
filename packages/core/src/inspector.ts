@@ -101,6 +101,20 @@ export type InspectorEvent =
   // server→client request and the client's reply. `reqId` pairs reply↔request, as above.
   | { type: 'msg.serverRequest'; target: string; name: string; input: unknown; reqId: number }
   | { type: 'msg.serverReply'; target: string; name: string; ok: boolean; output?: unknown; error?: MessageError; reqId: number }
+  // Collection frames (typed rows, ADR-0006). Client ops carry the originating `connId`; row-change fan-out is
+  // collection-scoped — one event per applied change, like `msg.broadcast`. `query`/`ops`/`row` are redacted.
+  | { type: 'collection.sub'; connId: string; role: string; n: string; sid: number; query: unknown; ok: boolean; error?: MessageError; count?: number }
+  | { type: 'collection.unsub'; connId: string; n: string; sid: number }
+  | { type: 'collection.write'; connId: string; role: string; ops: unknown; ok: boolean; error?: MessageError }
+  | { type: 'collection.change'; n: string; op: 'insert' | 'update' | 'delete'; id: string; origin?: string; row?: unknown }
+  // CRDT document frames (ADR-0007). The delta is opaque base64 Yjs binary — never surfaced; `open`/`write` carry the
+  // plaintext snapshot the server already computed (read policy / validate-before-commit), `change` only the writer
+  // origin + delta byte size.
+  | { type: 'crdt.open'; connId: string; n: string; id: string; ok: boolean; error?: MessageError; snapshot?: unknown }
+  | { type: 'crdt.write'; connId: string; n: string; id: string; origin: string; deltaBytes: number; ok: boolean; error?: MessageError; snapshot?: unknown }
+  | { type: 'crdt.close'; connId: string; n: string; id: string }
+  | { type: 'crdt.change'; n: string; id: string; origin: string; deltaBytes: number }
+  | { type: 'crdt.delete'; n: string; id: string }
 
 /**
  * The public taxonomy a plugin `onEvent` tap observes: an {@link InspectorEvent} with live
@@ -139,6 +153,15 @@ export function eventPayload(event: InspectorEvent): unknown {
     case 'msg.broadcast':
     case 'msg.publish':
       return event.data
+    case 'collection.sub':
+      return event.query
+    case 'collection.write':
+      return event.ops
+    case 'collection.change':
+      return event.row
+    case 'crdt.open':
+    case 'crdt.write':
+      return event.ok ? event.snapshot : event.error
     default:
       return undefined
   }

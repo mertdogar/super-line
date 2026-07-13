@@ -68,6 +68,8 @@ export interface CollectionInfo {
   key: string
   references: Record<string, string>
   schema?: unknown
+  /** True for CRDT document collections — they're id-queryable only (no schema-field filters), so the CC degrades the filter/sort UI. */
+  crdt: boolean
 }
 
 /** A failed response/reply, carried on `msg.response` / `msg.serverReply`. */

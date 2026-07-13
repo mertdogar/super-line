@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { defineContract, eq } from '@super-line/core'
+import { defineContract, eq, gte, ilike, and } from '@super-line/core'
 import type { CollectionInfo } from '@super-line/core'
 import { memoryCollections } from '@super-line/collections-memory'
 import { crdtMemoryCollections } from '@super-line/collections-crdt-memory'
@@ -86,6 +86,98 @@ describe('collection inspection RPCs', () => {
     expect(typeof docs[0]!._createdAt).toBe('number')
     expect(typeof docs[0]!._updatedAt).toBe('number')
 
+    inspector.close()
+  })
+})
+
+describe('collection inspection — filter & sort', () => {
+  const h = createHarness()
+  afterEach(() => h.dispose())
+  const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+  const shop = defineContract({
+    collections: {
+      products: { schema: z.object({ id: z.string(), name: z.string(), price: z.number(), inStock: z.boolean() }), key: 'id' },
+    },
+    roles: { user: { clientToServer: {} } },
+  })
+
+  it('pushes a structured filter to the whole collection and reports crdt: false', async () => {
+    const { srv, url } = await h.server(shop, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      plugins: [inspectorPlugin()],
+      collections: memoryCollections(),
+      policies: { products: { read: () => eq('id', 'nope'), write: () => true } }, // restrictive — inspector sees through
+    })
+    await srv.collection('products').insert({ id: 'a', name: 'Apple', price: 3, inStock: true })
+    await srv.collection('products').insert({ id: 'b', name: 'Banana', price: 1, inStock: false })
+    await srv.collection('products').insert({ id: 'c', name: 'Cherry', price: 5, inStock: true })
+
+    const inspector = await connectInspector(url)
+    const cols = (await inspector.request('listCollections')) as CollectionInfo[]
+    expect(cols.find((c) => c.name === 'products')?.crdt).toBe(false)
+
+    // price >= 3 AND inStock === true → a (3) and c (5), not b
+    const filtered = (await inspector.request('queryCollection', { collection: 'products', filter: and(gte('price', 3), eq('inStock', true)) })) as { id: string }[]
+    expect(filtered.map((r) => r.id).sort()).toEqual(['a', 'c'])
+    inspector.close()
+  })
+
+  it('sorts rows by the inspector-only created/updated timestamps, honoring limit/offset', async () => {
+    const { srv, url } = await h.server(shop, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      plugins: [inspectorPlugin()],
+      collections: memoryCollections(),
+      policies: { products: { read: () => undefined, write: () => true } },
+    })
+    await srv.collection('products').insert({ id: 'a', name: 'A', price: 1, inStock: true })
+    await sleep(5)
+    await srv.collection('products').insert({ id: 'b', name: 'B', price: 2, inStock: true })
+    await sleep(5)
+    await srv.collection('products').insert({ id: 'c', name: 'C', price: 3, inStock: true })
+    await sleep(5)
+    await srv.collection('products').update({ id: 'a', name: 'A2', price: 1, inStock: true }) // bump a's updatedAt to newest
+
+    const inspector = await connectInspector(url)
+    const byCreatedDesc = (await inspector.request('queryCollection', { collection: 'products', orderBy: [{ field: '_createdAt', dir: 'desc' }] })) as { id: string }[]
+    expect(byCreatedDesc.map((r) => r.id)).toEqual(['c', 'b', 'a']) // newest-created first
+
+    // paging through the timestamp-sorted scan
+    const page1 = (await inspector.request('queryCollection', { collection: 'products', orderBy: [{ field: '_createdAt', dir: 'asc' }], limit: 2, offset: 0 })) as { id: string }[]
+    expect(page1.map((r) => r.id)).toEqual(['a', 'b'])
+    const page2 = (await inspector.request('queryCollection', { collection: 'products', orderBy: [{ field: '_createdAt', dir: 'asc' }], limit: 2, offset: 2 })) as { id: string }[]
+    expect(page2.map((r) => r.id)).toEqual(['c'])
+
+    const byUpdatedDesc = (await inspector.request('queryCollection', { collection: 'products', orderBy: [{ field: '_updatedAt', dir: 'desc' }] })) as { id: string }[]
+    expect(byUpdatedDesc[0]?.id).toBe('a') // a was updated last
+    inspector.close()
+  })
+
+  it('filters CRDT docs by id substring and sorts by created', async () => {
+    const canvas = defineContract({
+      collections: { scene: { schema: z.object({ title: z.string().optional() }), crdt: { mode: 'document' } } },
+      roles: { user: { clientToServer: {} } },
+    })
+    const { srv, url } = await h.server(canvas, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      plugins: [inspectorPlugin()],
+      crdtCollections: crdtMemoryCollections(),
+      policies: { scene: { read: () => true, write: () => true } },
+    })
+    await srv.collection('scene').create('apple', { title: 'a' })
+    await sleep(5)
+    await srv.collection('scene').create('banana', { title: 'b' })
+    await sleep(5)
+    await srv.collection('scene').create('cherry', { title: 'c' })
+
+    const inspector = await connectInspector(url)
+    expect(((await inspector.request('listCollections')) as CollectionInfo[]).find((c) => c.name === 'scene')?.crdt).toBe(true)
+
+    const an = (await inspector.request('queryCollection', { collection: 'scene', filter: ilike('id', '%an%') })) as { id: string }[]
+    expect(an.map((r) => r.id)).toEqual(['banana']) // only 'banana' contains 'an'
+
+    const byCreatedDesc = (await inspector.request('queryCollection', { collection: 'scene', orderBy: [{ field: '_createdAt', dir: 'desc' }] })) as { id: string }[]
+    expect(byCreatedDesc.map((r) => r.id)).toEqual(['cherry', 'banana', 'apple'])
     inspector.close()
   })
 })

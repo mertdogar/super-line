@@ -7,8 +7,12 @@ import {
   eventPayload,
   isCrdtCollection,
   withRowMeta,
+  ROW_CREATED_AT,
+  ROW_UPDATED_AT,
   type Contract,
   type Schema,
+  type Expr,
+  type DocListOpts,
   type InspectorEvent,
   type InspectorEnvelope,
   type InspectedContract,
@@ -73,7 +77,8 @@ async function buildCollectionInfos(
   const defs = contract.collections ?? {}
   return Promise.all(
     infos.map(async (info) => {
-      const schema = defs[info.name]?.schema
+      const def = defs[info.name]
+      const schema = def?.schema
       let json: unknown
       if (toJsonSchema && schema) {
         try {
@@ -82,9 +87,31 @@ async function buildCollectionInfos(
           json = undefined
         }
       }
-      return { ...info, ...(json !== undefined ? { schema: json } : {}) } satisfies CollectionInfo
+      const crdt = def ? isCrdtCollection(def) : false
+      return { ...info, crdt, ...(json !== undefined ? { schema: json } : {}) } satisfies CollectionInfo
     }),
   )
+}
+
+// CRDT docs aren't content-queryable — the only filter they support is an id substring. Pull it out of an
+// `id` eq/like/ilike predicate (the shape the Control Center's CRDT filter builds), recursing through `and`.
+function idContainsOf(filter: Expr | undefined): string | undefined {
+  if (!filter) return undefined
+  if ((filter.op === 'like' || filter.op === 'ilike') && filter.field === 'id') return filter.pattern.replace(/%/g, '')
+  if (filter.op === 'eq' && filter.field === 'id' && typeof filter.value === 'string') return filter.value
+  if (filter.op === 'and') for (const a of filter.args) {
+    const r = idContainsOf(a)
+    if (r) return r
+  }
+  return undefined
+}
+
+// Map a Control Center orderBy field to the CRDT store's sortable dimensions (id / created / updated).
+function crdtSortBy(field: string | undefined): 'id' | 'createdAt' | 'updatedAt' | undefined {
+  if (field === 'id') return 'id'
+  if (field === ROW_CREATED_AT) return 'createdAt'
+  if (field === ROW_UPDATED_AT) return 'updatedAt'
+  return undefined
 }
 
 /**
@@ -208,10 +235,16 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
           if (!def) throw new SuperLineError('NOT_FOUND', `Unknown collection: ${collection}`)
           if (isCrdtCollection(def)) {
             // CRDT document collection: open-by-id, not row-queryable — synthesize `{ id, ...snapshot }` rows
-            // from the doc enumeration so the Collections view can browse them like any table. The per-doc
-            // created/updated already ride each DocSummary, so surface them under the reserved keys too.
+            // from the doc enumeration so the Collections view can browse them like any table. Filtering is
+            // id-substring only; sorting is by id / created / updated. The per-doc created/updated ride each
+            // DocSummary, so surface them under the reserved keys too.
             const handle = ctx.collection(collection) as unknown as ServerCrdtCollectionHandle
-            const docs = await handle.list({ limit: query.limit, offset: query.offset })
+            const opts: DocListOpts = { limit: query.limit, offset: query.offset }
+            const idContains = idContainsOf(query.filter)
+            if (idContains) opts.idContains = idContains
+            const sortBy = crdtSortBy(query.orderBy?.[0]?.field)
+            if (sortBy) opts.sort = { by: sortBy, dir: query.orderBy?.[0]?.dir === 'desc' ? 'desc' : 'asc' }
+            const docs = await handle.list(opts)
             const rows = await Promise.all(
               docs.map(async (d) =>
                 withRowMeta(
@@ -223,10 +256,24 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
             return rows.map((r) => safeSnapshot(r))
           }
           const handle = ctx.collection(collection) // ACL/policy bypassed — the inspector is a trusted observer
-          const rows = (await handle.snapshot(query)) as Record<string, unknown>[]
           const key = def.key ?? 'id'
-          const meta = handle.rowMeta ? await handle.rowMeta(rows.map((r) => String(r[key]))) : {}
-          return rows.map((r) => safeSnapshot(withRowMeta(r, meta[String(r[key])])))
+          const idOf = (r: Record<string, unknown>): string => String(r[key])
+          const tsSort = query.orderBy?.find((o) => o.field === ROW_CREATED_AT || o.field === ROW_UPDATED_AT)
+          if (tsSort && handle.rowMeta) {
+            // created/updated live outside the row data, so the backend can't ORDER BY them — scan the filtered
+            // set, merge the store timestamps, sort, then slice the requested page (inspector-side, dev-scale).
+            const all = (await handle.snapshot({ filter: query.filter })) as Record<string, unknown>[]
+            const meta = await handle.rowMeta(all.map(idOf))
+            const merged = all.map((r) => withRowMeta(r, meta[idOf(r)]) as Record<string, unknown>)
+            const dir = tsSort.dir === 'desc' ? -1 : 1
+            merged.sort((a, b) => (((a[tsSort.field] as number) ?? 0) - ((b[tsSort.field] as number) ?? 0)) * dir)
+            const offset = query.offset ?? 0
+            const page = query.limit != null ? merged.slice(offset, offset + query.limit) : merged.slice(offset)
+            return page.map((r) => safeSnapshot(r))
+          }
+          const rows = (await handle.snapshot(query)) as Record<string, unknown>[] // filter + schema-field sort push down
+          const meta = handle.rowMeta ? await handle.rowMeta(rows.map(idOf)) : {}
+          return rows.map((r) => safeSnapshot(withRowMeta(r, meta[idOf(r)])))
         },
       }),
     },

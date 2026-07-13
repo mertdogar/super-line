@@ -1,7 +1,7 @@
 import * as React from 'react'
-import { ArrowRight, KeyRound, RefreshCw } from 'lucide-react'
-import { ROW_CREATED_AT, ROW_UPDATED_AT } from '@super-line/core'
-import type { CollectionInfo } from '@super-line/core'
+import { ArrowDown, ArrowRight, ArrowUp, KeyRound, Plus, RefreshCw, X } from 'lucide-react'
+import { andFilters, eq, gt, gte, ilike, lt, lte, neq, ROW_CREATED_AT, ROW_UPDATED_AT } from '@super-line/core'
+import type { CollectionInfo, Expr, Scalar } from '@super-line/core'
 import type { InspectorClient } from '@/lib/inspector-client'
 import { Badge } from '@/components/ui/badge'
 import { Json } from '@/components/json-view'
@@ -10,6 +10,51 @@ import { cn } from '@/lib/utils'
 
 const PAGE = 100
 type Row = Record<string, unknown>
+type Op = 'eq' | 'neq' | 'contains' | 'lt' | 'lte' | 'gt' | 'gte' | 'is'
+type Field = { name: string; type: string }
+type Condition = { id: number; field: string; op: Op; value: string }
+type SortState = { field: string; dir: 'asc' | 'desc' }
+
+const OP_LABEL: Record<Op, string> = { eq: '=', neq: '≠', contains: 'contains', lt: '<', lte: '≤', gt: '>', gte: '≥', is: 'is' }
+
+/** The operators offered for a field, by its JSON-Schema type (empty type = schema unavailable → all comparisons). */
+function opsFor(type: string): Op[] {
+  if (type === 'boolean') return ['is']
+  if (type === 'number' || type === 'integer') return ['eq', 'neq', 'lt', 'lte', 'gt', 'gte']
+  if (type === 'string') return ['eq', 'neq', 'contains']
+  return ['eq', 'neq', 'contains', 'lt', 'lte', 'gt', 'gte']
+}
+
+/** Coerce a text value to the scalar the filter needs — by declared type, or a numeric-looking heuristic when the schema is unknown. */
+function coerceVal(v: string, type: string, op: Op): Scalar {
+  if (op === 'is' || type === 'boolean') return v === 'true'
+  if (type === 'number' || type === 'integer') return Number(v)
+  if (op === 'contains') return v
+  if (type !== 'string' && /^-?\d+(\.\d+)?$/.test(v.trim())) return Number(v.trim())
+  return v
+}
+
+function condToExpr(c: Condition, type: string): Expr | undefined {
+  if (c.op !== 'is' && c.value.trim() === '') return undefined // an empty value is "not set", not a filter
+  const v = coerceVal(c.value, type, c.op)
+  switch (c.op) {
+    case 'eq':
+    case 'is':
+      return eq(c.field, v)
+    case 'neq':
+      return neq(c.field, v)
+    case 'contains':
+      return ilike(c.field, `%${c.value}%`)
+    case 'lt':
+      return lt(c.field, v)
+    case 'lte':
+      return lte(c.field, v)
+    case 'gt':
+      return gt(c.field, v)
+    case 'gte':
+      return gte(c.field, v)
+  }
+}
 
 /** The reserved created/updated timestamp (epoch ms) the inspector merges onto a row, or null if absent. */
 function tsOf(r: Row, key: string): number | null {
@@ -18,10 +63,58 @@ function tsOf(r: Row, key: string): number | null {
 }
 
 /** Field names + types pulled best-effort from a collection's JSON Schema (omitted when no converter is available). */
-function fieldsOf(schema: unknown): { name: string; type: string }[] {
+function fieldsOf(schema: unknown): Field[] {
   const props = (schema as { properties?: Record<string, { type?: unknown }> } | undefined)?.properties
   if (!props || typeof props !== 'object') return []
   return Object.entries(props).map(([name, def]) => ({ name, type: typeof def?.type === 'string' ? def.type : '' }))
+}
+
+/** One `field op value` row of the structured filter. Fields become a select when the schema is known, a text input otherwise. */
+function FilterRow({ cond, fields, onChange, onRemove }: { cond: Condition; fields: Field[]; onChange: (c: Condition) => void; onRemove: () => void }): React.JSX.Element {
+  const type = fields.find((f) => f.name === cond.field)?.type ?? ''
+  const ops = opsFor(type)
+  const inputCls = 'rounded-md border bg-transparent px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring'
+  return (
+    <div className="flex items-center gap-1.5">
+      {fields.length > 0 ? (
+        <select
+          value={cond.field}
+          onChange={(e) => {
+            const t = fields.find((f) => f.name === e.target.value)?.type ?? ''
+            const op = opsFor(t)[0]! // reset op to one valid for the new field's type
+            onChange({ ...cond, field: e.target.value, op, value: op === 'is' ? 'true' : cond.value }) // keep stored value in sync with the boolean select's default
+          }}
+          className={cn(inputCls, 'font-mono')}
+        >
+          {fields.map((f) => (
+            <option key={f.name} value={f.name}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input value={cond.field} onChange={(e) => onChange({ ...cond, field: e.target.value })} placeholder="field" className={cn(inputCls, 'w-28 font-mono')} />
+      )}
+      <select value={cond.op} onChange={(e) => onChange({ ...cond, op: e.target.value as Op })} className={inputCls}>
+        {ops.map((o) => (
+          <option key={o} value={o}>
+            {OP_LABEL[o]}
+          </option>
+        ))}
+      </select>
+      {type === 'boolean' || cond.op === 'is' ? (
+        <select value={cond.value || 'true'} onChange={(e) => onChange({ ...cond, value: e.target.value })} className={inputCls}>
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </select>
+      ) : (
+        <input value={cond.value} onChange={(e) => onChange({ ...cond, value: e.target.value })} placeholder="value" className={cn(inputCls, 'w-40')} />
+      )}
+      <button onClick={onRemove} className="rounded p-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground" title="Remove condition">
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  )
 }
 
 export function CollectionsExplorer({ client }: { client: InspectorClient | null }): React.JSX.Element {
@@ -30,26 +123,37 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
   const [rows, setRows] = React.useState<Row[]>([])
   const [more, setMore] = React.useState(false)
   const [loading, setLoading] = React.useState(false)
-  const [filter, setFilter] = React.useState('')
+  const [text, setText] = React.useState('') // client-side quick substring over loaded rows
+  const [conditions, setConditions] = React.useState<Condition[]>([]) // structured server-side filter (row collections)
+  const [idFilter, setIdFilter] = React.useState('') // server-side id-substring filter (CRDT collections)
+  const [sort, setSort] = React.useState<SortState>({ field: 'id', dir: 'asc' })
   const [selected, setSelected] = React.useState<Row | null>(null)
 
   const rowsRef = React.useRef<Row[]>([])
   rowsRef.current = rows
+  const condId = React.useRef(0)
   const selectedCollection = collections.find((c) => c.name === name) ?? null
+  const isCrdt = selectedCollection?.crdt ?? false
+  const fields = React.useMemo(() => fieldsOf(selectedCollection?.schema), [selectedCollection])
 
   React.useEffect(() => {
     if (!client) return
     client.listCollections().then(setCollections).catch(() => {})
   }, [client])
 
+  // Build the server-side filter IR from the current UI: id-substring for CRDT, ANDed field conditions for rows.
+  const buildFilter = React.useCallback((): Expr | undefined => {
+    if (isCrdt) return idFilter.trim() ? ilike('id', `%${idFilter}%`) : undefined
+    const exprs = conditions.map((c) => condToExpr(c, fields.find((f) => f.name === c.field)?.type ?? '')).filter((e): e is Expr => e !== undefined)
+    return andFilters(...exprs)
+  }, [isCrdt, idFilter, conditions, fields])
+
   const load = React.useCallback(
     (reset: boolean) => {
       if (!client || !name) return
-      const col = collections.find((c) => c.name === name)
-      const key = col?.key ?? 'id'
       setLoading(true)
       client
-        .queryCollection(name, { orderBy: [{ field: key, dir: 'asc' }], limit: PAGE, offset: reset ? 0 : rowsRef.current.length })
+        .queryCollection(name, { filter: buildFilter(), orderBy: [{ field: sort.field, dir: sort.dir }], limit: PAGE, offset: reset ? 0 : rowsRef.current.length })
         .then((page) => {
           const next = page as Row[]
           setRows(reset ? next : [...rowsRef.current, ...next])
@@ -58,21 +162,49 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
         .catch(() => {})
         .finally(() => setLoading(false))
     },
-    [client, name, collections],
+    [client, name, buildFilter, sort],
   )
 
-  React.useEffect(() => load(true), [load])
+  // Reload on collection / filter / sort change, debounced so typing a filter value doesn't fire a query per keystroke.
+  React.useEffect(() => {
+    const t = setTimeout(() => load(true), 200)
+    return () => clearTimeout(t)
+  }, [load])
 
   const pick = (n: string): void => {
+    const col = collections.find((c) => c.name === n)
     setName(n)
     setRows([])
-    setFilter('')
+    setText('')
+    setConditions([])
+    setIdFilter('')
     setSelected(null)
+    setSort({ field: col?.key ?? 'id', dir: 'asc' })
   }
+
+  const addCondition = (): void => {
+    const f = fields[0]
+    const op = opsFor(f?.type ?? '')[0]!
+    setConditions((cs) => [...cs, { id: ++condId.current, field: f?.name ?? '', op, value: op === 'is' ? 'true' : '' }])
+  }
+  const setCondition = (c: Condition): void => setConditions((cs) => cs.map((x) => (x.id === c.id ? c : x)))
+  const removeCondition = (id: number): void => setConditions((cs) => cs.filter((x) => x.id !== id))
+  const toggleSort = (field: string): void => setSort((s) => (s.field === field ? { field, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { field, dir: 'asc' }))
 
   const key = selectedCollection?.key ?? 'id'
   const idOf = (r: Row): string => String(r[key] ?? '')
-  const shown = filter ? rows.filter((r) => JSON.stringify(r).toLowerCase().includes(filter.toLowerCase())) : rows
+  const shown = text ? rows.filter((r) => JSON.stringify(r).toLowerCase().includes(text.toLowerCase())) : rows
+
+  const sortArrow = (field: string): React.JSX.Element | null =>
+    sort.field !== field ? null : sort.dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+  const SortTh = ({ field, label }: { field: string; label: string }): React.JSX.Element => (
+    <th className="px-3 py-2 font-medium">
+      <button onClick={() => toggleSort(field)} className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-foreground">
+        {label}
+        {sortArrow(field)}
+      </button>
+    </th>
+  )
 
   return (
     <div className="flex h-full gap-3">
@@ -89,7 +221,11 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
               )}
             >
               <span className="truncate">{c.name}</span>
-              {Object.keys(c.references).length > 0 ? (
+              {c.crdt ? (
+                <Badge variant="muted" className="ml-auto">
+                  crdt
+                </Badge>
+              ) : Object.keys(c.references).length > 0 ? (
                 <Badge variant="muted" className="ml-auto">
                   {Object.keys(c.references).length} fk
                 </Badge>
@@ -108,12 +244,12 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
             {/* Schema panel: fields + primary key + the advisory foreign-key edges */}
             <div className="shrink-0 rounded-md border bg-card/40 p-3">
               <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                {fieldsOf(selectedCollection.schema).length === 0 ? (
+                {fields.length === 0 ? (
                   <span className="text-xs text-muted-foreground">
                     key <span className="font-mono text-foreground">{selectedCollection.key}</span> · schema unavailable
                   </span>
                 ) : (
-                  fieldsOf(selectedCollection.schema).map((f) => (
+                  fields.map((f) => (
                     <span
                       key={f.name}
                       className={cn(
@@ -132,40 +268,55 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
                 <div key={field} className="flex items-center gap-1 text-[11px] text-muted-foreground">
                   <span className="font-mono text-foreground">{field}</span>
                   <ArrowRight className="h-3 w-3" />
-                  <button
-                    onClick={() => pick(refCollection)}
-                    className="font-mono text-sky-300 underline-offset-2 hover:underline"
-                  >
+                  <button onClick={() => pick(refCollection)} className="font-mono text-sky-300 underline-offset-2 hover:underline">
                     {refCollection}
                   </button>
                 </div>
               ))}
             </div>
 
-            <div className="flex flex-wrap items-center gap-1.5">
-              <input
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filter rows…"
-                className="w-48 rounded-md border bg-transparent px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
-              />
-              <button
-                onClick={() => load(true)}
-                className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-accent/40"
-              >
-                <RefreshCw className={cn('h-3 w-3', loading && 'animate-spin')} />
-                Refresh
-              </button>
-              <span className="text-xs text-muted-foreground">{shown.length} rows</span>
+            {/* Structured, server-side filter: ANDed field conditions for rows; id-substring for CRDT docs */}
+            <div className="flex flex-col gap-1.5">
+              {isCrdt ? (
+                <input
+                  value={idFilter}
+                  onChange={(e) => setIdFilter(e.target.value)}
+                  placeholder="id contains…"
+                  className="w-64 rounded-md border bg-transparent px-2 py-1 text-xs font-mono outline-none focus:ring-1 focus:ring-ring"
+                />
+              ) : (
+                conditions.map((c) => (
+                  <FilterRow key={c.id} cond={c} fields={fields} onChange={setCondition} onRemove={() => removeCondition(c.id)} />
+                ))
+              )}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {!isCrdt ? (
+                  <button onClick={addCondition} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-accent/40">
+                    <Plus className="h-3 w-3" />
+                    Add filter
+                  </button>
+                ) : null}
+                <input
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder="Quick find (loaded rows)…"
+                  className="w-48 rounded-md border bg-transparent px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                />
+                <button onClick={() => load(true)} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-accent/40">
+                  <RefreshCw className={cn('h-3 w-3', loading && 'animate-spin')} />
+                  Refresh
+                </button>
+                <span className="text-xs text-muted-foreground">{shown.length} rows</span>
+              </div>
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto rounded-md border">
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="border-b bg-card/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">{key}</th>
-                    <th className="px-3 py-2 font-medium">created</th>
-                    <th className="px-3 py-2 font-medium">updated</th>
+                    <SortTh field={key} label={key} />
+                    <SortTh field={ROW_CREATED_AT} label="created" />
+                    <SortTh field={ROW_UPDATED_AT} label="updated" />
                     <th className="px-3 py-2 font-medium">row</th>
                   </tr>
                 </thead>
@@ -193,7 +344,7 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
                   {shown.length === 0 && !loading ? (
                     <tr>
                       <td colSpan={4} className="px-3 py-3 text-sm text-muted-foreground">
-                        {filter ? 'No rows match the filter.' : 'No rows.'}
+                        {text || conditions.length > 0 || idFilter ? 'No rows match the filter.' : 'No rows.'}
                       </td>
                     </tr>
                   ) : null}

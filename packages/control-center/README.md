@@ -4,19 +4,20 @@ A zero-install debugging webapp for inspecting a running [super-line](https://gi
 
 ## Use
 
-**1. Turn on the inspector** on each server node you want to reach (off by default):
+**1. Mount the inspector plugin** on each server node you want to reach (off by default):
 
 ```ts
 import { webSocketServerTransport } from '@super-line/transport-websocket'
+import { inspector } from '@super-line/plugin-inspector'
 
 const srv = createSuperLineServer(contract, {
-  transports: [webSocketServerTransport({ server, inspector: true })], // negotiates the inspector subprotocol
+  transports: [webSocketServerTransport({ server })],
   authenticate,
-  inspector: true, // gates the reserved `superline.inspector.v1` channel (server-authoritative)
+  plugins: [inspector()], // taps telemetry + gates the reserved `superline.inspector.v1` channel
 })
 ```
 
-The inspector is server-authoritative: pass `inspector: true` **both** on the server opts (to gate the telemetry) **and** on `webSocketServerTransport` (to negotiate the subprotocol).
+The inspector ships as [`@super-line/plugin-inspector`](https://www.npmjs.com/package/@super-line/plugin-inspector): mounting the plugin both taps every event and declares the reserved connection class the Control Center attaches to. (Earlier versions used an `inspector: true` server/transport option — that's gone; `inspector.redact` is now `inspector({ redact: ['token'] })`.)
 
 **2. Run the Control Center** and point it at any node:
 
@@ -31,7 +32,7 @@ It serves the app locally and opens your browser. Switch endpoints from the conn
 - **Topology** — a hub-and-spoke graph: the Adapter/bus, server nodes (by friendly `nodeName`), and every connection (colored by **transport/wire**). Pick a room — or a wire family (ws / http / libp2p / loopback) — to highlight matching connections across nodes. Updates live.
 - **Connections** — a table of every connection (role, **transport/wire**, user, node, rooms); click one for its descriptor plus a best-effort, node-local snapshot of `ctx` and `conn.data`.
 - **Contract** — the full contract surface (roles × directions × message flavors) with best-effort JSON Schemas.
-- **Live feed** — lifecycle events (connect / disconnect / room / topic) *and* message traffic (requests + responses, events, broadcasts, topic publishes), each tagged with the **wire** it rode, fanned out across the cluster in real time. Filter by category, node, or wire; pause; and expand any message row to its payload.
+- **Live feed** — lifecycle events (connect / disconnect / room / topic), message traffic (requests + responses, events, broadcasts, topic publishes), *and* collection/CRDT traffic (`collection.*` row writes/changes, `crdt.*` document opens/writes/changes) — each tagged with the **wire** it rode, fanned out across the cluster in real time. Filter by category (Lifecycle / Requests / Events / Collections), node, or wire; pause; and expand any row to its payload (a `crdt.write` shows the decoded post-merge snapshot, not the opaque delta).
 - **Collections** — a schema graph of your contract collections plus a row browser: query and page through each collection's rows (CRDT documents surface as `{ id, ...snapshot }` rows), and click one for its value. Backed by the inspector's `listCollections` / `queryCollection`.
 - **Settings** — configure the inspector WebSocket URL (saved to your browser). **Resources** — a page of links to the docs, repo, and npm.
 
@@ -39,13 +40,13 @@ Transport/wire is a first-class dimension throughout: connections carry a normal
 
 ## Security
 
-The inspector channel is **read-only** but **unauthenticated** in v1, and `inspector: true` mirrors every message payload to the bus (an extra publish per message). Keep it to **local development or a trusted network** — never enable it on an internet-facing production node. Mask sensitive fields with `inspector: { redact: [...] }` (applies to `ctx`, `conn.data`, and message payloads).
+The inspector channel is **read-only** but **unauthenticated** in v1, and `inspector()` mirrors every message payload to the bus (an extra publish per message). Keep it to **local development or a trusted network** — never mount it on an internet-facing production node. Mask sensitive fields with `inspector({ redact: [...] })` (applies to `ctx`, `conn.data`, and message payloads).
 
 See the [Control Center guide](https://super-line.dogar.biz/how-to/control-center) for details.
 
 ---
 
-- 📦 npm: [`@super-line/control-center`](https://www.npmjs.com/package/@super-line/control-center) · v0.7.0
+- 📦 npm: [`@super-line/control-center`](https://www.npmjs.com/package/@super-line/control-center) · v0.10.1
 - 📖 Docs: <https://super-line.dogar.biz/>
 - 🧩 Source: <https://github.com/mertdogar/super-line>
 

@@ -44,7 +44,7 @@ interface SuperLinePlugin<S extends Directional = {}> {
 
 ### Taps are node-local observers
 
-`onEvent` fires synchronously at every emit site with **live** payload references — the same objects your handlers see, before any snapshot or redaction — reusing the inspector's `TapEvent` taxonomy (`msg.request`, `msg.response`, `connect`, `disconnect`, …). It costs nothing when no plugin taps are registered. Two invariants make it safe to hand you a live reference:
+`onEvent` fires synchronously at every emit site with **live** payload references — the same objects your handlers see, before any snapshot or redaction — reusing the inspector's `TapEvent` taxonomy (`msg.request`, `msg.response`, `connect`, `disconnect`, the `collection.*` / `crdt.*` families, …). It costs nothing when no plugin taps are registered. Two invariants make it safe to hand you a live reference:
 
 - **Don't mutate.** You hold the real object, not a copy. Read it; never write it.
 - **A throwing tap is isolated.** The error is routed to `onError` and the underlying operation still succeeds — a tap can never break traffic.

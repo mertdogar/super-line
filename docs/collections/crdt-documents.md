@@ -80,6 +80,10 @@ doc.update({ title: 'hello' })                      // merges + syncs to every o
 const { data, update } = useDoc('scenes', 'board')
 ```
 
+::: tip Watch it in the Control Center
+Mount [`inspector()`](/how-to/control-center) and every document open/write/change streams to the live feed's **Collections** filter. Because deltas are opaque on the wire, a `crdt.write` row expands to the **decoded post-merge snapshot** the server validated — so you can watch edits (including a server-side agent's co-writes, stamped with their `origin`) land in real time.
+:::
+
 ## Run it
 
 - [`examples/store-sync-json`](https://github.com/mertdogar/super-line/tree/main/examples/store-sync-json) — a collaborative JSON editor over `@super-line/collections-crdt-memory`: edit any field in two tabs and watch edits **merge** (concurrent edits to different fields both survive).

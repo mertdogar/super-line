@@ -655,7 +655,7 @@ const srv = createSuperLineServer(api, {
 npx @super-line/control-center --url ws://localhost:3000   # opens the SPA; --url seeds the default connection
 ```
 
-Telemetry fans out cluster-wide over the adapter, so one dashboard sees every node's traffic (requests · events · broadcasts · publishes), live topology, and presence.
+Telemetry fans out cluster-wide over the adapter, so one dashboard sees every node's traffic (requests · events · broadcasts · publishes · collection/CRDT writes), live topology, and presence.
 
 ## Testing
 

@@ -75,9 +75,11 @@ The full contract surface: `shared` and each role, split by direction with a fla
 
 Lifecycle churn — `connect` / `disconnect` / `room.add` / `room.remove` / `topic.sub` / `topic.unsub` — published on a reserved channel and fanned out cluster-wide via your Adapter, so an inspector on any one node sees events from every node.
 
-<img src="/control-center/live-feed.png" alt="Control Center live feed — a real-time stream of lifecycle and message events with Lifecycle, Requests, and Events filters" class="sl-shot" />
+<img src="/control-center/live-feed.png" alt="Control Center live feed — a real-time stream of lifecycle, message, and collection events with Lifecycle, Requests, Events, and Collections filters" class="sl-shot" />
 
-It also streams **message traffic** — `msg.request` / `msg.response` / `msg.broadcast` / `msg.publish` / `msg.event`, plus `msg.serverRequest` / `msg.serverReply` between nodes. Filter by **Lifecycle**, **Requests**, or **Events**, pause the stream, and expand any row to inspect its payload (redacted per your `inspector({ redact })` config).
+It also streams **message traffic** — `msg.request` / `msg.response` / `msg.broadcast` / `msg.publish` / `msg.event`, plus `msg.serverRequest` / `msg.serverReply` between nodes — and **collection traffic**: row writes and CRDT-document edits (`collection.sub` / `collection.write` / `collection.change`, `crdt.open` / `crdt.write` / `crdt.change` / `crdt.delete`). Filter by **Lifecycle**, **Requests**, **Events**, or **Collections**, pause the stream, and expand any row to inspect its payload (redacted per your `inspector({ redact })` config).
+
+CRDT deltas are opaque on the wire, so a `crdt.write` / `crdt.open` row expands to the **decoded post-merge document snapshot** the server validated — the readable state *after* the edit, not the binary delta — while a `crdt.change` fan-out shows the writer `origin` and delta size. A server-side agent co-writing a document (as in [`examples/ai-canvas`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas)) therefore shows up as `crdt.write` rows stamped with its `origin`.
 
 <img src="/control-center/live-feed-payload.png" alt="Control Center live feed with a broadcast row expanded to show its JSON payload" class="sl-shot" />
 
@@ -93,4 +95,4 @@ A handful of jump-off cards — the home page, the documentation, the GitHub rep
 
 ## How it works
 
-Everything rides the WebSocket transport super-line already owns — the Control Center is itself a super-line-style client on the reserved channel. Contract structure comes from the in-process contract object; field-level schemas use the optional [`@standard-community/standard-json`](https://github.com/standard-community/standard-json) bridge when present, falling back to structure-only otherwise. Cluster reads come from the [presence registry](/how-to/introspection-and-presence); live events — both lifecycle and message traffic — reuse the same Adapter pub/sub fan-out as rooms and topics, so a single inspector sees the whole cluster.
+Everything rides the WebSocket transport super-line already owns — the Control Center is itself a super-line-style client on the reserved channel. Contract structure comes from the in-process contract object; field-level schemas use the optional [`@standard-community/standard-json`](https://github.com/standard-community/standard-json) bridge when present, falling back to structure-only otherwise. Cluster reads come from the [presence registry](/how-to/introspection-and-presence); live events — lifecycle, message, and collection traffic — reuse the same Adapter pub/sub fan-out as rooms and topics, so a single inspector sees the whole cluster.

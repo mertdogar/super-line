@@ -122,6 +122,10 @@ The server **pushes down** what it can and re-checks the exact predicate; the cl
 const { rows, insert, update, delete: del } = useCollection('messages', { filter: eq('channelId', id) })
 ```
 
+::: tip Watch it in the Control Center
+Beyond the [Collections schema graph + row browser](/how-to/control-center), mounting [`inspector()`](/how-to/control-center) streams every subscribe and write to the live feed's **Collections** filter (`collection.sub` / `collection.write` / `collection.change`) — expand a row to see the written data, redacted per your `inspector({ redact })` config.
+:::
+
 ## Run it
 
 - [`examples/collections`](https://github.com/mertdogar/super-line/tree/main/examples/collections) — a runnable tsx tracer: RLS pushdown, a `messages ⋈ users` join, and optimistic writes with rollback, in ~120 lines against a real server.

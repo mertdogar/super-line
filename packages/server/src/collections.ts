@@ -1,4 +1,4 @@
-import type { Expr, CollectionQuery, CrdtServerReplica, DocListOpts, DocSummary } from '@super-line/core'
+import type { Expr, CollectionQuery, CrdtServerReplica, DocListOpts, DocSummary, RowTimestamps } from '@super-line/core'
 
 type Awaitable<T> = T | Promise<T>
 
@@ -41,6 +41,8 @@ export interface ServerCollectionHandle<Row = unknown> {
   read(id: string): Promise<Row | undefined>
   /** Materialize a snapshot (filter/sort/limit); omit the query for the whole collection. Server-side, policy-free. */
   snapshot(query?: CollectionQuery): Promise<Row[]>
+  /** Inspector-only: per-row created/updated timestamps keyed by id. Absent unless the backend tracks them. */
+  rowMeta?(ids: string[]): Promise<Record<string, RowTimestamps>>
 }
 
 /**

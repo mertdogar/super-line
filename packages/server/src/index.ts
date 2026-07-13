@@ -1829,6 +1829,7 @@ export function createSuperLineServer<
         snapshot(query) {
           return Promise.resolve(store.snapshot(name, query ?? {}))
         },
+        ...(store.rowMeta ? { rowMeta: (ids: string[]) => Promise.resolve(store.rowMeta!(name, ids)) } : {}),
       }
       return handle as unknown as Ret
     },

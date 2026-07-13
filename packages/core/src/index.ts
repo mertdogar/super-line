@@ -111,7 +111,8 @@ export type {
 
 export type { StoreChange, ResourceReplica } from './store.js'
 
-export type { CollectionStore, ResolvedRowOp, RowChange } from './collections.js'
+export type { CollectionStore, ResolvedRowOp, RowChange, RowTimestamps } from './collections.js'
+export { withRowMeta, ROW_CREATED_AT, ROW_UPDATED_AT } from './collections.js'
 export type { CrdtCollectionStore, DocChange, DocSummary, DocListOpts, CrdtServerReplica, CrdtCollectionClient } from './crdt-collections.js'
 
 export {

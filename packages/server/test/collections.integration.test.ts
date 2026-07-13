@@ -59,6 +59,30 @@ describe('collections — snapshot, filtering, live routing', () => {
     expect(sub.rows().map((r) => r.id)).toEqual(['m1', 'm3'])
   })
 
+  it('never leaks the inspector-only timestamps to a subscribed client (rows stay exactly the schema)', async () => {
+    const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+      policies: { messages: { read: () => undefined, write: authorOnly }, users: { read: () => undefined, write: () => true } },
+    })
+    await srv.collection('messages').insert(msg('m1', 'general', 'u1', 1)) // seed (snapshot path)
+
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    const sub = client.collection('messages').subscribe({ filter: eq('channelId', 'general') })
+    await sub.ready
+    await client.collection('messages').insert(msg('m2', 'general', 'u1', 2)) // live (cchg path)
+    await waitFor(() => sub.rows().length === 2)
+
+    // The client's row keys are exactly the declared schema — `_createdAt`/`_updatedAt` are inspector-only and
+    // must never ride cbat/cchg. (`createdAt` here is the user's own schema field, not the reserved one.)
+    for (const r of sub.rows()) {
+      expect(Object.keys(r as object).sort()).toEqual(['authorId', 'channelId', 'createdAt', 'id', 'text'])
+      expect(r).not.toHaveProperty('_createdAt')
+      expect(r).not.toHaveProperty('_updatedAt')
+    }
+  })
+
   it('delivers a row-set change event to a plain subscriber', async () => {
     const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
       authenticate,

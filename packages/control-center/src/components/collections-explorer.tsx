@@ -1,13 +1,21 @@
 import * as React from 'react'
 import { ArrowRight, KeyRound, RefreshCw } from 'lucide-react'
+import { ROW_CREATED_AT, ROW_UPDATED_AT } from '@super-line/core'
 import type { CollectionInfo } from '@super-line/core'
 import type { InspectorClient } from '@/lib/inspector-client'
 import { Badge } from '@/components/ui/badge'
 import { Json } from '@/components/json-view'
+import { formatDuration, formatTime } from '@/lib/events'
 import { cn } from '@/lib/utils'
 
 const PAGE = 100
 type Row = Record<string, unknown>
+
+/** The reserved created/updated timestamp (epoch ms) the inspector merges onto a row, or null if absent. */
+function tsOf(r: Row, key: string): number | null {
+  const v = r[key]
+  return typeof v === 'number' ? v : null
+}
 
 /** Field names + types pulled best-effort from a collection's JSON Schema (omitted when no converter is available). */
 function fieldsOf(schema: unknown): { name: string; type: string }[] {
@@ -156,6 +164,8 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
                 <thead>
                   <tr className="border-b bg-card/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                     <th className="px-3 py-2 font-medium">{key}</th>
+                    <th className="px-3 py-2 font-medium">created</th>
+                    <th className="px-3 py-2 font-medium">updated</th>
                     <th className="px-3 py-2 font-medium">row</th>
                   </tr>
                 </thead>
@@ -169,6 +179,12 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
                       <td className="px-3 py-1.5 font-mono text-xs">
                         <span className="block max-w-[16rem] truncate">{idOf(r)}</span>
                       </td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground" title={tsOf(r, ROW_CREATED_AT) != null ? formatTime(tsOf(r, ROW_CREATED_AT)!) : undefined}>
+                        {tsOf(r, ROW_CREATED_AT) != null ? `${formatDuration(tsOf(r, ROW_CREATED_AT)!)} ago` : '—'}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground" title={tsOf(r, ROW_UPDATED_AT) != null ? formatTime(tsOf(r, ROW_UPDATED_AT)!) : undefined}>
+                        {tsOf(r, ROW_UPDATED_AT) != null ? `${formatDuration(tsOf(r, ROW_UPDATED_AT)!)} ago` : '—'}
+                      </td>
                       <td className="px-3 py-1.5 text-xs text-muted-foreground">
                         <span className="block max-w-[38rem] truncate font-mono">{JSON.stringify(r)}</span>
                       </td>
@@ -176,7 +192,7 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
                   ))}
                   {shown.length === 0 && !loading ? (
                     <tr>
-                      <td colSpan={2} className="px-3 py-3 text-sm text-muted-foreground">
+                      <td colSpan={4} className="px-3 py-3 text-sm text-muted-foreground">
                         {filter ? 'No rows match the filter.' : 'No rows.'}
                       </td>
                     </tr>

@@ -71,6 +71,12 @@ The full contract surface: `shared` and each role, split by direction with a fla
 
 <img src="/control-center/contract.png" alt="Control Center contract view — shared and per-role messages grouped by direction, each with a flavor badge and an expandable JSON Schema payload" class="sl-shot" />
 
+### Collections
+
+Every declared collection, with its schema (fields + primary key) and advisory foreign-key edges, plus a row browser that scans the backend directly — bypassing row policies, since the inspector is a trusted observer. Each row lists its **id**, **created**, **updated**, and full **row** JSON; click a row for the pretty-printed detail. CRDT document collections browse here too, as `{ id, ...snapshot }` doc-rows.
+
+The **created** / **updated** columns are per-row store metadata the backend tracks (epoch ms) and the inspector surfaces here — they are Control-Center-only and never part of your row schema. Relay backends (`collections-memory` / `-sqlite`) stamp them on the handling node; the self tier (`collections-pglite`) stamps them once on the central Postgres clock. A store upgraded from before these columns existed backfills its existing rows with the upgrade time.
+
 ### Live feed
 
 Lifecycle churn — `connect` / `disconnect` / `room.add` / `room.remove` / `topic.sub` / `topic.unsub` — published on a reserved channel and fanned out cluster-wide via your Adapter, so an inspector on any one node sees events from every node.

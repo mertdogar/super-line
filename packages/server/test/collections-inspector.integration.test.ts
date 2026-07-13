@@ -49,6 +49,14 @@ describe('collection inspection RPCs', () => {
     const all = (await inspector.request('queryCollection', { collection: 'messages' })) as { id: string }[]
     expect(all.map((r) => r.id).sort()).toEqual(['m1', 'm2'])
 
+    // Each row carries the inspector-only created/updated timestamps (the CC's columns); the underlying
+    // schema fields are untouched. They are epoch ms and, on a freshly inserted row, equal.
+    const m1 = (all as Array<Record<string, unknown>>).find((r) => r.id === 'm1')!
+    expect(typeof m1._createdAt).toBe('number')
+    expect(typeof m1._updatedAt).toBe('number')
+    expect(m1._createdAt).toBe(m1._updatedAt)
+    expect(m1).toMatchObject({ id: 'm1', channelId: 'general', authorId: 'u1', text: 'hi' })
+
     await expect(inspector.request('queryCollection', { collection: 'ghost' })).rejects.toThrow()
 
     inspector.close()
@@ -72,8 +80,11 @@ describe('collection inspection RPCs', () => {
     expect(cols.map((c) => c.name)).toContain('scene') // CRDT collection now visible in the CC
     expect(cols.find((c) => c.name === 'scene')?.key).toBe('id')
 
-    const docs = (await inspector.request('queryCollection', { collection: 'scene' })) as Array<{ id: string; title?: string }>
-    expect(docs).toEqual([{ id: 'board', title: 'hello' }]) // synthesized doc-row
+    const docs = (await inspector.request('queryCollection', { collection: 'scene' })) as Array<Record<string, unknown>>
+    expect(docs[0]).toMatchObject({ id: 'board', title: 'hello' }) // synthesized doc-row
+    // CRDT collections carry created/updated too — merged from each DocSummary (free; already tracked per-doc).
+    expect(typeof docs[0]!._createdAt).toBe('number')
+    expect(typeof docs[0]!._updatedAt).toBe('number')
 
     inspector.close()
   })

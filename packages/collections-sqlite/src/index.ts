@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import { SuperLineError, applyQuery } from '@super-line/core'
-import type { CollectionStore, ResolvedRowOp, RowChange, Expr } from '@super-line/core'
+import type { CollectionStore, ResolvedRowOp, RowChange, Expr, RowTimestamps } from '@super-line/core'
 
 /** Options for {@link sqliteCollections}. */
 export interface SqliteCollectionsOptions {
@@ -82,15 +82,25 @@ export function sqliteCollections(opts: SqliteCollectionsOptions): CollectionSto
   db.exec(
     `CREATE TABLE IF NOT EXISTS "${table}" (
        collection TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL,
+       created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0,
        PRIMARY KEY (collection, id)
      )`,
   )
+  // Migrate a pre-timestamp table in place: add the columns, then backfill existing rows with the upgrade time
+  // (we can't know their true creation instant). Fresh tables already have the columns, so this is skipped.
+  const cols = db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[]
+  if (!cols.some((c) => c.name === 'created_at')) {
+    const upgradeTs = Date.now()
+    db.exec(`ALTER TABLE "${table}" ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0`)
+    db.exec(`ALTER TABLE "${table}" ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0`)
+    db.prepare(`UPDATE "${table}" SET created_at = ?, updated_at = ?`).run(upgradeTs, upgradeTs)
+  }
 
   const stmt = {
     get: db.prepare(`SELECT data FROM "${table}" WHERE collection = ? AND id = ?`),
     has: db.prepare(`SELECT 1 FROM "${table}" WHERE collection = ? AND id = ?`),
-    insert: db.prepare(`INSERT INTO "${table}" (collection, id, data) VALUES (?, ?, ?)`),
-    update: db.prepare(`UPDATE "${table}" SET data = ? WHERE collection = ? AND id = ?`),
+    insert: db.prepare(`INSERT INTO "${table}" (collection, id, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`),
+    update: db.prepare(`UPDATE "${table}" SET data = ?, updated_at = ? WHERE collection = ? AND id = ?`),
     delete: db.prepare(`DELETE FROM "${table}" WHERE collection = ? AND id = ?`),
   }
 
@@ -99,15 +109,16 @@ export function sqliteCollections(opts: SqliteCollectionsOptions): CollectionSto
   // One better-sqlite3 transaction = one atomic batch. A throw rolls the whole transaction back.
   const applyTx = db.transaction((ops: ResolvedRowOp[], origin: string): RowChange[] => {
     const changes: RowChange[] = []
+    const ts = Date.now() // one wall-clock per batch; createdAt frozen on insert, updatedAt bumps on update
     for (const op of ops) {
       if (op.op === 'insert') {
         if (stmt.has.get(op.n, op.id)) throw new SuperLineError('CONFLICT', `Row already exists: ${op.n}/${op.id}`)
-        stmt.insert.run(op.n, op.id, JSON.stringify(op.row))
+        stmt.insert.run(op.n, op.id, JSON.stringify(op.row), ts, ts)
         changes.push({ n: op.n, k: 'insert', id: op.id, next: op.row, origin })
       } else if (op.op === 'update') {
         const prev = stmt.get.get(op.n, op.id) as { data: string } | undefined
         if (!prev) throw new SuperLineError('NOT_FOUND', `No row: ${op.n}/${op.id}`)
-        stmt.update.run(JSON.stringify(op.row), op.n, op.id)
+        stmt.update.run(JSON.stringify(op.row), ts, op.n, op.id)
         changes.push({ n: op.n, k: 'update', id: op.id, prev: JSON.parse(prev.data), next: op.row, origin })
       } else {
         const prev = stmt.get.get(op.n, op.id) as { data: string } | undefined
@@ -140,6 +151,15 @@ export function sqliteCollections(opts: SqliteCollectionsOptions): CollectionSto
     read(n, id) {
       const row = stmt.get.get(n, id) as { data: string } | undefined
       return row ? JSON.parse(row.data) : undefined
+    },
+    rowMeta(n, ids) {
+      const out: Record<string, RowTimestamps> = {}
+      if (ids.length === 0) return out
+      const q = `SELECT id, created_at, updated_at FROM "${table}" WHERE collection = ? AND id IN (${ids.map(() => '?').join(',')})`
+      for (const r of db.prepare(q).all(n, ...ids) as { id: string; created_at: number; updated_at: number }[]) {
+        out[r.id] = { createdAt: r.created_at, updatedAt: r.updated_at }
+      }
+      return out
     },
     onChange(cb) {
       listeners.add(cb)

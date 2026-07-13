@@ -6,6 +6,7 @@ import {
   classifyContract,
   eventPayload,
   isCrdtCollection,
+  withRowMeta,
   type Contract,
   type Schema,
   type InspectorEvent,
@@ -207,16 +208,25 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
           if (!def) throw new SuperLineError('NOT_FOUND', `Unknown collection: ${collection}`)
           if (isCrdtCollection(def)) {
             // CRDT document collection: open-by-id, not row-queryable — synthesize `{ id, ...snapshot }` rows
-            // from the doc enumeration so the Collections view can browse them like any table.
+            // from the doc enumeration so the Collections view can browse them like any table. The per-doc
+            // created/updated already ride each DocSummary, so surface them under the reserved keys too.
             const handle = ctx.collection(collection) as unknown as ServerCrdtCollectionHandle
             const docs = await handle.list({ limit: query.limit, offset: query.offset })
             const rows = await Promise.all(
-              docs.map(async (d) => ({ id: d.id, ...((await handle.read(d.id)) as Record<string, unknown> | undefined) })),
+              docs.map(async (d) =>
+                withRowMeta(
+                  { id: d.id, ...((await handle.read(d.id)) as Record<string, unknown> | undefined) },
+                  { createdAt: d.createdAt, updatedAt: d.updatedAt },
+                ),
+              ),
             )
             return rows.map((r) => safeSnapshot(r))
           }
-          const rows = await ctx.collection(collection).snapshot(query) // ACL/policy bypassed — the inspector is a trusted observer
-          return rows.map((r) => safeSnapshot(r))
+          const handle = ctx.collection(collection) // ACL/policy bypassed — the inspector is a trusted observer
+          const rows = (await handle.snapshot(query)) as Record<string, unknown>[]
+          const key = def.key ?? 'id'
+          const meta = handle.rowMeta ? await handle.rowMeta(rows.map((r) => String(r[key]))) : {}
+          return rows.map((r) => safeSnapshot(withRowMeta(r, meta[String(r[key])])))
         },
       }),
     },

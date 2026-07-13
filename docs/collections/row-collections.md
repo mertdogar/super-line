@@ -123,7 +123,7 @@ const { rows, insert, update, delete: del } = useCollection('messages', { filter
 ```
 
 ::: tip Watch it in the Control Center
-Beyond the [Collections schema graph + row browser](/how-to/control-center), mounting [`inspector()`](/how-to/control-center) streams every subscribe and write to the live feed's **Collections** filter (`collection.sub` / `collection.write` / `collection.change`) — expand a row to see the written data, redacted per your `inspector({ redact })` config.
+Beyond the [Collections schema graph + row browser](/how-to/control-center) — which lists each row's **created** / **updated** timestamps alongside its data — mounting [`inspector()`](/how-to/control-center) streams every subscribe and write to the live feed's **Collections** filter (`collection.sub` / `collection.write` / `collection.change`) — expand a row to see the written data, redacted per your `inspector({ redact })` config.
 :::
 
 ## Run it

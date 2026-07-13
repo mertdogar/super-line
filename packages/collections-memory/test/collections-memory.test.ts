@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { memoryCollections } from '@super-line/collections-memory'
 import { eq, gte } from '@super-line/core'
 import type { RowChange } from '@super-line/core'
@@ -108,5 +108,37 @@ describe('memoryCollections — snapshot', () => {
     const store = memoryCollections()
     expect(store.snapshot('nope', {})).toEqual([])
     expect(store.snapshot('messages', { filter: gte('likes', 0) })).toEqual([])
+  })
+})
+
+describe('memoryCollections — rowMeta (inspector-only timestamps)', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('stamps createdAt/updatedAt on insert; update bumps updatedAt but freezes createdAt', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(1_000))
+    const store = memoryCollections()
+    store.apply([{ op: 'insert', n: 'messages', id: 'a', row: msg('a', 'g', 1) }], 'o1')
+
+    expect(await store.rowMeta!('messages', ['a'])).toEqual({ a: { createdAt: 1_000, updatedAt: 1_000 } })
+
+    vi.setSystemTime(new Date(6_000))
+    store.apply([{ op: 'update', n: 'messages', id: 'a', row: msg('a', 'g', 9) }], 'o1')
+    expect(await store.rowMeta!('messages', ['a'])).toEqual({ a: { createdAt: 1_000, updatedAt: 6_000 } }) // createdAt frozen
+  })
+
+  it('keeps snapshot/read row-pure — timestamps never leak into the client-facing row', () => {
+    const store = memoryCollections()
+    store.apply([{ op: 'insert', n: 'messages', id: 'a', row: msg('a', 'g', 1) }], 'o1')
+    expect(store.read('messages', 'a')).toEqual(msg('a', 'g', 1)) // no _createdAt/_updatedAt
+    expect(store.snapshot('messages', {})).toEqual([msg('a', 'g', 1)])
+  })
+
+  it('rowMeta omits ids that do not exist', async () => {
+    const store = memoryCollections()
+    store.apply([{ op: 'insert', n: 'messages', id: 'a', row: msg('a', 'g', 1) }], 'o1')
+    const meta = await store.rowMeta!('messages', ['a', 'ghost'])
+    expect(meta).toHaveProperty('a')
+    expect(meta).not.toHaveProperty('ghost')
   })
 })

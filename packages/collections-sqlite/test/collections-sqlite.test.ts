@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import Database from 'better-sqlite3'
 import { sqliteCollections } from '@super-line/collections-sqlite'
 import { eq, gte, isIn, like, ilike, and, neq } from '@super-line/core'
 import type { CollectionStore, RowChange } from '@super-line/core'
@@ -125,5 +126,46 @@ describe('sqliteCollections — durability', () => {
     expect(s2.read('messages', 'a')).toEqual(msg('a', 'general', 1))
     expect(rows(s2, 'messages', { filter: eq('channelId', 'general') }).map((r) => r.id)).toEqual(['a'])
     s2.close?.()
+  })
+})
+
+describe('sqliteCollections — rowMeta (inspector-only timestamps)', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('stamps createdAt/updatedAt on insert; update bumps updatedAt but freezes createdAt', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(1_000))
+    const store = sqliteCollections({ file: ':memory:' })
+    store.apply([{ op: 'insert', n: 'messages', id: 'a', row: msg('a', 'g', 1) }], 'o1')
+    expect((await store.rowMeta!('messages', ['a'])).a).toEqual({ createdAt: 1_000, updatedAt: 1_000 })
+
+    vi.setSystemTime(new Date(6_000))
+    store.apply([{ op: 'update', n: 'messages', id: 'a', row: msg('a', 'g', 9) }], 'o1')
+    expect((await store.rowMeta!('messages', ['a'])).a).toEqual({ createdAt: 1_000, updatedAt: 6_000 })
+  })
+
+  it('keeps snapshot/read row-pure and omits unknown ids from rowMeta', async () => {
+    const store = sqliteCollections({ file: ':memory:' })
+    store.apply([{ op: 'insert', n: 'messages', id: 'a', row: msg('a', 'g', 1) }], 'o1')
+    expect(store.read('messages', 'a')).toEqual(msg('a', 'g', 1)) // no _createdAt/_updatedAt
+    expect(rows(store, 'messages')).toEqual([msg('a', 'g', 1)])
+    expect(await store.rowMeta!('messages', ['a', 'ghost'])).not.toHaveProperty('ghost')
+    expect(await store.rowMeta!('messages', [])).toEqual({})
+  })
+
+  it('migrates a pre-timestamp table in place and backfills existing rows with the upgrade time', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(50_000))
+    const file = tmpFile()
+    // Simulate an old durable store: the original (collection, id, data)-only schema, with a row already in it.
+    const legacy = new Database(file)
+    legacy.exec(`CREATE TABLE "collection_rows" (collection TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY (collection, id))`)
+    legacy.prepare(`INSERT INTO "collection_rows" (collection, id, data) VALUES (?, ?, ?)`).run('messages', 'old', JSON.stringify(msg('old', 'g', 1)))
+    legacy.close()
+
+    const store = sqliteCollections({ file }) // triggers ALTER + backfill at upgrade time
+    expect(store.read('messages', 'old')).toEqual(msg('old', 'g', 1)) // row survives untouched
+    expect((await store.rowMeta!('messages', ['old'])).old).toEqual({ createdAt: 50_000, updatedAt: 50_000 })
+    store.close?.()
   })
 })

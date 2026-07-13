@@ -105,6 +105,23 @@ describe('pglite collections — central CRUD (postgres.js over pg-wire)', () =>
     expect(out.map((r) => r.id)).toEqual(['c'])
     expect((await store.snapshot('users', {})).length).toBe(1) // scoped: only the users collection
   })
+
+  it('tracks created/updated via the central clock (inspector rowMeta), keeping rows pure', async () => {
+    const { store } = await makeStore()
+    await store.apply([{ op: 'insert', n: 'messages', id: 'm1', row: msg('m1', 'general', 1) }], 'o1')
+    const afterInsert = (await store.rowMeta!('messages', ['m1'])).m1!
+    expect(afterInsert.createdAt).toBeGreaterThan(0)
+    expect(afterInsert.createdAt).toBe(afterInsert.updatedAt) // insert: created === updated
+
+    await sleep(5)
+    await store.apply([{ op: 'update', n: 'messages', id: 'm1', row: msg('m1', 'general', 9) }], 'o1')
+    const afterUpdate = (await store.rowMeta!('messages', ['m1'])).m1!
+    expect(afterUpdate.createdAt).toBe(afterInsert.createdAt) // frozen
+    expect(afterUpdate.updatedAt).toBeGreaterThan(afterInsert.updatedAt) // bumped
+
+    expect(await store.read('messages', 'm1')).toEqual(msg('m1', 'general', 9)) // row-pure (no _createdAt)
+    expect(await store.rowMeta!('messages', ['ghost'])).toEqual({})
+  })
 })
 
 describe('pglite collections — local replica feed (live.changes → onChange)', () => {

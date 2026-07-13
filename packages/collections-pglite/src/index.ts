@@ -5,7 +5,10 @@ import { electricSync } from '@electric-sql/pglite-sync'
 import type { PGliteWithSync } from '@electric-sql/pglite-sync'
 import postgres from 'postgres'
 import { SuperLineError, applyQuery } from '@super-line/core'
-import type { CollectionStore, ResolvedRowOp, RowChange } from '@super-line/core'
+import type { CollectionStore, ResolvedRowOp, RowChange, RowTimestamps } from '@super-line/core'
+
+// Central-Postgres wall-clock in epoch ms. Authoritative + node-consistent (self-tier writes hit central once).
+const NOW_MS = '(extract(epoch from clock_timestamp())*1000)::bigint'
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/
 // The synthetic single-column key = `collection` + SEP + `id`. `live.changes` keys on ONE column, and U+0001
@@ -45,7 +48,7 @@ export interface PgliteCollectionsOptions {
 export async function pgliteCollections(opts: PgliteCollectionsOptions): Promise<CollectionStore> {
   const table = opts.table ?? 'collection_rows'
   if (!IDENT.test(table)) throw new Error(`Invalid table name: ${table}`)
-  const ddl = `CREATE TABLE IF NOT EXISTS "${table}" (pk text PRIMARY KEY, collection text NOT NULL, id text NOT NULL, data jsonb NOT NULL, origin text)`
+  const ddl = `CREATE TABLE IF NOT EXISTS "${table}" (pk text PRIMARY KEY, collection text NOT NULL, id text NOT NULL, data jsonb NOT NULL, origin text, created_at bigint NOT NULL DEFAULT ${NOW_MS}, updated_at bigint NOT NULL DEFAULT ${NOW_MS})`
 
   // Central Postgres — writes + strong reads.
   const sql = postgres(opts.pgUrl, { prepare: false, onnotice: () => {} })
@@ -60,6 +63,9 @@ export async function pgliteCollections(opts: PgliteCollectionsOptions): Promise
     }
   }
   await runDdl(ddl)
+  // Migrate a pre-timestamp central table: the volatile default backfills existing rows with the upgrade time.
+  await runDdl(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS created_at bigint NOT NULL DEFAULT ${NOW_MS}`)
+  await runDdl(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS updated_at bigint NOT NULL DEFAULT ${NOW_MS}`)
   const asJson = (v: unknown): ReturnType<typeof sql.json> => sql.json(v as Parameters<typeof sql.json>[0])
 
   // Local in-memory PGlite — the reactive change feed (Electric → live.changes). Ephemeral; re-syncs on boot.
@@ -105,7 +111,7 @@ export async function pgliteCollections(opts: PgliteCollectionsOptions): Promise
               VALUES (${pk}, ${op.n}, ${op.id}, ${asJson(op.row)}, ${origin}) ON CONFLICT (pk) DO NOTHING`
             if (res.count === 0) throw new SuperLineError('CONFLICT', `Row already exists: ${op.n}/${op.id}`)
           } else if (op.op === 'update') {
-            const res = await tx`UPDATE ${tx(table)} SET data = ${asJson(op.row)}, origin = ${origin} WHERE pk = ${pk}`
+            const res = await tx`UPDATE ${tx(table)} SET data = ${asJson(op.row)}, origin = ${origin}, updated_at = (extract(epoch from clock_timestamp())*1000)::bigint WHERE pk = ${pk}`
             if (res.count === 0) throw new SuperLineError('NOT_FOUND', `No row: ${op.n}/${op.id}`)
           } else {
             await tx`DELETE FROM ${tx(table)} WHERE pk = ${pk}` // idempotent
@@ -127,6 +133,14 @@ export async function pgliteCollections(opts: PgliteCollectionsOptions): Promise
     async read(n, id) {
       const rows = await sql`SELECT data::text AS data FROM ${sql(table)} WHERE pk = ${encodePk(n, id)}`
       return rows[0] ? JSON.parse(rows[0].data as string) : undefined
+    },
+    async rowMeta(n, ids) {
+      // Strong read from central — the timestamps never ride the Electric feed (client wire stays row-pure).
+      const out: Record<string, RowTimestamps> = {}
+      if (ids.length === 0) return out
+      const rows = await sql`SELECT id, created_at, updated_at FROM ${sql(table)} WHERE collection = ${n} AND id IN ${sql(ids)}`
+      for (const r of rows) out[r.id as string] = { createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) }
+      return out
     },
     onChange(cb) {
       changeCbs.add(cb)

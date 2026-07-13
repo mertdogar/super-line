@@ -1,6 +1,6 @@
 {
   "name": "@super-line/plugin-inspector",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Control Center inspector for super-line, packaged as a plugin — taps + a plugin-owned CC connection.",
   "license": "MIT",

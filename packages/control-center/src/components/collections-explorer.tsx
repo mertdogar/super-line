@@ -10,15 +10,18 @@ import { cn } from '@/lib/utils'
 
 const PAGE = 100
 type Row = Record<string, unknown>
-type Op = 'eq' | 'neq' | 'contains' | 'lt' | 'lte' | 'gt' | 'gte' | 'is'
-type Field = { name: string; type: string }
-type Condition = { id: number; field: string; op: Op; value: string }
+type Op = 'eq' | 'neq' | 'contains' | 'lt' | 'lte' | 'gt' | 'gte' | 'is' | 'after' | 'before' | 'within'
+type Field = { name: string; type: string; label?: string }
+type Condition = { id: number; field: string; op: Op; value: string; unit?: TimeUnit }
 type SortState = { field: string; dir: 'asc' | 'desc' }
+type TimeUnit = 'm' | 'h' | 'd'
 
-const OP_LABEL: Record<Op, string> = { eq: '=', neq: '≠', contains: 'contains', lt: '<', lte: '≤', gt: '>', gte: '≥', is: 'is' }
+const UNIT_MS: Record<TimeUnit, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 }
+const OP_LABEL: Record<Op, string> = { eq: '=', neq: '≠', contains: 'contains', lt: '<', lte: '≤', gt: '>', gte: '≥', is: 'is', after: 'after', before: 'before', within: 'within last' }
 
 /** The operators offered for a field, by its JSON-Schema type (empty type = schema unavailable → all comparisons). */
 function opsFor(type: string): Op[] {
+  if (type === 'datetime') return ['after', 'before', 'within']
   if (type === 'boolean') return ['is']
   if (type === 'number' || type === 'integer') return ['eq', 'neq', 'lt', 'lte', 'gt', 'gte']
   if (type === 'string') return ['eq', 'neq', 'contains']
@@ -34,8 +37,14 @@ function coerceVal(v: string, type: string, op: Op): Scalar {
   return v
 }
 
-function condToExpr(c: Condition, type: string): Expr | undefined {
+function condToExpr(c: Condition, type: string, now: number): Expr | undefined {
   if (c.op !== 'is' && c.value.trim() === '') return undefined // an empty value is "not set", not a filter
+  if (type === 'datetime') {
+    if (c.op === 'within') return gte(c.field, now - Number(c.value) * UNIT_MS[c.unit ?? 'h']) // last N units
+    const ms = new Date(c.value).getTime() // datetime-local → epoch ms
+    if (Number.isNaN(ms)) return undefined
+    return c.op === 'after' ? gt(c.field, ms) : lt(c.field, ms)
+  }
   const v = coerceVal(c.value, type, c.op)
   switch (c.op) {
     case 'eq':
@@ -53,6 +62,8 @@ function condToExpr(c: Condition, type: string): Expr | undefined {
       return gt(c.field, v)
     case 'gte':
       return gte(c.field, v)
+    default:
+      return undefined
   }
 }
 
@@ -70,32 +81,56 @@ function fieldsOf(schema: unknown): Field[] {
 }
 
 /** One `field op value` row of the structured filter. Fields become a select when the schema is known, a text input otherwise. */
-function FilterRow({ cond, fields, onChange, onRemove }: { cond: Condition; fields: Field[]; onChange: (c: Condition) => void; onRemove: () => void }): React.JSX.Element {
+function FilterRow({ cond, fields, schemaLess, onChange, onRemove }: { cond: Condition; fields: Field[]; schemaLess: boolean; onChange: (c: Condition) => void; onRemove: () => void }): React.JSX.Element {
   const type = fields.find((f) => f.name === cond.field)?.type ?? ''
   const ops = opsFor(type)
   const inputCls = 'rounded-md border bg-transparent px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring'
+  const listId = `flt-${cond.id}`
   return (
     <div className="flex items-center gap-1.5">
-      {fields.length > 0 ? (
+      {!schemaLess ? (
         <select
           value={cond.field}
           onChange={(e) => {
             const t = fields.find((f) => f.name === e.target.value)?.type ?? ''
-            const op = opsFor(t)[0]! // reset op to one valid for the new field's type
-            onChange({ ...cond, field: e.target.value, op, value: op === 'is' ? 'true' : cond.value }) // keep stored value in sync with the boolean select's default
+            const op = opsFor(t)[0]! // reset op to one valid for the new field's type; clear value (types differ)
+            onChange({ ...cond, field: e.target.value, op, value: op === 'is' ? 'true' : '', unit: 'h' })
           }}
           className={cn(inputCls, 'font-mono')}
         >
           {fields.map((f) => (
             <option key={f.name} value={f.name}>
-              {f.name}
+              {f.label ?? f.name}
             </option>
           ))}
         </select>
       ) : (
-        <input value={cond.field} onChange={(e) => onChange({ ...cond, field: e.target.value })} placeholder="field" className={cn(inputCls, 'w-28 font-mono')} />
+        <>
+          <input
+            value={cond.field}
+            list={listId}
+            onChange={(e) => {
+              const t = fields.find((f) => f.name === e.target.value)?.type ?? ''
+              onChange({ ...cond, field: e.target.value, op: opsFor(t)[0]! })
+            }}
+            placeholder="field"
+            className={cn(inputCls, 'w-32 font-mono')}
+          />
+          <datalist id={listId}>
+            {fields.map((f) => (
+              <option key={f.name} value={f.name} />
+            ))}
+          </datalist>
+        </>
       )}
-      <select value={cond.op} onChange={(e) => onChange({ ...cond, op: e.target.value as Op })} className={inputCls}>
+      <select
+        value={cond.op}
+        onChange={(e) => {
+          const op = e.target.value as Op
+          onChange({ ...cond, op, value: (op === 'within') !== (cond.op === 'within') ? '' : cond.value }) // value shape changes across "within"
+        }}
+        className={inputCls}
+      >
         {ops.map((o) => (
           <option key={o} value={o}>
             {OP_LABEL[o]}
@@ -107,6 +142,17 @@ function FilterRow({ cond, fields, onChange, onRemove }: { cond: Condition; fiel
           <option value="true">true</option>
           <option value="false">false</option>
         </select>
+      ) : type === 'datetime' && cond.op === 'within' ? (
+        <>
+          <input type="number" min="1" value={cond.value} onChange={(e) => onChange({ ...cond, value: e.target.value })} placeholder="N" className={cn(inputCls, 'w-16')} />
+          <select value={cond.unit ?? 'h'} onChange={(e) => onChange({ ...cond, unit: e.target.value as TimeUnit })} className={inputCls}>
+            <option value="m">minutes</option>
+            <option value="h">hours</option>
+            <option value="d">days</option>
+          </select>
+        </>
+      ) : type === 'datetime' ? (
+        <input type="datetime-local" value={cond.value} onChange={(e) => onChange({ ...cond, value: e.target.value })} className={cn(inputCls, 'w-52')} />
       ) : (
         <input value={cond.value} onChange={(e) => onChange({ ...cond, value: e.target.value })} placeholder="value" className={cn(inputCls, 'w-40')} />
       )}
@@ -134,7 +180,12 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
   const condId = React.useRef(0)
   const selectedCollection = collections.find((c) => c.name === name) ?? null
   const isCrdt = selectedCollection?.crdt ?? false
-  const fields = React.useMemo(() => fieldsOf(selectedCollection?.schema), [selectedCollection])
+  const schemaFields = React.useMemo(() => fieldsOf(selectedCollection?.schema), [selectedCollection])
+  // Filterable fields = schema fields + the inspector-only created/updated timestamps (datetime).
+  const filterFields = React.useMemo<Field[]>(
+    () => [...schemaFields, { name: ROW_CREATED_AT, type: 'datetime', label: 'created' }, { name: ROW_UPDATED_AT, type: 'datetime', label: 'updated' }],
+    [schemaFields],
+  )
 
   React.useEffect(() => {
     if (!client) return
@@ -144,9 +195,10 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
   // Build the server-side filter IR from the current UI: id-substring for CRDT, ANDed field conditions for rows.
   const buildFilter = React.useCallback((): Expr | undefined => {
     if (isCrdt) return idFilter.trim() ? ilike('id', `%${idFilter}%`) : undefined
-    const exprs = conditions.map((c) => condToExpr(c, fields.find((f) => f.name === c.field)?.type ?? '')).filter((e): e is Expr => e !== undefined)
+    const now = Date.now() // anchors "within last N" at query-build time
+    const exprs = conditions.map((c) => condToExpr(c, filterFields.find((f) => f.name === c.field)?.type ?? '', now)).filter((e): e is Expr => e !== undefined)
     return andFilters(...exprs)
-  }, [isCrdt, idFilter, conditions, fields])
+  }, [isCrdt, idFilter, conditions, filterFields])
 
   const load = React.useCallback(
     (reset: boolean) => {
@@ -183,9 +235,9 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
   }
 
   const addCondition = (): void => {
-    const f = fields[0]
+    const f = schemaFields[0] // default to the first schema field (created/updated are opt-in via the dropdown)
     const op = opsFor(f?.type ?? '')[0]!
-    setConditions((cs) => [...cs, { id: ++condId.current, field: f?.name ?? '', op, value: op === 'is' ? 'true' : '' }])
+    setConditions((cs) => [...cs, { id: ++condId.current, field: f?.name ?? '', op, value: op === 'is' ? 'true' : '', unit: 'h' }])
   }
   const setCondition = (c: Condition): void => setConditions((cs) => cs.map((x) => (x.id === c.id ? c : x)))
   const removeCondition = (id: number): void => setConditions((cs) => cs.filter((x) => x.id !== id))
@@ -244,12 +296,12 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
             {/* Schema panel: fields + primary key + the advisory foreign-key edges */}
             <div className="shrink-0 rounded-md border bg-card/40 p-3">
               <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                {fields.length === 0 ? (
+                {schemaFields.length === 0 ? (
                   <span className="text-xs text-muted-foreground">
                     key <span className="font-mono text-foreground">{selectedCollection.key}</span> · schema unavailable
                   </span>
                 ) : (
-                  fields.map((f) => (
+                  schemaFields.map((f) => (
                     <span
                       key={f.name}
                       className={cn(
@@ -286,7 +338,7 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
                 />
               ) : (
                 conditions.map((c) => (
-                  <FilterRow key={c.id} cond={c} fields={fields} onChange={setCondition} onRemove={() => removeCondition(c.id)} />
+                  <FilterRow key={c.id} cond={c} fields={filterFields} schemaLess={schemaFields.length === 0} onChange={setCondition} onRemove={() => removeCondition(c.id)} />
                 ))
               )}
               <div className="flex flex-wrap items-center gap-1.5">

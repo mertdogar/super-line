@@ -7,6 +7,8 @@ import {
   eventPayload,
   isCrdtCollection,
   withRowMeta,
+  matchesFilter,
+  andFilters,
   ROW_CREATED_AT,
   ROW_UPDATED_AT,
   type Contract,
@@ -112,6 +114,26 @@ function crdtSortBy(field: string | undefined): 'id' | 'createdAt' | 'updatedAt'
   if (field === ROW_CREATED_AT) return 'createdAt'
   if (field === ROW_UPDATED_AT) return 'updatedAt'
   return undefined
+}
+
+const isTsField = (field: string): boolean => field === ROW_CREATED_AT || field === ROW_UPDATED_AT
+
+// Does the filter reference a reserved created/updated key? Such predicates can't push down (the timestamps
+// live outside the row data), so the row branch scans + merges rowMeta + evaluates the full filter in JS.
+function filterMentionsTs(expr: Expr | undefined): boolean {
+  if (!expr) return false
+  if ('args' in expr) return expr.args.some(filterMentionsTs) // and | or
+  if ('arg' in expr) return filterMentionsTs(expr.arg) // not
+  return isTsField(expr.field)
+}
+
+// The pushable subset of a filter: drop any timestamp predicate (the backend would json_extract a missing
+// field → wrongly exclude). Only narrows the scan; `matchesFilter` re-checks the full filter after the merge.
+function stripTs(expr: Expr | undefined): Expr | undefined {
+  if (!expr) return undefined
+  if ('args' in expr) return expr.op === 'and' ? andFilters(...expr.args.map(stripTs)) : filterMentionsTs(expr) ? undefined : expr // or: can't split → don't push
+  if ('arg' in expr) return filterMentionsTs(expr) ? undefined : expr // not
+  return isTsField(expr.field) ? undefined : expr
 }
 
 /**
@@ -259,14 +281,18 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
           const key = def.key ?? 'id'
           const idOf = (r: Record<string, unknown>): string => String(r[key])
           const tsSort = query.orderBy?.find((o) => o.field === ROW_CREATED_AT || o.field === ROW_UPDATED_AT)
-          if (tsSort && handle.rowMeta) {
-            // created/updated live outside the row data, so the backend can't ORDER BY them — scan the filtered
-            // set, merge the store timestamps, sort, then slice the requested page (inspector-side, dev-scale).
-            const all = (await handle.snapshot({ filter: query.filter })) as Record<string, unknown>[]
+          if ((tsSort || filterMentionsTs(query.filter)) && handle.rowMeta) {
+            // created/updated live outside the row data, so the backend can't filter or ORDER BY them — push the
+            // schema-only part of the filter, merge the store timestamps, then apply the FULL filter + sort in JS
+            // and slice the requested page (inspector-side, dev-scale).
+            const all = (await handle.snapshot({ filter: stripTs(query.filter) })) as Record<string, unknown>[]
             const meta = await handle.rowMeta(all.map(idOf))
-            const merged = all.map((r) => withRowMeta(r, meta[idOf(r)]) as Record<string, unknown>)
-            const dir = tsSort.dir === 'desc' ? -1 : 1
-            merged.sort((a, b) => (((a[tsSort.field] as number) ?? 0) - ((b[tsSort.field] as number) ?? 0)) * dir)
+            let merged = all.map((r) => withRowMeta(r, meta[idOf(r)]) as Record<string, unknown>)
+            if (query.filter) merged = merged.filter((r) => matchesFilter(query.filter, r)) // re-check incl. timestamps
+            if (tsSort) {
+              const dir = tsSort.dir === 'desc' ? -1 : 1
+              merged.sort((a, b) => (((a[tsSort.field] as number) ?? 0) - ((b[tsSort.field] as number) ?? 0)) * dir)
+            }
             const offset = query.offset ?? 0
             const page = query.limit != null ? merged.slice(offset, offset + query.limit) : merged.slice(offset)
             return page.map((r) => safeSnapshot(r))

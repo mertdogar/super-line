@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { defineContract, eq, gte, ilike, and } from '@super-line/core'
+import { defineContract, eq, gte, ilike, and, lt, ROW_CREATED_AT } from '@super-line/core'
 import type { CollectionInfo } from '@super-line/core'
 import { memoryCollections } from '@super-line/collections-memory'
 import { crdtMemoryCollections } from '@super-line/collections-crdt-memory'
@@ -178,6 +178,48 @@ describe('collection inspection — filter & sort', () => {
 
     const byCreatedDesc = (await inspector.request('queryCollection', { collection: 'scene', orderBy: [{ field: '_createdAt', dir: 'desc' }] })) as { id: string }[]
     expect(byCreatedDesc.map((r) => r.id)).toEqual(['cherry', 'banana', 'apple'])
+    inspector.close()
+  })
+
+  it('filters rows by the inspector-only _createdAt/_updatedAt (before/after, and combined with a schema predicate)', async () => {
+    const { srv, url } = await h.server(shop, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      plugins: [inspectorPlugin()],
+      collections: memoryCollections(),
+      policies: { products: { read: () => undefined, write: () => true } },
+    })
+    await srv.collection('products').insert({ id: 'a', name: 'A', price: 1, inStock: true })
+    await sleep(5)
+    await srv.collection('products').insert({ id: 'b', name: 'B', price: 2, inStock: false })
+    await sleep(5)
+    await srv.collection('products').insert({ id: 'c', name: 'C', price: 3, inStock: true })
+
+    const inspector = await connectInspector(url)
+    const all = (await inspector.request('queryCollection', { collection: 'products', orderBy: [{ field: ROW_CREATED_AT, dir: 'asc' }] })) as Array<Record<string, unknown>>
+    expect(all.map((r) => r.id)).toEqual(['a', 'b', 'c'])
+    const tB = all[1]![ROW_CREATED_AT] as number // b's creation instant
+
+    // created >= b  → b, c   (the timestamp predicate can't push down; the handler scans + evaluates it in JS)
+    const fromB = (await inspector.request('queryCollection', { collection: 'products', filter: gte(ROW_CREATED_AT, tB) })) as { id: string }[]
+    expect(fromB.map((r) => r.id).sort()).toEqual(['b', 'c'])
+
+    // created < b  → a
+    const beforeB = (await inspector.request('queryCollection', { collection: 'products', filter: lt(ROW_CREATED_AT, tB) })) as { id: string }[]
+    expect(beforeB.map((r) => r.id)).toEqual(['a'])
+
+    // created >= b AND inStock === true  → c only (b is out of stock; schema part pushes down, ts part in JS)
+    const inStockFromB = (await inspector.request('queryCollection', { collection: 'products', filter: and(gte(ROW_CREATED_AT, tB), eq('inStock', true)) })) as { id: string }[]
+    expect(inStockFromB.map((r) => r.id)).toEqual(['c'])
+
+    // paging a timestamp-filtered + timestamp-sorted set
+    const page = (await inspector.request('queryCollection', {
+      collection: 'products',
+      filter: gte(ROW_CREATED_AT, all[0]![ROW_CREATED_AT] as number),
+      orderBy: [{ field: ROW_CREATED_AT, dir: 'asc' }],
+      limit: 2,
+      offset: 1,
+    })) as { id: string }[]
+    expect(page.map((r) => r.id)).toEqual(['b', 'c'])
     inspector.close()
   })
 })

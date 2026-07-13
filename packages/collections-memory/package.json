@@ -1,6 +1,6 @@
 {
   "name": "@super-line/collections-memory",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "In-memory CollectionStore backend for super-line — the zero-dependency default for typed row collections.",
   "license": "MIT",

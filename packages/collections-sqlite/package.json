@@ -1,6 +1,6 @@
 {
   "name": "@super-line/collections-sqlite",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Durable SQLite CollectionStore backend for super-line — typed row collections that survive a restart, with IR→SQL snapshot pushdown.",
   "license": "MIT",

@@ -32,19 +32,19 @@ export function memoryCollections(): CollectionStore {
       // (and intra-batch dependencies — insert then update the same id — apply against evolving state).
       const undo: Array<() => void> = []
       const changes: RowChange[] = []
+      const ts = now() // one clock read for the whole batch: it is atomic, so it happened at one instant
       try {
         for (const op of ops) {
           const t = tableOf(op.n)
           if (op.op === 'insert') {
             if (t.has(op.id)) throw new SuperLineError('CONFLICT', `Row already exists: ${op.n}/${op.id}`)
-            const ts = now()
             t.set(op.id, { row: op.row, createdAt: ts, updatedAt: ts })
             undo.push(() => t.delete(op.id))
             changes.push({ n: op.n, k: 'insert', id: op.id, next: op.row, origin })
           } else if (op.op === 'update') {
             const prev = t.get(op.id)
             if (!prev) throw new SuperLineError('NOT_FOUND', `No row: ${op.n}/${op.id}`)
-            t.set(op.id, { row: op.row, createdAt: prev.createdAt, updatedAt: now() }) // createdAt frozen; updatedAt bumps
+            t.set(op.id, { row: op.row, createdAt: prev.createdAt, updatedAt: ts }) // createdAt frozen; updatedAt bumps
             undo.push(() => t.set(op.id, prev))
             changes.push({ n: op.n, k: 'update', id: op.id, prev: prev.row, next: op.row, origin })
           } else {

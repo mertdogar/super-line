@@ -45,6 +45,24 @@ afterEach(() => {
 })
 
 describe('crdtLibsqlCollections (durable CRDT)', () => {
+  // The relay-sync invariant (CrdtCollectionStore.apply), executable. This backend is the reason the rule is
+  // written down at all: it keeps its hot path sync and persists off a debounced onChange precisely so that
+  // durability never makes `apply` async — a constraint that lived only in this file's doc comment until the
+  // seam was specified. Assert it, so the next durable backend cannot rediscover it the hard way.
+  it('applies SYNCHRONOUSLY despite being durable — an async relay backend echo-storms the cluster', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'crdt-libsql-sync-'))
+    const store = await crdtLibsqlCollections({ url: `file:${join(dir, 'sync.db')}`, debounceMs: 5, docOptions })
+    expect(store.clustering).toBe('relay') // the invariant binds relay backends only
+    store.create('scenes', 's1', { title: 'hello' }, docOptions())
+    const p = peer(await store.read('scenes', 's1'))
+    const delta = p.write(() => p.sv.update({ title: 'world' }))
+
+    const returned = store.apply({ n: 'scenes', id: 's1', update: delta, origin: 'alice' }, docOptions(), requireTitle)
+    expect(typeof (returned as { then?: unknown })?.then).not.toBe('function')
+    await returned
+    await store.close?.()
+  })
+
   it('persists across a close/reopen (rehydrates full Yjs state)', async () => {
     dir = mkdtempSync(join(tmpdir(), 'crdt-libsql-'))
     const url = `file:${join(dir, 'a.db')}`

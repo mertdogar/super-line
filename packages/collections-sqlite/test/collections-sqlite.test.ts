@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { sqliteCollections } from '@super-line/collections-sqlite'
 import { eq, gte, isIn, like, ilike, and, neq } from '@super-line/core'
-import type { CollectionStore, RowChange } from '@super-line/core'
+import type { CollectionStore } from '@super-line/core'
+import { runRowConformance } from '../../core/test/collection-store-conformance.js'
 
 const msg = (id: string, channelId: string, n: number, extra: Record<string, unknown> = {}) => ({ id, channelId, text: `m${n}`, likes: n, ...extra })
 const rows = (store: CollectionStore, n: string, query = {}) => store.snapshot(n, query) as ReturnType<typeof msg>[]
@@ -20,39 +21,10 @@ const tmpFile = (): string => {
   return join(d, 'test.db')
 }
 
-describe('sqliteCollections — apply parity', () => {
-  it('inserts/updates/deletes atomically and emits prev/next changes', () => {
-    const store = sqliteCollections({ file: ':memory:' })
-    const seen: RowChange[] = []
-    store.onChange((c) => seen.push(c))
-    store.apply([{ op: 'insert', n: 'messages', id: 'a', row: msg('a', 'g', 1) }], 'o1')
-    store.apply([{ op: 'update', n: 'messages', id: 'a', row: msg('a', 'g', 9) }], 'o1')
-    store.apply([{ op: 'delete', n: 'messages', id: 'a' }], 'o1')
-    expect(seen.map((c) => c.k)).toEqual(['insert', 'update', 'delete'])
-    expect(seen[1]).toMatchObject({ prev: msg('a', 'g', 1), next: msg('a', 'g', 9) })
-    expect(seen[2]).toMatchObject({ k: 'delete', prev: msg('a', 'g', 9) })
-    store.close?.()
-  })
+// The seam's contract — apply/atomicity/query-IR/rowMeta/relay — is asserted once, for every backend.
+runRowConformance('collections-sqlite', { make: () => sqliteCollections({ file: ':memory:' }), clustering: 'relay' })
 
-  it('rejects duplicate insert / missing update and rolls a failed batch back', () => {
-    const store = sqliteCollections({ file: ':memory:' })
-    store.apply([{ op: 'insert', n: 'm', id: 'a', row: msg('a', 'g', 1) }], 'o')
-    expect(() => store.apply([{ op: 'insert', n: 'm', id: 'a', row: msg('a', 'g', 2) }], 'o')).toThrow(/exists/i)
-    expect(() => store.apply([{ op: 'update', n: 'm', id: 'z', row: msg('z', 'g', 1) }], 'o')).toThrow(/no row/i)
-    // atomic: op1 ok, op2 fails → both rolled back
-    expect(() =>
-      store.apply(
-        [
-          { op: 'insert', n: 'm', id: 'b', row: msg('b', 'g', 2) },
-          { op: 'insert', n: 'm', id: 'a', row: msg('a', 'g', 3) },
-        ],
-        'o',
-      ),
-    ).toThrow(/exists/i)
-    expect(store.read('m', 'b')).toBeUndefined()
-    store.close?.()
-  })
-})
+// Below: only what is genuinely sqlite's, not the seam's.
 
 describe('sqliteCollections — snapshot (IR→SQL pushdown + JS refine)', () => {
   const seed = (store: CollectionStore) =>
@@ -65,14 +37,6 @@ describe('sqliteCollections — snapshot (IR→SQL pushdown + JS refine)', () =>
       ],
       'o',
     )
-
-  it('filters + sorts + limits via a compilable filter (eq + orderBy + limit)', () => {
-    const store = sqliteCollections({ file: ':memory:' })
-    seed(store)
-    const out = rows(store, 'messages', { filter: eq('channelId', 'general'), orderBy: [{ field: 'likes', dir: 'desc' }], limit: 2 })
-    expect(out.map((r) => r.id)).toEqual(['d', 'a'])
-    store.close?.()
-  })
 
   it('compiles in / comparison / and predicates', () => {
     const store = sqliteCollections({ file: ':memory:' })
@@ -127,45 +91,24 @@ describe('sqliteCollections — durability', () => {
     expect(rows(s2, 'messages', { filter: eq('channelId', 'general') }).map((r) => r.id)).toEqual(['a'])
     s2.close?.()
   })
-})
-
-describe('sqliteCollections — rowMeta (inspector-only timestamps)', () => {
-  afterEach(() => vi.useRealTimers())
-
-  it('stamps createdAt/updatedAt on insert; update bumps updatedAt but freezes createdAt', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date(1_000))
-    const store = sqliteCollections({ file: ':memory:' })
-    store.apply([{ op: 'insert', n: 'messages', id: 'a', row: msg('a', 'g', 1) }], 'o1')
-    expect((await store.rowMeta!('messages', ['a'])).a).toEqual({ createdAt: 1_000, updatedAt: 1_000 })
-
-    vi.setSystemTime(new Date(6_000))
-    store.apply([{ op: 'update', n: 'messages', id: 'a', row: msg('a', 'g', 9) }], 'o1')
-    expect((await store.rowMeta!('messages', ['a'])).a).toEqual({ createdAt: 1_000, updatedAt: 6_000 })
-  })
-
-  it('keeps snapshot/read row-pure and omits unknown ids from rowMeta', async () => {
-    const store = sqliteCollections({ file: ':memory:' })
-    store.apply([{ op: 'insert', n: 'messages', id: 'a', row: msg('a', 'g', 1) }], 'o1')
-    expect(store.read('messages', 'a')).toEqual(msg('a', 'g', 1)) // no _createdAt/_updatedAt
-    expect(rows(store, 'messages')).toEqual([msg('a', 'g', 1)])
-    expect(await store.rowMeta!('messages', ['a', 'ghost'])).not.toHaveProperty('ghost')
-    expect(await store.rowMeta!('messages', [])).toEqual({})
-  })
 
   it('migrates a pre-timestamp table in place and backfills existing rows with the upgrade time', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(50_000))
-    const file = tmpFile()
-    // Simulate an old durable store: the original (collection, id, data)-only schema, with a row already in it.
-    const legacy = new Database(file)
-    legacy.exec(`CREATE TABLE "collection_rows" (collection TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY (collection, id))`)
-    legacy.prepare(`INSERT INTO "collection_rows" (collection, id, data) VALUES (?, ?, ?)`).run('messages', 'old', JSON.stringify(msg('old', 'g', 1)))
-    legacy.close()
+    try {
+      const file = tmpFile()
+      // Simulate an old durable store: the original (collection, id, data)-only schema, with a row already in it.
+      const legacy = new Database(file)
+      legacy.exec(`CREATE TABLE "collection_rows" (collection TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY (collection, id))`)
+      legacy.prepare(`INSERT INTO "collection_rows" (collection, id, data) VALUES (?, ?, ?)`).run('messages', 'old', JSON.stringify(msg('old', 'g', 1)))
+      legacy.close()
 
-    const store = sqliteCollections({ file }) // triggers ALTER + backfill at upgrade time
-    expect(store.read('messages', 'old')).toEqual(msg('old', 'g', 1)) // row survives untouched
-    expect((await store.rowMeta!('messages', ['old'])).old).toEqual({ createdAt: 50_000, updatedAt: 50_000 })
-    store.close?.()
+      const store = sqliteCollections({ file }) // triggers ALTER + backfill at upgrade time
+      expect(store.read('messages', 'old')).toEqual(msg('old', 'g', 1)) // row survives untouched
+      expect((await store.rowMeta!('messages', ['old'])).old).toEqual({ createdAt: 50_000, updatedAt: 50_000 })
+      store.close?.()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

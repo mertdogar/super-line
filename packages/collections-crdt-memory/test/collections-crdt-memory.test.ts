@@ -42,6 +42,23 @@ const requireTitle = (snapshot: unknown): void => {
 }
 
 describe('crdtMemoryCollections', () => {
+  // The relay-sync invariant (CrdtCollectionStore.apply), executable. The server's relay ingress sets a
+  // re-publish guard, applies, and clears the guard in `finally` — which only holds while apply emits
+  // onChange before returning. An async apply clears the guard first and the delta ping-pongs across the
+  // cluster forever. `origin` cannot substitute: it names the WRITER and survives the relay, so a receiving
+  // node cannot tell a relayed delta from a local write by that same writer.
+  it('applies SYNCHRONOUSLY — a relay backend that returns a promise echo-storms the cluster', async () => {
+    const store = crdtMemoryCollections()
+    expect(store.clustering).toBe('relay') // the invariant binds relay backends only
+    store.create('scenes', 's1', { title: 'hello' }, { mode: 'document' })
+    const p = peer(await store.read('scenes', 's1'))
+    const delta = p.write(() => p.sv.update({ title: 'world' }))
+
+    const returned = store.apply({ n: 'scenes', id: 's1', update: delta, origin: 'alice' }, { mode: 'document' }, requireTitle)
+    expect(typeof (returned as { then?: unknown })?.then).not.toBe('function')
+    await returned
+  })
+
   it('creates a doc and serves catch-up state; a valid delta merges and fans out', async () => {
     const store = crdtMemoryCollections()
     const changes: DocChange[] = []

@@ -2,10 +2,10 @@ import { PGlite } from '@electric-sql/pglite'
 import { live } from '@electric-sql/pglite/live'
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket'
 import type { PGliteWithLive } from '@electric-sql/pglite/live'
-import { eq } from '@super-line/core'
-import type { RowChange } from '@super-line/core'
+import type { CollectionStore, RowChange } from '@super-line/core'
 import { pgliteCollections } from '@super-line/collections-pglite'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { runRowConformance } from '../../core/test/collection-store-conformance.js'
 
 const PORT = 5601
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -48,82 +48,16 @@ async function makeStore() {
   return { store, db, table }
 }
 
-const msg = (id: string, channelId: string, n: number) => ({ id, channelId, text: `m${n}`, likes: n })
-
-describe('pglite collections — central CRUD (postgres.js over pg-wire)', () => {
-  it('is self-clustering', async () => {
-    const { store } = await makeStore()
-    expect(store.clustering).toBe('self')
-  })
-
-  it('round-trips insert/update/delete across collections with strong central reads', async () => {
-    const { store } = await makeStore()
-    await store.apply([{ op: 'insert', n: 'users', id: 'u1', row: { id: 'u1', name: 'Ada' } }], 'o1')
-    await store.apply([{ op: 'insert', n: 'messages', id: 'm1', row: msg('m1', 'general', 1) }], 'o1')
-    expect(await store.read('users', 'u1')).toEqual({ id: 'u1', name: 'Ada' })
-    expect(await store.read('messages', 'm1')).toEqual(msg('m1', 'general', 1))
-    // same id in different collections is distinct (composite key)
-    expect(await store.read('users', 'm1')).toBeUndefined()
-
-    await expect(store.apply([{ op: 'insert', n: 'messages', id: 'm1', row: msg('m1', 'general', 2) }], 'o1')).rejects.toMatchObject({ code: 'CONFLICT' })
-    await expect(store.apply([{ op: 'update', n: 'messages', id: 'zz', row: msg('zz', 'general', 1) }], 'o1')).rejects.toMatchObject({ code: 'NOT_FOUND' })
-
-    await store.apply([{ op: 'update', n: 'messages', id: 'm1', row: msg('m1', 'general', 9) }], 'o1')
-    expect(await store.read('messages', 'm1')).toEqual(msg('m1', 'general', 9))
-
-    await store.apply([{ op: 'delete', n: 'messages', id: 'm1' }], 'o1')
-    expect(await store.read('messages', 'm1')).toBeUndefined()
-  })
-
-  it('applies a batch atomically (a failing op rolls the whole transaction back)', async () => {
-    const { store } = await makeStore()
-    await store.apply([{ op: 'insert', n: 'messages', id: 'a', row: msg('a', 'g', 1) }], 'o')
-    await expect(
-      store.apply(
-        [
-          { op: 'insert', n: 'messages', id: 'b', row: msg('b', 'g', 2) },
-          { op: 'insert', n: 'messages', id: 'a', row: msg('a', 'g', 3) }, // duplicate → whole batch rolls back
-        ],
-        'o',
-      ),
-    ).rejects.toMatchObject({ code: 'CONFLICT' })
-    expect(await store.read('messages', 'b')).toBeUndefined()
-  })
-
-  it('snapshots with the query IR (filter + sort + limit), scoped to the collection', async () => {
-    const { store } = await makeStore()
-    await store.apply(
-      [
-        { op: 'insert', n: 'messages', id: 'a', row: msg('a', 'general', 3) },
-        { op: 'insert', n: 'messages', id: 'b', row: msg('b', 'random', 1) },
-        { op: 'insert', n: 'messages', id: 'c', row: msg('c', 'general', 5) },
-        { op: 'insert', n: 'users', id: 'u1', row: { id: 'u1', name: 'Ada' } },
-      ],
-      'o',
-    )
-    const out = (await store.snapshot('messages', { filter: eq('channelId', 'general'), orderBy: [{ field: 'likes', dir: 'desc' }], limit: 1 })) as ReturnType<typeof msg>[]
-    expect(out.map((r) => r.id)).toEqual(['c'])
-    expect((await store.snapshot('users', {})).length).toBe(1) // scoped: only the users collection
-  })
-
-  it('tracks created/updated via the central clock (inspector rowMeta), keeping rows pure', async () => {
-    const { store } = await makeStore()
-    await store.apply([{ op: 'insert', n: 'messages', id: 'm1', row: msg('m1', 'general', 1) }], 'o1')
-    const afterInsert = (await store.rowMeta!('messages', ['m1'])).m1!
-    expect(afterInsert.createdAt).toBeGreaterThan(0)
-    expect(afterInsert.createdAt).toBe(afterInsert.updatedAt) // insert: created === updated
-
-    await sleep(5)
-    await store.apply([{ op: 'update', n: 'messages', id: 'm1', row: msg('m1', 'general', 9) }], 'o1')
-    const afterUpdate = (await store.rowMeta!('messages', ['m1'])).m1!
-    expect(afterUpdate.createdAt).toBe(afterInsert.createdAt) // frozen
-    expect(afterUpdate.updatedAt).toBeGreaterThan(afterInsert.updatedAt) // bumped
-
-    expect(await store.read('messages', 'm1')).toEqual(msg('m1', 'general', 9)) // row-pure (no _createdAt)
-    expect(await store.rowMeta!('messages', ['ghost'])).toEqual({})
-  })
+// The seam's contract, asserted once for every backend. `self` gates off the relay clauses: this backend's
+// `apply` deliberately does NOT fire onChange (its replication feed does, on every node — see below) and
+// returns nothing, so those clauses would be asserting a contract it is right not to honour.
+runRowConformance('collections-pglite', {
+  make: async (): Promise<CollectionStore> => (await makeStore()).store,
+  clustering: 'self',
 })
 
+// Below: only what is genuinely pglite's — the half of `apply`'s contract that the suite cannot cover,
+// because for a `self` backend the change surfaces through the replica feed rather than from `apply`.
 describe('pglite collections — local replica feed (live.changes → onChange)', () => {
   it('maps a streamed insert/update/delete to onChange, parsing collection+id on delete', async () => {
     const { store, db, table } = await makeStore()

@@ -8,7 +8,10 @@ import { SuperLineError, applyQuery } from '@super-line/core'
 import type { CollectionStore, ResolvedRowOp, RowChange, RowTimestamps } from '@super-line/core'
 
 // Central-Postgres wall-clock in epoch ms. Authoritative + node-consistent (self-tier writes hit central once).
-const NOW_MS = '(extract(epoch from clock_timestamp())*1000)::bigint'
+// `transaction_timestamp()`, not `clock_timestamp()`: a batch is atomic, so every row it touches must carry the
+// SAME stamp (see CollectionStore.apply). clock_timestamp() is volatile *within* a transaction and would hand
+// two rows of one batch different values whenever the statements straddle a millisecond.
+const NOW_MS = '(extract(epoch from transaction_timestamp())*1000)::bigint'
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/
 // The synthetic single-column key = `collection` + SEP + `id`. `live.changes` keys on ONE column, and U+0001
@@ -111,7 +114,7 @@ export async function pgliteCollections(opts: PgliteCollectionsOptions): Promise
               VALUES (${pk}, ${op.n}, ${op.id}, ${asJson(op.row)}, ${origin}) ON CONFLICT (pk) DO NOTHING`
             if (res.count === 0) throw new SuperLineError('CONFLICT', `Row already exists: ${op.n}/${op.id}`)
           } else if (op.op === 'update') {
-            const res = await tx`UPDATE ${tx(table)} SET data = ${asJson(op.row)}, origin = ${origin}, updated_at = (extract(epoch from clock_timestamp())*1000)::bigint WHERE pk = ${pk}`
+            const res = await tx`UPDATE ${tx(table)} SET data = ${asJson(op.row)}, origin = ${origin}, updated_at = ${tx.unsafe(NOW_MS)} WHERE pk = ${pk}`
             if (res.count === 0) throw new SuperLineError('NOT_FOUND', `No row: ${op.n}/${op.id}`)
           } else {
             await tx`DELETE FROM ${tx(table)} WHERE pk = ${pk}` // idempotent

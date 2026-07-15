@@ -164,7 +164,7 @@ describe('Collection runtime · row change routing', () => {
     const listeners = new Set<(c: RowChange) => void>()
     const feed = {
       clustering: 'self' as const,
-      apply: () => [],
+      apply: () => {}, // `self`: apply returns nothing and fires no onChange — the feed does (ADR-0009)
       snapshot: () => [],
       read: () => undefined,
       onChange: (cb: (c: RowChange) => void) => {

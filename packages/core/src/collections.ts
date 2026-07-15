@@ -52,37 +52,8 @@ export function withRowMeta(row: unknown, meta: RowTimestamps | undefined): unkn
   return { ...(row as Record<string, unknown>), [ROW_CREATED_AT]: meta.createdAt, [ROW_UPDATED_AT]: meta.updatedAt }
 }
 
-export interface CollectionStore {
-  /**
-   * Cross-node sync mode, inherited from the store family: `relay` (core relays batches over the adapter;
-   * each node a full replica) or `self` (the backend owns cross-node propagation; core fans locally only).
-   */
-  readonly clustering: 'relay' | 'self'
-  /**
-   * Apply a batch of resolved row ops **atomically** — all-or-nothing on the handling node. Throws to abort
-   * the whole batch (nothing persisted, nothing emitted): `CONFLICT` if an `insert` id exists, `NOT_FOUND`
-   * if an `update` targets an absent id. `delete` of an absent id is a silent no-op. This is the ingest
-   * point for BOTH client batches and relayed remote batches. `origin` echo-breaks the writer.
-   *
-   * Every row a batch touches carries the **same** `createdAt`/`updatedAt`: the batch is atomic, so it
-   * happened at one instant. Read the clock once for the whole batch, not once per op.
-   *
-   * **{@link CollectionStore.clustering} changes this method's contract**, so it is specified per mode:
-   *
-   * - `relay` — apply **fires {@link CollectionStore.onChange} once per resulting change before returning,
-   *   and returns those changes**. It MUST also be **synchronous**: the relay ingress path fires-and-forgets
-   *   (`void apply(...)`) so it can absorb a cross-node race in a `try`/`catch`, and its CRDT sibling guards
-   *   re-publish with a flag cleared in `finally`. An async apply escapes that catch and clears that guard
-   *   before the change is ever emitted — turning one relayed write into a cluster-wide echo storm.
-   *   (`collections-crdt-libsql` already engineers around this — sync hot path, debounced `onChange`
-   *   persistence — which is why the rule is stated here rather than in one backend's private comment.)
-   * - `self` — apply persists to the central backend and returns; it does **not** fire `onChange` and its
-   *   return value is empty. The backend's own replication feed surfaces the change on **every** node,
-   *   including this one, so firing here would double-deliver. It may be async; nothing relays it.
-   *
-   * Both modes are pinned by the shared conformance suite (`core/test/collection-store-conformance.ts`).
-   */
-  apply(ops: ResolvedRowOp[], origin: string): Awaitable<RowChange[]>
+/** The members every backend provides, whatever its {@link CollectionStore} clustering mode. */
+interface CollectionStoreBase {
   /** Materialize a collection's snapshot for the initial subscribe: filter → sort → offset/limit (core injects the policy filter). */
   snapshot(n: string, query: CollectionQuery): Awaitable<unknown[]>
   /** Read one row by primary key — for write-policy `prev` and advisory FK checks. Undefined if absent. */
@@ -93,8 +64,71 @@ export interface CollectionStore {
    * Control Center. Absent ⇒ the backend doesn't track row timestamps; the inspector shows no created/updated.
    */
   rowMeta?(n: string, ids: string[]): Awaitable<Record<string, RowTimestamps>>
-  /** Subscribe to every applied row change across all collections — core's single fan-out source. Returns an unsubscribe fn. */
+  /**
+   * Subscribe to every applied row change across all collections — core's single fan-out source. Returns an
+   * unsubscribe fn. **Who fires it depends on the mode**: a {@link RelayCollectionStore} fires it from
+   * `apply`; a {@link SelfCollectionStore} fires it from its replication feed instead. That difference is
+   * the one thing this seam cannot state in its types (the signature is identical either way), so it is
+   * stated here and pinned by the conformance suite.
+   */
   onChange(cb: (change: RowChange) => void): () => void
   /** Release any resources held by the backend. */
   close?(): Awaitable<void>
 }
+
+/**
+ * A node-local replica. Core relays each batch across nodes over the Adapter and re-ingests remote batches
+ * through {@link RelayCollectionStore.apply}, so every node converges to the same rows.
+ */
+export interface RelayCollectionStore extends CollectionStoreBase {
+  readonly clustering: 'relay'
+  /**
+   * See {@link CollectionStore} for the shared atomicity / error / timestamp contract. In `relay` mode apply
+   * also **fires `onChange` once per resulting change before returning, and returns those changes**.
+   *
+   * **The non-void return type is load-bearing — do not "simplify" it to `void`.** It is the only thing
+   * making an async implementation a compile error, and that is the invariant which keeps a relayed write
+   * from echo-storming the cluster: the relay ingress fires-and-forgets (`void apply(...)`) so it can absorb
+   * a cross-node race in a `try`/`catch`, and the CRDT sibling clears a re-publish guard in `finally`. An
+   * async apply escapes that catch and clears that guard before the change is ever emitted. TypeScript's
+   * void-return rule accepts a function returning *anything* where `void` is declared, so `apply(): void`
+   * would silently permit `async apply()` again. `RowChange[]` does not.
+   *
+   * (`collections-crdt-libsql` had to discover this constraint on its own — sync hot path, debounced
+   * `onChange` persistence — back when it lived only in prose. Now the compiler holds it.)
+   */
+  apply(ops: ResolvedRowOp[], origin: string): RowChange[]
+}
+
+/**
+ * A backend that owns its own cross-node propagation (a central Postgres + a per-node replication feed).
+ * Core never relays for it; it fans out only to this node's local subscribers.
+ */
+export interface SelfCollectionStore extends CollectionStoreBase {
+  readonly clustering: 'self'
+  /**
+   * See {@link CollectionStore} for the shared atomicity / error / timestamp contract. In `self` mode apply
+   * persists to the central backend and returns **nothing**, and does **not** fire `onChange`: the backend's
+   * replication feed surfaces the change on *every* node, including this one, so firing here would
+   * double-deliver. It may be async — nothing relays it, so the synchrony `relay` demands does not apply.
+   */
+  apply(ops: ResolvedRowOp[], origin: string): Awaitable<void>
+}
+
+/**
+ * The persistence seam for typed rows, **discriminated on `clustering`** (ADR-0009): the mode genuinely
+ * changes `apply`'s contract — its synchrony, its return value, and whether it fires `onChange` — rather
+ * than only telling core how to route around it.
+ *
+ * Shared by both modes, `apply` is **atomic**: all-or-nothing on the handling node. It throws to abort the
+ * whole batch (nothing persisted, nothing emitted) — `CONFLICT` if an `insert` id already exists,
+ * `NOT_FOUND` if an `update` targets an absent id — while a `delete` of an absent id is a silent no-op (the
+ * relay ingress leans on that to absorb cross-node races). It is the ingest point for BOTH client batches
+ * and relayed remote batches, and `origin` echo-breaks the writer. Every row a batch touches carries the
+ * **same** `createdAt`/`updatedAt`: the batch is atomic, so it happened at one instant — read the clock once
+ * per batch, not once per op.
+ *
+ * Consumers that only read (`read` / `snapshot` / `onChange`) can use this union directly and never narrow.
+ * Every clause above, and each mode's differences, are pinned by `core/test/collection-store-conformance.ts`.
+ */
+export type CollectionStore = RelayCollectionStore | SelfCollectionStore

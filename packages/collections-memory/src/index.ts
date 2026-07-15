@@ -1,5 +1,5 @@
 import { SuperLineError, applyQuery } from '@super-line/core'
-import type { CollectionStore, ResolvedRowOp, RowChange, RowTimestamps } from '@super-line/core'
+import type { RelayCollectionStore, ResolvedRowOp, RowChange, RowTimestamps } from '@super-line/core'
 
 /** A stored row plus its creation / last-update wall-clock (epoch ms) — the timestamps are inspector-only. */
 interface Entry {
@@ -14,7 +14,7 @@ interface Entry {
  * it does no networking; super-line core relays batches across nodes and re-ingests remote batches through
  * {@link CollectionStore.apply}, so every node is a converged LWW replica.
  */
-export function memoryCollections(): CollectionStore {
+export function memoryCollections(): RelayCollectionStore {
   const data = new Map<string, Map<string, Entry>>() // collection name → (row id → entry)
   const listeners = new Set<(change: RowChange) => void>()
   const now = (): number => Date.now()

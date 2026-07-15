@@ -5,11 +5,11 @@ import { electricSync } from '@electric-sql/pglite-sync'
 import type { PGliteWithSync } from '@electric-sql/pglite-sync'
 import postgres from 'postgres'
 import { SuperLineError, applyQuery } from '@super-line/core'
-import type { CollectionStore, ResolvedRowOp, RowChange, RowTimestamps } from '@super-line/core'
+import type { SelfCollectionStore, ResolvedRowOp, RowChange, RowTimestamps } from '@super-line/core'
 
 // Central-Postgres wall-clock in epoch ms. Authoritative + node-consistent (self-tier writes hit central once).
 // `transaction_timestamp()`, not `clock_timestamp()`: a batch is atomic, so every row it touches must carry the
-// SAME stamp (see CollectionStore.apply). clock_timestamp() is volatile *within* a transaction and would hand
+// SAME stamp (see SelfCollectionStore.apply). clock_timestamp() is volatile *within* a transaction and would hand
 // two rows of one batch different values whenever the statements straddle a millisecond.
 const NOW_MS = '(extract(epoch from transaction_timestamp())*1000)::bigint'
 
@@ -41,14 +41,14 @@ export interface PgliteCollectionsOptions {
 }
 
 /**
- * The self-clustering CollectionStore (ADR-0006, `clustering: 'self'`) — central Postgres + a per-node
+ * The self-clustering SelfCollectionStore (ADR-0006, `clustering: 'self'`) — central Postgres + a per-node
  * Electric-synced replica. Writes + strong reads hit a central Postgres; each node mirrors the row
  * table into an in-memory PGlite replica via **Electric** (one-way) and turns its `live.changes` feed into
- * {@link CollectionStore.onChange}, which core fans to LOCAL subscribers only. Postgres+Electric is the only
+ * {@link SelfCollectionStore.onChange}, which core fans to LOCAL subscribers only. Postgres+Electric is the only
  * fan-out infra — no super-line adapter. A write round-trips central PG → Electric → every node's feed; the
  * `origin` column carries attribution through the round-trip. All collections share one table, keyed by the pk.
  */
-export async function pgliteCollections(opts: PgliteCollectionsOptions): Promise<CollectionStore> {
+export async function pgliteCollections(opts: PgliteCollectionsOptions): Promise<SelfCollectionStore> {
   const table = opts.table ?? 'collection_rows'
   if (!IDENT.test(table)) throw new Error(`Invalid table name: ${table}`)
   const ddl = `CREATE TABLE IF NOT EXISTS "${table}" (pk text PRIMARY KEY, collection text NOT NULL, id text NOT NULL, data jsonb NOT NULL, origin text, created_at bigint NOT NULL DEFAULT ${NOW_MS}, updated_at bigint NOT NULL DEFAULT ${NOW_MS})`
@@ -103,9 +103,10 @@ export async function pgliteCollections(opts: PgliteCollectionsOptions): Promise
 
   return {
     clustering: 'self',
-    async apply(ops: ResolvedRowOp[], origin: string): Promise<RowChange[]> {
+    async apply(ops: ResolvedRowOp[], origin: string): Promise<void> {
       // Atomic on central Postgres. A throw rolls the whole transaction back. Changes surface via the Electric
-      // feed (onChange) on every node — including this one — so the return value is intentionally empty.
+      // feed (onChange) on every node — including this one — so apply returns nothing and fires no onChange;
+      // doing either here would double-deliver. That is the `self` half of the contract (ADR-0009).
       await sql.begin(async (tx) => {
         for (const op of ops) {
           const pk = encodePk(op.n, op.id)
@@ -121,7 +122,6 @@ export async function pgliteCollections(opts: PgliteCollectionsOptions): Promise
           }
         }
       })
-      return []
     },
     async snapshot(n, query) {
       // Strong read from central. jsonb::text is parsed here (postgres.js parses jsonb inconsistently across

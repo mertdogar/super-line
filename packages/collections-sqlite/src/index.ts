@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import { SuperLineError, applyQuery } from '@super-line/core'
-import type { CollectionStore, ResolvedRowOp, RowChange, Expr, RowTimestamps } from '@super-line/core'
+import type { RelayCollectionStore, ResolvedRowOp, RowChange, Expr, RowTimestamps } from '@super-line/core'
 
 /** Options for {@link sqliteCollections}. */
 export interface SqliteCollectionsOptions {
@@ -66,13 +66,13 @@ function compileWhere(expr: Expr | undefined): { sql: string; params: unknown[] 
 }
 
 /**
- * The durable SQLite CollectionStore — {@link "@super-line/collections-memory"}'s in-memory backend, but
+ * The durable SQLite RelayCollectionStore — {@link "@super-line/collections-memory"}'s in-memory backend, but
  * rows survive a restart. Every collection's rows live in one table as JSON blobs keyed `(collection, id)`;
  * a batch commits in a single better-sqlite3 transaction (all-or-nothing). Snapshots push the compilable part
  * of the filter to SQL and re-apply the exact query in JS. `clustering: 'relay'` — core relays batches across
- * nodes and re-ingests them through {@link CollectionStore.apply}, so every node is a converged LWW replica.
+ * nodes and re-ingests them through {@link RelayCollectionStore.apply}, so every node is a converged LWW replica.
  */
-export function sqliteCollections(opts: SqliteCollectionsOptions): CollectionStore {
+export function sqliteCollections(opts: SqliteCollectionsOptions): RelayCollectionStore {
   const table = opts.table ?? 'collection_rows'
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table)) throw new Error(`Invalid table name: ${table}`)
 

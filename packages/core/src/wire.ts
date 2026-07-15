@@ -130,7 +130,7 @@ export interface PubFrame {
   t: 'pub'
   c: string // channel
   d: unknown
-  i?: string // origin node id; stamped for server-side bus dedup, ignored by clients
+  nd?: string // origin NODE id; stamped by the server's Cluster for bus dedup, ignored by clients
 }
 // a server→client request the client must answer (with SResFrame/SErrFrame)
 export interface SReqFrame {

@@ -67,10 +67,13 @@ import {
 } from '@super-line/core'
 import { Conn, resolvePrincipal } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
+import { createCluster } from './cluster.js'
 import type { CollectionPolicy, ServerCollectionHandle, WriteOp, CrdtCollectionPolicy, ServerCrdtCollectionHandle } from './collections.js'
 
 export { Conn, resolvePrincipal } from './conn.js'
 export { MemoryBus, createInMemoryAdapter } from './memory-adapter.js'
+export { createCluster } from './cluster.js'
+export type { Cluster, ClusterMessage } from './cluster.js'
 export type { CollectionPolicy, ServerCollectionHandle, WriteOp, CrdtCollectionPolicy, ServerCrdtCollectionHandle } from './collections.js'
 
 // Web Crypto UUID — available in every browser and Node 19+. Keeps the server
@@ -681,6 +684,9 @@ export function createSuperLineServer<
   // plugin-private channels (x:<plugin>:<name>), off-contract so they don't ride the validated bus path
   const pluginChannels = new Map<string, Set<(data: unknown, meta: BusMeta) => void>>()
   const instanceId = randomUUID() // identifies this node; lets the bus drop its own looped-back echo
+  // owns node identity on the wire: stamps `nd` outbound, reports `own` inbound. Detection only — each caller
+  // still picks its own delivery policy (see the Cluster docs: deliver-at-source vs deliver-on-receipt).
+  const cluster = createCluster(adapter, serializer, instanceId)
   const envNodeName = typeof process !== 'undefined' ? process.env.SUPER_LINE_NODE_NAME : undefined
   const nodeName = opts.nodeName ?? envNodeName ?? instanceId.slice(0, 8)
   const replyChannel = REPLY + instanceId
@@ -1266,10 +1272,13 @@ export function createSuperLineServer<
       if (relaying) return
       if (taps.length)
         emitTap({ type: 'crdt.change', n: change.n, id: change.id, origin: change.origin, deltaBytes: crdtDeltaBytes(change.update) })
-      void adapter.publish(
-        channel,
-        serializer.encode({ t: 'cdchg', n: change.n, id: change.id, u: change.update, o: change.origin, nd: instanceId } satisfies CDChangeFrame),
-      )
+      cluster.broadcast(channel, {
+        t: 'cdchg',
+        n: change.n,
+        id: change.id,
+        u: change.update,
+        o: change.origin,
+      } satisfies Omit<CDChangeFrame, 'nd'>)
     })
     if (isSelf)
       crdtStore.onDelete?.((n, id) => {
@@ -1285,16 +1294,15 @@ export function createSuperLineServer<
   // a relay backend that didn't originate it — apply the delta locally so this node converges. Remote deltas
   // were already validated at their originating node (Q3), so the local apply trusts them (no-op validate).
   function handleCrdtRelay(channel: string, payload: string | Uint8Array): void {
+    // deliver-on-receipt: CRDT does not fan out on its own onChange, so the loopback IS local delivery.
+    // Forward the raw bytes to local subscribers BEFORE consulting `own` — one buffer, N conns, no re-encode.
     const set = members.get(channel)
     if (set) for (const conn of set) conn.sendRaw(payload)
-    let frame: CDChangeFrame | CDDeleteFrame
-    try {
-      frame = serializer.decode(payload) as CDChangeFrame | CDDeleteFrame
-    } catch {
-      return
-    }
-    if (frame.nd === instanceId) return // our own publish looped back; already applied locally
+    const msg = cluster.receive(payload)
+    if (!msg) return
+    if (msg.own) return // our own publish looped back; already applied locally (but was forwarded above)
     if (!crdtStore || crdtStore.clustering !== 'relay') return
+    const frame = msg.data as CDChangeFrame | CDDeleteFrame
     const def = crdtDefOf(frame.n)
     if (!def) return
     if (frame.t === 'cddel') {
@@ -1419,8 +1427,7 @@ export function createSuperLineServer<
   async function commitCollectionBatch(ops: ResolvedRowOp[], origin: string, relay: boolean): Promise<void> {
     if (ops.length === 0 || !collectionStore) return
     await collectionStore.apply(ops, origin)
-    if (relay && collIsRelay)
-      void adapter.publish(COLL_CHANNEL, serializer.encode({ ops, origin, nd: instanceId } satisfies CollRelay))
+    if (relay && collIsRelay) cluster.broadcast(COLL_CHANNEL, { ops, origin } satisfies Omit<CollRelay, 'nd'>)
   }
 
   async function handleCollectionBatch(conn: Conn, frame: CBatchFrame): Promise<void> {
@@ -1465,15 +1472,13 @@ export function createSuperLineServer<
   }
 
   function handleCollectionRelay(payload: string | Uint8Array): void {
-    let env: CollRelay
-    try {
-      env = serializer.decode(payload) as CollRelay
-    } catch {
-      return
-    }
-    if (env.nd === instanceId) return // our own publish looped back; already applied + routed locally
+    const msg = cluster.receive(payload)
+    if (!msg) return
+    if (msg.own) return // deliver-at-source: our own publish looped back; already applied + routed locally
     if (!collectionStore || !collIsRelay) return
+    const env = msg.data as CollRelay
     try {
+      // relay backends apply synchronously (see CollectionStore.apply) — an async one would escape this catch
       void collectionStore.apply(env.ops, env.origin) // → onChange → routeRowChange (this node's local conns)
     } catch {
       // insert-conflict / not-found from a cross-node race — drop; it converges on the next write.
@@ -1512,7 +1517,7 @@ export function createSuperLineServer<
     // local echo: fire same-node bus subscribers in-process (no adapter round-trip), trusted (not re-validated)
     const busSet = busListeners.get(channel)
     if (busSet) for (const cb of busSet) callBus(cb, data, instanceId, name)
-    void adapter.publish(channel, serializer.encode({ t: 'pub', c: name, d: data, i: instanceId } satisfies PubFrame))
+    cluster.broadcast(channel, { t: 'pub', c: name, d: data } satisfies Omit<PubFrame, 'nd'>)
   }
 
   function callBus(
@@ -1530,14 +1535,11 @@ export function createSuperLineServer<
 
   // a bus frame from another node: validate the payload (inbound), then fan out to local subscribers
   function deliverBus(payload: string | Uint8Array, set: Set<(data: unknown, meta: BusMeta) => void>): void {
-    let frame: PubFrame
-    try {
-      frame = serializer.decode(payload) as PubFrame
-    } catch {
-      return
-    }
-    if (frame.i === instanceId) return // own publish looped back; local listeners already fired directly
-    const from = frame.i ?? ''
+    const msg = cluster.receive(payload)
+    if (!msg) return
+    if (msg.own) return // deliver-at-source: local listeners already fired directly in publishTo
+    const frame = msg.data as PubFrame
+    const from = msg.from
     const name = frame.c
     const def = c.shared?.serverToClient?.[name]
     const schema = def && typeof def === 'object' && 'payload' in def ? (def.payload as Schema) : undefined
@@ -1555,18 +1557,14 @@ export function createSuperLineServer<
     })()
   }
 
-  // a frame on a plugin channel (x:<plugin>:<name>): decode the {i,d} envelope, drop our own echo, deliver.
+  // a frame on a plugin channel (x:<plugin>:<name>): decode the {d} envelope, drop our own echo, deliver.
   function handlePluginChannel(channel: string, payload: string | Uint8Array): void {
     const set = pluginChannels.get(channel)
     if (!set) return
-    let frame: { i: string; d: unknown }
-    try {
-      frame = serializer.decode(payload) as { i: string; d: unknown }
-    } catch {
-      return
-    }
-    if (frame.i === instanceId) return // own publish looped back; local listeners already fired directly
-    for (const cb of set) callBus(cb, frame.d, frame.i, channel)
+    const msg = cluster.receive(payload)
+    if (!msg) return
+    if (msg.own) return // deliver-at-source: local listeners already fired directly in pluginChannel.publish
+    for (const cb of set) callBus(cb, (msg.data as { d: unknown }).d, msg.from, channel)
   }
 
   // a plugin-private, cluster-wide channel: local echo in-process + adapter fan-out, own echo dropped by id.
@@ -1576,7 +1574,7 @@ export function createSuperLineServer<
       publish(data) {
         const set = pluginChannels.get(channel)
         if (set) for (const cb of set) callBus(cb, data, instanceId, channel) // local echo
-        void adapter.publish(channel, serializer.encode({ i: instanceId, d: data }))
+        cluster.broadcast(channel, { d: data })
       },
       subscribe(handler) {
         let set = pluginChannels.get(channel)
@@ -1792,7 +1790,7 @@ export function createSuperLineServer<
             // onDelete on every node (which already emits crdt.delete) — so only the relay branch taps here.
             if (cstore.clustering !== 'self') {
               if (taps.length) emitTap({ type: 'crdt.delete', n: name, id })
-              void adapter.publish(CDOC + name + ':' + id, serializer.encode({ t: 'cddel', n: name, id, nd: instanceId } satisfies CDDeleteFrame))
+              cluster.broadcast(CDOC + name + ':' + id, { t: 'cddel', n: name, id } satisfies Omit<CDDeleteFrame, 'nd'>)
             }
           },
           list(o) {

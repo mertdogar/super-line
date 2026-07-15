@@ -125,7 +125,7 @@ describe('cluster event bus', () => {
     const raw = createInMemoryAdapter(bus)
     void raw.publish(
       't:shared:announce',
-      jsonSerializer.encode({ t: 'pub', c: 'announce', d: { msg: 123 }, i: 'other-node' }),
+      jsonSerializer.encode({ t: 'pub', c: 'announce', d: { msg: 123 }, nd: 'other-node' }),
     )
 
     await waitFor(() => errs.length === 1)

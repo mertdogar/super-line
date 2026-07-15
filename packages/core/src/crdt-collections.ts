@@ -76,6 +76,15 @@ export interface CrdtCollectionStore {
    * backend computes the post-merge plaintext on a scratch copy and calls `validate(snapshot)`; if it throws,
    * nothing is committed and the throw propagates (the server resyncs the writer). On success it commits,
    * fires {@link CrdtCollectionStore.onChange}, and returns. `NOT_FOUND` if the doc is absent.
+   *
+   * **INVARIANT — a `relay` backend MUST apply synchronously.** When a delta arrives from another node the
+   * server sets a re-publish guard, applies, and clears the guard in `finally`; the guard is what stops this
+   * node from re-publishing a delta it merely relayed in. It is sound only while `apply` emits `onChange`
+   * before returning — an async apply clears the guard first and the delta ping-pongs across the cluster
+   * forever. Nor can `origin` substitute: it identifies the *writer* and survives the relay, so the receiving
+   * node cannot tell a relayed delta from a local write by that same writer. A `self` backend is exempt: it
+   * never relays. (`collections-crdt-libsql` keeps its hot path sync and persists off `onChange` for exactly
+   * this reason — the rule lives here now rather than in that one backend's comment.)
    */
   apply(change: DocChange, opts: DocOptions | undefined, validate: (snapshot: unknown) => void): Awaitable<void>
   /** Remove a document (idempotent). */

@@ -64,6 +64,14 @@ export interface CollectionStore {
    * the whole batch (nothing persisted, nothing emitted): `CONFLICT` if an `insert` id exists, `NOT_FOUND`
    * if an `update` targets an absent id. `delete` of an absent id is a silent no-op. This is the ingest
    * point for BOTH client batches and relayed remote batches. `origin` echo-breaks the writer.
+   *
+   * **INVARIANT — a `relay` backend MUST apply synchronously.** The relay ingress path fires-and-forgets
+   * (`void apply(...)`) so it can absorb a cross-node race in a `try`/`catch`, and its CRDT sibling guards
+   * re-publish with a flag cleared in `finally`. An async `apply` escapes that catch, and clears that guard
+   * before the change is ever emitted — turning one relayed write into a cluster-wide echo storm. A `self`
+   * backend carries no such constraint: it never relays. (`collections-crdt-libsql` already engineers around
+   * this — sync hot path, debounced `onChange` persistence — which is why the rule is stated here now instead
+   * of living on in one backend's private comment.)
    */
   apply(ops: ResolvedRowOp[], origin: string): Awaitable<RowChange[]>
   /** Materialize a collection's snapshot for the initial subscribe: filter → sort → offset/limit (core injects the policy filter). */

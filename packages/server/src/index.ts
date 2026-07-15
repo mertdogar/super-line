@@ -1,12 +1,7 @@
 import {
   jsonSerializer,
   validate,
-  validateSync,
   SuperLineError,
-  andFilters,
-  orFilters,
-  matchesFilter,
-  isCrdtCollection,
   type Adapter,
   type Serializer,
   type Schema,
@@ -14,26 +9,12 @@ import {
   type Directional,
   type CtsOf,
   type CollectionDef,
-  type CrdtCollectionDef,
   type CollectionName,
   type CrdtCollectionName,
   type RowOf,
   type DocOf,
   type CollectionStore,
   type CrdtCollectionStore,
-  type CDOpenFrame,
-  type CDWriteFrame,
-  type CDCloseFrame,
-  type CDChangeFrame,
-  type CDDeleteFrame,
-  type ResolvedRowOp,
-  type RowChange,
-  type Expr,
-  type CollectionQuery,
-  type CSubFrame,
-  type CUnsubFrame,
-  type CBatchFrame,
-  type CChangeFrame,
   type InspectorEvent,
   type MessageError,
   type TapEvent,
@@ -68,13 +49,25 @@ import {
 import { Conn, resolvePrincipal } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
 import { createCluster } from './cluster.js'
-import type { CollectionPolicy, ServerCollectionHandle, WriteOp, CrdtCollectionPolicy, ServerCrdtCollectionHandle } from './collections.js'
+import { createCollectionRuntime, CDOC, COLL_CHANNEL } from './collections/index.js'
+import type { CollectionPolicy, ServerCollectionHandle, CrdtCollectionPolicy, ServerCrdtCollectionHandle } from './collections/index.js'
 
 export { Conn, resolvePrincipal } from './conn.js'
 export { MemoryBus, createInMemoryAdapter } from './memory-adapter.js'
 export { createCluster } from './cluster.js'
+export { createCollectionRuntime } from './collections/index.js'
 export type { Cluster, ClusterMessage } from './cluster.js'
-export type { CollectionPolicy, ServerCollectionHandle, WriteOp, CrdtCollectionPolicy, ServerCrdtCollectionHandle } from './collections.js'
+export type {
+  CollectionConn,
+  CollectionHost,
+  CollectionPolicy,
+  CollectionRuntime,
+  CollectionRuntimeConfig,
+  ServerCollectionHandle,
+  WriteOp,
+  CrdtCollectionPolicy,
+  ServerCrdtCollectionHandle,
+} from './collections/index.js'
 
 // Web Crypto UUID — available in every browser and Node 19+. Keeps the server
 // runnable in-browser (e.g. a loopback-transport demo) with no node:crypto import.
@@ -99,8 +92,8 @@ const CONN = 'c:' // personal channel per connection (targeted cross-node send)
 const USER = 'u:' // personal channel per user key (cross-node fan-out)
 const REPLY = 'reply:' // per-node channel carrying server→client request replies back to the origin
 const PLUGIN = 'x:' // reserved prefix for plugin-private channels: `x:<plugin>:<name>`
-const CDOC = 'd:' // per-CRDT-document fan-out channel: `d:<collection>:<id>`
-const SERVER_ORIGIN = 'server' // origin stamped on server co-writes (distinct from any client writer id)
+// `d:` (per-document fan-out) and `cbatch` (relayed row batches) belong to the Collection runtime, which is
+// their only user — see ./collections. They are imported here purely so the adapter demux can route to it.
 
 // Envelope carried on personal (c:/u:) channels — distinct from the raw frame fan-out of rooms/topics.
 type PersonalEnvelope =
@@ -577,10 +570,9 @@ export function createSuperLineServer<
     pluginNames.add(p.name)
   }
 
-  // ---- Collections: the single backend + row policies + filter-based routing registry ----
-  const collectionStore = opts.collections
+  // ---- Collections: contract-declared defs + the host's and plugins' policies ----
   const collectionDefs = (c.collections ?? {}) as Record<string, CollectionDef>
-  const collectionPolicies = { ...opts.policies } as Record<string, CollectionPolicy<unknown, unknown>>
+  const collectionPolicies = { ...opts.policies } as Record<string, unknown>
   // merge plugin-contributed row policies; unknown-collection or collision with host/another plugin throws
   for (const p of plugins) {
     if (!p.policies) continue
@@ -591,26 +583,8 @@ export function createSuperLineServer<
         )
       if (name in collectionPolicies)
         throw new Error(`Plugin '${p.name}' policy for collection '${name}' collides with an existing policy`)
-      collectionPolicies[name] = policy as CollectionPolicy<unknown, unknown>
+      collectionPolicies[name] = policy
     }
-  }
-  const checkReferences = opts.checkReferences ?? false
-  const collIsRelay = collectionStore?.clustering === 'relay'
-  // CRDT document collections (ADR-0007): a separate backend, routed by mode. `collectionPolicies` holds both
-  // families keyed by name; CRDT sites read it as a CrdtCollectionPolicy.
-  const crdtStore = opts.crdtCollections
-  const crdtDefOf = (n: string): CrdtCollectionDef | undefined => {
-    const d = collectionDefs[n]
-    return d && isCrdtCollection(d) ? d : undefined
-  }
-  const COLL_CHANNEL = 'cbatch' // fixed cluster channel carrying relayed collection batches (compared by ===)
-  type ConnCollState = { subs: Map<string, Map<number, CollectionQuery>>; policy: Map<string, Expr | undefined> }
-  const collSubscribers = new Map<string, Set<Conn>>() // collection name → conns with ≥1 live subscription (routing index)
-  const connColl = new Map<Conn, ConnCollState>() // per-conn: subscription filters + cached policy read-filter
-  interface CollRelay {
-    ops: ResolvedRowOp[]
-    origin: string
-    nd: string
   }
 
   // Reserved (plugin-owned) connection classes declared to transports; matching conns are observer-invisible.
@@ -692,7 +666,6 @@ export function createSuperLineServer<
   const replyChannel = REPLY + instanceId
   let impl: Impl = {}
   let closing = false // close() is idempotent
-  let relaying = false // true while applying a relayed CRDT change, so its onChange doesn't re-publish (echo loop)
 
   // server→client request bookkeeping (one counter, two roles a node can play)
   let nextSReq = 1
@@ -733,11 +706,11 @@ export function createSuperLineServer<
       return
     }
     if (channel.startsWith(CDOC)) {
-      handleCrdtRelay(channel, payload)
+      collections.onCrdtRelay(channel, payload)
       return
     }
     if (channel === COLL_CHANNEL) {
-      handleCollectionRelay(payload)
+      collections.onRelay(payload)
       return
     }
     if (channel.startsWith(PLUGIN)) {
@@ -752,8 +725,7 @@ export function createSuperLineServer<
 
   // the server→client request feature subscribes its reply channel up front (one per node)
   void adapter.subscribe(replyChannel)
-  // a relay-mode collection backend needs every node to receive every batch (any node may hold subscribers)
-  if (collectionStore && collIsRelay) void adapter.subscribe(COLL_CHANNEL)
+  // (the Collection runtime subscribes COLL_CHANNEL itself, once it exists — see below)
 
   // personal (c:/u:) channels carry a control envelope, not a raw frame to forward verbatim
   function handlePersonal(channel: string, payload: string | Uint8Array): void {
@@ -1029,7 +1001,7 @@ export function createSuperLineServer<
     raw.onClose((code) => {
       conns.delete(conn)
       for (const channel of conn.channels) leaveChannel(conn, channel)
-      collUnsubAll(conn) // drop this conn's collection subscriptions from the routing registry
+      collections.detach(conn) // drop this conn's collection subscriptions from the routing registry
       void adapter.presence?.del(conn.id)
       const goneUserId = opts.identify?.(conn) // carry the name so the feed can label a purged conn
       emitTap({
@@ -1065,12 +1037,12 @@ export function createSuperLineServer<
     else if (frame.t === 'unsub') {
       const ns = topicNamespace(conn.role, frame.c)
       if (ns) leaveChannel(conn, TOPIC + ns + ':' + frame.c)
-    } else if (frame.t === 'csub') await handleCollectionSub(conn, frame)
-    else if (frame.t === 'cuns') handleCollectionUnsub(conn, frame)
-    else if (frame.t === 'cbat') await handleCollectionBatch(conn, frame)
-    else if (frame.t === 'cdopen') await handleCrdtOpen(conn, frame)
-    else if (frame.t === 'cdwr') await handleCrdtWrite(conn, frame)
-    else if (frame.t === 'cdclose') handleCrdtClose(conn, frame)
+    } else if (frame.t === 'csub') await collections.onSub(conn, frame)
+    else if (frame.t === 'cuns') collections.onUnsub(conn, frame)
+    else if (frame.t === 'cbat') await collections.onBatch(conn, frame)
+    else if (frame.t === 'cdopen') await collections.onCrdtOpen(conn, frame)
+    else if (frame.t === 'cdwr') await collections.onCrdtWrite(conn, frame)
+    else if (frame.t === 'cdclose') collections.onCrdtClose(conn, frame)
     else if (frame.t === 'sres') {
       await handleClientReply(conn, frame.i, { ok: true, d: frame.d })
     } else if (frame.t === 'serr') {
@@ -1181,312 +1153,37 @@ export function createSuperLineServer<
     })
   }
 
-  // ---- CRDT document collections (ADR-0007) -------------------------------------------------------------
-  // The store machinery re-surfaced under the collection API: per-doc fan-out channel (d:<n>:<id>), opaque
-  // base64 deltas, validate-before-commit at ingress, guard-shaped policies (no stored ACL). Creation is
-  // server-authoritative (Q10) — a client opens an existing doc; a missing doc is NOT_FOUND.
-  function crdtMissing(conn: Conn, i: number, n: string): boolean {
-    if (crdtStore && crdtDefOf(n)) return false
-    conn.send({ t: 'err', i, code: 'NOT_FOUND', m: `Unknown CRDT collection: ${n}` })
-    return true
-  }
-
-  async function handleCrdtOpen(conn: Conn, frame: CDOpenFrame): Promise<void> {
-    if (crdtMissing(conn, frame.i, frame.n)) return
-    const store = crdtStore!
-    await dispatchOp(
-      conn,
-      frame.i,
-      { kind: 'subscribe', name: `collection:${frame.n}/${frame.id}`, conn },
-      async () => {
-        const state = await store.read(frame.n, frame.id)
-        if (state === undefined) throw new SuperLineError('NOT_FOUND', `No document: ${frame.n}/${frame.id}`)
-        const principal = conn.principal ?? conn.id
-        const policy = collectionPolicies[frame.n] as CrdtCollectionPolicy<unknown, unknown> | undefined
-        if (!policy?.read) throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}/${frame.id}`) // deny-by-default
-        const replica = store.open(frame.n, frame.id)
-        const snapshot = replica.getSnapshot()
-        replica.close()
-        if (!(await policy.read(principal, frame.id, snapshot, conn.ctx)))
-          throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}/${frame.id}`)
-        await joinChannel(conn, CDOC + frame.n + ':' + frame.id)
-        if (taps.length) emitTap({ type: 'crdt.open', connId: conn.id, n: frame.n, id: frame.id, ok: true, snapshot })
-        conn.send({ t: 'res', i: frame.i, d: state }) // catch-up: full Yjs state
-      },
-      (error) => emitTap({ type: 'crdt.open', connId: conn.id, n: frame.n, id: frame.id, ok: false, error }))
-  }
-
-  async function handleCrdtWrite(conn: Conn, frame: CDWriteFrame): Promise<void> {
-    if (crdtMissing(conn, frame.i, frame.n)) return
-    const store = crdtStore!
-    const def = crdtDefOf(frame.n)!
-    const deltaBytes = typeof frame.u === 'string' ? frame.u.length : 0
-    await dispatchOp(
-      conn,
-      frame.i,
-      { kind: 'request', name: `collection:${frame.n}/${frame.id}`, conn },
-      async () => {
-        const principal = conn.principal ?? conn.id
-        const policy = collectionPolicies[frame.n] as CrdtCollectionPolicy<unknown, unknown> | undefined
-        if (!policy?.write) throw new SuperLineError('FORBIDDEN', `Write denied: ${frame.n}/${frame.id}`) // deny-by-default
-        if (!(await policy.write(principal, frame.id, conn.ctx)))
-          throw new SuperLineError('FORBIDDEN', `Write denied: ${frame.n}/${frame.id}`)
-        // validate-before-commit: the backend merges onto a scratch copy and calls this with the post-merge
-        // plaintext; a throw aborts the commit (nothing fanned) and surfaces as an err → the client resyncs.
-        let snapshot: unknown
-        await store.apply({ n: frame.n, id: frame.id, update: frame.u as string, origin: frame.o }, def.crdt, (snap) => {
-          snapshot = snap
-          validateSync(def.schema, snap)
-        })
-        if (taps.length)
-          emitTap({ type: 'crdt.write', connId: conn.id, n: frame.n, id: frame.id, origin: frame.o, deltaBytes, ok: true, snapshot })
-        conn.send({ t: 'res', i: frame.i, d: null })
-      },
-      (error) => emitTap({ type: 'crdt.write', connId: conn.id, n: frame.n, id: frame.id, origin: frame.o, deltaBytes, ok: false, error }))
-  }
-
-  function handleCrdtClose(conn: Conn, frame: CDCloseFrame): void {
-    if (!crdtDefOf(frame.n)) return
-    leaveChannel(conn, CDOC + frame.n + ':' + frame.id)
-    if (taps.length) emitTap({ type: 'crdt.close', connId: conn.id, n: frame.n, id: frame.id })
-  }
-
-  // The delta byte size shown on a `crdt.change`/`crdt.write` event (the opaque base64 Yjs update never crosses).
-  const crdtDeltaBytes = (u: unknown): number => (typeof u === 'string' ? u.length : u instanceof Uint8Array ? u.byteLength : 0)
-
-  // crdtStore.onChange is the single fan-out source for CRDT docs. Emit `crdt.change` once at the origin node
-  // (self: every node's replica; relay: only where the delta wasn't relayed in), before per-conn delivery.
-  if (crdtStore) {
-    const isSelf = crdtStore.clustering === 'self'
-    crdtStore.onChange((change) => {
-      const channel = CDOC + change.n + ':' + change.id
-      if (isSelf) {
-        if (taps.length)
-          emitTap({ type: 'crdt.change', n: change.n, id: change.id, origin: change.origin, deltaBytes: crdtDeltaBytes(change.update) })
-        const set = members.get(channel)
-        if (!set) return
-        const payload = serializer.encode({ t: 'cdchg', n: change.n, id: change.id, u: change.update, o: change.origin } satisfies CDChangeFrame)
-        for (const conn of set) conn.sendRaw(payload)
-        return
-      }
-      if (relaying) return
-      if (taps.length)
-        emitTap({ type: 'crdt.change', n: change.n, id: change.id, origin: change.origin, deltaBytes: crdtDeltaBytes(change.update) })
-      cluster.broadcast(channel, {
-        t: 'cdchg',
-        n: change.n,
-        id: change.id,
-        u: change.update,
-        o: change.origin,
-      } satisfies Omit<CDChangeFrame, 'nd'>)
-    })
-    if (isSelf)
-      crdtStore.onDelete?.((n, id) => {
-        if (taps.length) emitTap({ type: 'crdt.delete', n, id })
-        const set = members.get(CDOC + n + ':' + id)
-        if (!set) return
-        const payload = serializer.encode({ t: 'cddel', n, id } satisfies CDDeleteFrame)
-        for (const conn of set) conn.sendRaw(payload)
-      })
-  }
-
-  // A CRDT delta/delete arriving on a d: channel from the adapter: forward raw to local subscribers, and — for
-  // a relay backend that didn't originate it — apply the delta locally so this node converges. Remote deltas
-  // were already validated at their originating node (Q3), so the local apply trusts them (no-op validate).
-  function handleCrdtRelay(channel: string, payload: string | Uint8Array): void {
-    // deliver-on-receipt: CRDT does not fan out on its own onChange, so the loopback IS local delivery.
-    // Forward the raw bytes to local subscribers BEFORE consulting `own` — one buffer, N conns, no re-encode.
-    const set = members.get(channel)
-    if (set) for (const conn of set) conn.sendRaw(payload)
-    const msg = cluster.receive(payload)
-    if (!msg) return
-    if (msg.own) return // our own publish looped back; already applied locally (but was forwarded above)
-    if (!crdtStore || crdtStore.clustering !== 'relay') return
-    const frame = msg.data as CDChangeFrame | CDDeleteFrame
-    const def = crdtDefOf(frame.n)
-    if (!def) return
-    if (frame.t === 'cddel') {
-      try {
-        void crdtStore.delete(frame.n, frame.id)
-      } catch {
-        // absent — nothing to delete
-      }
-      return
-    }
-    relaying = true
-    try {
-      void crdtStore.apply({ n: frame.n, id: frame.id, update: frame.u as string, origin: frame.o }, def.crdt, () => {})
-    } catch {
-      // doc not present on this node yet (creates are node-local) — drop; it catches up on next open
-    } finally {
-      relaying = false
-    }
-  }
-
-  // ---- Collections --------------------------------------------------------
-  // Typed rows (ADR-0006). Routing is FILTER-based: each row change is
-  // evaluated against every subscribed connection's effective visibility (policy read-filter ∧ the OR of its
-  // subscription filters), so the server keeps only predicates per connection — never per-row membership. The
-  // CLIENT re-filters per subscription. Writes are atomic batches; under relay the whole batch fans as ONE
-  // adapter message and re-applies on each node (each node routes to its own local subscribers).
-  const collConnState = (conn: Conn): ConnCollState => {
-    let s = connColl.get(conn)
-    if (!s) connColl.set(conn, (s = { subs: new Map(), policy: new Map() }))
-    return s
-  }
-
-  function collUnsubAll(conn: Conn): void {
-    connColl.delete(conn)
-    for (const set of collSubscribers.values()) set.delete(conn)
-  }
-
-  async function handleCollectionSub(conn: Conn, frame: CSubFrame): Promise<void> {
-    if (!collectionStore || !collectionDefs[frame.n]) {
-      conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: `Unknown collection: ${frame.n}` })
-      return
-    }
-    await dispatchOp(conn, frame.i, { kind: 'subscribe', name: `collection:${frame.n}`, conn }, async () => {
-      const principal = conn.principal ?? conn.id
-      const policy = collectionPolicies[frame.n]
-      if (!policy?.read) throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}`) // deny-by-default
-      const policyFilter = await policy.read(principal, conn.ctx)
-      const eff = andFilters(policyFilter, frame.q.filter)
-      const rows = await collectionStore.snapshot(frame.n, { ...frame.q, filter: eff })
-      const state = collConnState(conn)
-      let subs = state.subs.get(frame.n)
-      if (!subs) state.subs.set(frame.n, (subs = new Map()))
-      subs.set(frame.s, frame.q)
-      state.policy.set(frame.n, policyFilter) // principal-derived; refreshed each (re)subscribe (staleness caveat)
-      let set = collSubscribers.get(frame.n)
-      if (!set) collSubscribers.set(frame.n, (set = new Set()))
-      set.add(conn)
-      if (taps.length)
-        emitTap({ type: 'collection.sub', connId: conn.id, role: conn.role, n: frame.n, sid: frame.s, query: frame.q, ok: true, count: rows.length })
-      conn.send({ t: 'res', i: frame.i, d: rows }) // initial snapshot
+  // ---- Collections ---------------------------------------------------------------------------------------
+  // The Collection runtime (ADR-0006 rows + ADR-0007 CRDT documents) lives behind ./collections. The server
+  // hands it frames, relayed payloads, and departing conns; it hands back `srv.collection(n)` and the shapes
+  // the inspector reports. Everything it needs is below, as capabilities rather than raw handles.
+  const collections = createCollectionRuntime(
+    {
+      store: opts.collections,
+      crdtStore: opts.crdtCollections,
+      defs: collectionDefs,
+      policies: collectionPolicies,
+      checkReferences: opts.checkReferences ?? false,
     },
-    (error) => emitTap({ type: 'collection.sub', connId: conn.id, role: conn.role, n: frame.n, sid: frame.s, query: frame.q, ok: false, error }))
-  }
-
-  function handleCollectionUnsub(conn: Conn, frame: CUnsubFrame): void {
-    const state = connColl.get(conn)
-    const subs = state?.subs.get(frame.n)
-    if (!state || !subs) return
-    subs.delete(frame.s)
-    if (taps.length) emitTap({ type: 'collection.unsub', connId: conn.id, n: frame.n, sid: frame.s })
-    if (subs.size === 0) {
-      state.subs.delete(frame.n)
-      state.policy.delete(frame.n)
-      collSubscribers.get(frame.n)?.delete(conn)
-    }
-  }
-
-  // Validate + policy-guard every op against the current state. Throws to abort the whole batch (nothing applied).
-  async function resolveCollectionOps(ops: CBatchFrame['ops'], principal: string, ctx: unknown): Promise<ResolvedRowOp[]> {
-    const store = collectionStore
-    if (!store) throw new SuperLineError('NOT_FOUND', 'No collection backend configured')
-    const out: ResolvedRowOp[] = []
-    for (const op of ops) {
-      const def = collectionDefs[op.n]
-      if (!def) throw new SuperLineError('NOT_FOUND', `Unknown collection: ${op.n}`)
-      if (isCrdtCollection(def)) throw new SuperLineError('NOT_FOUND', `Collection ${op.n} is a CRDT document collection — use collection(n).open(id), not a row batch`)
-      const policy = collectionPolicies[op.n]
-      if (!policy?.write) throw new SuperLineError('FORBIDDEN', `Write denied: ${op.n}`) // deny-by-default
-      const prev = await store.read(op.n, op.id)
-      if (op.op === 'delete') {
-        if (!(await policy.write(principal, 'delete', undefined, prev, ctx)))
-          throw new SuperLineError('FORBIDDEN', `Write denied: ${op.n}/${op.id}`)
-        out.push({ op: 'delete', n: op.n, id: op.id })
-        continue
-      }
-      const row = await validate(def.schema, op.d)
-      const key = (row as Record<string, unknown>)[def.key]
-      if (typeof key !== 'string')
-        throw new SuperLineError('VALIDATION', `Collection ${op.n} row is missing string key '${def.key}'`)
-      if (key !== op.id) throw new SuperLineError('VALIDATION', `Row key '${key}' does not match op id '${op.id}'`)
-      if (checkReferences && def.references) {
-        for (const [field, refCollection] of Object.entries(def.references)) {
-          const ref = (row as Record<string, unknown>)[field]
-          if (ref === undefined || ref === null) continue // an absent/null FK is "no reference"
-          if ((await store.read(refCollection, String(ref))) === undefined)
-            throw new SuperLineError('VALIDATION', `Dangling reference: ${op.n}.${field} → ${refCollection}/${String(ref)} does not exist`)
-        }
-      }
-      const kind: WriteOp = op.op
-      if (!(await policy.write(principal, kind, row, prev, ctx)))
-        throw new SuperLineError('FORBIDDEN', `Write denied: ${op.n}/${op.id}`)
-      out.push({ op: kind, n: op.n, id: op.id, row })
-    }
-    return out
-  }
-
-  // Apply a resolved batch atomically, fan out locally (via onChange → routeRowChange), and — under relay —
-  // publish the whole batch to other nodes. Shared by client batches and server co-writes (`srv.collection`).
-  // ponytail: the guard reads `prev` in resolveCollectionOps then applies here; the backend's synchronous apply
-  // is the real serialization point, so a TOCTOU only affects guards that read prev, and durable backends will
-  // wrap resolve+apply in one transaction later.
-  async function commitCollectionBatch(ops: ResolvedRowOp[], origin: string, relay: boolean): Promise<void> {
-    if (ops.length === 0 || !collectionStore) return
-    await collectionStore.apply(ops, origin)
-    if (relay && collIsRelay) cluster.broadcast(COLL_CHANNEL, { ops, origin } satisfies Omit<CollRelay, 'nd'>)
-  }
-
-  async function handleCollectionBatch(conn: Conn, frame: CBatchFrame): Promise<void> {
-    if (!collectionStore) {
-      conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: 'No collection backend configured' })
-      return
-    }
-    await dispatchOp(
-      conn,
-      frame.i,
-      { kind: 'request', name: 'collection:batch', conn },
-      async () => {
-        const principal = conn.principal ?? conn.id
-        const resolved = await resolveCollectionOps(frame.ops, principal, conn.ctx)
-        await commitCollectionBatch(resolved, principal, true)
-        if (taps.length) emitTap({ type: 'collection.write', connId: conn.id, role: conn.role, ops: frame.ops, ok: true })
-        conn.send({ t: 'res', i: frame.i, d: null })
+    {
+      dispatch: (conn, id, info, terminal, onError) =>
+        dispatchOp(conn as Conn, id, { ...info, conn: info.conn as Conn }, terminal, onError),
+      cluster,
+      channels: {
+        join: (conn, channel) => joinChannel(conn as Conn, channel),
+        leave: (conn, channel) => leaveChannel(conn as Conn, channel),
+        membersOf: (channel) => members.get(channel),
       },
-      (error) => emitTap({ type: 'collection.write', connId: conn.id, role: conn.role, ops: frame.ops, ok: false, error }))
-  }
-
-  // The single fan-out source: route one applied row change to local subscribers whose effective filter admits
-  // it (pre-op OR post-op — so a row that leaves a filter on update is delivered too, and the client removes it).
-  function routeRowChange(change: RowChange): void {
-    if (taps.length)
-      emitTap({ type: 'collection.change', n: change.n, op: change.k, id: change.id, origin: change.origin, row: change.next })
-    const conns = collSubscribers.get(change.n)
-    if (!conns || conns.size === 0) return
-    for (const conn of conns) {
-      const state = connColl.get(conn)
-      const subs = state?.subs.get(change.n)
-      if (!state || !subs || subs.size === 0) continue
-      const eff = andFilters(state.policy.get(change.n), orFilters([...subs.values()].map((q) => q.filter)))
-      // A `self` backend surfaces a delete via its feed WITHOUT the prior row; deliver it to every subscriber and
-      // let the client remove-if-present (it never held policy-hidden rows). Relay deletes always carry `prev`.
-      const prevlessDelete = change.k === 'delete' && change.prev === undefined
-      const inPrev = prevlessDelete || (change.prev !== undefined && matchesFilter(eff, change.prev))
-      const inNext = change.next !== undefined && matchesFilter(eff, change.next)
-      if (!inPrev && !inNext) continue
-      conn.send({ t: 'cchg', n: change.n, k: change.k, id: change.id, d: change.next } satisfies CChangeFrame)
-    }
-  }
-
-  function handleCollectionRelay(payload: string | Uint8Array): void {
-    const msg = cluster.receive(payload)
-    if (!msg) return
-    if (msg.own) return // deliver-at-source: our own publish looped back; already applied + routed locally
-    if (!collectionStore || !collIsRelay) return
-    const env = msg.data as CollRelay
-    try {
-      // relay backends apply synchronously (see CollectionStore.apply) — an async one would escape this catch
-      void collectionStore.apply(env.ops, env.origin) // → onChange → routeRowChange (this node's local conns)
-    } catch {
-      // insert-conflict / not-found from a cross-node race — drop; it converges on the next write.
-      // ponytail: LWW-merge-on-conflict for concurrent same-id inserts is a phase-2 multi-node hardening.
-    }
-  }
-
-  if (collectionStore) collectionStore.onChange(routeRowChange) // one subscription drives all local delivery
+      // lazy on purpose: with nothing tapping, the payload is never built and collections never learn that
+      // observation has a cost. The closure keeps `emitTap` for its own sites; this adapts, it doesn't mirror.
+      tap: (event) => {
+        if (taps.length) emitTap(event())
+      },
+      encode: (frame) => serializer.encode(frame),
+    },
+  )
+  // a relay-mode row backend needs every node to receive every batch (any node may hold subscribers)
+  if (collections.relaysRows) void adapter.subscribe(COLL_CHANNEL)
 
   function room(name: string): Room<C> {
     const channel = ROOM + name
@@ -1762,74 +1459,7 @@ export function createSuperLineServer<
       name: N,
     ): N extends CrdtCollectionName<C> ? ServerCrdtCollectionHandle<DocOf<C, N>> : ServerCollectionHandle<RowOf<C, N>> {
       type Ret = N extends CrdtCollectionName<C> ? ServerCrdtCollectionHandle<DocOf<C, N>> : ServerCollectionHandle<RowOf<C, N>>
-      const def = collectionDefs[name]
-      if (!def) throw new SuperLineError('NOT_FOUND', `Collection not declared: ${name}`)
-      // CRDT document collection: server-authoritative create + reactive co-writer (Q10). Policy-free.
-      if (isCrdtCollection(def)) {
-        if (!crdtStore) throw new SuperLineError('NOT_FOUND', 'No CRDT collection backend configured')
-        const cstore = crdtStore
-        const handle: ServerCrdtCollectionHandle<unknown> = {
-          async create(id, data) {
-            const v = await validate(def.schema, data)
-            await cstore.create(name, id, v, def.crdt)
-          },
-          open(id, o) {
-            return cstore.open(name, id, { ...o, doc: def.crdt })
-          },
-          async read(id) {
-            const state = await cstore.read(name, id)
-            if (state === undefined) return undefined
-            const r = cstore.open(name, id, { doc: def.crdt })
-            const s = r.getSnapshot()
-            r.close()
-            return s
-          },
-          async delete(id) {
-            await cstore.delete(name, id)
-            // relay backends fan the delete over the adapter (emit at this origin); self backends fan it via
-            // onDelete on every node (which already emits crdt.delete) — so only the relay branch taps here.
-            if (cstore.clustering !== 'self') {
-              if (taps.length) emitTap({ type: 'crdt.delete', n: name, id })
-              cluster.broadcast(CDOC + name + ':' + id, { t: 'cddel', n: name, id } satisfies Omit<CDDeleteFrame, 'nd'>)
-            }
-          },
-          list(o) {
-            return Promise.resolve(cstore.list(name, o))
-          },
-        }
-        return handle as unknown as Ret
-      }
-      if (!collectionStore) throw new SuperLineError('NOT_FOUND', 'No collection backend configured')
-      const store = collectionStore
-      // Server co-writes: schema-validated, policy-free (server-authoritative), fan out + relay like a client batch.
-      const resolve = async (row: unknown): Promise<{ id: string; row: unknown }> => {
-        const v = await validate(def.schema, row)
-        const key = (v as Record<string, unknown>)[def.key]
-        if (typeof key !== 'string')
-          throw new SuperLineError('VALIDATION', `Collection ${name} row is missing string key '${def.key}'`)
-        return { id: key, row: v }
-      }
-      const handle: ServerCollectionHandle<unknown> = {
-        async insert(row) {
-          const { id, row: v } = await resolve(row)
-          await commitCollectionBatch([{ op: 'insert', n: name, id, row: v }], SERVER_ORIGIN, true)
-        },
-        async update(row) {
-          const { id, row: v } = await resolve(row)
-          await commitCollectionBatch([{ op: 'update', n: name, id, row: v }], SERVER_ORIGIN, true)
-        },
-        async delete(id) {
-          await commitCollectionBatch([{ op: 'delete', n: name, id }], SERVER_ORIGIN, true)
-        },
-        read(id) {
-          return Promise.resolve(store.read(name, id))
-        },
-        snapshot(query) {
-          return Promise.resolve(store.snapshot(name, query ?? {}))
-        },
-        ...(store.rowMeta ? { rowMeta: (ids: string[]) => Promise.resolve(store.rowMeta!(name, ids)) } : {}),
-      }
-      return handle as unknown as Ret
+      return collections.handle(name) as Ret
     },
     async close() {
       if (closing) return
@@ -1891,14 +1521,7 @@ export function createSuperLineServer<
         }
       },
       collection: (name) => api.collection(name as CollectionName<C>) as ServerCollectionHandle,
-      collectionInfos: () =>
-        // CRDT document collections surface with a synthetic `id` key + no references — the inspector's
-        // queryCollection synthesizes doc-rows for them (they're open-by-id, not row-queryable).
-        Object.entries(collectionDefs).map(([name, def]) =>
-          isCrdtCollection(def)
-            ? { name, key: 'id', references: {} }
-            : { name, key: def.key, references: def.references ?? {} },
-        ),
+      collectionInfos: () => collections.infos(),
       describe: (conn) => buildDescriptor(conn),
       connectionById: (id) => Promise.resolve(presenceOrThrow().get(id)),
       channel: (name) => pluginChannel(pluginName, name),

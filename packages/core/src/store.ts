@@ -9,6 +9,13 @@
  * Return a structural clone of `root` with the value at `path` removed — the surgical-delete primitive.
  * Clones only along the path (not a deep clone): fed to a diff-and-patch `set`, only the removed key is
  * rewritten, so concurrent edits to sibling keys still merge. Never mutates `root`. `path === []` returns `root`.
+ *
+ * **The array branch looks unsound and is not.** `splice` renumbers every later index, so it reads as though a
+ * concurrent edit to a shifted sibling must be clobbered. It isn't: the diff feeding the CRDT is *structural*,
+ * not positional, so a shorter array yields a minimal list delta. That is counter-intuitive enough to have been
+ * gotten wrong by reading this code — hence `collections-crdt-memory/test/remove-at-path.test.ts`, which pins
+ * the merge behaviour under real concurrent writers (the only place the guarantee above is observable, since it
+ * is a property of this function composed with `StoreValue.set`, not of this function alone).
  */
 export const removeAtPath = (root: unknown, path: (string | number)[]): unknown => {
   if (path.length === 0) return root

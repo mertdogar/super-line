@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react'
 import type { Contract } from '@super-line/core'
-import type { ChannelRowOf, ChatClient, ChatLiveStore, MembershipRowOf, MessageRowOf } from './client.js'
+import type { AssembledMessageOf, ChannelRowOf, ChatClient, ChatLiveStore, MembershipRowOf } from './client.js'
 
 export interface ChatBinding<C extends Contract> {
   /** Mount near your root with a {@link ChatClient} instance (rebuild it when the auth client swaps connections). */
@@ -11,8 +11,11 @@ export interface ChatBinding<C extends Contract> {
   useChannels: () => ChannelRowOf<C>[]
   /** Live member list of one channel. */
   useMembers: (channelId: string) => MembershipRowOf<C>[]
-  /** Live chronological message window of one channel. */
-  useMessages: (channelId: string, opts?: { limit?: number }) => MessageRowOf<C>[]
+  /** Live chronological message window of one channel — streamed messages arrive assembled (`parts`/`status`). */
+  useMessages: (
+    channelId: string,
+    opts?: { limit?: number; partsLimit?: number; streaming?: boolean },
+  ) => AssembledMessageOf<C>[]
 }
 
 /**
@@ -50,10 +53,23 @@ export function createChatHooks<C extends Contract>(): ChatBinding<C> {
     return useStoreRows(() => chat.members(channelId), [chat, channelId])
   }
 
-  function useMessages(channelId: string, opts?: { limit?: number }): MessageRowOf<C>[] {
+  function useMessages(
+    channelId: string,
+    opts?: { limit?: number; partsLimit?: number; streaming?: boolean },
+  ): AssembledMessageOf<C>[] {
     const chat = useChat()
     const limit = opts?.limit
-    return useStoreRows(() => chat.messages(channelId, limit !== undefined ? { limit } : undefined), [chat, channelId, limit])
+    const partsLimit = opts?.partsLimit
+    const streaming = opts?.streaming
+    return useStoreRows(
+      () =>
+        chat.messages(channelId, {
+          ...(limit !== undefined ? { limit } : {}),
+          ...(partsLimit !== undefined ? { partsLimit } : {}),
+          ...(streaming !== undefined ? { streaming } : {}),
+        }),
+      [chat, channelId, limit, partsLimit, streaming],
+    )
   }
 
   return { ChatProvider, useChat, useChannels, useMembers, useMessages }

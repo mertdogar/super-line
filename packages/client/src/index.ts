@@ -65,9 +65,24 @@ export type ServerHandlers<C extends Contract, R extends RoleOf<C>> = {
   ) => Awaitable<Output<ServerRequests<C, R>[K]>>
 }
 
+/**
+ * Fixed members of the client instance. A contract request with one of these names is unreachable
+ * as a proxy method at runtime — so it is OMITTED from {@link ClientMethods} too, turning the
+ * shadowing into a compile error at the call site instead of a silently-wrong dispatch.
+ */
+type ReservedClientKeys =
+  | 'on'
+  | 'subscribe'
+  | 'implement'
+  | 'collection'
+  | 'close'
+  | 'onReconnect'
+  | 'connected'
+  | 'role'
+
 /** The request-calling half of {@link SuperLineClient} (one method per request in the role's surface). */
 export type ClientMethods<C extends Contract, R extends RoleOf<C>> = {
-  [K in keyof Requests<C, R>]: (
+  [K in Exclude<keyof Requests<C, R>, ReservedClientKeys>]: (
     input: ClientInput<Requests<C, R>[K]>,
     opts?: CallOptions,
   ) => Promise<Output<Requests<C, R>[K]>>
@@ -100,6 +115,13 @@ export type SuperLineClient<C extends Contract, R extends RoleOf<C>> = ClientMet
   ): N extends CrdtCollectionName<C> ? CrdtCollectionHandle<DocOf<C, N>> : CollectionHandle<RowOf<C, N>>
   /** Close the connection and stop reconnecting. */
   close(): void
+  /**
+   * Register a listener fired on each successful reconnect (after the first connect). Post-hoc
+   * counterpart of the `onReconnect` OPTION — for wrapper libraries over an existing client (e.g.
+   * plugin-chat's `chatClient`) whose server-side state is connection-scoped (rooms) and must be
+   * re-established after a reconnect. Returns an unregister fn.
+   */
+  onReconnect(cb: () => void): () => void
   /** Whether the socket is currently open. */
   readonly connected: boolean
   /** This client's role. */
@@ -354,6 +376,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   const connectHooks = [opts.onConnect, ...clientPlugins.map((p) => p.onConnect)]
   const disconnectHooks = [opts.onDisconnect, ...clientPlugins.map((p) => p.onDisconnect)]
   const reconnectHooks = [opts.onReconnect, ...clientPlugins.map((p) => p.onReconnect)]
+  const reconnectListeners = new Set<() => void>() // post-hoc `client.onReconnect(cb)` registrations
   function routeError(error: unknown, kind: ClientErrorInfo['kind'], where?: { collection?: string; id?: string }): void {
     if (opts.onError) {
       try {
@@ -441,7 +464,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     for (const topic of topicListeners.keys()) sendSub(topic)
     for (const entry of openDocs.values()) sendDocOpen(entry) // re-open CRDT docs → fresh full Yjs state (client re-merges)
     for (const sub of collectionSubs.values()) sendCollectionSub(sub) // re-snapshot collection subscriptions (client re-diffs)
-    if (connectedOnce) fireLifecycle(reconnectHooks, 'reconnect', 0)
+    if (connectedOnce) fireLifecycle([...reconnectHooks, ...reconnectListeners], 'reconnect', 0)
     else {
       connectedOnce = true
       fireLifecycle(connectHooks, 'connect', 0)
@@ -961,6 +984,10 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       closed = true
       if (reconnectTimer) clearTimeout(reconnectTimer)
       rawConn?.close()
+    },
+    onReconnect(cb: () => void): () => void {
+      reconnectListeners.add(cb)
+      return () => void reconnectListeners.delete(cb)
     },
     get connected(): boolean {
       return rawConn?.writable ?? false

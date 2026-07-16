@@ -30,7 +30,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "oxlint packages examples",
-    "docs:packages": "pnpm --filter @super-line/core --filter @super-line/client --filter @super-line/server --filter @super-line/transport-loopback build",
+    "docs:packages": "pnpm --filter @super-line/core --filter @super-line/client --filter @super-line/server --filter @super-line/transport-loopback --filter @super-line/collections-memory --filter @super-line/plugin-chat build",
     "docs:dev": "pnpm --filter @super-line/docs dev",
     "docs:build": "pnpm docs:packages && pnpm --filter @super-line/docs build"
   },

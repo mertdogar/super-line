@@ -1,12 +1,11 @@
 import { execSync } from 'node:child_process'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, inject, it } from 'vitest'
 import { z } from 'zod'
-import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers'
 import { defineContract, type Adapter } from '@super-line/core'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
 import { createHarness, waitFor } from './harness.js'
 
-// Requires Docker (testcontainers spins up rabbitmq:4); skipped cleanly when Docker is absent.
+// Requires Docker (the shared per-run rabbitmq:4 from global-docker.ts); skipped cleanly when Docker is absent.
 // Cluster presence through the full server, over the duplicated gossip directory. Reconcile edge
 // cases are unit-tested in adapter-rabbitmq/test/presence.reconcile.test.ts.
 let dockerAvailable = true
@@ -33,22 +32,7 @@ function auth(h: { query: Record<string, string> }) {
 }
 const identify = (conn: { ctx: unknown }) => (conn.ctx as { userId: string }).userId
 
-let container: StartedTestContainer
-let amqpUrl: string
-
-beforeAll(async () => {
-  container = await new GenericContainer('rabbitmq:4')
-    .withExposedPorts(5672)
-    .withEnvironment({ RABBITMQ_DEFAULT_USER: 'superline', RABBITMQ_DEFAULT_PASS: 'superline' })
-    .withWaitStrategy(Wait.forLogMessage('Server startup complete'))
-    .withStartupTimeout(180_000)
-    .start()
-  amqpUrl = `amqp://superline:superline@${container.getHost()}:${container.getMappedPort(5672)}`
-}, 180_000)
-
-afterAll(async () => {
-  await container?.stop()
-})
+const amqpUrl = inject('amqpUrl')
 
 const h = createHarness()
 afterEach(() => h.dispose())

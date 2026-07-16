@@ -1,12 +1,11 @@
 import { execSync } from 'node:child_process'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, inject, it } from 'vitest'
 import { z } from 'zod'
-import { GenericContainer, type StartedTestContainer } from 'testcontainers'
 import { defineContract } from '@super-line/core'
 import { createRedisAdapter } from '@super-line/adapter-redis'
 import { createHarness, tick } from './harness.js'
 
-// Requires Docker (testcontainers spins up redis:7); skipped cleanly when Docker is absent.
+// Requires Docker (the shared per-run redis:7 from global-docker.ts); skipped cleanly when Docker is absent.
 let dockerAvailable = true
 try {
   execSync('docker info', { stdio: 'ignore' })
@@ -23,17 +22,7 @@ const contract = defineContract({
   roles: { user: {} },
 })
 
-let container: StartedTestContainer
-let redisUrl: string
-
-beforeAll(async () => {
-  container = await new GenericContainer('redis:7').withExposedPorts(6379).start()
-  redisUrl = `redis://${container.getHost()}:${container.getMappedPort(6379)}`
-}, 120_000)
-
-afterAll(async () => {
-  await container?.stop()
-})
+const redisUrl = inject('redisUrl')
 
 const h = createHarness()
 afterEach(() => h.dispose())

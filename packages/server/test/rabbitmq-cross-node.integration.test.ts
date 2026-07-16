@@ -1,12 +1,11 @@
 import { execSync } from 'node:child_process'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, inject, it } from 'vitest'
 import { z } from 'zod'
-import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers'
 import { defineContract } from '@super-line/core'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
 import { createHarness, tick, waitFor } from './harness.js'
 
-// Requires Docker (testcontainers spins up rabbitmq:4); skipped cleanly when Docker is absent.
+// Requires Docker (the shared per-run rabbitmq:4 from global-docker.ts); skipped cleanly when Docker is absent.
 let dockerAvailable = true
 try {
   execSync('docker info', { stdio: 'ignore' })
@@ -30,25 +29,7 @@ const contract = defineContract({
   },
 })
 
-let container: StartedTestContainer
-let amqpUrl: string
-
-beforeAll(async () => {
-  // RabbitMQ boots slower than Redis — wait for the log line, generous startup timeout.
-  // A custom default user is needed: the built-in `guest` is refused over the mapped port
-  // (RabbitMQ restricts `guest` to loopback connections).
-  container = await new GenericContainer('rabbitmq:4')
-    .withExposedPorts(5672)
-    .withEnvironment({ RABBITMQ_DEFAULT_USER: 'superline', RABBITMQ_DEFAULT_PASS: 'superline' })
-    .withWaitStrategy(Wait.forLogMessage('Server startup complete'))
-    .withStartupTimeout(180_000)
-    .start()
-  amqpUrl = `amqp://superline:superline@${container.getHost()}:${container.getMappedPort(5672)}`
-}, 180_000)
-
-afterAll(async () => {
-  await container?.stop()
-})
+const amqpUrl = inject('amqpUrl')
 
 const h = createHarness()
 afterEach(() => h.dispose())

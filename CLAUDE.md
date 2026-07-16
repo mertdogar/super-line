@@ -5,7 +5,9 @@ Strictly-typed realtime data bus for TypeScript — one contract for every patte
 ## Commands (run from repo ROOT)
 
 ```bash
-pnpm test         # vitest run — the REAL suite (~399 tests). `pnpm -r test` runs NOTHING.
+pnpm test         # the REAL suite: fast lane (parallel) + integration lane. `pnpm -r test` runs NOTHING.
+pnpm test:fast    # fast lane only — no Docker, parallel forks; the inner loop
+pnpm test:integration  # heavy lane — Docker brokers (one shared redis+rabbitmq via global-docker.ts), zeromq/libp2p sockets, serial
 pnpm typecheck    # root tsc — the REAL check. `pnpm -r typecheck` only covers 2 of 18 projects.
 pnpm lint         # oxlint (NOT eslint)
 pnpm build        # pnpm -r build (tsup)
@@ -24,7 +26,8 @@ pnpm docs:build
 ## Gotchas
 
 - **Tests and typecheck only work from root**, not via `pnpm -r` (no package has a `test` script; only 2 have `typecheck`). `pnpm -r test` silently passes while running nothing.
-- `packages/server/test/reconnect.integration.test.ts` → "auto-reconnects after an abrupt drop" is timing-flaky under full parallel load; it passes in isolation. Don't chase it as a regression.
+- `packages/server/test/reconnect.integration.test.ts` → "auto-reconnects after an abrupt drop" is timing-flaky under full parallel load; it passes in isolation. Don't chase it as a regression. (It lives in the serial integration lane for exactly this reason.)
+- The lane split is the `heavy` list in `vitest.config.ts` (Docker/socket/timing-sensitive files), NOT the `.integration.test.ts` suffix — most integration-named files are loopback tests and run in the parallel fast lane. To run one heavy file: `pnpm test:integration <name>`.
 - ESM-only packages. Lint/format is oxlint/oxfmt, not ESLint/Prettier.
 
 ## Architecture

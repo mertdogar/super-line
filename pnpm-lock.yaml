@@ -17,6 +17,9 @@ importers:
       oxlint:
         specifier: ^0.15.0
         version: 0.15.15
+      testcontainers:
+        specifier: ^10.28.0
+        version: 10.28.0
       tsup:
         specifier: ^8.3.5
         version: 8.5.1(@swc/core@1.15.41)(jiti@2.7.0)(postcss@8.5.15)(tsx@4.22.4)(typescript@5.9.3)(yaml@2.9.0)

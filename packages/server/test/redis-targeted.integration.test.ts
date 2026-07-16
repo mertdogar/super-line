@@ -1,7 +1,6 @@
 import { execSync } from 'node:child_process'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, inject, it } from 'vitest'
 import { z } from 'zod'
-import { GenericContainer, type StartedTestContainer } from 'testcontainers'
 import { defineContract, SuperLineError } from '@super-line/core'
 import { createRedisAdapter } from '@super-line/adapter-redis'
 import { createHarness, waitFor } from './harness.js'
@@ -29,17 +28,7 @@ function auth(h: { query: Record<string, string> }) {
 }
 const identify = (conn: { ctx: unknown }) => (conn.ctx as { userId: string }).userId
 
-let container: StartedTestContainer
-let redisUrl: string
-
-beforeAll(async () => {
-  container = await new GenericContainer('redis:7').withExposedPorts(6379).start()
-  redisUrl = `redis://${container.getHost()}:${container.getMappedPort(6379)}`
-}, 120_000)
-
-afterAll(async () => {
-  await container?.stop()
-})
+const redisUrl = inject('redisUrl')
 
 const h = createHarness()
 afterEach(() => h.dispose())

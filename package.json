@@ -6,14 +6,27 @@
   "description": "Strictly-typed realtime data bus for TypeScript — requests, events, subscriptions & synced state from one contract.",
   "license": "MIT",
   "author": "Mert",
-  "keywords": ["websocket", "typesafe", "realtime", "rooms", "pubsub", "rpc", "typescript"],
-  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git" },
+  "keywords": [
+    "websocket",
+    "typesafe",
+    "realtime",
+    "rooms",
+    "pubsub",
+    "rpc",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mertdogar/super-line.git"
+  },
   "homepage": "https://github.com/mertdogar/super-line#readme",
   "bugs": "https://github.com/mertdogar/super-line/issues",
   "packageManager": "pnpm@11.5.1",
   "scripts": {
     "build": "pnpm -r build",
-    "test": "vitest run",
+    "test": "vitest run && vitest run --config vitest.integration.config.ts",
+    "test:fast": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "oxlint packages examples",
@@ -24,6 +37,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "oxlint": "^0.15.0",
+    "testcontainers": "^10.28.0",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

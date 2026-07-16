@@ -159,6 +159,10 @@ export function chatAgentTools<C extends Contract, R extends RoleOf<C>, S extend
             content: m.content,
             createdAt: iso(m.createdAt),
             edited: m.editedAt !== null,
+            // streamed messages: absent content is 'still streaming' or 'no text projection', not
+            // an empty send — the status disambiguates for the model
+            ...(m.status !== undefined ? { status: m.status } : {}),
+            ...(m.error !== undefined ? { error: m.error } : {}),
           }))
         } catch (e) {
           return asError(e)

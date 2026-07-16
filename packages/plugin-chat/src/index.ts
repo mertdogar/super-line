@@ -9,6 +9,18 @@ export type ChannelVisibility = (typeof CHANNEL_VISIBILITIES)[number]
 export const MEMBER_ROLES = ['owner', 'member'] as const
 export type MemberRole = (typeof MEMBER_ROLES)[number]
 
+/** Streaming lifecycle of a message. Absent = a plain one-shot send (never streamed). */
+export const MESSAGE_STATUSES = ['streaming', 'complete', 'aborted', 'error'] as const
+export type MessageStatus = (typeof MESSAGE_STATUSES)[number]
+
+/** Part kinds a streamed message accumulates (PLAN-chat-streaming decision 2). */
+export const PART_TYPES = ['text', 'reasoning', 'tool'] as const
+export type PartType = (typeof PART_TYPES)[number]
+
+/** A tool part's lifecycle: args streaming in → executing → settled (result/isError present). */
+export const TOOL_STATES = ['input-streaming', 'running', 'done'] as const
+export type ToolState = (typeof TOOL_STATES)[number]
+
 /** The host's opaque extension slot, present on all three collections (validate its shape in `before` hooks). */
 const metadata = z.record(z.string(), z.unknown()).optional()
 
@@ -45,22 +57,91 @@ export const messageSchema = <S extends z.ZodTypeAny>(content: S) =>
     id: z.string(),
     channelId: z.string(),
     authorId: z.string(),
-    content,
+    // OPTIONAL because a STREAMED message's envelope stays quiet until finalize derives the
+    // projection (PLAN-chat-streaming decision 9); plain sends always carry it
+    content: content.optional(),
     createdAt: z.number(),
     editedAt: z.number().nullable(),
+    // streaming lifecycle — absent on plain sends
+    status: z.enum(MESSAGE_STATUSES).optional(),
+    error: z.string().optional(),
     metadata,
   })
 
+/**
+ * One block of a streamed message — its own row so a rewrite is bounded by PART size, never turn
+ * size (PLAN-chat-streaming decision 3). pk = `${messageId}:${idx}` (server-assigned idx).
+ * `parent` = the `toolCallId` of the delegating tool part this nests under (subagent trees,
+ * decision 10); null = root lane. `offset` = the checkpointed length of `text` — live deltas splice
+ * on top of it. `lastActivityAt` is stamped at every checkpoint so staleness is visible.
+ */
+export const messagePartSchema = z.object({
+  id: z.string(),
+  messageId: z.string(),
+  channelId: z.string(), // denormalized: the parts RLS filter keys on it
+  idx: z.number(),
+  type: z.enum(PART_TYPES),
+  parent: z.string().nullable(),
+  text: z.string(),
+  offset: z.number(),
+  done: z.boolean(),
+  lastActivityAt: z.number(),
+  // tool parts only:
+  toolCallId: z.string().optional(),
+  toolName: z.string().optional(),
+  args: z.unknown().optional(),
+  result: z.unknown().optional(),
+  isError: z.boolean().optional(),
+  state: z.enum(TOOL_STATES).optional(),
+})
+export type ChatMessagePart = z.infer<typeof messagePartSchema>
+
+/** The parts pk — mirrors {@link memId}'s role for memberships. */
+export const partId = (messageId: string, idx: number): string => `${messageId}:${idx}`
+
+/**
+ * The append vocabulary — a PLUGIN-OWNED union, deliberately not AI SDK `UIMessageChunk`
+ * (decision 4: adapters absorb SDK drift at the edge). `key` is the producer's handle for a part —
+ * for tool parts it MUST be the `toolCallId`; the server maps key→idx. `delta` applies to
+ * text/reasoning parts only (tool args land whole via `part_patch`).
+ */
+export const streamEventSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('part_start'),
+    key: z.string(),
+    partType: z.enum(PART_TYPES),
+    toolName: z.string().optional(),
+    parent: z.string().optional(),
+  }),
+  z.object({ type: z.literal('delta'), key: z.string(), text: z.string() }),
+  z.object({
+    type: z.literal('part_patch'),
+    key: z.string(),
+    args: z.unknown().optional(),
+    result: z.unknown().optional(),
+    isError: z.boolean().optional(),
+    state: z.enum(['running', 'done']).optional(),
+  }),
+  z.object({ type: z.literal('part_end'), key: z.string(), text: z.string().optional() }),
+])
+export type ChatStreamEvent = z.infer<typeof streamEventSchema>
+
 export type ChatChannel = z.infer<typeof channelSchema>
 export type ChatMembership = z.infer<typeof membershipSchema>
-/** A message row. `Content` defaults to `unknown` — the server kit never inspects the body. */
+/**
+ * A message row. `Content` defaults to `unknown` — the server kit never inspects the body.
+ * `content` is absent on a still-streaming envelope (the finalize projection fills it);
+ * `status` is absent on plain one-shot sends.
+ */
 export interface ChatMessage<Content = unknown> {
   id: string
   channelId: string
   authorId: string
-  content: Content
+  content?: Content
   createdAt: number
   editedAt: number | null
+  status?: MessageStatus
+  error?: string
   metadata?: Record<string, unknown>
 }
 
@@ -100,7 +181,43 @@ const requestDefs = <S extends z.ZodTypeAny>(content: S) => {
     sendMessage: { input: z.object({ channelId: z.string(), content, metadata }), output: message },
     editMessage: { input: z.object({ id: z.string(), content: content.optional(), metadata }), output: message },
     deleteMessage: { input: z.object({ id: z.string() }), output: z.object({ ok: z.boolean() }) },
+    // ── streaming (PLAN-chat-streaming decision 4): open → append batches → settle ────────────────
+    startMessage: { input: z.object({ channelId: z.string(), metadata }), output: message },
+    appendMessage: {
+      input: z.object({ id: z.string(), events: z.array(streamEventSchema).min(1) }),
+      output: z.object({ ok: z.boolean() }),
+    },
+    finalizeMessage: {
+      input: z.object({
+        id: z.string(),
+        status: z.enum(['complete', 'aborted', 'error']).optional(),
+        error: z.string().optional(),
+      }),
+      output: message,
+    },
+    // enter/leave the per-channel delta room — the ONLY way the plugin learns a client is viewing
+    // a channel (topics can't scope per-channel; decision 5)
+    watchChannel: { input: z.object({ channelId: z.string() }), output: z.object({ ok: z.boolean() }) },
+    unwatchChannel: { input: z.object({ channelId: z.string() }), output: z.object({ ok: z.boolean() }) },
   }
+}
+
+/**
+ * Ephemeral token deltas — broadcast to the per-channel room, never persisted; the part-row
+ * checkpoints are the durable floor a late joiner reconstructs from (decisions 5+6). `offset` is
+ * the length of the part's text BEFORE this delta: a client applies it iff it lines up with what
+ * it has, else waits for the next checkpoint row.
+ */
+const chatEvents = {
+  'chat.streamDelta': {
+    payload: z.object({
+      channelId: z.string(),
+      messageId: z.string(),
+      partIdx: z.number(),
+      offset: z.number(),
+      text: z.string(),
+    }),
+  },
 }
 
 /**
@@ -108,7 +225,7 @@ const requestDefs = <S extends z.ZodTypeAny>(content: S) => {
  * inspects content, so its handlers/subtraction key on this static shape while the CONTRACT carries the
  * host's real schema. `clientToServer` keys here are subtracted from the host's `implement()` obligation.
  */
-export const chatSurface = defineSurface({ clientToServer: requestDefs(z.unknown()) })
+export const chatSurface = defineSurface({ clientToServer: requestDefs(z.unknown()), serverToClient: chatEvents })
 export type ChatSurface = typeof chatSurface
 
 /**
@@ -134,7 +251,12 @@ export function chatContract<S extends z.ZodTypeAny = z.ZodString>(opts?: { cont
         key: 'id',
         references: { authorId: 'users', channelId: 'channels' },
       },
+      messageParts: {
+        schema: messagePartSchema,
+        key: 'id',
+        references: { messageId: 'messages', channelId: 'channels' },
+      },
     },
-    shared: { clientToServer: requestDefs(content) },
+    shared: { clientToServer: requestDefs(content), serverToClient: chatEvents },
   })
 }

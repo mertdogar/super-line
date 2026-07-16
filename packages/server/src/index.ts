@@ -325,7 +325,7 @@ export interface SuperLinePlugin<S extends Directional = {}> {
    * an optional dispose function, called on `server.close()`. Use for wiring cluster-wide views from
    * local taps + a plugin channel (the inspector's pattern), timers, or background subscriptions.
    */
-  setup?: (ctx: PluginContext) => void | (() => void)
+  setup?: (ctx: PluginContext) => void | (() => void | Promise<void>)
 }
 
 /**
@@ -1352,7 +1352,7 @@ export function createSuperLineServer<
     })
   }
 
-  const pluginDisposers: Array<() => void> = [] // populated after `api` is built (plugin setup() returns)
+  const pluginDisposers: Array<() => void | Promise<void>> = [] // populated after `api` is built (plugin setup() returns)
   const pluginHandlers: Record<string, AnyHandler> = {} // plugin request handlers, keyed by method name
 
   const api: SuperLineServer<C, A, HandledKeys<P>> = {
@@ -1466,7 +1466,9 @@ export function createSuperLineServer<
       closing = true
       for (const dispose of pluginDisposers) {
         try {
-          dispose() // plugins tear down first, while the adapter is still live for channel unsubscribes
+          // awaited so a plugin can drain in-flight state (e.g. settle open streams) while the
+          // adapter and backend are still live — plugins tear down first
+          await dispose()
         } catch {
           // a dispose that throws can't block the rest of shutdown
         }

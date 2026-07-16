@@ -21,6 +21,7 @@ export const alias = {
   '@super-line/plugin-chat/server': src('packages/plugin-chat/src/server.ts'),
   '@super-line/plugin-chat/client': src('packages/plugin-chat/src/client.ts'),
   '@super-line/plugin-chat/react': src('packages/plugin-chat/src/react.tsx'),
+  '@super-line/plugin-chat/ai': src('packages/plugin-chat/src/ai.ts'),
   '@super-line/plugin-chat': src('packages/plugin-chat/src/index.ts'),
   '@super-line/collections-memory': src('packages/collections-memory/src/index.ts'),
   '@super-line/collections-crdt-memory': src('packages/collections-crdt-memory/src/index.ts'),
@@ -56,6 +57,8 @@ export const heavy = [
   'packages/adapter-libp2p/test/**/*.test.ts',
   'packages/transport-libp2p/test/**/*.test.ts',
   'packages/collections-crdt-pglite/test/collections-crdt-pglite.integration.test.ts',
+  // in-process PGlite (WASM) is CPU-bound: its compaction waitFor starves under parallel forks
+  'packages/collections-crdt-pglite/test/collections-crdt-pglite.test.ts',
 ]
 
 export default defineConfig({

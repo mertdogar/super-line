@@ -4,33 +4,64 @@
 // web cockpit — but everything here is plain plugin-chat rows, durable across reloads.
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { Bot, LogOut, Network, Send, User as UserIcon, Wrench } from 'lucide-react'
+import { Bot, Menu, Send, User as UserIcon, Wrench } from 'lucide-react'
 import { useChannels, useChat, useMessages } from '@/App'
+import { Sidebar } from '@/components/sidebar'
 import type { FeedMessage, MessagePart } from '@/contract'
 
 export function Chat({ me, myName, onSignOut }: { me: string; myName: string; onSignOut: () => void }): React.JSX.Element {
+  const chat = useChat()
   const channels = useChannels()
-  const channel = channels[0] // the seeded #agents channel (first-timers are auto-joined)
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [navOpen, setNavOpen] = useState(false)
+  const active = channels.find((c) => c.id === activeId) ?? channels[0]
+
+  const select = (id: string): void => {
+    setActiveId(id)
+    setNavOpen(false)
+    void chat.join(id).catch(() => {}) // join-on-select (public channels); already-a-member is fine
+  }
+  const create = (name: string): void => {
+    void chat
+      .createChannel({ name })
+      .then((ch) => setActiveId(ch.id))
+      .catch(() => {})
+  }
+
   return (
-    <div className="flex h-full flex-col bg-background">
-      <header className="flex items-center gap-2 border-b px-4 py-3 shadow-sm">
-        <Network className="h-5 w-5 text-primary" />
-        <h1 className="font-bold">#{channel?.name ?? 'agents'}</h1>
-        <span className="hidden text-sm text-muted-foreground sm:inline">
-          — a supervisor that delegates; subagents stream in cards
-        </span>
-        <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
-          <span>{myName}</span>
+    <div className="flex h-full bg-background">
+      {navOpen && <div className="fixed inset-0 z-30 bg-black/50 md:hidden" aria-hidden onClick={() => setNavOpen(false)} />}
+      <div
+        className={`fixed inset-y-0 left-0 z-40 transition-transform md:static md:z-auto md:translate-x-0 ${
+          navOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        }`}
+      >
+        <Sidebar
+          myName={myName}
+          channels={channels}
+          activeId={active?.id ?? ''}
+          onSelect={select}
+          onCreate={create}
+          onSignOut={onSignOut}
+        />
+      </div>
+
+      <section className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center gap-2 border-b px-4 py-3 shadow-sm">
           <button
-            onClick={onSignOut}
-            aria-label="Sign out"
-            className="grid h-7 w-7 place-items-center rounded hover:bg-muted hover:text-foreground"
+            onClick={() => setNavOpen(true)}
+            aria-label="Open channel list"
+            className="-ml-1 grid h-8 w-8 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
           >
-            <LogOut className="h-4 w-4" />
+            <Menu className="h-5 w-5" />
           </button>
-        </div>
-      </header>
-      {channel ? <Feed channelId={channel.id} me={me} /> : <div className="flex-1" />}
+          <h1 className="font-bold">#{active?.name ?? 'agents'}</h1>
+          <span className="hidden truncate text-sm text-muted-foreground sm:inline">
+            — a supervisor that delegates; subagents stream in cards
+          </span>
+        </header>
+        {active ? <Feed key={active.id} channelId={active.id} me={me} /> : <div className="flex-1" />}
+      </section>
     </div>
   )
 }

@@ -41,20 +41,38 @@ export async function startSupervisor(deps: { authKit: AuthKit; chatKit: ChatKit
   const botChat = chatClient(client, { userId: bot.id })
   await botChat.ready
 
-  const feed = botChat.messages(channel.id, { limit: 20 })
-  await feed.ready
-  const seen = new Set(feed.rows().map((m) => m.id))
-  feed.subscribe(() => {
-    for (const m of feed.rows() as Message[]) {
-      if (seen.has(m.id)) continue
-      seen.add(m.id)
-      if (m.authorId === bot.id) continue
-      void answer(m).catch((err) => console.error('supervisor turn failed', err))
-    }
+  // The supervisor lives in EVERY public channel — a new channel is a new conversation with it,
+  // exactly like a new thread in the harness cockpit. The bot's channel directory is live, so a
+  // channel created from any browser is joined and watched the moment its row arrives.
+  type Feed = ReturnType<typeof botChat.messages>
+  const directory = botChat.channels()
+  await directory.ready
+  const watched = new Set<string>()
+  const watch = (channelId: string): void => {
+    if (watched.has(channelId)) return
+    watched.add(channelId)
+    void (async () => {
+      await botChat.join(channelId).catch(() => {}) // already a member (seed/restart) is fine
+      const feed = botChat.messages(channelId, { limit: 20 })
+      await feed.ready
+      const seen = new Set(feed.rows().map((m) => m.id))
+      feed.subscribe(() => {
+        for (const m of feed.rows() as Message[]) {
+          if (seen.has(m.id)) continue
+          seen.add(m.id)
+          if (m.authorId === bot.id) continue
+          void answer(channelId, feed, m).catch((err) => console.error('supervisor turn failed', err))
+        }
+      })
+    })().catch((err) => console.error(`failed to watch channel ${channelId}`, err))
+  }
+  directory.subscribe(() => {
+    for (const c of directory.rows()) watch(c.id)
   })
+  for (const c of directory.rows()) watch(c.id)
 
   type TurnMessage = { role: 'user'; content: string } | { role: 'assistant'; content: string }
-  const history = (): TurnMessage[] =>
+  const history = (feed: Feed): TurnMessage[] =>
     (feed.rows() as Message[])
       .filter((m) => m.status !== 'streaming')
       .slice(-8)
@@ -68,14 +86,14 @@ export async function startSupervisor(deps: { authKit: AuthKit; chatKit: ChatKit
         return m.authorId === bot.id ? { role: 'assistant', content } : { role: 'user', content }
       })
 
-  async function answer(_m: Message): Promise<void> {
+  async function answer(channelId: string, feed: Feed, _m: Message): Promise<void> {
     if (!process.env.AI_GATEWAY_API_KEY) {
-      await botChat.send(channel.id, 'Set AI_GATEWAY_API_KEY in .env to bring the supervisor online.')
+      await botChat.send(channelId, 'Set AI_GATEWAY_API_KEY in .env to bring the supervisor online.')
       return
     }
-    const w = await botChat.stream(channel.id)
+    const w = await botChat.stream(channelId)
     try {
-      await runTurn(w, history())
+      await runTurn(w, history(feed))
       await w.finalize()
     } catch (err) {
       await w.abort(String(err)).catch(() => {})

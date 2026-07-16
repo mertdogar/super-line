@@ -35,6 +35,54 @@ const h = createHarness()
 afterEach(() => h.dispose())
 
 describe('collections — snapshot, filtering, live routing', () => {
+  it('a write racing the subscribe snapshot is NOT lost (server registers-then-reads; client replays)', async () => {
+    // A store whose snapshot result goes STALE before it returns: rows are read immediately, then
+    // the response stalls — any write during the stall is missing from the snapshot, so it must
+    // reach the subscriber as a live cchg. Before the fix the sub was registered only after the
+    // read returned: the racing write landed in NEITHER the snapshot NOR the feed (the
+    // auto-join-on-connect race — a permanently deaf UI).
+    const real = memoryCollections()
+    let armed = false
+    let onRead!: () => void
+    const readDone = new Promise<void>((r) => (onRead = r))
+    let release!: () => void
+    const released = new Promise<void>((r) => (release = r))
+    const slow = new Proxy(real, {
+      get(t, p, r) {
+        if (p === 'snapshot')
+          return async (...args: unknown[]) => {
+            const rows = await (t as unknown as { snapshot: (...a: unknown[]) => Promise<unknown[]> }).snapshot(...args)
+            if (armed) {
+              armed = false
+              onRead() // rows are now frozen — the race window is open
+              await released
+            }
+            return rows
+          }
+        return Reflect.get(t, p, r)
+      },
+    }) as typeof real
+    const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: slow,
+      policies: {
+        users: { read: () => undefined, write: () => true },
+        messages: { read: () => undefined, write: authorOnly },
+      },
+    })
+    await srv.collection('messages').insert(msg('m1', 'general', 'u9', 1))
+
+    armed = true
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    const sub = client.collection('messages').subscribe({ filter: eq('channelId', 'general') })
+    await readDone // the snapshot HAS been read (m1 only) and is stalled
+    await srv.collection('messages').insert(msg('m2', 'general', 'u9', 2)) // the racing co-write
+    release()
+    await sub.ready
+    expect(sub.rows().map((r) => r.id).sort()).toEqual(['m1', 'm2'])
+  })
+
   it('seeds a filtered snapshot then streams matching inserts, ignoring non-matching ones', async () => {
     const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
       authenticate,

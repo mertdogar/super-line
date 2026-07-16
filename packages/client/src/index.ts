@@ -421,6 +421,9 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     listeners: Set<(ev: RowSetEvent) => void>
     ready: Deferred
     settled: boolean
+    // `cchg` frames that arrived BEFORE the initial snapshot (the server registers the sub before
+    // reading it, so a write racing the subscribe fans out first) — replayed in order after seeding.
+    pending: CChangeFrame[]
   }
   const collectionSubs = new Map<number, LiveSub>() // subId → sub (drives reconnect re-subscribe)
   const collectionSubsByName = new Map<string, Set<LiveSub>>() // collection → subs (drives `cchg` dispatch)
@@ -556,7 +559,12 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       void handleServerRequest(frame)
     } else if (frame.t === 'cchg') {
       const subs = collectionSubsByName.get(frame.n)
-      if (subs) for (const sub of subs) applyCollectionChange(sub, frame) // client re-filters per subscription
+      if (subs)
+        for (const sub of subs) {
+          // before the initial snapshot lands, buffer — seeding would otherwise clobber this change
+          if (!sub.settled) sub.pending.push(frame)
+          else applyCollectionChange(sub, frame) // client re-filters per subscription
+        }
     } else if (frame.t === 'cdchg') {
       const entry = openDocs.get(docKey(frame.n, frame.id))
       if (entry) {
@@ -844,8 +852,22 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     }
     if (!sub.settled) {
       sub.map = next
-      recomputeView(sub)
       sub.settled = true
+      // replay changes that raced the snapshot (server registers-then-reads): upserts are idempotent
+      // against snapshot rows, deletes remove rows the stale snapshot still carried
+      const raced = sub.pending
+      sub.pending = []
+      const racedIds = new Set<string>()
+      for (const f of raced) {
+        racedIds.add(f.id)
+        applyCollectionChange(sub, f) // notifies per change
+      }
+      recomputeView(sub)
+      // Notify the seed itself: a listener attached BEFORE the snapshot (useSyncExternalStore, any
+      // reactive wrapper) must learn the rows exist — silence here left UIs frozen at [] until some
+      // unrelated live change happened to arrive. Fired BEFORE `ready` resolves, so consumers that
+      // seed from rows() at ready-time (the TanStack adapter) still see exactly-once delivery.
+      for (const [id, row] of sub.map) if (!racedIds.has(id)) notifySub(sub, { type: 'insert', id, row })
       sub.ready.resolve()
       return
     }
@@ -925,6 +947,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
           listeners: new Set(),
           ready: deferred(),
           settled: false,
+          pending: [],
         }
         collectionSubs.set(subId, sub)
         let set = collectionSubsByName.get(name)

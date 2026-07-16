@@ -100,7 +100,10 @@ export function createRowCollections(config: CollectionRuntimeConfig, host: Coll
         if (!policy?.read) throw new SuperLineError('FORBIDDEN', `Read denied: ${frame.n}`) // deny-by-default
         const policyFilter = await policy.read(principalOf(conn), conn.ctx)
         const eff = andFilters(policyFilter, frame.q.filter)
-        const rows = await store.snapshot(frame.n, { ...frame.q, filter: eff })
+        // Register BEFORE the snapshot read: a write committing while the snapshot query runs must
+        // fan out as a live `cchg` — registering after the read put such a write in NEITHER the
+        // snapshot NOR the feed (a permanently lost row; the auto-join-on-connect race). The client
+        // buffers pre-snapshot changes and replays them after seeding, so cchg-before-res is safe.
         const state = stateOf(conn)
         let subs = state.subs.get(frame.n)
         if (!subs) state.subs.set(frame.n, (subs = new Map()))
@@ -109,6 +112,17 @@ export function createRowCollections(config: CollectionRuntimeConfig, host: Coll
         let set = subscribers.get(frame.n)
         if (!set) subscribers.set(frame.n, (set = new Set()))
         set.add(conn)
+        let rows: unknown[]
+        try {
+          rows = await store.snapshot(frame.n, { ...frame.q, filter: eff })
+        } catch (e) {
+          subs.delete(frame.s) // failed subscribe must not leave a live registration behind
+          if (subs.size === 0) {
+            state.subs.delete(frame.n)
+            set.delete(conn)
+          }
+          throw e
+        }
         host.tap(() => ({
           type: 'collection.sub',
           connId: conn.id,

@@ -134,6 +134,24 @@ Package scaffold (subpaths) · `chatContract()` fragment (collections + 11 share
 kit: domain cores + hooks + policies (read-RLS, write-deny) + request handlers + imperative namespaces
 (decisions 2–8, 11–13). Startup validation (auth fragment present, contract roles).
 
+17. **AI SDK agent toolset (`/ai` subpath)** — settled in a follow-up grill 2026-07-16. Client-side ONLY:
+    tools wrap the agent's own connection, so every call is authorization-checked by the server (RLS +
+    membership + owner gates) — the LLM can never exceed its bot user's permissions. A kit-backed variant
+    was rejected (LLM inputs trusted with arbitrary identities). `chatAgentTools(client, opts?)` in
+    `@super-line/plugin-chat/ai` (`ai` = optional peer, like react) returns a plain `ToolSet` — STATELESS:
+    reads are one-shot subscribe→ready→rows→close (ms vs an LLM step's seconds), writes are the typed
+    requests, no chatClient instance, no watcher, no close(). It takes the RAW SuperLineClient (needs the
+    `users` directory for author-name resolution; bot id resolved lazily via memoized whoami). Core set
+    (default): `list_channels` (+member flag) · `list_members` · `read_messages` (author names, ISO
+    times, structured content passthrough) · `send_message` · `join_channel` · `leave_channel`.
+    `{ management: true }` adds: `create_channel`/`update_channel`/`delete_channel`,
+    `add_member`/`remove_member`/`set_member_role`, `edit_message`/`delete_message`, `list_users`.
+    snake_case names; `content` host-parametrized like the contract (`opts.content`, default z.string());
+    failures return structured `{ error: code, message }` so the model reads FORBIDDEN/CONFLICT and
+    adapts instead of the loop aborting. No watch/stream tool (tools are req/res; live reaction stays the
+    host loop). Example: the #ask-ai agent upgrades to a `ToolLoopAgent` with the core toolset. Tests:
+    tool `execute()` against a real loopback server, no LLM.
+
 ### Phase 2 — client halves + example + docs
 `/client` (`chatClient`, re-subscribe mechanic, live stores) + `/react` hooks (decision 14) ·
 rewrite `examples/collections-chat` · **LLM agent in the example** (`#ask-ai` channel: server-side

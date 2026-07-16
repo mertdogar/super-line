@@ -1502,6 +1502,9 @@ importers:
       '@types/react':
         specifier: ^18.3.0
         version: 18.3.31
+      ai:
+        specifier: ^6.0.209
+        version: 6.0.209(zod@3.25.76)
       react:
         specifier: ^18.3.0
         version: 18.3.1

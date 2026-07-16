@@ -28,6 +28,10 @@
     "./react": {
       "import": { "types": "./dist/react.d.ts", "default": "./dist/react.js" },
       "require": { "types": "./dist/react.d.cts", "default": "./dist/react.cjs" }
+    },
+    "./ai": {
+      "import": { "types": "./dist/ai.d.ts", "default": "./dist/ai.js" },
+      "require": { "types": "./dist/ai.d.cts", "default": "./dist/ai.cjs" }
     }
   },
   "files": ["dist"],
@@ -46,11 +50,13 @@
     "@super-line/client": "workspace:^",
     "@super-line/plugin-auth": "workspace:^",
     "@super-line/server": "workspace:^",
+    "ai": ">=6",
     "react": ">=18"
   },
   "peerDependenciesMeta": {
     "@super-line/client": { "optional": true },
     "@super-line/server": { "optional": true },
+    "ai": { "optional": true },
     "react": { "optional": true }
   },
   "devDependencies": {
@@ -60,6 +66,7 @@
     "@super-line/server": "workspace:^",
     "@super-line/transport-websocket": "workspace:*",
     "@types/react": "^18.3.0",
+    "ai": "^6.0.209",
     "react": "^18.3.0"
   }
 }

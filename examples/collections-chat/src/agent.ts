@@ -1,8 +1,10 @@
-import { generateText } from 'ai'
+import { ToolLoopAgent } from 'ai'
+import type { SuperLineClient } from '@super-line/client'
 import { eq } from '@super-line/core'
 import { createSuperLineClient } from '@super-line/client'
 import { webSocketClientTransport } from '@super-line/transport-websocket'
 import { chatClient } from '@super-line/plugin-chat/client'
+import { chatAgentTools } from '@super-line/plugin-chat/ai'
 import type { auth } from '@super-line/plugin-auth/server'
 import type { chat as chatKitFactory } from '@super-line/plugin-chat/server'
 import { chat, type Message } from './contract.js'
@@ -54,7 +56,7 @@ export async function startAgent(deps: { authKit: AuthKit; chatKit: ChatKit; url
   const agent = chatClient(client, { userId: bot.id })
   await agent.ready
 
-  const reply = makeResponder()
+  const reply = makeResponder(client, channelId)
   const feed = agent.messages(channelId, { limit: 20 })
   await feed.ready
   const seen = new Set(feed.rows().map((m) => m.id)) // ignore the backlog present at startup
@@ -89,17 +91,29 @@ export async function startAgent(deps: { authKit: AuthKit; chatKit: ChatKit; url
 type Responder = (prompt: string, history: { role: 'user' | 'assistant'; text: string }[]) => Promise<string>
 
 /**
- * Build the reply function: the Vercel AI SDK via the AI Gateway when `AI_GATEWAY_API_KEY` is set,
- * otherwise a canned offline responder so the demo runs with no key. The gateway is the AI SDK's default
- * provider, so a bare `provider/model` string routes through it.
+ * Build the reply function: a `ToolLoopAgent` (Vercel AI SDK via the AI Gateway) when
+ * `AI_GATEWAY_API_KEY` is set, otherwise a canned offline responder so the demo runs with no key.
+ *
+ * The agent gets the plugin's toolset over its OWN connection (`@super-line/plugin-chat/ai`) — so it can
+ * look around the workspace (list channels, read other channels it belongs to, see who's in them) while
+ * answering. The write tools are spread-omitted: the runtime below owns the actual posting, so the model
+ * gathers context and returns plain text. Every tool call is authorization-checked server-side — the
+ * model can never see beyond the bot user's own membership.
  */
-function makeResponder(): Responder {
+function makeResponder(client: SuperLineClient<typeof chat, 'user'>, channelId: string): Responder {
   if (!process.env.AI_GATEWAY_API_KEY) return cannedResponder()
+  const { send_message: _send, join_channel: _join, leave_channel: _leave, ...contextTools } = chatAgentTools(client)
+  const agent = new ToolLoopAgent({
+    model: MODEL,
+    instructions:
+      'You are "Ask AI", a concise, friendly assistant embedded in a team chat workspace. ' +
+      `This conversation happens in the channel #${AGENT_CHANNEL} (channelId: "${channelId}") — use that id with your tools. ` +
+      'You may use your tools to look around (list channels, read recent messages, list members) when it helps. ' +
+      'Reply to the conversation in one short paragraph of plain text — the runtime posts it for you.',
+    tools: contextTools,
+  })
   return async (_prompt, history) => {
-    const { text } = await generateText({
-      model: MODEL,
-      system:
-        'You are "Ask AI", a concise, friendly assistant embedded in a team chat channel. Reply in one short paragraph.',
+    const { text } = await agent.generate({
       messages: history.map((h) => ({ role: h.role, content: h.text })),
     })
     return text

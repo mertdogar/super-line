@@ -6,12 +6,18 @@ export const GUEST_ROLE = 'guest'
 
 // ── auth collection row schemas ──────────────────────────────────────────────────────────────────
 
-/** The public user directory. World-readable by default; only the server co-writer writes it. */
+/**
+ * The public user directory. World-readable by default; only the server co-writer writes it.
+ * `deletedAt` = soft-delete (deactivation): the row stays served so old content keeps rendering its
+ * author — absent/null means active. `metadata` is the host's opaque extension slot.
+ */
 export const userSchema = z.object({
   id: z.string(),
   displayName: z.string(),
   roles: z.array(z.string()),
   createdAt: z.number(),
+  deletedAt: z.number().nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 })
 /** Secret: email → password hash. `email` is the pk. Server-only (deny-all). */
 export const credentialSchema = z.object({

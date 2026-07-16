@@ -1,8 +1,6 @@
-// The two Mastra agents — the same supervisor/worker pair as super-harness's examples/web,
-// minus the harness: a supervisor that MUST delegate real-world lookups to a `worker` subagent
-// whose weather tool hits Open-Meteo live. The delegate tool is hand-rolled here (the harness
-// injects its own): its execute() streams the worker INTO THE SAME MESSAGE, nested under the
-// delegate call's tool part — see runtime.ts.
+// The two Mastra agents — completely vanilla: no factories, no delegate tool here. The engine
+// (@super-line/plugin-chat/mastra) injects `delegate` per stream call via toolsets, exactly like
+// super-harness — agents stay pure and reusable.
 
 import { Agent } from '@mastra/core/agent'
 import { createTool } from '@mastra/core/tools'
@@ -48,39 +46,13 @@ export const worker = new Agent({
   tools: { weather: weatherTool },
 })
 
-/**
- * The supervisor's delegate tool, mirroring the harness's `makeDelegateTool` shape
- * ({ agentType, task } in, { content, isError } out). The runtime supplies `run` per turn so the
- * worker's stream lands in that turn's message.
- */
-export function makeDelegateTool(run: (agentType: string, task: string, toolCallId: string) => Promise<{ content: string; isError: boolean }>) {
-  return createTool({
-    id: 'delegate',
-    description:
-      'Delegate a self-contained task to a subagent. It runs headless and returns a final report. Pass the full context it needs.',
-    inputSchema: z.object({
-      agentType: z.string().describe('Which subagent to run. One of: worker'),
-      task: z.string().describe('The complete task/brief for the subagent.'),
-    }),
-    outputSchema: z.object({ content: z.string(), isError: z.boolean() }),
-    execute: async ({ agentType, task }, ctx) => {
-      const c = ctx as { agent?: { toolCallId?: string } } | undefined
-      const toolCallId = c?.agent?.toolCallId ?? `${agentType}:${task.length}`
-      return run(agentType, task, toolCallId)
-    },
-  })
-}
-
-export function makeSupervisor(delegate: ReturnType<typeof makeDelegateTool>): Agent {
-  return new Agent({
-    id: 'supervisor',
-    name: 'supervisor',
-    instructions:
-      'You coordinate a `worker` subagent that has a live weather tool. ' +
-      'For any weather/data question you MUST delegate to the worker via the delegate tool (do not answer from memory), ' +
-      'then summarize its report in one short sentence. For everything else, answer conversationally and briefly. ' +
-      'Everyone in the channel watches your delegations stream live.',
-    model: gateway(MODEL),
-    tools: { delegate },
-  })
-}
+export const supervisor = new Agent({
+  id: 'supervisor',
+  name: 'supervisor',
+  instructions:
+    'You coordinate a `worker` subagent that has a live weather tool. ' +
+    'For any weather/data question you MUST delegate to the worker via the delegate tool (do not answer from memory), ' +
+    'then summarize its report in one short sentence. For everything else, answer conversationally and briefly. ' +
+    'Everyone in the channel watches your delegations stream live.',
+  model: gateway(MODEL),
+})

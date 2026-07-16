@@ -140,11 +140,11 @@ Consumers do nothing: the same `chat.messages(channelId)` feed serves streamed m
 
 **Supervisor trees:** a part may nest under a delegate tool call via `parent`, so one message can
 carry a whole multi-agent turn — each delegation rendering as its own card with the subagent's
-tool calls and text inside, durable across reloads. The
+tool calls and text inside, durable across reloads. You never build these trees by hand for
+Mastra agents: `mastraEngine` (see the Mastra section below) owns the lanes, the
+delegate tool, and the nesting; the
 [`examples/chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor)
-app rebuilds super-harness's supervisor/worker flow this way with plain Mastra agents — its
-`chunk-adapter.ts` (a port of the harness's Mastra `fullStream` mapper) is reusable for any
-Mastra producer.
+app rebuilds super-harness's supervisor/worker flow with it in a handful of lines.
 
 Worth knowing:
 
@@ -244,3 +244,76 @@ const agent = new ToolLoopAgent({
   calls, and text land live as parts. It never settles the message (`finalize`/`abort` stay yours);
   a turn-level error chunk is *returned*, not thrown. The collections-chat example's bot answers
   this way — its tool calls visibly stream into #ask-ai.
+
+## Mastra agents — `@super-line/plugin-chat/mastra`
+
+Hook plain [Mastra](https://mastra.ai) `Agent`s to streamed messages exactly the way
+super-harness hooks them to its cockpit — hand them over and the engine owns the wiring
+(`@mastra/core` is an optional peer dependency, like `ai`):
+
+```ts
+import { Agent } from '@mastra/core/agent'
+import { mastraEngine } from '@super-line/plugin-chat/mastra'
+
+const worker = new Agent({ id: 'worker', instructions: '…', model, tools: { weather } })
+const supervisor = new Agent({ id: 'supervisor', instructions: '…', model }) // no delegate tool here!
+
+const engine = mastraEngine({ agent: supervisor, subagents: [{ agent: worker }] })
+await engine.respond(chat, channelId, history) // one whole turn → one settled streamed message
+```
+
+What the engine owns, so your agents stay vanilla:
+
+- **The `delegate` tool** — injected per stream call via Mastra `toolsets` (`{ agentType, task } →
+  { content, isError }`), never baked into your `Agent`. Config declares the topology:
+  `delegatesTo` edges (default: the root may delegate to every subagent, subagents are leaves) and
+  `maxDepth` (default 3). Illegal edges, unknown agents, and depth overruns come back to the model
+  as `isError` tool results.
+- **Lanes and nesting** — the supervisor streams at the root; each delegation streams *into the
+  same message*, its parts nested under the delegate call's tool part (`parent`). The delegate
+  part is always emitted: it IS the anchor. Renderers wanting a distinct card special-case
+  `toolName === 'delegate'`.
+- **The chunk mapping** — the harness's Mastra `fullStream` mapper, vocabulary preserved
+  (text/reasoning segmentation at tool boundaries, whole args, `tool-error` → error result).
+- **Failure semantics** — a subagent's failure becomes the delegate's `isError` result and the
+  turn continues (the model sees it and may retry); a ROOT-level error chunk is returned;
+  `respond` then settles `{ status: 'error' }`, deletes turns that never streamed anything, and
+  aborts on a thrown failure.
+- **Abort, one mechanism** — `opts.abortSignal` and a dead sink (flush checked once per LLM step:
+  kill-switch, cap violation, disconnect) both cancel every in-flight lane at every depth.
+
+`engine.run(sink, input)` is the composable half (any `StreamEventSink`, never settles);
+`pipeMastraStream(sink, fullStream)` is the single-lane escape hatch, the exact Mastra sibling of
+`pipeUIMessageStream`.
+
+## The bot loop — `onChatMessage` + `provisionChatBot`
+
+The remaining boilerplate of "run a bot" is two calls. Server-side, mint the identity
+(idempotent across restarts — finds by display name, reactivates if soft-deleted, revokes and
+re-mints the same-label API key, joins channels):
+
+```ts
+import { provisionChatBot } from '@super-line/plugin-chat/server'
+const { user, apiKey } = await provisionChatBot(authKit, chatKit, { name: 'Supervisor' })
+```
+
+Client-side (same process or not — the bot is a regular user over the wire), run the loop:
+
+```ts
+import { chatClient, onChatMessage } from '@super-line/plugin-chat/client'
+
+const bot = chatClient(client, { userId: user.id })
+await bot.ready
+onChatMessage(bot, async ({ channelId, message, history }) => {
+  await engine.respond(bot, channelId, history) // or any AI-SDK producer — the loop doesn't care
+}, { channels: 'all', historyLimit: 8 })
+```
+
+The loop owns what every hand-rolled bot got subtly wrong: backlog is context, not triggers; own
+messages are skipped; another producer's still-streaming message defers until it settles;
+`history` arrives model-ready (`{ role, content }`, settled turns only, textless turns kept with
+honest `[error: … — no text]` placeholders); a failed join retries on the next directory tick.
+`channels: 'all'` means every channel the bot can *see* (RLS: public + already-member private),
+auto-joining public ones on appear — a new channel is a new conversation; pass an id list to pin
+it down. And turns are **serialized per channel**: a message arriving mid-answer queues, and its
+turn's history already contains the finished answer. Channels stay concurrent with each other.

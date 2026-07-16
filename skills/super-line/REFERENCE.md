@@ -483,6 +483,27 @@ chatAgentTools<C,R,S>(client, opts?: { content?: S; management?: boolean }): Too
 //   { management: true } adds: create_channel/update_channel/delete_channel · add_member/remove_member/set_member_role · edit_message/delete_message · list_users
 pipeUIMessageStream(writer, stream): Promise<{ error?: string }>   // AI SDK v6 bridge: streamText(...).toUIMessageStream() / agent.stream(...) → a streamed chat message
 //   maps text/reasoning/tool chunks onto parts (tool-input-delta + step framing + files/sources dropped); NEVER settles — finalize/abort stay yours; a turn-level error chunk is RETURNED, not thrown
+
+// /mastra — plain Mastra Agents → streamed messages (the harness hookup, chat-scoped); `@mastra/core` OPTIONAL peer dep.
+mastraEngine({ agent, subagents?: [{agent, delegatesTo?, maxSteps?}], delegatesTo?, maxSteps?, maxDepth? (3), suppressTools? }): MastraEngine
+//   Agents stay VANILLA — the engine injects the `delegate` tool per stream call via toolsets ({agentType,task}→{content,isError}),
+//   owns edges/depth gates (violations = isError tool results), lane keys (root s:, worker w:{toolCallId}: nested via `parent` under
+//   the delegate part — which is ALWAYS emitted: it is the nesting anchor; never suppress it), and the harness-ported chunk mapping.
+//   run(sink, input: string|ChatTurnMessage[], { abortSignal?, requestContext? }): Promise<{ text, error? }>  — never settles; root error RETURNED,
+//     subagent failure = the delegate's isError result (turn continues). Abort = ONE turn signal at every depth, also fired by a dead sink
+//     (flush checked at each step-finish: kill-switch/cap/disconnect ⇒ ~1 LLM step of waste, not a whole tree).
+//   respond(chat, channelId, input, opts?): Promise<MessageRowOf|undefined>  — open→run→settle: error-finalize on turn error, DELETES
+//     never-pushed empty turns (returns undefined), abort+rethrow on throw.
+pipeMastraStream(sink, fullStream, { lane?, suppressTools? }): Promise<{ text, error? }>   // single-lane escape hatch, sibling of pipeUIMessageStream
+
+// bot runtime (framework-agnostic — pairs with mastraEngine OR any AI-SDK producer)
+provisionChatBot(authKit, chatKit, { name, email?, role? ('user'), keyLabel?, metadata?, channels? }): Promise<{ user, apiKey }>   // /server
+//   restart-idempotent: find by DISPLAY NAME (public users row has no email), reactivate if soft-deleted, REVOKE+re-mint same-label key, idempotent joins
+onChatMessage(chat, handler: ({channelId, message, history}) => …, { channels? ('all'|string[]), historyLimit? (8) }): () => void   // /client
+//   'all' = RLS-visible channels (public + member-private), auto-join public on appear; backlog/own messages skipped; other producers'
+//   streaming envelopes DEFER until settled; history = model-ready ChatTurnMessage[] w/ honest `[status — no text]` placeholders;
+//   turns SERIALIZED per channel (queued msg's history sees the finished answer), channels concurrent; failed join retries next directory tick.
+//   chatClient also exposes `userId` (resolved own id, read after `ready`).
 ```
 
 Rules: **public** channels are self-service join/leave; **private** are add-by-owner and answer `NOT_FOUND` to a non-member's `joinChannel` (anti-probing). Creator is the first `owner`; owners manage membership + rename/delete. **Last-owner protection**: leave/remove/demote throws `CONFLICT` if it would leave members with zero owners. Messages **hard-delete**; edit stamps `editedAt`. Membership is required for EVERY send (server included) — add an agent to a channel before it posts. **AI agents = regular users**: provision via `authKit.users.create` (no password) + `authKit.apiKeys.create`, add to a channel, connect with `params: { apiKey }` and the same `chatClient`. Known v1 caveat: per-channel serialization is in-process, so under relay clustering requests on other nodes can still interleave (no cross-node CAS).

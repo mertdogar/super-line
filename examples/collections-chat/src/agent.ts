@@ -4,12 +4,13 @@ import type { SuperLineClient } from '@super-line/client'
 import { eq } from '@super-line/core'
 import { createSuperLineClient } from '@super-line/client'
 import { webSocketClientTransport } from '@super-line/transport-websocket'
-import { chatClient } from '@super-line/plugin-chat/client'
+import { chatClient, onChatMessage } from '@super-line/plugin-chat/client'
 import type { ChatClient } from '@super-line/plugin-chat/client'
+import type { ChatTurnMessage } from '@super-line/plugin-chat'
 import { chatAgentTools, pipeUIMessageStream } from '@super-line/plugin-chat/ai'
 import type { auth } from '@super-line/plugin-auth/server'
-import type { chat as chatKitFactory } from '@super-line/plugin-chat/server'
-import { chat, type Message } from './contract.js'
+import { provisionChatBot, type chat as chatKitFactory } from '@super-line/plugin-chat/server'
+import { chat } from './contract.js'
 
 type AuthKit = ReturnType<typeof auth<typeof chat>>
 type ChatKit = ReturnType<typeof chatKitFactory<typeof chat>>
@@ -44,61 +45,40 @@ export async function startAgent(deps: { authKit: AuthKit; chatKit: ChatKit; url
   const { authKit, chatKit, url } = deps
   const channelId = await seedChannels(chatKit)
 
-  // idempotent provisioning: find the bot by its (unique) display name, else create it passwordless
-  const existing = (await authKit.users.find({ filter: eq('displayName', BOT_NAME), includeDeactivated: true }))[0]
-  const bot = existing ?? (await authKit.users.create({ email: BOT_EMAIL, displayName: BOT_NAME, metadata: { bot: true } }))
-  const { key } = await authKit.apiKeys.create(bot.id, { role: 'user', label: 'agent-runtime' })
-  await chatKit.members.add(channelId, bot.id).catch(() => {}) // already a member on a restart → fine
+  // idempotent provisioning, one library call: find-or-create by display name, re-mint the
+  // same-label API key (restarts no longer accumulate live keys), join #ask-ai
+  const { user, apiKey } = await provisionChatBot(authKit, chatKit, {
+    name: BOT_NAME,
+    email: BOT_EMAIL,
+    keyLabel: 'agent-runtime',
+    channels: [channelId],
+  })
 
   const client = createSuperLineClient(chat, {
     transport: webSocketClientTransport({ url }),
     role: 'user',
-    params: { apiKey: key },
+    params: { apiKey },
   })
-  const agent = chatClient(client, { userId: bot.id })
+  const agent = chatClient(client, { userId: user.id })
   await agent.ready
 
   const respond = makeStreamer(client, agent, channelId)
-  const feed = agent.messages(channelId, { limit: 20 })
-  await feed.ready
-  const seen = new Set(feed.rows().map((m) => m.id)) // ignore the backlog present at startup
-
-  feed.subscribe(() => {
-    for (const m of feed.rows() as Message[]) {
-      if (seen.has(m.id)) continue
-      seen.add(m.id)
-      if (m.authorId === bot.id) continue // never answer itself
-      void handle(m)
-    }
-  })
-
-  const recentContext = (): { role: 'user' | 'assistant'; text: string }[] =>
-    (feed.rows() as Message[])
-      .filter((m) => m.status !== 'streaming') // exclude only IN-FLIGHT turns — settled ones stay
-      .slice(-8)
-      .map((m) => ({
-        role: m.authorId === bot.id ? 'assistant' : 'user',
-        // a settled turn can be textless (aborted, tool-only) — keep it in history, honestly labeled
-        text:
-          m.content === undefined
-            ? `[${m.status ?? 'message'}${m.error ? `: ${m.error}` : ''} — no text]`
-            : typeof m.content === 'string'
-              ? m.content
-              : JSON.stringify(m.content),
-      }))
-
-  async function handle(m: Message): Promise<void> {
-    try {
-      await respond(typeof m.content === 'string' ? (m.content ?? '') : JSON.stringify(m.content), recentContext())
-    } catch (err) {
-      console.error('agent reply failed', err)
-    }
-  }
+  // the bot loop (backlog excluded, own messages skipped, streaming envelopes deferred, history
+  // assembled with honest placeholders, turns serialized per channel) is one library call — this
+  // example's producer is the AI SDK, proving the loop is framework-agnostic
+  onChatMessage(
+    agent,
+    async ({ message, history }) => {
+      const prompt = typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
+      await respond(prompt ?? '', history)
+    },
+    { channels: [channelId] },
+  )
 
   console.log(`  🤖 Ask AI agent online in #${AGENT_CHANNEL} (${process.env.AI_GATEWAY_API_KEY ? MODEL : 'offline canned replies'})`)
 }
 
-type Streamer = (prompt: string, history: { role: 'user' | 'assistant'; text: string }[]) => Promise<void>
+type Streamer = (prompt: string, history: ChatTurnMessage[]) => Promise<void>
 
 /**
  * Build the reply pipeline: the bot answers as a STREAMED message (PLAN-chat-streaming) — reasoning,
@@ -159,7 +139,7 @@ function makeStreamer(
       },
     }
     try {
-      const result = await agent.stream({ messages: history.map((h) => ({ role: h.role, content: h.text })) })
+      const result = await agent.stream({ messages: history })
       const { error } = await pipeUIMessageStream(sink, result.toUIMessageStream())
       if (!pushed) {
         await w.abort('empty reply')

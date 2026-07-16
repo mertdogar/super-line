@@ -173,10 +173,34 @@ try {
 
 Design record: [ADR-0011](https://github.com/mertdogar/super-line/blob/main/docs/adr/0011-streamed-messages-are-parts-rows-plus-ephemeral-deltas.md).
 
+## Mastra agents + the bot loop
+
+Plain [Mastra](https://mastra.ai) `Agent`s hook up the way super-harness does it — hand them over,
+the engine owns the delegate tool (injected per call via `toolsets`, never baked into your Agent),
+the lanes/nesting, the chunk mapping, and abort. Provisioning and the channel loop are one call
+each:
+
+```ts
+import { provisionChatBot } from '@super-line/plugin-chat/server'
+import { chatClient, onChatMessage } from '@super-line/plugin-chat/client'
+import { mastraEngine } from '@super-line/plugin-chat/mastra'
+
+const { user, apiKey } = await provisionChatBot(authKit, chatKit, { name: 'Supervisor' }) // restart-idempotent
+const bot = chatClient(client, { userId: user.id })   // client connected with { apiKey }
+await bot.ready
+
+const engine = mastraEngine({ agent: supervisor, subagents: [{ agent: worker }] })
+onChatMessage(bot, ({ channelId, history }) => engine.respond(bot, channelId, history))
+// the loop: joins channels on appear, skips backlog + own messages, model-ready history,
+// turns serialized per channel; works with any producer (AI SDK included), not just Mastra
+```
+
 ## Subpaths
 
-`.` (contract fragment + schemas/types) · `/server` (`chat()` → `chatKit`) · `/client` (`chatClient`) ·
-`/react` (`createChatHooks`) · `/ai` (`chatAgentTools`; `ai` is an optional peer dependency).
+`.` (contract fragment + schemas/types) · `/server` (`chat()` → `chatKit` · `provisionChatBot`) ·
+`/client` (`chatClient` · `onChatMessage`) · `/react` (`createChatHooks`) · `/ai`
+(`chatAgentTools` · `pipeUIMessageStream`; `ai` is an optional peer dependency) · `/mastra`
+(`mastraEngine` · `pipeMastraStream`; `@mastra/core` is an optional peer dependency).
 
 The message body is host-parametrized: `chatContract({ content })` slots your Zod schema into the `messages`
 collection and the send/edit requests, so the server validates every body and types flow end-to-end
@@ -188,5 +212,7 @@ collection and the send/edit requests, so the server validates every body and ty
 - **Tutorial:** <https://super-line.dogar.biz/tutorials/chat-backbone>
 - **Example:** [`examples/collections-chat`](https://github.com/mertdogar/super-line/tree/main/examples/collections-chat)
   — a Slack-like app built entirely on this plugin, with a live LLM agent in an `#ask-ai` channel.
+- **Example:** [`examples/chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor)
+  — Mastra supervisor + worker streaming a nested delegation tree into a channel via `mastraEngine`.
 
 MIT © super-line

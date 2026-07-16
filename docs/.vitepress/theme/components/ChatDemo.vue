@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
-/* Two-up showpiece for the chat plugin: the contract wiring (left) and the
-   running app it produces (right). One `chatContract()` types the client, the
-   server handlers, AND the LLM agent's tools — so a human and an AI agent talk
-   over the exact same surface. All API is real super-line (verified against
-   plugin-chat + plugin-auth READMEs / how-tos): defineContract({ plugins }),
-   chatKit.plugin / authKit.plugin, ToolLoopAgent + chatAgentTools(client).
-   The chat panel is a scripted illustration — the tool-call rows (read_messages
-   / create_channel) are real names from the `/ai` toolset. */
+/* Two-up showpiece for the chat plugin: the contract wiring (left) and a REAL
+   running instance (right). Like ClusterDemo, this boots actual super-line in the
+   tab — @super-line/plugin-chat over the loopback transport, backed by
+   collections-memory. You send real messages through the plugin's typed requests;
+   the "Ask AI" agent replies through the same server-authoritative chatKit API and
+   performs real management calls (create_channel). Identity is simplified for a
+   self-contained widget (a tiny inline `users` table + a trivial authenticate)
+   rather than the full plugin-auth login shown in the code panel. */
 
 const wiring = `<span class="c">// one contract — merge whole domains as plugins</span>
 <span class="k">const</span> app = <span class="f">defineContract</span>({
@@ -26,104 +26,229 @@ plugins: [authKit.plugin, <span class="hl">chatKit.plugin</span>],
   tools: <span class="f">chatAgentTools</span>(client), <span class="c">// its own connection</span>
 })`
 
-type Line =
-  | { kind: 'msg'; who: string; self?: boolean; text: string }
-  | { kind: 'agent'; who: string; text: string }
-  | { kind: 'tool'; who: string; call: string }
-  | { kind: 'sys'; text: string }
+// ── live-instance state ────────────────────────────────────────────────────────
+type Anno =
+  | { kind: 'tool'; ts: number; seq: number; who: string; call: string }
+  | { kind: 'sys'; ts: number; seq: number; text: string }
+type MsgItem = { kind: 'msg' | 'agent'; ts: number; seq: number; id: string; who: string; self: boolean; text: string }
+type Item = MsgItem | Anno
 
-const script: Line[] = [
-  { kind: 'msg', who: 'grace', text: 'anyone tried the new chat plugin yet?' },
-  { kind: 'msg', who: 'ada', self: true, text: 'yeah — channels, membership + messages, all on one contract' },
-  { kind: 'msg', who: 'ada', self: true, text: '@Ask AI which transports can it run over?' },
-  { kind: 'tool', who: 'Ask AI', call: 'read_messages' },
-  { kind: 'agent', who: 'Ask AI', text: 'WebSocket, HTTP, or libp2p — the same code on every wire.' },
-  { kind: 'agent', who: 'Ask AI', text: "Want a #transports channel? I'll set it up." },
-  { kind: 'tool', who: 'Ask AI', call: 'create_channel' },
-  { kind: 'sys', text: 'Ask AI created #transports · added grace, ada' },
+const ME = 'ada'
+const AGENT = 'ask-ai'
+const NAMES: Record<string, string> = { ada: 'ada', grace: 'grace', 'ask-ai': 'Ask AI' }
+
+const booted = ref(false)
+const failed = ref(false)
+const busy = ref(false)
+const typing = ref(false)
+const draft = ref('')
+const version = ref(0) // bumped on every live-store change to re-read rows
+const annos = reactive<Anno[]>([])
+const feedEl = ref<HTMLElement | null>(null)
+
+const chips = [
+  { label: 'which transports?', text: 'which transports can it run over?' },
+  { label: 'is it typed?', text: 'is it typed end to end?' },
+  { label: 'open a channel', text: 'open a #transports channel' },
 ]
 
-// Default: everything visible (SSR / no-JS / reduced-motion — content is never
-// gated behind the animation). Motion just replays it as an arriving conversation.
-const shown = ref(script.length)
-const typing = ref(false)
-const root = ref<HTMLElement | null>(null)
-const feed = ref<HTMLElement | null>(null)
-
-let io: IntersectionObserver | null = null
-let timer: ReturnType<typeof setTimeout> | null = null
-let cancelled = false
+let seq = 0
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let chatKit: any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let cc: any
+// the ONE live message store — created in boot, never re-created (each cc.messages()
+// call opens a fresh subscription, so calling it inside a computed would loop)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let feed: any
+let channelId = ''
+const cleanups: Array<() => void> = []
 
 const reduced = () =>
   typeof window === 'undefined' ||
   !window.matchMedia('(prefers-reduced-motion: no-preference)').matches
 
-function toBottom() {
-  const el = feed.value
-  if (el) el.scrollTop = el.scrollHeight
+const wait = (ms: number) => new Promise((r) => setTimeout(r, reduced() ? 0 : ms))
+
+// The rendered stream: real message rows from the live store, merged with the
+// agent's tool-call / system annotations, ordered by (timestamp, seq).
+const timeline = computed<Item[]>(() => {
+  void version.value
+  if (!feed) return []
+  const rows = (feed.rows?.() ?? []) as Array<{
+    id: string
+    authorId: string
+    content: unknown
+    createdAt: number
+  }>
+  const msgs: Item[] = rows.map((r, i) => ({
+    kind: r.authorId === AGENT ? 'agent' : 'msg',
+    ts: r.createdAt,
+    seq: i,
+    id: r.id,
+    who: NAMES[r.authorId] ?? r.authorId,
+    self: r.authorId === ME,
+    text: typeof r.content === 'string' ? r.content : JSON.stringify(r.content),
+  }))
+  return [...msgs, ...annos].sort((a, b) => a.ts - b.ts || a.seq - b.seq)
+})
+
+const onlineCount = computed(() => {
+  void version.value
+  return 3
+})
+
+function scrollDown() {
+  nextTick(() => {
+    const el = feedEl.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
 }
 
-function step(i: number) {
-  if (cancelled) return
-  if (i >= script.length) {
-    typing.value = false
-    return
-  }
-  const line = script[i]
-  const showNext = () => {
-    typing.value = false
-    shown.value = i + 1
-    requestAnimationFrame(toBottom)
-    timer = setTimeout(() => step(i + 1), line.kind === 'sys' ? 780 : 940)
-  }
-  // the agent "thinks" before it speaks or acts
-  if (line.kind === 'agent' || line.kind === 'tool') {
-    typing.value = true
-    requestAnimationFrame(toBottom)
-    timer = setTimeout(showNext, 680)
-  } else {
-    showNext()
-  }
+function pushTool(call: string) {
+  annos.push({ kind: 'tool', ts: Date.now(), seq: seq++, who: NAMES[AGENT], call })
+  scrollDown()
+}
+function pushSys(text: string) {
+  annos.push({ kind: 'sys', ts: Date.now(), seq: seq++, text })
+  scrollDown()
 }
 
-function play() {
-  cancelled = false
-  shown.value = 0
+// The agent's turn: scripted intent (no live LLM in a docs page), but every move is
+// a REAL plugin request — a message send, and for some prompts a create_channel.
+async function agentTurn(prompt: string) {
+  const p = prompt.toLowerCase()
+  let reply = 'Good question — I can read the channel and act on it with typed tools.'
+  let tool = 'read_messages'
+  let makeChannel = false
+  // check the "open/create a channel" intent first — it can also mention transports
+  if (p.includes('open') || p.includes('create') || p.includes('channel')) {
+    reply = "On it — I'll spin up #transports and add you."
+    tool = 'create_channel'
+    makeChannel = true
+  } else if (p.includes('transport') || p.includes('wire')) {
+    reply = 'WebSocket, HTTP, or libp2p — the same code on every wire.'
+  } else if (p.includes('type') || p.includes('codegen')) {
+    reply = 'Yes — one contract types the client, the server, and me. Zero codegen.'
+  }
+
+  pushTool(tool)
+  typing.value = true
+  await wait(620)
   typing.value = false
-  timer = setTimeout(() => step(0), 420)
+  await chatKit.messages.send({ channelId, authorId: AGENT, content: reply })
+  scrollDown()
+
+  if (makeChannel) {
+    await wait(360)
+    pushTool('add_member')
+    const t = await chatKit.channels.create({ name: 'transports', visibility: 'public', owner: AGENT })
+    await chatKit.members.add(t.id, ME)
+    pushSys('Ask AI created #transports · added ada')
+  }
 }
 
-onMounted(() => {
-  if (reduced()) {
-    requestAnimationFrame(toBottom)
-    return
+async function submit(text: string) {
+  const body = text.trim()
+  if (!body || !booted.value || busy.value) return
+  busy.value = true
+  draft.value = ''
+  try {
+    await cc.send(channelId, body) // real client request, as ada
+    scrollDown()
+    await agentTurn(body)
+  } catch {
+    // demo: a failed op just doesn't render
+  } finally {
+    busy.value = false
   }
-  const el = root.value
-  if (!el) return
-  io = new IntersectionObserver(
-    (entries) => {
-      for (const e of entries) {
-        if (e.isIntersecting) {
-          io?.disconnect()
-          io = null
-          play()
-        }
-      }
-    },
-    { threshold: 0.35 },
-  )
-  io.observe(el)
+}
+
+onMounted(async () => {
+  try {
+    const { defineContract } = await import('@super-line/core')
+    const { z } = await import('zod')
+    const { createSuperLineServer } = await import('@super-line/server')
+    const { createSuperLineClient } = await import('@super-line/client')
+    const { createLoopbackTransport } = await import('@super-line/transport-loopback')
+    const { memoryCollections } = await import('@super-line/collections-memory')
+    const { chatContract } = await import('@super-line/plugin-chat')
+    const { chat } = await import('@super-line/plugin-chat/server')
+    const { chatClient } = await import('@super-line/plugin-chat/client')
+
+    // A minimal identity table satisfies the plugin's `users` requirement without
+    // pulling the full plugin-auth login into a marketing widget.
+    const app = defineContract({
+      roles: { user: {} },
+      collections: { users: { schema: z.object({ id: z.string(), name: z.string() }), key: 'id' } },
+      plugins: [chatContract()],
+    })
+
+    const backend = memoryCollections()
+    chatKit = chat({ contract: app })
+    const loop = createLoopbackTransport()
+    const srv = createSuperLineServer(app, {
+      transports: [loop.server],
+      collections: backend,
+      authenticate: (h: { query?: Record<string, string> }) => ({
+        role: 'user' as const,
+        ctx: { userId: h.query?.userId ?? 'anon', roles: ['user'], sessionId: 's' },
+      }),
+      identify: (conn: { ctx?: unknown }) => (conn.ctx as { userId?: string } | undefined)?.userId,
+      plugins: [chatKit.plugin],
+    })
+    cleanups.push(() => void srv.close?.())
+
+    for (const [id, name] of [
+      ['ada', 'Ada'],
+      ['grace', 'Grace'],
+      ['ask-ai', 'Ask AI'],
+    ] as const) {
+      await srv.collection('users').insert({ id, name })
+    }
+
+    const ch = await chatKit.channels.create({ name: 'ask-ai', visibility: 'public', owner: ME })
+    channelId = ch.id
+    await chatKit.members.add(ch.id, 'grace')
+    await chatKit.members.add(ch.id, AGENT)
+    await chatKit.messages.send({ channelId: ch.id, authorId: 'grace', content: 'anyone tried the new chat plugin?' })
+
+    const client = createSuperLineClient(app, {
+      transport: loop.client(),
+      role: 'user',
+      params: { userId: ME },
+    })
+    cleanups.push(() => void client.close?.())
+    cc = chatClient(client, { userId: ME })
+
+    feed = cc.messages(ch.id)
+    const off = feed.subscribe(() => {
+      version.value++
+      scrollDown()
+    })
+    cleanups.push(() => off?.())
+    await feed.ready
+    version.value++
+    booted.value = true
+    scrollDown()
+  } catch {
+    failed.value = true
+  }
 })
 
 onBeforeUnmount(() => {
-  cancelled = true
-  io?.disconnect()
-  if (timer) clearTimeout(timer)
+  cleanups.forEach((fn) => {
+    try {
+      fn()
+    } catch {
+      /* best-effort teardown */
+    }
+  })
 })
 </script>
 
 <template>
-  <div ref="root" class="cd">
+  <div class="cd">
     <!-- left: the wiring + bridge -->
     <div class="cd-left">
       <div class="cd-win">
@@ -140,64 +265,75 @@ onBeforeUnmount(() => {
       </p>
     </div>
 
-    <!-- right: the running app -->
-    <div
-      class="cd-app"
-      role="img"
-      aria-label="A scripted chat in an #ask-ai channel: grace and ada talk, then the AI agent 'Ask AI' calls read_messages, answers that super-line runs over WebSocket, HTTP or libp2p, then calls create_channel to open a #transports channel and add grace and ada — a human and an AI agent over the one super-line contract."
-    >
+    <!-- right: the REAL running app -->
+    <div class="cd-app" :class="{ booted }">
       <div class="cd-app__head">
         <span class="cd-app__ch"># ask-ai</span>
         <span class="cd-app__pres">
-          <i class="cd-dot" aria-hidden="true" />3 online · you are <b>ada</b>
+          <i class="cd-dot" :class="{ off: !booted }" aria-hidden="true" />{{ onlineCount }} online · you are
+          <b>ada</b>
         </span>
       </div>
 
-      <div ref="feed" class="cd-feed">
-        <template v-for="(line, i) in script" :key="i">
+      <div ref="feedEl" class="cd-feed" role="log" aria-live="polite" aria-label="Live #ask-ai messages">
+        <template v-for="it in timeline" :key="it.kind + it.ts + it.seq">
           <div
-            v-if="i < shown"
+            v-if="it.kind === 'msg' || it.kind === 'agent'"
             class="cd-row"
-            :class="[
-              `cd-row--${line.kind}`,
-              { 'cd-row--self': line.kind === 'msg' && line.self },
-            ]"
+            :class="{ 'cd-row--self': it.self, 'cd-row--agent': it.kind === 'agent' }"
           >
-            <!-- human / self message -->
-            <template v-if="line.kind === 'msg'">
-              <span class="cd-who">{{ line.who }}</span>
-              <span class="cd-bubble">{{ line.text }}</span>
-            </template>
-
-            <!-- agent message -->
-            <template v-else-if="line.kind === 'agent'">
+            <template v-if="it.kind === 'agent'">
               <span class="cd-who cd-who--agent">
-                <i class="cd-bot" aria-hidden="true">✦</i>{{ line.who }}
+                <i class="cd-bot" aria-hidden="true">✦</i>{{ it.who }}
                 <em class="cd-tag">agent</em>
               </span>
-              <span class="cd-bubble cd-bubble--agent">{{ line.text }}</span>
+              <span class="cd-bubble cd-bubble--agent">{{ it.text }}</span>
             </template>
-
-            <!-- tool call -->
-            <span v-else-if="line.kind === 'tool'" class="cd-tool">
-              <i aria-hidden="true">▸</i> {{ line.who }} called
-              <code>{{ line.call }}</code>
-            </span>
-
-            <!-- system / membership event -->
-            <span v-else class="cd-sys">{{ line.text }}</span>
+            <template v-else>
+              <span class="cd-who">{{ it.who }}</span>
+              <span class="cd-bubble">{{ it.text }}</span>
+            </template>
           </div>
+
+          <span v-else-if="it.kind === 'tool'" class="cd-tool">
+            <i aria-hidden="true">▸</i> {{ it.who }} called <code>{{ it.call }}</code>
+          </span>
+
+          <span v-else class="cd-sys">{{ it.text }}</span>
         </template>
 
         <div v-if="typing" class="cd-row cd-row--agent">
           <span class="cd-typing" aria-hidden="true"><i /><i /><i /></span>
         </div>
+
+        <p v-if="!booted && !failed" class="cd-boot">connecting a live super-line instance…</p>
+        <p v-if="failed" class="cd-boot">demo couldn't start in this browser — the code on the left is the real wiring.</p>
       </div>
 
-      <div class="cd-composer" aria-hidden="true">
-        <span class="cd-composer__field">Message #ask-ai<i class="cd-caret" /></span>
-        <span class="cd-composer__send">Send</span>
+      <div class="cd-quick" role="group" aria-label="Quick messages">
+        <button
+          v-for="c in chips"
+          :key="c.label"
+          type="button"
+          class="cd-chip"
+          :disabled="!booted || busy"
+          @click="submit(c.text)"
+        >
+          {{ c.label }}
+        </button>
       </div>
+
+      <form class="cd-composer" @submit.prevent="submit(draft)">
+        <input
+          v-model="draft"
+          class="cd-composer__field"
+          type="text"
+          :disabled="!booted || busy"
+          placeholder="Message #ask-ai"
+          aria-label="Message #ask-ai as ada"
+        />
+        <button class="cd-composer__send" type="submit" :disabled="!booted || busy || !draft.trim()">Send</button>
+      </form>
     </div>
   </div>
 </template>
@@ -312,8 +448,11 @@ onBeforeUnmount(() => {
 .cd-app {
   display: flex;
   flex-direction: column;
-  min-height: clamp(360px, 46vw, 440px);
+  height: clamp(440px, 52vw, 520px);
+  opacity: 0.75;
+  transition: opacity 0.4s ease;
 }
+.cd-app.booted { opacity: 1; }
 .cd-app__head {
   display: flex;
   align-items: center;
@@ -322,6 +461,7 @@ onBeforeUnmount(() => {
   padding: 0.85rem 1.05rem;
   border-bottom: 1px solid var(--sl-code-border);
   background: var(--sl-code-bg-2);
+  flex: none;
 }
 .cd-app__ch {
   font-weight: 700;
@@ -344,15 +484,16 @@ onBeforeUnmount(() => {
   background: var(--sl-cyan-bright);
   flex: none;
 }
+.cd-dot.off { background: #3a4654; }
 
 .cd-feed {
   flex: 1;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
   gap: 0.5rem;
   padding: 1rem 1.05rem;
-  overflow: hidden;
+  overflow-y: auto;
+  scroll-behavior: smooth;
 }
 .cd-row {
   display: flex;
@@ -361,8 +502,6 @@ onBeforeUnmount(() => {
   max-width: 82%;
 }
 .cd-row--self { align-self: flex-end; align-items: flex-end; }
-.cd-row--tool,
-.cd-row--sys { max-width: 100%; }
 
 .cd-who {
   font-size: 0.72rem;
@@ -398,7 +537,6 @@ onBeforeUnmount(() => {
   border: 1px solid var(--sl-code-border);
 }
 .cd-row--self .cd-bubble {
-  color: var(--sl-code-text);
   background: color-mix(in oklab, var(--sl-cyan) 15%, var(--sl-code-bg-2));
   border-color: color-mix(in oklab, var(--sl-cyan) 34%, var(--sl-code-border));
 }
@@ -434,6 +572,12 @@ onBeforeUnmount(() => {
   font-size: 0.74rem;
   color: var(--sl-code-dim);
 }
+.cd-boot {
+  margin: auto;
+  font-size: 0.8rem;
+  color: var(--sl-code-dim);
+  text-align: center;
+}
 
 .cd-typing {
   display: inline-flex;
@@ -451,6 +595,37 @@ onBeforeUnmount(() => {
   opacity: 0.5;
 }
 
+/* ── quick-ask chips ── */
+.cd-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.55rem 0.85rem 0;
+  flex: none;
+}
+.cd-chip {
+  appearance: none;
+  font: 500 0.76rem/1 var(--vp-font-family-base);
+  color: var(--sl-code-text);
+  background: var(--sl-code-bg-2);
+  border: 1px solid var(--sl-code-border);
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.16s, background-color 0.16s, color 0.16s;
+}
+.cd-chip:hover:not(:disabled) {
+  border-color: var(--sl-cyan);
+  color: var(--sl-cyan-strong);
+  background: color-mix(in oklab, var(--sl-cyan) 10%, var(--sl-code-bg-2));
+}
+.cd-chip:focus-visible {
+  outline: 2px solid var(--sl-cyan-bright);
+  outline-offset: 2px;
+}
+.cd-chip:disabled { opacity: 0.5; cursor: default; }
+
+/* ── composer ── */
 .cd-composer {
   display: flex;
   align-items: center;
@@ -458,43 +633,48 @@ onBeforeUnmount(() => {
   padding: 0.7rem 0.85rem;
   border-top: 1px solid var(--sl-code-border);
   background: var(--sl-code-bg-2);
+  flex: none;
 }
 .cd-composer__field {
   flex: 1;
-  display: inline-flex;
-  align-items: center;
-  padding: 0.5rem 0.7rem;
+  min-width: 0;
+  padding: 0.55rem 0.7rem;
   border-radius: 9px;
   background: var(--sl-code-bg);
   border: 1px solid var(--sl-code-border);
-  font-size: 0.82rem;
-  color: var(--sl-code-dim);
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--sl-code-text);
 }
-.cd-caret {
-  width: 1px;
-  height: 0.95em;
-  margin-left: 2px;
-  background: var(--sl-cyan-bright);
+.cd-composer__field::placeholder { color: var(--sl-code-dim); }
+.cd-composer__field:focus-visible {
+  outline: none;
+  border-color: var(--sl-cyan);
 }
+.cd-composer__field:disabled { opacity: 0.6; }
 .cd-composer__send {
-  padding: 0.5rem 0.95rem;
+  flex: none;
+  padding: 0.55rem 0.95rem;
+  border: 0;
   border-radius: 9px;
   font-size: 0.82rem;
   font-weight: 700;
   color: var(--sl-on-cyan);
   background: var(--sl-cyan-bright);
+  cursor: pointer;
+  transition: filter 0.16s, opacity 0.16s;
 }
+.cd-composer__send:hover:not(:disabled) { filter: brightness(1.08); }
+.cd-composer__send:focus-visible { outline: 2px solid var(--sl-cyan-bright); outline-offset: 2px; }
+.cd-composer__send:disabled { opacity: 0.45; cursor: default; }
 
 /* ── motion ── */
 @media (prefers-reduced-motion: no-preference) {
   .cd-row {
     animation: cd-in 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
-  .cd-dot {
+  .cd-dot:not(.off) {
     animation: cd-pulse 2.2s ease-out infinite;
-  }
-  .cd-caret {
-    animation: cd-blink 1.1s step-end infinite;
   }
   .cd-typing i {
     animation: cd-think 1.1s ease-out infinite;
@@ -511,7 +691,6 @@ onBeforeUnmount(() => {
   70% { box-shadow: 0 0 0 7px transparent; }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
-@keyframes cd-blink { 50% { opacity: 0; } }
 @keyframes cd-think {
   0%, 100% { opacity: 0.35; transform: scale(0.82); }
   50% { opacity: 1; transform: scale(1); }
@@ -522,6 +701,6 @@ onBeforeUnmount(() => {
   .cd {
     grid-template-columns: minmax(0, 1fr);
   }
-  .cd-app { min-height: clamp(340px, 90vw, 420px); }
+  .cd-app { height: clamp(420px, 120vw, 500px); }
 }
 </style>

@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@super-line/client": "workspace:*",
+    "@super-line/collections-memory": "workspace:*",
     "@super-line/core": "workspace:*",
+    "@super-line/plugin-chat": "workspace:*",
     "@super-line/server": "workspace:*",
     "@super-line/transport-loopback": "workspace:*",
     "zod": "^3.24.1"

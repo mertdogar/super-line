@@ -35,9 +35,15 @@ importers:
       '@super-line/client':
         specifier: workspace:*
         version: link:../packages/client
+      '@super-line/collections-memory':
+        specifier: workspace:*
+        version: link:../packages/collections-memory
       '@super-line/core':
         specifier: workspace:*
         version: link:../packages/core
+      '@super-line/plugin-chat':
+        specifier: workspace:*
+        version: link:../packages/plugin-chat
       '@super-line/server':
         specifier: workspace:*
         version: link:../packages/server

@@ -385,9 +385,11 @@ onBeforeUnmount(() => {
         </div>
 
         <p class="sl-real sl-chat-real">
-          Real: <code>examples/collections-chat</code> — a Slack-like app built
-          entirely on this plugin, with a live LLM agent in an
-          <code>#ask-ai</code> channel.
+          That panel is <strong>live</strong>: the real plugin running in this tab
+          over the loopback transport — every message you send is a typed request,
+          and the agent replies through the same server-authoritative API. The full
+          app (with a real LLM agent) is
+          <code>examples/collections-chat</code>.
           <a :href="withBase('/how-to/plugin-chat')">Chat plugin →</a>
         </p>
       </div>

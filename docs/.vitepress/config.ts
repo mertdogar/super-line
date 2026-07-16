@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitepress'
 import llmstxt, { copyOrDownloadAsMarkdownButtons } from 'vitepress-plugin-llms'
 import typedocSidebar from '../reference/typedoc-sidebar.json'
@@ -31,6 +32,14 @@ export default defineConfig({
   },
   vite: {
     plugins: [llmstxt({ domain: 'https://super-line.dogar.biz' })],
+    resolve: {
+      // The in-page ChatDemo runs the real plugin-chat server; its dist imports
+      // `randomUUID` from Node's `crypto`. Point that at a browser shim.
+      alias: {
+        crypto: fileURLToPath(new URL('./shims/crypto.ts', import.meta.url)),
+        'node:crypto': fileURLToPath(new URL('./shims/crypto.ts', import.meta.url)),
+      },
+    },
     build: {
       // The ClusterDemo runs a real super-line server in-browser. The server's
       // getContract() (inspector-only, never called here) lazily pulls the

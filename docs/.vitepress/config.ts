@@ -98,6 +98,7 @@ export default defineConfig({
           items: [
             { text: 'Authenticate & assign roles', link: '/how-to/roles-auth' },
             { text: 'Add authentication (plugin)', link: '/how-to/plugin-auth' },
+            { text: 'Add a chat backbone (plugin)', link: '/how-to/plugin-chat' },
             { text: 'Hook the connection lifecycle', link: '/how-to/middleware-lifecycle' },
             { text: 'Handle errors', link: '/how-to/errors' },
             { text: 'Query presence & topology', link: '/how-to/introspection-and-presence' },
@@ -170,6 +171,7 @@ export default defineConfig({
           items: [
             { text: 'Plugin catalog', link: '/plugins/' },
             { text: 'Authentication', link: '/how-to/plugin-auth' },
+            { text: 'Chat backbone', link: '/how-to/plugin-chat' },
             { text: 'Control Center inspector', link: '/how-to/control-center' },
             { text: 'Super Harness', link: '/plugins/super-harness' },
           ],

@@ -1,124 +1,106 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { useLiveQuery } from '@tanstack/react-db'
-import { eq } from '@tanstack/db'
-import { Hash, Lock, Send } from 'lucide-react'
+import { useRef, useState, type KeyboardEvent } from 'react'
+import { Hash, Lock, Pencil, Send, Trash2, Users } from 'lucide-react'
 import { Avatar } from '@/components/avatar'
+import { MembersPanel } from '@/components/members-panel'
 import { Button } from '@/components/ui/button'
 import { ChatInput } from '@/components/ui/chat/chat-input'
 import { ChatMessageList } from '@/components/ui/chat/chat-message-list'
-import type { ReadState } from '@/hooks/use-read-state'
-import { useChat } from '@/lib/chat'
+import type { Channel, Message } from '@/contract'
+import { useChat, useMessages, useUsers } from '@/lib/chat'
 import { useRequest } from '@/lib/superline'
 import { cn } from '@/lib/utils'
 
 const GROUP_WINDOW = 5 * 60 * 1000 // group consecutive messages from the same author within 5 min
 
-// One denormalized feed row: the messages⋈users JOIN gives us the author's display name for free.
-interface FeedRow {
-  id: string
-  authorId: string
-  author: string
-  text: string
-  createdAt: number
-}
-
 interface ChannelViewProps {
   myUserId: string
-  channelId: string
-  channelName: string
+  channel: Channel
   isMember: boolean
   typingUsers: string[]
-  markRead: ReadState['markRead']
 }
 
-export function ChannelView({
-  myUserId,
-  channelId,
-  channelName,
-  isMember,
-  typingUsers,
-  markRead,
-}: ChannelViewProps): React.JSX.Element {
-  const { users, messages, send, join } = useChat()
+export function ChannelView({ myUserId, channel, isMember, typingUsers }: ChannelViewProps): React.JSX.Element {
+  const chat = useChat()
+  const users = useUsers()
+  const messages = useMessages(channel.id) // live, membership-scoped: empty until you join
   const [joining, setJoining] = useState(false)
+  const [showMembers, setShowMembers] = useState(false)
 
-  // THE headline: a client-side JOIN of two synced collections, denormalizing the author's name onto each
-  // message. `messages` is already limited to your joined channels by row-level security; this narrows to
-  // the active one. When you're not a member, the collection carries no rows for it → the feed is empty and
-  // we show the join gate instead.
-  const { data, isLoading } = useLiveQuery(
-    (q) =>
-      q
-        .from({ m: messages })
-        .join({ u: users }, ({ m, u }) => eq(u.id, m.authorId), 'inner')
-        .where(({ m }) => eq(m.channelId, channelId))
-        .orderBy(({ m }) => m.createdAt, 'asc')
-        .select(({ m, u }) => ({
-          id: m.id,
-          authorId: m.authorId,
-          author: u.displayName,
-          text: m.text,
-          createdAt: m.createdAt,
-        })),
-    [messages, users, channelId],
-  )
-  const items = data as FeedRow[]
-  const latestAt = items.length ? items[items.length - 1]!.createdAt : 0
-
-  // viewing a channel marks it read up to its newest message
-  useEffect(() => {
-    if (isMember && latestAt) markRead(channelId, latestAt)
-  }, [isMember, channelId, latestAt, markRead])
-
-  const { call: ping } = useRequest('typing')
+  const nameOf = (userId: string): string => users.get(userId)?.displayName ?? 'unknown'
 
   const handleJoin = (): void => {
     setJoining(true)
-    join(channelId)
+    chat
+      .join(channel.id)
       .catch(() => {})
       .finally(() => setJoining(false))
   }
 
+  const { call: ping } = useRequest('typing')
+
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-background">
       <header className="flex items-center gap-2 border-b px-4 py-3 shadow-sm">
-        {isMember ? <Hash className="h-5 w-5 text-muted-foreground" /> : <Lock className="h-5 w-5 text-muted-foreground" />}
-        <h2 className="font-bold text-foreground">{channelName}</h2>
-        {isMember && <span className="text-sm text-muted-foreground">· {items.length} messages</span>}
+        {channel.visibility === 'private' ? (
+          <Lock className="h-5 w-5 text-muted-foreground" />
+        ) : (
+          <Hash className="h-5 w-5 text-muted-foreground" />
+        )}
+        <h2 className="font-bold text-foreground">{channel.name}</h2>
+        {isMember && <span className="text-sm text-muted-foreground">· {messages.length} messages</span>}
+        <div className="ml-auto">
+          {isMember && (
+            <Button variant="ghost" size="sm" onClick={() => setShowMembers((s) => !s)}>
+              <Users className="mr-1 h-4 w-4" /> Members
+            </Button>
+          )}
+        </div>
       </header>
 
-      {!isMember ? (
-        <JoinGate channelName={channelName} pending={joining} onJoin={handleJoin} />
-      ) : isLoading ? (
-        <div className="grid flex-1 place-items-center text-sm text-muted-foreground">connecting…</div>
-      ) : items.length === 0 ? (
-        <Empty channelName={channelName} />
-      ) : (
-        <ChatMessageList className="flex-1">
-          <MessageRows items={items} myUserId={myUserId} />
-        </ChatMessageList>
-      )}
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          {!isMember ? (
+            <JoinGate channel={channel} pending={joining} onJoin={handleJoin} />
+          ) : messages.length === 0 ? (
+            <Empty channelName={channel.name} />
+          ) : (
+            <ChatMessageList className="flex-1">
+              <MessageRows
+                items={messages}
+                myUserId={myUserId}
+                nameOf={nameOf}
+                onEdit={(id, content) => void chat.editMessage(id, { content }).catch(() => {})}
+                onDelete={(id) => void chat.deleteMessage(id).catch(() => {})}
+              />
+            </ChatMessageList>
+          )}
 
-      {isMember && (
-        <>
-          <TypingIndicator users={typingUsers} />
-          <Composer
-            channelName={channelName}
-            onSend={(text) => send(channelId, text)}
-            onType={() => void ping({ channel: channelId }).catch(() => {})}
-          />
-        </>
-      )}
+          {isMember && (
+            <>
+              <TypingIndicator users={typingUsers} />
+              <Composer
+                channelName={channel.name}
+                onSend={(text) => void chat.send(channel.id, text).catch(() => {})}
+                onType={() => void ping({ channelId: channel.id }).catch(() => {})}
+              />
+            </>
+          )}
+        </div>
+
+        {isMember && showMembers && (
+          <MembersPanel channel={channel} myUserId={myUserId} onClose={() => setShowMembers(false)} />
+        )}
+      </div>
     </section>
   )
 }
 
 function JoinGate({
-  channelName,
+  channel,
   pending,
   onJoin,
 }: {
-  channelName: string
+  channel: Channel
   pending: boolean
   onJoin: () => void
 }): React.JSX.Element {
@@ -128,19 +110,31 @@ function JoinGate({
         <Lock className="h-6 w-6" />
       </div>
       <div>
-        <h3 className="text-xl font-bold">#{channelName}</h3>
+        <h3 className="text-xl font-bold">#{channel.name}</h3>
         <p className="max-w-sm text-sm text-muted-foreground">
           You're not in this channel yet. Its messages are hidden by row-level security until you join.
         </p>
       </div>
       <Button onClick={onJoin} disabled={pending}>
-        {pending ? 'Joining…' : `Join #${channelName}`}
+        {pending ? 'Joining…' : `Join #${channel.name}`}
       </Button>
     </div>
   )
 }
 
-function MessageRows({ items, myUserId }: { items: FeedRow[]; myUserId: string }): React.JSX.Element {
+function MessageRows({
+  items,
+  myUserId,
+  nameOf,
+  onEdit,
+  onDelete,
+}: {
+  items: Message[]
+  myUserId: string
+  nameOf: (id: string) => string
+  onEdit: (id: string, content: string) => void
+  onDelete: (id: string) => void
+}): React.JSX.Element {
   const rows: React.ReactNode[] = []
   let lastDay = ''
   let lastFrom = ''
@@ -155,7 +149,17 @@ function MessageRows({ items, myUserId }: { items: FeedRow[]; myUserId: string }
       lastAt = 0
     }
     const grouped = m.authorId === lastFrom && m.createdAt - lastAt < GROUP_WINDOW
-    rows.push(<MessageRow key={m.id} m={m} grouped={grouped} mine={m.authorId === myUserId} />)
+    rows.push(
+      <MessageRow
+        key={m.id}
+        m={m}
+        author={nameOf(m.authorId)}
+        grouped={grouped}
+        mine={m.authorId === myUserId}
+        onEdit={onEdit}
+        onDelete={onDelete}
+      />,
+    )
     lastFrom = m.authorId
     lastAt = m.createdAt
   }
@@ -163,7 +167,35 @@ function MessageRows({ items, myUserId }: { items: FeedRow[]; myUserId: string }
   return <>{rows}</>
 }
 
-function MessageRow({ m, grouped, mine }: { m: FeedRow; grouped: boolean; mine: boolean }): React.JSX.Element {
+function MessageRow({
+  m,
+  author,
+  grouped,
+  mine,
+  onEdit,
+  onDelete,
+}: {
+  m: Message
+  author: string
+  grouped: boolean
+  mine: boolean
+  onEdit: (id: string, content: string) => void
+  onDelete: (id: string) => void
+}): React.JSX.Element {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+
+  const startEdit = (): void => {
+    setDraft(text)
+    setEditing(true)
+  }
+  const commit = (): void => {
+    const next = draft.trim()
+    setEditing(false)
+    if (next && next !== text) onEdit(m.id, next)
+  }
+
   return (
     <div className={cn('group flex gap-3 px-4 hover:bg-muted/60', grouped ? 'py-0.5' : 'mt-3 py-0.5')}>
       <div className="w-9 shrink-0">
@@ -172,21 +204,66 @@ function MessageRow({ m, grouped, mine }: { m: FeedRow; grouped: boolean; mine: 
             {timeShort(m.createdAt)}
           </span>
         ) : (
-          <Avatar name={m.author} size={36} />
+          <Avatar name={author} size={36} />
         )}
       </div>
       <div className="min-w-0 flex-1">
         {!grouped && (
           <div className="flex items-baseline gap-2">
             <span className="font-semibold text-foreground">
-              {m.author}
+              {author}
               {mine && <span className="ml-1 text-xs font-normal text-muted-foreground">(you)</span>}
             </span>
             <span className="text-xs text-muted-foreground">{timeLong(m.createdAt)}</span>
           </div>
         )}
-        <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-foreground">{m.text}</div>
+        {editing ? (
+          <div className="mt-1 flex items-end gap-2">
+            <ChatInput
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  commit()
+                }
+                if (e.key === 'Escape') setEditing(false)
+              }}
+              className="h-auto max-h-40 min-h-[36px] resize-none"
+            />
+            <Button size="sm" onClick={commit}>
+              Save
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-foreground">
+            {text}
+            {m.editedAt && <span className="ml-1 text-xs text-muted-foreground">(edited)</span>}
+          </div>
+        )}
       </div>
+      {mine && !editing && (
+        <div className="hidden shrink-0 items-start gap-1 group-hover:flex">
+          <button
+            onClick={startEdit}
+            aria-label="Edit message"
+            className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => onDelete(m.id)}
+            aria-label="Delete message"
+            className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }

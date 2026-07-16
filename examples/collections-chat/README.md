@@ -1,26 +1,22 @@
 # collections-chat
 
-A Slack-like chat app built on super-line **Collections** (ADR-0006) — the relational successor to the
-LWW document [Store](../../packages/store-memory). Channels, memberships, users and message history are
-**typed rows declared on the contract**, and the client uses [TanStack DB](https://tanstack.com/db) as its
-query engine for the `messages ⋈ users` join and optimistic writes. A Vite + React 19 + Tailwind v4 +
-shadcn/ui front end (the [shadcn-chat](https://shadcn-chat.vercel.app) blocks).
+A Slack-like chat app built entirely on **[`@super-line/plugin-chat`](../../packages/plugin-chat)** — the
+chat backbone plugin — with identity from **[`@super-line/plugin-auth`](../../packages/plugin-auth)** and a
+live **LLM agent** you can talk to. Channels, membership control, and messages are typed collections the
+plugin owns; this app is mostly UI plus a little presence/typing garnish.
 
-This is the collections counterpart to [`advanced-chat-app`](../advanced-chat-app) (same UI, built on the
-durable `store-sqlite`). Read them side by side to see the two models.
+A Vite + React 19 + Tailwind v4 + shadcn/ui front end (the [shadcn-chat](https://shadcn-chat.vercel.app)
+blocks). Durable to `collections-chat.db` (gitignored, [`@super-line/collections-sqlite`](../../packages/collections-sqlite)).
 
-**The headline:** super-line is the server-authoritative **sync source**; TanStack DB is the client
-**query engine**. Four collections model the whole app, and **row-level security** is enforced
-server-side — you only ever read messages in channels you've joined, and you can only post as yourself.
+**The headline:** the whole chat model — public/private channels, owner/member roles, send/edit/delete —
+comes from the plugin. The app declares only the ephemeral presence/typing signals, proving host-land
+garnish still composes on a plugin backbone.
 
 ```ts
-// on the contract — the server validates every row and types flow end-to-end
-collections: {
-  users:       { schema: { id, name },                          key: 'id' },
-  channels:    { schema: { id, name, createdAt },               key: 'id' },
-  memberships: { schema: { id, userId, channelId },             key: 'id', references: { userId: 'users', channelId: 'channels' } },
-  messages:    { schema: { id, channelId, authorId, text, createdAt }, key: 'id', references: { authorId: 'users', channelId: 'channels' } },
-}
+// the entire durable model is two plugins on the contract
+plugins: [authContract(), chatContract()]
+// → collections: users, credentials, sessions, channels, memberships, messages
+// → requests:     signIn/signUp/…, createChannel/join/addMember/sendMessage/editMessage/…
 ```
 
 ## Run it
@@ -30,79 +26,68 @@ pnpm install            # from the repo root (builds the better-sqlite3 native m
 pnpm --filter @super-line/example-collections-chat dev
 ```
 
-- web: http://localhost:5173 — enter a display name (or open `?name=ada`)
+- web: http://localhost:5173 — sign up with an email + password (identity is real, via plugin-auth)
 - server: `ws://localhost:8791`
 
-Open a second window as a different user (`?name=bob`) to see live messages, presence and typing. The
-workspace persists to `examples/collections-chat/collections-chat.db` (gitignored,
-[`@super-line/collections-sqlite`](../../packages/collections-sqlite)) — **stop and restart the server and
-your channels, memberships + history are still there.** Delete `collections-chat.db` to reset.
+Open a second window as a different user to see live messages, presence, and typing. The workspace
+persists — restart the server and your channels, memberships, and history are still there. Delete
+`collections-chat.db` to reset.
 
-### Try the row-level security
+### Talk to the AI agent
 
-- Every channel is listed in the sidebar (the `channels` collection is world-readable), but the ones you
-  haven't joined show a **🔒 lock** — click one and you get a *"Join to see the conversation"* gate. Its
-  messages never crossed the wire.
-- **Join** it and the backlog streams in; **leave** and it vanishes. This is enforced by the server, not
-  the UI — watch it in the Control Center.
-- Posting a message is **optimistic** (it appears instantly). The author-only + member-only write policy
-  means you can't post as someone else or into a channel you haven't joined — an illegal write rolls back.
+Every new user is dropped into **#ask-ai**, where a bot named **Ask AI** replies. The bot is a *genuine
+user*: the server provisions it (`authKit.users.create` + `authKit.apiKeys.create`) and runs it as a
+headless client connecting over WebSocket with its own API key — its messages are ordinary wire traffic
+you can watch in the Control Center.
+
+By default it replies with canned offline messages (no setup needed). To give it a real brain, copy
+`.env.example` to `.env` and add a [Vercel AI Gateway](https://vercel.com/ai-gateway) key:
+
+```bash
+# examples/collections-chat/.env
+AI_GATEWAY_API_KEY=your_key
+# MODEL=anthropic/claude-sonnet-5   # optional; any Gateway "provider/model" string
+```
+
+The agent uses the [Vercel AI SDK](https://ai-sdk.dev) — swap providers by changing the `MODEL` string.
+
+### Try the membership control
+
+- **Public vs private.** Create a channel and pick **Public** (anyone finds + joins) or **Private**
+  (invisible to non-members; you're added by an owner). A private channel you don't belong to never appears
+  and its messages never cross the wire.
+- **Roles.** The creator is the **owner**. Open the **Members** panel — as an owner you can add people,
+  remove them, and promote/demote between owner and member. Try to remove the last owner and the server
+  refuses with a conflict.
+- **Edit / delete.** Hover your own messages to edit or delete them (author-only, enforced server-side).
+- Every action is a **server-authoritative request** — tamper with the client and you just get `FORBIDDEN`.
 
 ### Inspect live traffic (Control Center)
-
-The server enables the inspector (`plugins: [inspector()]`), so you can watch every request, response,
-event and collection change in real time — and browse the collection schema graph + rows — with the
-[Control Center](../../packages/control-center):
 
 ```bash
 pnpm --filter @super-line/example-collections-chat inspector
 ```
 
-It builds the Control Center, serves it on http://localhost:7777 and opens it pointed at this server
-(`ws://localhost:8791`). Open the **Collections** view to see the `users ← messages → channels ← memberships`
-schema graph and browse rows; open the **live feed** to watch `csub`/`cbat`/`cchg` frames as you chat.
+Builds the [Control Center](../../packages/control-center), serves it on http://localhost:7777, and points
+it at this server. Open **Collections** for the `users ← messages → channels ← memberships` schema graph,
+and the **live feed** to watch the chat requests + `cchg` frames as you (and the agent) chat.
 
 ## How it works
 
-**Collections replace the Store as the durable read-model, and clients write rows directly.** There are no
-`send`/`createChannel` request handlers — the server is just **row policies** + a couple of seed co-writes.
+**The plugin owns the durable model; the app owns the UI and the garnish.**
 
-- **Identity.** Your display name maps to a stable `userId` (`slug(name)`), so your messages and
-  memberships stick to you across reloads. The server upserts your `users` row and auto-joins `#general`
-  on connect. `identify()` returns your `userId` — the principal every policy checks.
-- **Writes are optimistic collection mutations.** Sending a message, creating a channel, and join/leave are
-  all TanStack DB row writes (`messages.insert(...)`, `memberships.insert(...)`), mapped to atomic
-  super-line batches by the [`@super-line/tanstack-db`](../../packages/tanstack-db) adapter. The server
-  authorizes each with a **write policy** and rolls back the optimistic row on denial.
-- **Reads are row-level-secured.** `messages.read = async (p) => isIn('channelId', await memberChannels(p))`
-  — a policy that itself **queries the memberships collection**. It's ANDed into every snapshot *and* every
-  live change, server-side.
-- **The client join is TanStack DB.** `useLiveQuery` joins the synced `messages` collection with `users` to
-  denormalize the author's name onto each message — the join runs on the client, over server-secured data.
-
-### How RLS re-subscribes on join (the one subtle bit)
-
-A read policy is evaluated at **subscribe time** and cached per connection, so it can go stale when your
-membership changes. The client handles this without any manual re-subscribe wiring:
-
-1. Join/leave write the `memberships` collection **non-optimistically** — the row appears only once the
-   server confirms it.
-2. `myChannelIds` is derived from those *confirmed* rows, so it only moves after the server agrees.
-3. The `messages` collection is filtered by `myChannelIds`; when that set changes, the collection is
-   re-created — a fresh subscription that makes the server re-evaluate the policy against your new
-   membership. The just-joined channel's backlog streams in; a left channel's rows drop out.
-
-The server independently enforces the same policy, so the client filter is only what *drives* the
-re-subscribe — never what secures the data.
-
-**Presence and typing stay ephemeral topics** (they aren't rows) — the durable/ephemeral split is explicit:
-collections for state, topics for signals.
-
-## Files
-
-- `src/contract.ts` — the four collections + the ephemeral presence/typing topics
-- `src/server.ts` — the super-line server: `collections-sqlite`, row-level-security `policies`, seed co-writes
-- `src/lib/chat.tsx` — the TanStack DB collections + the `useChat()` provider (writes + the RLS re-subscribe)
-- `src/lib/identity.ts` — `slug`/`memId`, shared by server + browser so both compute the same ids
-- `src/components/` — the Slack UI (sidebar directory, channel view + join gate, composer, create-channel dialog)
-- `src/components/ui/` — shadcn primitives + the shadcn-chat blocks
+- **Identity** — plugin-auth. Sign-up/login, sessions, the `users` directory; `identify()` returns your
+  `userId`, the principal plugin-chat's read policies key on.
+- **The chat model** — plugin-chat. Its `chatKit.plugin` ships the row policies (read = membership-scoped
+  RLS; write = deny) and the 11 request handlers. This app has **no** channel/message policies or handlers
+  of its own — see [`src/server.ts`](src/server.ts).
+- **Every mutation is a request**, not an optimistic row-write ([ADR-0010](../../docs/adr/0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md)).
+  The server owns ids and timestamps, and a `sendMessage` **hook** trims + rejects empty bodies for humans
+  and the agent alike.
+- **The client is `chatClient`** ([`src/lib/chat.tsx`](src/lib/chat.tsx)) — no TanStack dependency. It owns
+  the re-subscribe-on-membership-change mechanic, so joining a channel streams its backlog into an already-
+  open store with no manual wiring. React bindings (`useChannels`/`useMembers`/`useMessages`) come from
+  `@super-line/plugin-chat/react`; the app reads the world-readable `users` directory directly for author
+  names.
+- **The agent** ([`src/agent.ts`](src/agent.ts)) is the same `chatClient` a human uses — the plugin has one
+  client surface for browsers and headless agents alike.

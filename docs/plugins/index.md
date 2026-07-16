@@ -23,6 +23,16 @@ sessions, API keys, JWTs, and data-driven roles. Its contract fragment,
 server plugin, and client helpers keep authentication on the same
 server-authoritative connection as your application.
 
+### Chat backbone
+
+**First-party · Application backbone**
+
+[`@super-line/plugin-chat`](/how-to/plugin-chat) adds channels (public and
+private), owner/member membership control, and messages (send, edit, delete) as
+typed collections. Every mutation is a server-authoritative, hookable request,
+and it ships an imperative server API so agents and back-office code drive the
+same model as clients. Requires [`@super-line/plugin-auth`](/how-to/plugin-auth).
+
 ### Control Center inspector
 
 **First-party · Observability**

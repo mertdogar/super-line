@@ -435,6 +435,41 @@ Notes:
 - **Login is a reconnect, not an upgrade.** A connection's role is frozen at connect, so `signIn`/`signUp` tear down the guest socket and reconnect as `authedRole` with `params: { token }`. Token persisted at `superline.auth.token`; `authClient` hides the guest↔authed swap.
 - **Handshake precedence in `authenticate`:** `role === 'guest'` → guest; else `params.apiKey` (`slp_…`, one fixed role, stateful + revocable); else `params.jwt` (only if `jwt.secret` set — stateless, unrevocable pre-expiry); else `params.token` (session). Token/JWT paths throw `BAD_REQUEST` if no role requested, `FORBIDDEN` if the role isn't granted.
 - `getToken()` throws `BAD_REQUEST` unless the server enabled `jwt`. `createApiKey` returns the raw `slp_…` value **once** and requires you already hold the requested role. `revoke(userId)` deletes sessions + disconnects cluster-wide but does NOT revoke API keys (do those per-key). `requestPasswordReset` is a silent no-op without `sendPasswordReset` and always returns `{ ok: true }` (never leaks email existence); `confirmPasswordReset` flushes all the user's sessions.
+- **Imperative server management** (on `AuthServer`, for provisioning users + agents from server code — all require the running server): `authKit.users.get/find/create/update/setRoles/deactivate/reactivate/setPassword` and `authKit.apiKeys.create/listFor/revoke`. `users.create({ email, password?, displayName, roles?, metadata? })` — omit `password` for the **invite flow** (unclaimed until a password reset). Users **soft-delete**: `deactivate(id)` stamps `deletedAt` (the `users` row gains optional `deletedAt` + `metadata`), flushes sessions/keys/reset-tokens, kicks live connections, and blocks all three auth paths; `reactivate(id)` restores. `apiKeys.create(userId, { role, label, expiresInMs? })` mints an agent's key server-side (raw `slp_…` returned once). This is how you provision an **AI-agent user** for `@super-line/plugin-chat`.
+
+## @super-line/plugin-chat
+
+A reusable **chat backbone** as a paired plugin — channels (public/private), owner/member membership control, and messages (send/edit/delete) as typed collections. Subpaths: `.` (contract) · `/server` · `/client` · `/react`. **Requires `@super-line/plugin-auth`** (identity + the `users` directory the FKs reference). Design: every mutation is a server-authoritative, hookable **request**; collections are client-read-only (ADR-0010).
+
+```ts
+// . (contract half) — generic over the message body (default z.string())
+chatContract<S>(opts?: { content?: S }): ContractPlugin   // adds channels/memberships/messages + 11 shared requests
+// plugins: [authContract(), chatContract()]  OR  chatContract({ content: myZodSchema })
+// schemas/types: channelSchema/membershipSchema/messageSchema, ChatChannel/ChatMembership/ChatMessage, memId(channelId,userId)
+
+// /server — factory is `chat`; bind to `chatKit`
+chat<C>(opts: { contract: C; hooks?: ChatHooks }): ChatServer   // throws at startup if the contract lacks the auth+chat fragments
+// hooks wrap DOMAIN cores → fire for client requests AND imperative chatKit calls, with an initiator { kind:'client',userId } | { kind:'server' }
+//   ChatOpHook<In,Out> = { before?(input,initiator)→In|void (transform or throw-to-veto); after?(result,initiator) (throw propagates, write stays) }
+//   hook keys: createChannel/updateChannel/deleteChannel/joinChannel/leaveChannel/addMember/removeMember/setMemberRole/sendMessage/editMessage/deleteMessage
+interface ChatServer {
+  plugin: SuperLinePlugin            // read-RLS/write-deny policies + the 11 request handlers
+  channels: { create({name,visibility?,owner?,metadata?}) / get / find({filter?,limit?,offset?}) / update / delete(cascades) }
+  members:  { add(channelId,userId,{role?}) / remove / setRole / of(channelId) / channelsOf(userId) }
+  messages: { send({channelId,authorId,content,metadata?}) / edit / delete / find({filter?,orderBy?,limit?,offset?}) }
+}
+
+// /client — NO TanStack/React dependency; owns the membership-driven re-subscribe mechanic. Agents use this too.
+chatClient<C,R>(client, opts?: { userId?: string|null; messageLimit?: number }): ChatClient<C>
+//   request methods: createChannel/updateChannel/deleteChannel/join/leave/addMember/removeMember/setMemberRole/send/editMessage/deleteMessage
+//   live stores: channels() / members(channelId) / messages(channelId,{limit?})  → each { rows(), subscribe(cb), ready, close() }
+
+// /react
+createChatHooks<C>(): { ChatProvider, useChat, useChannels, useMembers, useMessages }
+//   <ChatProvider chat={chatClient(client,{userId})}>…</ChatProvider>
+```
+
+Rules: **public** channels are self-service join/leave; **private** are add-by-owner and answer `NOT_FOUND` to a non-member's `joinChannel` (anti-probing). Creator is the first `owner`; owners manage membership + rename/delete. **Last-owner protection**: leave/remove/demote throws `CONFLICT` if it would leave members with zero owners. Messages **hard-delete**; edit stamps `editedAt`. Membership is required for EVERY send (server included) — add an agent to a channel before it posts. **AI agents = regular users**: provision via `authKit.users.create` (no password) + `authKit.apiKeys.create`, add to a channel, connect with `params: { apiKey }` and the same `chatClient`. Known v1 caveat: per-channel serialization is in-process, so under relay clustering requests on other nodes can still interleave (no cross-node CAS).
 
 ## Contract plugins (compile-time contract merge)
 

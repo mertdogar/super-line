@@ -1,73 +1,40 @@
 import { z } from 'zod'
 import { defineContract, type RowOf } from '@super-line/core'
 import { authContract } from '@super-line/plugin-auth'
+import { chatContract } from '@super-line/plugin-chat'
 
 /**
- * The wire contract. Unlike the store-based `advanced-chat-app`, the durable state here lives in typed
- * COLLECTIONS declared on the contract (ADR-0006): the server validates every row write and both ends
- * share end-to-end types. super-line is the server-authoritative sync source; TanStack DB is the client
- * query engine (joins + optimistic mutations). Row-level security lives in the server's `policies`.
+ * The wire contract. The durable chat model — channels, memberships, messages — comes ENTIRELY from
+ * `@super-line/plugin-chat`: `chatContract()` merges those three collections and the 11 mutation
+ * requests (createChannel/join/addMember/sendMessage/…) into this contract, so the server validates
+ * every write and both ends share end-to-end types. Identity comes from `@super-line/plugin-auth`.
  *
- * Four collections model the whole app — no `send`/`createChannel` requests: those are optimistic row
- * writes now. Only the ephemeral `presence`/`typing` signals stay as requests + topics (they aren't rows).
+ * All this app declares itself is the ephemeral, non-durable garnish that isn't rows — presence and
+ * typing — proving host-land signals still compose cleanly on top of a plugin backbone.
  */
 export const chat = defineContract({
-  collections: {
-    // The public channel directory — every channel is visible so you can discover + join it.
-    // (The `users` directory is provided by @super-line/plugin-auth via `plugins` below.)
-    channels: {
-      schema: z.object({ id: z.string(), name: z.string(), createdAt: z.number() }),
-      key: 'id',
-    },
-    // Which channels a user has joined. Read-your-own + write-your-own (self-service join/leave). The
-    // messages read policy resolves your visible channels from these rows.
-    memberships: {
-      schema: z.object({ id: z.string(), userId: z.string(), channelId: z.string() }),
-      key: 'id',
-      references: { userId: 'users', channelId: 'channels' },
-    },
-    // The messages. Read is row-level-secured to your joined channels; write is author-only.
-    messages: {
-      schema: z.object({
-        id: z.string(),
-        channelId: z.string(),
-        authorId: z.string(),
-        text: z.string(),
-        createdAt: z.number(),
-      }),
-      key: 'id',
-      references: { authorId: 'users', channelId: 'channels' },
-    },
-  },
   roles: {
     user: {
       clientToServer: {
-        // called once on mount to seed the current presence list (topics aren't retained, so a
-        // late subscriber would otherwise miss the current value until the next change)
+        // seed the current presence list on mount (topics aren't retained)
         hello: { input: z.void(), output: z.object({ users: z.array(z.string()) }) },
-        // fire-and-forget-ish: the client pings this while typing; the server rebroadcasts.
-        typing: {
-          input: z.object({ channel: z.string() }),
-          output: z.object({ ok: z.boolean() }),
-        },
+        // the client pings this while typing; the server rebroadcasts per channel
+        typing: { input: z.object({ channelId: z.string() }), output: z.object({ ok: z.boolean() }) },
       },
       serverToClient: {
         // who is connected right now (workspace-wide), as a sorted list of names
         presence: { payload: z.object({ users: z.array(z.string()) }), subscribe: true },
         // who is currently typing, per channel: { [channelId]: [name, ...] }
-        typing: {
-          payload: z.object({ byChannel: z.record(z.string(), z.array(z.string())) }),
-          subscribe: true,
-        },
+        typing: { payload: z.object({ byChannel: z.record(z.string(), z.array(z.string())) }), subscribe: true },
       },
     },
   },
-  // @super-line/plugin-auth: adds the `guest` role, the users/credentials/sessions collections, and
-  // signIn/signUp/signOut/whoami — merged into this contract so the server + both clients share the types.
-  plugins: [authContract()],
+  // plugin-auth: guest role + users/credentials/sessions collections + signIn/signUp/signOut/whoami.
+  // plugin-chat: channels/memberships/messages collections + the chat mutation requests (default text body).
+  plugins: [authContract(), chatContract()],
 })
 
-/** Typed rows, derived from the contract collections — one source of truth for server + client. */
+/** Typed rows, derived from the merged contract — one source of truth for server + client. */
 export type User = RowOf<typeof chat, 'users'>
 export type Channel = RowOf<typeof chat, 'channels'>
 export type Membership = RowOf<typeof chat, 'memberships'>

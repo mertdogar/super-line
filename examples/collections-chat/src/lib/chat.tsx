@@ -1,122 +1,70 @@
-import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
-import { createCollection } from '@tanstack/db'
-import { useLiveQuery } from '@tanstack/react-db'
-import { isIn, SuperLineError } from '@super-line/core'
+import { createContext, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react'
+import { eq, type CollectionQuery } from '@super-line/core'
 import type { SuperLineClient } from '@super-line/client'
-import { superLineCollectionOptions } from '@super-line/tanstack-db'
-import { chat, type Membership } from '@/contract'
-import { memId, slug } from '@/lib/identity'
-import { useClient } from '@/lib/superline'
+import { chatClient, type ChatClient } from '@super-line/plugin-chat/client'
+import { createChatHooks } from '@super-line/plugin-chat/react'
+import { chat, type Membership, type User } from '@/contract'
 
 type Client = SuperLineClient<typeof chat, 'user'>
 
-// Small typed factories: one super-line-backed TanStack DB collection each. Using `ReturnType` for the
-// context field types keeps them exactly what `createCollection` infers (no generic-assignability dance).
-const usersCollection = (client: Client) => createCollection(superLineCollectionOptions(client, chat, 'users'))
-const channelsCollection = (client: Client) => createCollection(superLineCollectionOptions(client, chat, 'channels'))
-const membershipsCollection = (client: Client) =>
-  createCollection(superLineCollectionOptions(client, chat, 'memberships'))
-const messagesCollection = (client: Client, channelIds: string[]) => {
-  const config = superLineCollectionOptions(client, chat, 'messages', { query: { filter: isIn('channelId', channelIds) } })
-  // This collection is re-created whenever the joined-channel set changes (see ChatProvider). Give each
-  // instance a distinct id — two collections sharing the adapter's default `superline:messages` would
-  // collide in TanStack's registry during the swap.
-  return createCollection({ ...config, id: `superline:messages:${channelIds.join(',') || 'none'}` })
+// The plugin's React binding — `useChannels`/`useMembers`/`useMessages` over the chatClient (which owns
+// the membership-driven re-subscribe mechanic) + `useChat()` for the request methods (send/join/…).
+const binding = createChatHooks<typeof chat>()
+export const { useChat, useChannels, useMembers, useMessages } = binding
+
+// A tiny reactive view over any raw client collection — for the app-specific reads the chat plugin
+// doesn't wrap: the world-readable `users` directory (author names) and my own membership rows.
+function useLiveRows<Row>(client: Client, name: 'users' | 'memberships', query: CollectionQuery): Row[] {
+  const sub = useMemo(() => client.collection(name).subscribe(query) as { rows(): unknown; subscribe(cb: () => void): () => void; close(): void }, [client, name, query])
+  useEffect(() => () => sub.close(), [sub])
+  return useSyncExternalStore(sub.subscribe, () => sub.rows() as Row[], () => sub.rows() as Row[])
 }
 
-export interface ChatApi {
-  /** my user id (= slug of my display name) — the principal every row policy checks */
+interface ChatExtra {
   me: string
-  users: ReturnType<typeof usersCollection>
-  channels: ReturnType<typeof channelsCollection>
-  memberships: ReturnType<typeof membershipsCollection>
-  messages: ReturnType<typeof messagesCollection>
-  /** the channels I've joined, from my CONFIRMED membership rows */
-  myChannelIds: string[]
-  /** post a message optimistically (author-only write policy rolls it back if I cheat) */
-  send: (channelId: string, text: string) => void
-  /** create a channel and join it; returns the channel id */
-  createChannel: (name: string) => Promise<string>
-  join: (channelId: string) => Promise<void>
-  leave: (channelId: string) => Promise<void>
+  /** userId → user row, from the public directory (for author names + deactivated badges). */
+  users: Map<string, User>
+  /** my membership rows across all channels (own rows are a STABLE read filter — never goes deaf). */
+  myMemberships: Membership[]
+}
+const ExtraCtx = createContext<ChatExtra | null>(null)
+const EMPTY_QUERY: CollectionQuery = {}
+
+/**
+ * Wire the plugin chat client into React and add two app-level reads (users directory + my memberships).
+ * Rebuild it whenever the underlying super-line client swaps (login/logout) — the chatClient wraps ONE
+ * connection.
+ */
+export function ChatProvider({ client, me, children }: { client: Client; me: string; children: ReactNode }): ReactNode {
+  const chatCli = useMemo<ChatClient<typeof chat>>(() => chatClient(client, { userId: me }), [client, me])
+  useEffect(() => () => chatCli.close(), [chatCli])
+
+  const users = useLiveRows<User>(client, 'users', EMPTY_QUERY)
+  const myFilter = useMemo<CollectionQuery>(() => ({ filter: eq('userId', me) }), [me])
+  const myMemberships = useLiveRows<Membership>(client, 'memberships', myFilter)
+
+  const usersMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
+  const extra = useMemo<ChatExtra>(() => ({ me, users: usersMap, myMemberships }), [me, usersMap, myMemberships])
+
+  return (
+    <binding.ChatProvider chat={chatCli}>
+      <ExtraCtx.Provider value={extra}>{children}</ExtraCtx.Provider>
+    </binding.ChatProvider>
+  )
 }
 
-const ChatContext = createContext<ChatApi | null>(null)
-
-export function useChat(): ChatApi {
-  const ctx = useContext(ChatContext)
-  if (!ctx) throw new Error('useChat must be used inside <ChatProvider>')
+function useExtra(): ChatExtra {
+  const ctx = useContext(ExtraCtx)
+  if (!ctx) throw new Error('useExtra must be used inside <ChatProvider>')
   return ctx
 }
 
-const isConflict = (err: unknown): boolean => {
-  const e = err as { code?: string; message?: string } | undefined
-  return e?.code === 'CONFLICT' || /CONFLICT/i.test(e?.message ?? String(err))
-}
+export const useMe = (): string => useExtra().me
+export const useUsers = (): Map<string, User> => useExtra().users
+export const useMyMemberships = (): Membership[] => useExtra().myMemberships
 
-export function ChatProvider({ me, children }: { me: string; children: ReactNode }): React.JSX.Element {
-  const client = useClient()
-
-  // World-readable directories + my own membership rows. Stable for the life of the connection.
-  const users = useMemo(() => usersCollection(client), [client])
-  const channels = useMemo(() => channelsCollection(client), [client])
-  const memberships = useMemo(() => membershipsCollection(client), [client])
-
-  // My joined channels, from CONFIRMED membership rows. Join/leave write memberships NON-optimistically
-  // (below), so this set only moves once the server agrees — which is what keeps the messages
-  // re-subscribe below from ever racing ahead of the row policy.
-  const { data: myRows } = useLiveQuery((q) => q.from({ m: memberships }))
-  const myChannelIds = useMemo(
-    () => (myRows as Membership[]).map((m) => m.channelId).sort(),
-    [myRows],
-  )
-  const channelKey = myChannelIds.join(',')
-
-  // Re-created whenever my channel set changes. A fresh subscription makes the server re-evaluate the async
-  // messages read policy against my current membership, streaming in a just-joined channel's backlog (and
-  // dropping a left one's). The server enforces the same policy — this client filter just drives the re-sub.
-  const messages = useMemo(
-    () => messagesCollection(client, myChannelIds),
-    // channelKey stands in for myChannelIds (a fresh array each render)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [client, channelKey],
-  )
-  useEffect(() => () => void messages.cleanup(), [messages]) // stop the old subscription on re-key / unmount
-
-  const value = useMemo<ChatApi>(() => {
-    const join = async (channelId: string): Promise<void> => {
-      // non-optimistic: the row shows only once confirmed — see myChannelIds above
-      await memberships
-        .insert({ id: memId(me, channelId), userId: me, channelId }, { optimistic: false })
-        .isPersisted.promise
-    }
-    const leave = async (channelId: string): Promise<void> => {
-      await memberships.delete(memId(me, channelId), { optimistic: false }).isPersisted.promise
-    }
-
-    const send = (channelId: string, text: string): void => {
-      const body = text.trim()
-      if (!body) return
-      // optimistic: shows instantly, then persists + syncs back through the author join
-      void messages
-        .insert({ id: crypto.randomUUID(), channelId, authorId: me, text: body, createdAt: Date.now() })
-        .isPersisted.promise.catch(() => {})
-    }
-
-    const createChannel = async (name: string): Promise<string> => {
-      const id = slug(name)
-      if (!id) throw new SuperLineError('BAD_REQUEST', 'channel name is empty')
-      try {
-        await channels.insert({ id, name: name.trim(), createdAt: Date.now() }).isPersisted.promise
-      } catch (err) {
-        if (!isConflict(err)) throw err // already exists → fall through and just join it
-      }
-      await join(id)
-      return id
-    }
-
-    return { me, users, channels, memberships, messages, myChannelIds, send, createChannel, join, leave }
-  }, [me, users, channels, memberships, messages, myChannelIds])
-
-  return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>
+/** My membership role in a channel, or undefined if I'm not a member. */
+export function useMyRole(channelId: string): Membership['role'] | undefined {
+  const mine = useMyMemberships()
+  return mine.find((m) => m.channelId === channelId)?.role
 }

@@ -2,3 +2,7 @@
 *.db
 *.db-wal
 *.db-shm
+
+# local secrets — the AI Gateway key for the Ask AI agent (see .env.example)
+.env
+.env.local

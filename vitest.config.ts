@@ -19,6 +19,8 @@ export const alias = {
   '@super-line/plugin-auth/react': src('packages/plugin-auth/src/react.tsx'),
   '@super-line/plugin-auth': src('packages/plugin-auth/src/index.ts'),
   '@super-line/plugin-chat/server': src('packages/plugin-chat/src/server.ts'),
+  '@super-line/plugin-chat/client': src('packages/plugin-chat/src/client.ts'),
+  '@super-line/plugin-chat/react': src('packages/plugin-chat/src/react.tsx'),
   '@super-line/plugin-chat': src('packages/plugin-chat/src/index.ts'),
   '@super-line/collections-memory': src('packages/collections-memory/src/index.ts'),
   '@super-line/collections-crdt-memory': src('packages/collections-crdt-memory/src/index.ts'),

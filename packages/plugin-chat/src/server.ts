@@ -382,6 +382,11 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     return next
   }
 
+  // Strictly-monotonic message stamps (per node): a same-ms burst would otherwise tie on createdAt and
+  // make createdAt-ordered windows arbitrary. Server-authoritative timestamps make this possible at all.
+  let lastStamp = 0
+  const messageStamp = (): number => (lastStamp = Math.max(Date.now(), lastStamp + 1))
+
   const sendMessageCore = async (args: SendMessageArgs, initiator: ChatInitiator): Promise<ChatMessage> => {
     const input = await runBefore(hooks.sendMessage, args, initiator)
     const message = await withChannelLock(input.channelId, async () => {
@@ -395,7 +400,7 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
         channelId: input.channelId,
         authorId: input.authorId,
         content: input.content,
-        createdAt: Date.now(),
+        createdAt: messageStamp(),
         editedAt: null,
         ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
       }

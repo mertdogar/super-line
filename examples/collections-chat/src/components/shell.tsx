@@ -1,22 +1,24 @@
-import { useEffect, useState } from 'react'
-import { useLiveQuery } from '@tanstack/react-db'
+import { useEffect, useMemo, useState } from 'react'
 import { ChannelView } from '@/components/channel-view'
 import { Sidebar } from '@/components/sidebar'
-import { useChat } from '@/lib/chat'
-import { useReadState } from '@/hooks/use-read-state'
+import { useChannels, useMe, useMyMemberships } from '@/lib/chat'
 import { useRequest, useSubscription } from '@/lib/superline'
 
 export function Shell({ myName, onSignOut }: { myName: string; onSignOut: () => void }): React.JSX.Element {
-  const { me, channels: channelsCol, myChannelIds } = useChat()
+  const me = useMe()
+  // Every channel I can see: public ones + private ones I belong to (the plugin's read policy).
+  const channels = useChannels()
+  const myMemberships = useMyMemberships()
+  const joinedIds = useMemo(() => myMemberships.map((m) => m.channelId), [myMemberships])
 
-  // The full public channel directory (every channel is world-readable so you can discover + join it).
-  const { data: channels } = useLiveQuery((q) => q.from({ c: channelsCol }).orderBy(({ c }) => c.createdAt, 'asc'))
+  const [activeId, setActiveId] = useState<string | null>(null)
+  // default to the first channel once the directory arrives
+  const active = channels.find((c) => c.id === activeId) ?? channels[0]
+  useEffect(() => {
+    if (!activeId && active) setActiveId(active.id)
+  }, [activeId, active])
 
-  const [activeId, setActiveId] = useState('general')
-  const { lastRead, markRead } = useReadState(me)
-
-  // presence: topics aren't retained, so seed the current list once via `hello` (buffered until the
-  // socket connects), then stay live via the topic.
+  // presence: seed once via `hello` (topics aren't retained), then stay live via the topic
   const { call: hello } = useRequest('hello')
   const [online, setOnline] = useState<string[]>([])
   useEffect(() => {
@@ -30,10 +32,8 @@ export function Shell({ myName, onSignOut }: { myName: string; onSignOut: () => 
   }, [presence])
 
   const typing = useSubscription('typing')
-  const typingHere = (typing?.byChannel[activeId] ?? []).filter((u) => u !== myName)
-
-  const active = channels.find((c) => c.id === activeId)
-  const isMember = myChannelIds.includes(activeId)
+  const typingHere = active ? (typing?.byChannel[active.id] ?? []).filter((u) => u !== myName) : []
+  const isMember = active ? joinedIds.includes(active.id) : false
 
   return (
     <div className="flex h-full">
@@ -41,21 +41,24 @@ export function Shell({ myName, onSignOut }: { myName: string; onSignOut: () => 
         myName={myName}
         online={online}
         channels={channels}
-        joined={myChannelIds}
-        activeId={activeId}
+        joined={joinedIds}
+        activeId={active?.id ?? ''}
         onSelect={setActiveId}
-        lastRead={lastRead}
         onSignOut={onSignOut}
       />
-      <ChannelView
-        key={activeId}
-        myUserId={me}
-        channelId={activeId}
-        channelName={active?.name ?? activeId}
-        isMember={isMember}
-        typingUsers={typingHere}
-        markRead={markRead}
-      />
+      {active ? (
+        <ChannelView
+          key={active.id}
+          myUserId={me}
+          channel={active}
+          isMember={isMember}
+          typingUsers={typingHere}
+        />
+      ) : (
+        <div className="grid flex-1 place-items-center bg-background text-sm text-muted-foreground">
+          No channels yet.
+        </div>
+      )}
     </div>
   )
 }

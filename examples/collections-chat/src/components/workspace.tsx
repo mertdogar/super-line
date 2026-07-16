@@ -5,7 +5,7 @@ import { Shell } from '@/components/shell'
 import type { chat } from '@/contract'
 
 // The authenticated workspace. The live client comes from @super-line/plugin-auth (its lifecycle — connect,
-// reconnect, close on sign-out — is owned there); here we just wire it into the super-line + chat providers.
+// reconnect, close on sign-out — is owned there); here we wire it into the super-line + chat providers.
 export function Workspace({
   client,
   me,
@@ -19,7 +19,7 @@ export function Workspace({
 }): React.JSX.Element {
   return (
     <Provider client={client}>
-      <ChatProvider me={me}>
+      <ChatProvider client={client} me={me}>
         <Shell myName={name} onSignOut={onSignOut} />
       </ChatProvider>
     </Provider>

@@ -306,6 +306,9 @@ importers:
       '@super-line/plugin-auth':
         specifier: workspace:*
         version: link:../../packages/plugin-auth
+      '@super-line/plugin-chat':
+        specifier: workspace:*
+        version: link:../../packages/plugin-chat
       '@super-line/plugin-inspector':
         specifier: workspace:*
         version: link:../../packages/plugin-inspector
@@ -315,18 +318,12 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
-      '@super-line/tanstack-db':
-        specifier: workspace:*
-        version: link:../../packages/tanstack-db
       '@super-line/transport-websocket':
         specifier: workspace:*
         version: link:../../packages/transport-websocket
-      '@tanstack/db':
-        specifier: 0.5.33
-        version: 0.5.33(typescript@5.9.3)
-      '@tanstack/react-db':
-        specifier: 0.1.76
-        version: 0.1.76(react@19.2.7)(typescript@5.9.3)
+      ai:
+        specifier: ^6.0.209
+        version: 6.0.209(zod@3.25.76)
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -1502,6 +1499,12 @@ importers:
       '@super-line/transport-websocket':
         specifier: workspace:*
         version: link:../transport-websocket
+      '@types/react':
+        specifier: ^18.3.0
+        version: 18.3.31
+      react:
+        specifier: ^18.3.0
+        version: 18.3.1
 
   packages/plugin-inspector:
     dependencies:
@@ -3786,11 +3789,6 @@ packages:
   '@tanstack/pacer-lite@0.2.2':
     resolution: {integrity: sha512-eQ1MyLKCHyXiH7NbdmB80W77OhiMgGBUb+qDx/8WMGbwg5Lf/NlfD0TfNYAqY77i8V3AxoDoYdICrQE5ADw4Yw==}
     engines: {node: '>=18'}
-
-  '@tanstack/react-db@0.1.76':
-    resolution: {integrity: sha512-XqsyBQy6p2dY5Zy99vevUfUMXqYn56jp5pIgGxvh5cBtVrgDoyGgAhqDmla0oeufdNEdr4F9A7ExT47XwLpJgg==}
-    peerDependencies:
-      react: '>=16.8.0'
 
   '@testing-library/dom@10.4.1':
     resolution: {integrity: sha512-o4PXJQidqJl82ckFaXUeoAW+XysPLauYI43Abki5hABd853iMhitooc6znOnczgbTYmEP6U6/y1ZyKAIsvMKGg==}
@@ -9428,14 +9426,6 @@ snapshots:
 
   '@tanstack/pacer-lite@0.2.2': {}
 
-  '@tanstack/react-db@0.1.76(react@19.2.7)(typescript@5.9.3)':
-    dependencies:
-      '@tanstack/db': 0.5.33(typescript@5.9.3)
-      react: 19.2.7
-      use-sync-external-store: 1.6.0(react@19.2.7)
-    transitivePeerDependencies:
-      - typescript
-
   '@testing-library/dom@10.4.1':
     dependencies:
       '@babel/code-frame': 7.29.7
@@ -13377,10 +13367,6 @@ snapshots:
   use-sync-external-store@1.6.0(react@18.3.1):
     dependencies:
       react: 18.3.1
-
-  use-sync-external-store@1.6.0(react@19.2.7):
-    dependencies:
-      react: 19.2.7
 
   utf8-byte-length@1.0.5: {}
 

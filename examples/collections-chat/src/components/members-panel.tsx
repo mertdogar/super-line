@@ -31,7 +31,7 @@ export function MembersPanel({
   const act = (p: Promise<unknown>): void => void p.catch(() => {})
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-l bg-background">
+    <aside className="fixed inset-y-0 right-0 z-40 flex w-72 shrink-0 flex-col border-l bg-background shadow-lg md:static md:z-auto md:shadow-none">
       <header className="flex items-center justify-between border-b px-4 py-3">
         <span className="font-semibold">Members — {members.length}</span>
         <button

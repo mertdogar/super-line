@@ -26,7 +26,7 @@ export function Sidebar({
   const joinedSet = useMemo(() => new Set(joined), [joined])
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground">
+    <aside className="flex h-full w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground">
       <header className="flex items-center justify-between border-b border-sidebar-border px-4 py-3">
         <span className="flex items-center gap-2 text-lg font-bold">
           <MessageSquare className="h-5 w-5" />

@@ -3,6 +3,7 @@ import { ChannelView } from '@/components/channel-view'
 import { Sidebar } from '@/components/sidebar'
 import { useChannels, useMe, useMyMemberships } from '@/lib/chat'
 import { useRequest, useSubscription } from '@/lib/superline'
+import { cn } from '@/lib/utils'
 
 export function Shell({ myName, onSignOut }: { myName: string; onSignOut: () => void }): React.JSX.Element {
   const me = useMe()
@@ -12,6 +13,8 @@ export function Shell({ myName, onSignOut }: { myName: string; onSignOut: () => 
   const joinedIds = useMemo(() => myMemberships.map((m) => m.channelId), [myMemberships])
 
   const [activeId, setActiveId] = useState<string | null>(null)
+  // mobile: the sidebar is an off-canvas drawer (hamburger in the channel header opens it)
+  const [navOpen, setNavOpen] = useState(false)
   // default to the first channel once the directory arrives
   const active = channels.find((c) => c.id === activeId) ?? channels[0]
   useEffect(() => {
@@ -37,15 +40,32 @@ export function Shell({ myName, onSignOut }: { myName: string; onSignOut: () => 
 
   return (
     <div className="flex h-full">
-      <Sidebar
-        myName={myName}
-        online={online}
-        channels={channels}
-        joined={joinedIds}
-        activeId={active?.id ?? ''}
-        onSelect={setActiveId}
-        onSignOut={onSignOut}
-      />
+      {navOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          aria-hidden
+          onClick={() => setNavOpen(false)}
+        />
+      )}
+      <div
+        className={cn(
+          'fixed inset-y-0 left-0 z-40 transition-transform md:static md:z-auto md:translate-x-0',
+          navOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+        )}
+      >
+        <Sidebar
+          myName={myName}
+          online={online}
+          channels={channels}
+          joined={joinedIds}
+          activeId={active?.id ?? ''}
+          onSelect={(id) => {
+            setActiveId(id)
+            setNavOpen(false)
+          }}
+          onSignOut={onSignOut}
+        />
+      </div>
       {active ? (
         <ChannelView
           key={active.id}
@@ -53,6 +73,7 @@ export function Shell({ myName, onSignOut }: { myName: string; onSignOut: () => 
           channel={active}
           isMember={isMember}
           typingUsers={typingHere}
+          onOpenNav={() => setNavOpen(true)}
         />
       ) : (
         <div className="grid flex-1 place-items-center bg-background text-sm text-muted-foreground">

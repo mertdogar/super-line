@@ -2,6 +2,7 @@
 import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 import { withBase } from 'vitepress'
 import ClusterDemo from './ClusterDemo.vue'
+import ChatDemo from './ChatDemo.vue'
 
 // The theme router swallows same-page hash clicks on this layout, so the hero's
 // proof link scrolls itself. Instant jump, same as a native anchor.
@@ -359,6 +360,36 @@ onBeforeUnmount(() => {
             <pre class="sl-pre"><code v-html="collectionsCode" /></pre>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- ░░ CHAT PLUGIN — A HUMAN + AN AI AGENT ON ONE CONTRACT ░░ -->
+    <section class="sl-sec">
+      <div class="sl-shell">
+        <div class="sl-sec__head reveal">
+          <p class="sl-kicker"><span class="sl-new">New</span> Chat plugin</p>
+          <h2>Watch a human and an AI agent share one contract.</h2>
+          <p>
+            Whole domains drop onto your contract as <strong>plugins</strong>.
+            <code>chatContract()</code> adds channels, membership, and messages —
+            every mutation server-authoritative and hookable — and
+            <code>chatAgentTools()</code> hands that same typed surface to an LLM
+            over its <strong>own</strong> connection, so the server
+            authorization-checks every move.
+            <span class="sl-hl">The agent is just another user on the bus.</span>
+          </p>
+        </div>
+
+        <div class="reveal">
+          <ChatDemo />
+        </div>
+
+        <p class="sl-real sl-chat-real">
+          Real: <code>examples/collections-chat</code> — a Slack-like app built
+          entirely on this plugin, with a live LLM agent in an
+          <code>#ask-ai</code> channel.
+          <a :href="withBase('/how-to/plugin-chat')">Chat plugin →</a>
+        </p>
       </div>
     </section>
 
@@ -1320,6 +1351,9 @@ onBeforeUnmount(() => {
 }
 .sl-wire-real {
   margin-top: 1.05rem;
+}
+.sl-chat-real {
+  margin-top: clamp(1.2rem, 3vw, 1.9rem);
 }
 
 .sl-axes {

@@ -1,0 +1,26 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node", "vite/client"],
+    "noEmit": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@super-line/core": ["../../packages/core/src/index.ts"],
+      "@super-line/client": ["../../packages/client/src/index.ts"],
+      "@super-line/server": ["../../packages/server/src/index.ts"],
+      "@super-line/collections-sqlite": ["../../packages/collections-sqlite/src/index.ts"],
+      "@super-line/transport-websocket": ["../../packages/transport-websocket/src/index.ts"],
+      "@super-line/plugin-auth/server": ["../../packages/plugin-auth/src/server.ts"],
+      "@super-line/plugin-auth/client": ["../../packages/plugin-auth/src/client.ts"],
+      "@super-line/plugin-auth/react": ["../../packages/plugin-auth/src/react.tsx"],
+      "@super-line/plugin-auth": ["../../packages/plugin-auth/src/index.ts"],
+      "@super-line/plugin-chat/server": ["../../packages/plugin-chat/src/server.ts"],
+      "@super-line/plugin-chat/client": ["../../packages/plugin-chat/src/client.ts"],
+      "@super-line/plugin-chat/react": ["../../packages/plugin-chat/src/react.tsx"],
+      "@super-line/plugin-chat": ["../../packages/plugin-chat/src/index.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

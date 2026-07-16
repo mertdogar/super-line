@@ -1,0 +1,38 @@
+{
+  "name": "@super-line/example-chat-supervisor",
+  "private": true,
+  "type": "module",
+  "description": "Mastra supervisor + subagent streaming a nested turn-tree into a plugin-chat channel — no harness, just super-line",
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c magenta,green \"tsx --env-file-if-exists=.env --env-file-if-exists=../collections-chat/.env src/server.ts\" \"vite\"",
+    "dev:server": "tsx --env-file-if-exists=.env --env-file-if-exists=../collections-chat/.env src/server.ts",
+    "dev:web": "vite",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/gateway": "^4.0.16",
+    "@mastra/core": "1.50.1",
+    "@super-line/client": "workspace:*",
+    "@super-line/collections-sqlite": "workspace:*",
+    "@super-line/core": "workspace:*",
+    "@super-line/plugin-auth": "workspace:*",
+    "@super-line/plugin-chat": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "@super-line/transport-websocket": "workspace:*",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  }
+}

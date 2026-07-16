@@ -1,0 +1,8 @@
+# local SQLite database (the store-sqlite persistence) — delete to reset the workspace
+*.db
+*.db-wal
+*.db-shm
+
+# local secrets — the AI Gateway key for the Ask AI agent (see .env.example)
+.env
+.env.local

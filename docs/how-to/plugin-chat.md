@@ -138,6 +138,14 @@ Consumers do nothing: the same `chat.messages(channelId)` feed serves streamed m
 (`streaming → complete | aborted | error`); plain messages are untouched. Render with one branch:
 `msg.parts ? <AgentTurn/> : <Bubble/>`.
 
+**Supervisor trees:** a part may nest under a delegate tool call via `parent`, so one message can
+carry a whole multi-agent turn — each delegation rendering as its own card with the subagent's
+tool calls and text inside, durable across reloads. The
+[`examples/chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor)
+app rebuilds super-harness's supervisor/worker flow this way with plain Mastra agents — its
+`chunk-adapter.ts` (a port of the harness's Mastra `fullStream` mapper) is reusable for any
+Mastra producer.
+
 Worth knowing:
 
 - **Lifetime**: the author's disconnect auto-aborts its open streams, partials preserved;

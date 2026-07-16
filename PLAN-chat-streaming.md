@@ -1,8 +1,9 @@
 # PLAN — plugin-chat streaming messages
 
-> **Status: Phases 1–3 BUILT + reviewed (2026-07-16).** Phase 1 = 7191ce8, Phase 2 = 8bf554f,
-> Phase 3 verified live end-to-end (the #ask-ai agent streams its tool calls + text into the
-> channel). Phase 4 (`examples/chat-supervisor`) not started.
+> **Status: ALL 4 PHASES BUILT (2026-07-17).** Phase 1 = 7191ce8, Phase 2 = 8bf554f, Phase 3 =
+> f90400a (verified live end-to-end), Phase 4 = `examples/chat-supervisor` (Mastra supervisor +
+> worker, harness chunk-adapter port, delegation cards, reload-durable — verified in browser).
+> Two super-line-wide subscribe/seed delivery bugs found + fixed along the way (8ce298b).
 
 A chat message that stores an **entire agent stream** — reasoning, tool calls (nested
 subagent trees included), text — accumulated live via appends, rendered richly on the

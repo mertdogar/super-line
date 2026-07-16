@@ -6,7 +6,7 @@ import type { CollectionQuery, Contract, RoleOf } from '@super-line/core'
 import type { LiveRowSet, SuperLineClient } from '@super-line/client'
 import type { AuthUser } from '@super-line/plugin-auth'
 import { CHANNEL_VISIBILITIES, MEMBER_ROLES } from './index.js'
-import type { ChatChannel, ChatMembership, ChatMessage, ChatStreamEvent } from './index.js'
+import type { ChatChannel, ChatMembership, ChatMessage, ChatStreamEvent, StreamEventSink } from './index.js'
 
 export interface ChatAgentToolsOptions<S extends z.ZodTypeAny = z.ZodString> {
   /**
@@ -366,10 +366,7 @@ export function chatAgentTools<C extends Contract, R extends RoleOf<C>, S extend
   return { ...core, ...management }
 }
 
-/** The writer shape `pipeUIMessageStream` drives — both `chatClient`'s handle and `chatKit`'s writer fit. */
-export interface StreamEventSink {
-  push(...events: ChatStreamEvent[]): void | Promise<void>
-}
+export type { StreamEventSink } from './index.js'
 
 /**
  * Pipe an AI SDK v6 `UIMessageChunk` stream (`streamText(...).toUIMessageStream()`,

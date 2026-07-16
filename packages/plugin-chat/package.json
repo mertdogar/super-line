@@ -32,6 +32,10 @@
     "./ai": {
       "import": { "types": "./dist/ai.d.ts", "default": "./dist/ai.js" },
       "require": { "types": "./dist/ai.d.cts", "default": "./dist/ai.cjs" }
+    },
+    "./mastra": {
+      "import": { "types": "./dist/mastra.d.ts", "default": "./dist/mastra.js" },
+      "require": { "types": "./dist/mastra.d.cts", "default": "./dist/mastra.cjs" }
     }
   },
   "files": ["dist"],
@@ -47,6 +51,7 @@
     "zod": "^3.24.1"
   },
   "peerDependencies": {
+    "@mastra/core": ">=1.50",
     "@super-line/client": "workspace:^",
     "@super-line/plugin-auth": "workspace:^",
     "@super-line/server": "workspace:^",
@@ -54,12 +59,14 @@
     "react": ">=18"
   },
   "peerDependenciesMeta": {
+    "@mastra/core": { "optional": true },
     "@super-line/client": { "optional": true },
     "@super-line/server": { "optional": true },
     "ai": { "optional": true },
     "react": { "optional": true }
   },
   "devDependencies": {
+    "@mastra/core": "1.50.1",
     "@super-line/client": "workspace:^",
     "@super-line/collections-memory": "workspace:*",
     "@super-line/plugin-auth": "workspace:^",

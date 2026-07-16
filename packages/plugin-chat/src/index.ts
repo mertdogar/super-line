@@ -126,6 +126,14 @@ export const streamEventSchema = z.discriminatedUnion('type', [
 ])
 export type ChatStreamEvent = z.infer<typeof streamEventSchema>
 
+/**
+ * The writer shape the stream bridges drive (`pipeUIMessageStream`, `pipeMastraStream`,
+ * `mastraEngine`) — both `chatClient`'s handle and `chatKit`'s writer fit.
+ */
+export interface StreamEventSink {
+  push(...events: ChatStreamEvent[]): void | Promise<void>
+}
+
 export type ChatChannel = z.infer<typeof channelSchema>
 export type ChatMembership = z.infer<typeof membershipSchema>
 /**

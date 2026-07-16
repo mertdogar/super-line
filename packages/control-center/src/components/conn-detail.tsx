@@ -75,6 +75,11 @@ export function ConnDetail({
                 <Section title="conn.data">
                   <Json data={view.data} className="max-h-72" />
                 </Section>
+                {view.env !== undefined && view.env !== null ? (
+                  <Section title="conn.env · masked — values hidden unless revealEnvKeys-allowed">
+                    <Json data={view.env} className="max-h-72" />
+                  </Section>
+                ) : null}
               </>
             ) : (
               <p className="mt-3 text-xs text-muted-foreground">

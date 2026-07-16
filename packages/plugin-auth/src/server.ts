@@ -1,6 +1,6 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { andFilters, eq, gt, not, SuperLineError } from '@super-line/core'
-import type { Contract, RoleOf, Handshake, CollectionStore, Expr } from '@super-line/core'
+import type { Contract, RoleOf, Handshake, CollectionStore, Expr, AnyEnv } from '@super-line/core'
 import type { PluginContext, SuperLinePlugin } from '@super-line/server'
 import { GUEST_ROLE } from './index.js'
 import type { AuthApiKey, AuthContext, AuthCredential, AuthPasswordReset, AuthSession, AuthSurface, AuthUser } from './index.js'
@@ -29,6 +29,12 @@ export interface AuthServerOptions<C extends Contract> {
   sendPasswordReset?: (args: { user: AuthUser; token: string }) => void | Promise<void>
   /** Password-reset token lifetime in ms. Default 1 hour. */
   passwordResetTtlMs?: number
+  /**
+   * Compute the connection's client-visible `env` (ADR-0012) from its resolved identity, at connect — the
+   * result seeds `client.env`. Return `undefined` for none (e.g. guests). Update later with `authKit.pushEnv`.
+   * Since `authKit` owns `authenticate`, this is where the host's identity-keyed env business logic lives.
+   */
+  resolveEnv?: (ctx: AuthContext) => AnyEnv<C> | undefined | Promise<AnyEnv<C> | undefined>
 }
 
 /** An API key's public shape — everything but the raw `slp_…` key, which only `create` ever returns. */
@@ -94,6 +100,11 @@ export interface AuthServer<C extends Contract> {
    * cluster-wide. Use for an admin ban / "sign out of all devices". (API keys are separate — revoke those per-key.)
    */
   revoke: (userId: string) => Promise<void>
+  /**
+   * Update a user's client-visible `env` (ADR-0012) on all their live connections, cluster-wide (a key
+   * rotated, the assignment changed). The initial value is seeded by `resolveEnv`; use this for live updates.
+   */
+  pushEnv: (userId: string, env: AnyEnv<C>) => void
   /** Imperative user management (get/find/create/update/roles/deactivate/…). Requires the running server. */
   users: AuthUsersApi
   /** Imperative API-key management (agent provisioning). Requires the running server. */
@@ -143,7 +154,7 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
     }
   }
 
-  const authenticate = async (handshake: Handshake): Promise<AuthResultOf<C>> => {
+  const resolveBase = async (handshake: Handshake): Promise<AuthResultOf<C>> => {
     const guest = { role: GUEST_ROLE, ctx: { userId: null, roles: [], sessionId: null } } as AuthResultOf<C>
     const requestedRole = handshake.query.role
     if (requestedRole === GUEST_ROLE) return guest
@@ -188,6 +199,15 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
     if (!contractRoles.has(requestedRole)) throw new SuperLineError('BAD_REQUEST', `unknown role '${requestedRole}'`)
     if (!user.roles.includes(requestedRole)) throw new SuperLineError('FORBIDDEN', `role '${requestedRole}' not granted`)
     return { role: requestedRole, ctx: { userId: user.id, roles: user.roles, sessionId: session.id } } as AuthResultOf<C>
+  }
+
+  // Resolve identity (above), then seed the client-visible env (ADR-0012) from it via the host's resolveEnv.
+  // ctx and env are produced by ONE connect-time call but stay separate: ctx server-only+frozen, env client-visible.
+  const authenticate = async (handshake: Handshake): Promise<AuthResultOf<C>> => {
+    const base = await resolveBase(handshake)
+    if (!opts.resolveEnv) return base
+    const env = await opts.resolveEnv(base.ctx as AuthContext)
+    return (env == null ? base : { ...base, env }) as AuthResultOf<C>
   }
 
   const identify = (conn: { ctx: unknown }): string | undefined => (conn.ctx as AuthContext).userId ?? undefined
@@ -400,6 +420,12 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
     requireCtx().toUser(userId).disconnect()
   }
 
+  // Update a user's client-visible env on all their live connections, cluster-wide (ADR-0012) — for a
+  // key rotation / re-scope mid-conversation. The initial value comes from `resolveEnv` at connect.
+  const pushEnv = (userId: string, env: AnyEnv<C>): void => {
+    requireCtx().toUser(userId).setEnv(env as unknown)
+  }
+
   const users: AuthUsersApi = {
     get: async (id) => (await col('users').read(id)) as AuthUser | undefined,
     find: async (opts = {}) => {
@@ -507,5 +533,5 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
     },
   }
 
-  return { authenticate, identify, plugin, revoke, users, apiKeys }
+  return { authenticate, identify, plugin, revoke, pushEnv, users, apiKeys }
 }

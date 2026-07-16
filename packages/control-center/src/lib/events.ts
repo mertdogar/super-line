@@ -88,6 +88,8 @@ export function eventWire(event: InspectorEvent, r?: FeedResolver): WireAttribut
     case 'crdt.change':
     case 'crdt.delete':
       return undefined
+    case 'env.set':
+      return connWire(event.connId, r)
   }
 }
 
@@ -151,13 +153,16 @@ export function summarizeEvent(event: InspectorEvent, r?: FeedResolver): string 
       return `${event.n}/${event.id} ⇐ ${event.origin}`
     case 'crdt.delete':
       return `${event.n}/${event.id} · deleted`
+    case 'env.set':
+      return `→ ${who(event.connId, r)} · env`
   }
 }
 
 /** Coarse feed category, for the live-feed filter toggles. */
-export type FeedCategory = 'lifecycle' | 'requests' | 'events' | 'collections'
+export type FeedCategory = 'lifecycle' | 'requests' | 'events' | 'collections' | 'env'
 
 export function eventCategory(type: InspectorEvent['type']): FeedCategory {
+  if (type === 'env.set') return 'env'
   if (type.startsWith('collection.') || type.startsWith('crdt.')) return 'collections'
   if (type === 'msg.request' || type === 'msg.response' || type === 'msg.serverRequest' || type === 'msg.serverReply')
     return 'requests'
@@ -176,6 +181,7 @@ export function eventColor(type: InspectorEvent['type']): string {
   if (type === 'msg.request' || type === 'msg.serverRequest') return 'bg-cyan-400'
   if (type === 'msg.response' || type === 'msg.serverReply') return 'bg-emerald-400'
   if (type === 'msg.event' || type === 'msg.broadcast' || type === 'msg.publish') return 'bg-sky-400'
+  if (type === 'env.set') return 'bg-lime-400'
   return 'bg-amber-400'
 }
 
@@ -314,6 +320,7 @@ export const ALL_EVENT_TYPES: InspectorEvent['type'][] = [
   'crdt.close',
   'crdt.change',
   'crdt.delete',
+  'env.set',
 ]
 
 /** The relative trailing-window presets for the time filter (null = All). */

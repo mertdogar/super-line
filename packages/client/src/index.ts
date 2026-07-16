@@ -34,6 +34,7 @@ import {
   type CrdtCollectionName,
   type RowOf,
   type DocOf,
+  type EnvOf,
 } from '@super-line/core'
 import { backoffDelay } from './backoff.js'
 
@@ -126,6 +127,24 @@ export type SuperLineClient<C extends Contract, R extends RoleOf<C>> = ClientMet
   readonly connected: boolean
   /** This client's role. */
   readonly role: R
+  /**
+   * The server-vended, client-visible per-connection {@link https://…|env} (ADR-0012): a reactive handle
+   * over the state the server pushed to THIS connection. `current` is the latest value (`null` until the
+   * first push, or for a role that declares no `env`); `ready` resolves after the first push (await it
+   * before reading); `subscribe` fires on every update (rotation, re-scope). Code-only — an agent's runtime
+   * reads it and wires the creds into its tool implementations; never expose it to an LLM.
+   */
+  readonly env: EnvHandle<EnvOf<C, R> | null>
+}
+
+/** A reactive handle over a connection's client-visible {@link SuperLineClient.env} (ADR-0012). */
+export interface EnvHandle<E> {
+  /** The latest env pushed by the server (`null` until the first push / for a role with no `env`). */
+  readonly current: E
+  /** Resolves after the first `env` push — await before reading `current`. Kills the connect-time race. */
+  readonly ready: Promise<void>
+  /** Fire on every env update; returns an unsubscribe fn. */
+  subscribe(cb: (env: E) => void): () => void
 }
 
 /** A fine-grained change to a {@link LiveRowSet} (fed to sync consumers like the TanStack DB adapter). */
@@ -377,6 +396,12 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   const disconnectHooks = [opts.onDisconnect, ...clientPlugins.map((p) => p.onDisconnect)]
   const reconnectHooks = [opts.onReconnect, ...clientPlugins.map((p) => p.onReconnect)]
   const reconnectListeners = new Set<() => void>() // post-hoc `client.onReconnect(cb)` registrations
+
+  // client-visible per-connection env (ADR-0012): the server's first `env` frame resolves `envReady`;
+  // every frame updates `envCurrent` and fires listeners. Re-seeded on reconnect (server re-sends at accept).
+  let envCurrent: unknown = null
+  const envReady = deferred()
+  const envListeners = new Set<(env: unknown) => void>()
   function routeError(error: unknown, kind: ClientErrorInfo['kind'], where?: { collection?: string; id?: string }): void {
     if (opts.onError) {
       try {
@@ -555,6 +580,10 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
         return
       const set = topicListeners.get(frame.c)
       if (set) for (const cb of set) cb(frame.d)
+    } else if (frame.t === 'env') {
+      envCurrent = frame.d
+      envReady.resolve()
+      for (const cb of envListeners) cb(frame.d)
     } else if (frame.t === 'sreq') {
       void handleServerRequest(frame)
     } else if (frame.t === 'cchg') {
@@ -1014,6 +1043,16 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     },
     get connected(): boolean {
       return rawConn?.writable ?? false
+    },
+    env: {
+      get current(): unknown {
+        return envCurrent
+      },
+      ready: envReady.promise,
+      subscribe(cb: (env: unknown) => void): () => void {
+        envListeners.add(cb)
+        return () => void envListeners.delete(cb)
+      },
     },
   }
 

@@ -107,6 +107,7 @@ export default defineConfig({
           collapsed: true,
           items: [
             { text: 'Authenticate & assign roles', link: '/how-to/roles-auth' },
+            { text: 'Hand a connection its credentials (env)', link: '/how-to/connection-env' },
             { text: 'Add authentication (plugin)', link: '/how-to/plugin-auth' },
             { text: 'Add a chat backbone (plugin)', link: '/how-to/plugin-chat' },
             { text: 'Hook the connection lifecycle', link: '/how-to/middleware-lifecycle' },

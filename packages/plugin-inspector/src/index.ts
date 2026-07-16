@@ -29,6 +29,12 @@ import type { SuperLinePlugin, PluginChannel, ServerCrdtCollectionHandle } from 
 export interface InspectorOptions {
   /** Field names to mask (`[Redacted]`) in snapshotted payloads / ctx / data. */
   redact?: string[]
+  /**
+   * `env` keys to reveal in clear in the Control Center (ADR-0012). `env` holds credentials, so it is
+   * MASKED BY DEFAULT (values → `•••`, shape always shown); list the non-secret keys (e.g. `['projectId']`)
+   * to show their values. The opposite default from `redact` (a deny-list) and from ctx/data (shown).
+   */
+  revealEnvKeys?: string[]
 }
 
 const encoder = new TextEncoder()
@@ -145,6 +151,17 @@ function stripTs(expr: Expr | undefined): Expr | undefined {
  */
 export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
   const redact = new Set(opts.redact ?? [])
+  const revealEnvKeys = new Set(opts.revealEnvKeys ?? [])
+
+  // env is masked-by-default (ADR-0012): show the shape (all keys), but mask each value to `•••` unless the
+  // key is allow-listed via `revealEnvKeys` — the opposite of `redact`. Revealed values still pass through
+  // safeSnapshot (so `redact` and depth/size caps still apply within them).
+  function maskEnv(value: unknown): unknown {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return value === null ? null : '•••'
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as object)) out[k] = revealEnvKeys.has(k) ? safeSnapshot(v) : '•••'
+    return out
+  }
 
   // best-effort, never-throwing snapshot of a value for display (node-local); masks redacted field names
   function safeSnapshot(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
@@ -195,6 +212,8 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
       case 'crdt.open':
       case 'crdt.write':
         return event.ok ? { ...event, snapshot: safeSnapshot(event.snapshot) } : event
+      case 'env.set':
+        return { ...event, env: maskEnv(event.env) }
       default:
         return event
     }
@@ -243,6 +262,7 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
               descriptor: ctx.describe(local),
               ctx: safeSnapshot(local.ctx),
               data: safeSnapshot(local.data),
+              env: maskEnv(local.env),
               ctxAvailable: true,
             } satisfies ConnView
           }

@@ -47,14 +47,20 @@ export interface NodeView {
   topics: string[]
 }
 
-/** A connection's detail — what `getConn` returns. ctx/data are node-local and best-effort safe-serialized. */
+/** A connection's detail — what `getConn` returns. ctx/data/env are node-local and best-effort safe-serialized. */
 export interface ConnView {
   descriptor: ConnDescriptor
   /** Safe-serialized auth ctx; present only when the conn is on the queried node. */
   ctx?: unknown
   /** Safe-serialized `conn.data`; present only when the conn is on the queried node. */
   data?: unknown
-  /** Whether ctx/data could be read (false for conns on another node). */
+  /**
+   * Safe-serialized `conn.env` (ADR-0012), MASKED: values hidden unless the key is allow-listed via the
+   * inspector's `revealEnvKeys` (env holds credentials, so it is masked by default — the opposite of
+   * ctx/data). Present only when the conn is on the queried node.
+   */
+  env?: unknown
+  /** Whether ctx/data/env could be read (false for conns on another node). */
   ctxAvailable: boolean
 }
 
@@ -117,6 +123,9 @@ export type InspectorEvent =
   | { type: 'crdt.close'; connId: string; n: string; id: string }
   | { type: 'crdt.change'; n: string; id: string; origin: string; deltaBytes: number }
   | { type: 'crdt.delete'; n: string; id: string }
+  // server-vended per-connection env set/updated (ADR-0012). `env` is MASKED before crossing the bus
+  // (default-mask + `revealEnvKeys` allow-list), because it holds credentials — unlike ctx/data's deny-list.
+  | { type: 'env.set'; connId: string; nodeId: string; env: unknown }
 
 /**
  * The public taxonomy a plugin `onEvent` tap observes: an {@link InspectorEvent} with live
@@ -161,6 +170,8 @@ export function eventPayload(event: InspectorEvent): unknown {
       return event.ops
     case 'collection.change':
       return event.row
+    case 'env.set':
+      return event.env
     case 'crdt.open':
     case 'crdt.write':
       return event.ok ? event.snapshot : event.error

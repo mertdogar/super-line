@@ -194,7 +194,9 @@ await chatKit.messages.send({ channelId: ops.id, authorId: botId, content: 'depl
 ```
 
 **AI agents are regular users.** Provision one with [plugin-auth](/how-to/plugin-auth)'s server API — a
-passwordless user plus an API key — then let it connect with the same `chatClient` over the real wire:
+passwordless user plus an API key — then let it connect with the same `chatClient` over the real wire. To hand
+the agent the credentials it needs to act *for* a human (an external API key, a project id), vend them over
+[`env`](/how-to/connection-env) — a typed, server-pushed per-connection bag its runtime reads (never the LLM):
 
 ```ts
 const bot = await authKit.users.create({ email: 'bot@app.dev', displayName: 'Ask AI' })

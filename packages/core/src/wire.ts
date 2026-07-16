@@ -126,6 +126,13 @@ export interface EvtFrame {
   e: string // event name
   d: unknown
 }
+// a server→client push of the connection's current `env` (ADR-0012): the full, post-validation value,
+// or `null` for "no env". Full-value replace (state, not delta) — last write wins, client keeps no history.
+// Seeded once at connect (from `authenticate`'s `env`) and re-sent on every `conn.setEnv`/`toUser().setEnv`.
+export interface EnvFrame {
+  t: 'env'
+  d: unknown
+}
 export interface PubFrame {
   t: 'pub'
   c: string // channel
@@ -172,6 +179,7 @@ export type ServerFrame =
   | ResFrame
   | ErrFrame
   | EvtFrame
+  | EnvFrame
   | PubFrame
   | SReqFrame
   | CChangeFrame

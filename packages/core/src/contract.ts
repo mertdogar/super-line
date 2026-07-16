@@ -50,10 +50,12 @@ export interface Directional {
   serverToClient?: Record<string, ServerEntry>
 }
 
-/** A role block: its directions plus an optional `data` schema typing `conn.data`. */
+/** A role block: its directions plus optional `data`/`env` schemas typing `conn.data`/`conn.env`. */
 export interface RoleBlock extends Directional {
   /** Schema for this role's mutable per-connection `conn.data` (server-side scratch state). */
   data?: Schema
+  /** Schema for this role's server-vended, CLIENT-VISIBLE per-connection `conn.env` (ADR-0012). */
+  env?: Schema
 }
 
 /**
@@ -235,14 +237,14 @@ export function defineSurface<const D extends Directional>(surface: D): D {
  * ```
  */
 export function mergeSurfaces<
-  const A extends Directional & { data?: never },
-  const B extends Directional & { data?: never },
+  const A extends Directional & { data?: never; env?: never },
+  const B extends Directional & { data?: never; env?: never },
 >(a: A, b: B & NoOverlap<A, B>): MergedSurface<A, B> {
   for (const s of [a, b] as Directional[]) {
     for (const k of Object.keys(s)) {
       if (k !== 'clientToServer' && k !== 'serverToClient') {
         throw new Error(
-          `mergeSurfaces: unexpected key '${k}' — pass only { clientToServer, serverToClient } (a role's 'data' belongs on the role block, outside the merge)`,
+          `mergeSurfaces: unexpected key '${k}' — pass only { clientToServer, serverToClient } (a role's 'data'/'env' belongs on the role block, outside the merge)`,
         )
       }
     }
@@ -318,7 +320,10 @@ function mergeDirectional(a: Directional | undefined, b: Directional, where: str
 function mergeRoleBlock(a: RoleBlock, b: RoleBlock, where: string): RoleBlock {
   const merged = mergeDirectional(a, b, where) as RoleBlock
   const data = a.data ?? b.data
-  return data ? { ...merged, data } : merged
+  const env = a.env ?? b.env
+  if (data) merged.data = data
+  if (env) merged.env = env
+  return merged
 }
 
 // serverToClient split: has `input` => request; `subscribe: true` => topic; otherwise => push event.
@@ -363,6 +368,15 @@ export type DataOf<C extends Contract, R extends RoleOf<C>> = C['roles'][R] exte
   : Record<string, never>
 /** Union of every role's `conn.data` shape (used where the role isn't narrowed, e.g. shared handlers). */
 export type AnyData<C extends Contract> = DataOf<C, RoleOf<C>>
+
+/** The typed shape of `conn.env` for role `R` (its `env` schema, or `null` when the role declares none). */
+export type EnvOf<C extends Contract, R extends RoleOf<C>> = C['roles'][R] extends {
+  env: infer S extends Schema
+}
+  ? InferOut<S>
+  : null
+/** Union of every role's `conn.env` shape (used where the role isn't narrowed). */
+export type AnyEnv<C extends Contract> = { [R in RoleOf<C>]: EnvOf<C, R> }[RoleOf<C>]
 
 // Guarded extractors: re-assert the def constraint so indexed access stays a Schema.
 /** The input type a client passes for a request (pre-validation). */

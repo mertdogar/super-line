@@ -44,9 +44,10 @@ export interface Handshake {
 /**
  * What `authenticate` returns. Reject by throwing — the transport then rejects in its native idiom.
  * `transport` is injected by the server (from {@link Handshake.transport}); user `authenticate`
- * callbacks return only `role` + `ctx`.
+ * callbacks return `role` + `ctx`, and optionally `env` (the initial client-visible per-connection
+ * state seeded at connect; ADR-0012). `ctx` is server-only + frozen; `env` is client-visible + mutable.
  */
-export type AuthOutcome = { role: string; ctx: unknown; transport?: string }
+export type AuthOutcome = { role: string; ctx: unknown; env?: unknown; transport?: string }
 
 /**
  * A plugin-owned (reserved) connection class the server declares to its transports: a role name the

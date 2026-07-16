@@ -161,10 +161,20 @@ const ctxContract = defineContract({
   roles: { user: { clientToServer: { ping: { input: z.void(), output: z.number() } } } },
 })
 
+const envContract = defineContract({
+  roles: {
+    agent: {
+      env: z.object({ projectId: z.string(), ommaApiKey: z.string() }),
+      clientToServer: { ping: { input: z.void(), output: z.number() } },
+    },
+  },
+})
+
 interface ConnViewResult {
   descriptor: { id: string; role: string }
   ctx?: Record<string, unknown>
   data?: Record<string, unknown>
+  env?: Record<string, unknown>
   ctxAvailable: boolean
 }
 
@@ -201,6 +211,29 @@ describe('inspector getConn (slice 4)', () => {
     const circ = view.ctx?.circular as { self?: unknown } | undefined
     expect(circ?.self).toBe('[Circular]')
     expect(view.data?.count).toBe(5)
+    insp.close()
+  })
+
+  it('masks env by default in getConn, revealing only allow-listed keys (ADR-0012)', async () => {
+    const { srv, url } = await h.server(envContract, {
+      authenticate: () => ({
+        role: 'agent' as const,
+        ctx: { userId: 'u1' },
+        env: { projectId: 'p1', ommaApiKey: 'secret-key' },
+      }),
+      plugins: [inspector({ revealEnvKeys: ['projectId'] })],
+    })
+    srv.implement({ agent: { ping: async () => 1 } })
+    const u = h.client(envContract, { url, role: 'agent' })
+    await u.ping()
+    await waitFor(() => srv.local.connections.length === 1)
+    const id = srv.local.connections[0]!.id
+
+    const insp = await connectInspector(url)
+    const view = (await insp.request('getConn', { id })) as ConnViewResult
+    const env = view.env as { projectId?: unknown; ommaApiKey?: unknown } | undefined
+    expect(env?.projectId).toBe('p1') // allow-listed → shown in clear
+    expect(env?.ommaApiKey).toBe('•••') // masked by default (it's a credential)
     insp.close()
   })
 

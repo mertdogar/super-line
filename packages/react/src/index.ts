@@ -6,6 +6,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react'
 import type {
@@ -17,6 +18,7 @@ import type {
   ClientInput,
   Output,
   EventData,
+  EnvOf,
   CollectionName,
   CrdtCollectionName,
   RowOf,
@@ -202,5 +204,19 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     return { rows, error, insert, update, delete: del }
   }
 
-  return { Provider, useClient, useEvent, useSubscription, useRequest, useDoc, useCollection }
+  /**
+   * The connection's server-vended, client-visible {@link SuperLineClient.env} (ADR-0012), tracked
+   * reactively: `null` until the first push (or for a role with no `env`), then the latest value, re-rendering
+   * on every update. Code-only — wire the creds into effects/calls; never render a raw secret.
+   */
+  function useEnv(): EnvOf<C, R> | null {
+    const client = useClient()
+    return useSyncExternalStore(
+      (onChange) => client.env.subscribe(() => onChange()),
+      () => client.env.current,
+      () => client.env.current,
+    )
+  }
+
+  return { Provider, useClient, useEvent, useSubscription, useRequest, useDoc, useCollection, useEnv }
 }

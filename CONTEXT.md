@@ -127,6 +127,44 @@ A Cluster that quietly filtered own-messages would break every CRDT client's loc
 ### Relay-sync invariant
 Resolved 2026-07-15. A **`relay` backend's `apply` must be synchronous** — for both [[Collection runtime]] families. The relay ingress path fires-and-forgets (`void apply(...)`) so a cross-node race lands in a `try`/`catch`, and the CRDT side guards re-publish with a flag cleared in `finally`; an async `apply` escapes that catch and clears that guard before the change is emitted, turning one relayed write into a cluster-wide echo storm. [[Replica origin]] cannot substitute for the flag: it identifies the *writer* and survives the relay, so a receiving node cannot distinguish a relayed delta from a local write by that same writer. A `self` backend is exempt — it never relays. The rule was real and load-bearing but recorded only in `collections-crdt-libsql`'s private doc comment (that backend keeps its hot path sync and persists off `onChange` for exactly this reason); it now lives on `CollectionStore.apply` / `CrdtCollectionStore.apply`. Expressing it in the type system — splitting each seam into a discriminated union on `clustering`, which already discriminates — is the real fix and is still open (breaking; core + 6 backends; wants an ADR).
 
+### Credential
+Resolved 2026-07-17. The **durable stored secret** that proves a connection's identity: a **password hash**
+(`credentials` collection) for a human, an **API key** for a bot. Verified at login/connect. Distinct from a
+[[Session token]] (which is issued *after* a credential is verified) and from [[Connection ctx (identity)]]
+(the resolved identity, not the secret).
+
+### Session token
+Resolved 2026-07-17. A **re-sendable substitute for a password**, issued once a [[Credential]] is verified, so
+a human's browser can reconnect without re-sending the password — and so a login can be revoked without
+changing the password. **Humans only.** A bot needs none: its **API key is already a safely-re-sendable durable
+credential**, so `sessionId: null` on an API-key connection is correct, not a gap.
+
+### Connection session
+Resolved 2026-07-17. A **live connection plus its server-side state**. Every authenticated connection has one —
+bots included. Its server-only identity is [[Connection ctx (identity)]]; its client-visible slice is
+[[Connection env]].
+
+### Connection ctx (identity)
+Resolved 2026-07-17. The **frozen, server-only identity** a connection authenticated as (`{ userId, roles,
+sessionId }` under plugin-auth) — the value `authenticate` returns as `ctx`, stashed `readonly` on `conn.ctx`
+and used as the **trusted input to authorization** (handlers, row policies). Server-only and frozen for two
+reasons: authz must key on an unchanging, unforgeable identity, and hosts stash *server-only* per-connection
+state here. The opposite corner of the visibility×mutability grid from [[Connection env]] — the two are
+**paired at the source** (`authenticate → { role, ctx, env }`) but never merged.
+
+### Connection env
+Resolved 2026-07-17 (ADR-0012). A **typed, per-connection, server-vended, client-visible, mutable, ephemeral**
+state bag — the visibility-mirror sibling of `conn.data` (*"`data` is server-side scratch; `env` is the same,
+but the client sees it"*). Declared per role on the contract (`roles.R.env`), seeded by `authenticate`
+alongside [[Connection ctx (identity)]], updated live via `conn.setEnv` / `srv.toUser(id).setEnv`, read on the
+client as `client.env` (`current`/`ready`/`subscribe`) / React `useEnv()`. super-line is a **pure courier**: it
+validates and delivers the payload but never interprets, acts on, or attributes it (no impersonation, no
+on-behalf-of). **Never persisted** — it holds live external credentials and lives only in memory, re-seeded on
+reconnect. Its intended use is an agent's *runtime* wiring the creds into its tool implementations (the LLM
+never sees it). Surfaced in the Control Center (`ConnView` + an `env.set` feed event) **masked by default** —
+values hidden unless a key is host-allow-listed (`revealEnvKeys`) — because `env` always holds creds. Distinct
+from [[Store]] (persisted, ACL'd) and from a [[Collection policy]] (authorization, not delivery).
+
 ## Resolved (Store design, 2026-06-23)
 The Store-grilling session resolved the load-bearing architecture; each is a glossary term above. In short: [[Store]] is the foundational primitive (CRDT is one impl); [[Change]] is an opaque `{id,update,origin}` relayed symmetrically; a Store is a [[Store pair (server half / client half)]]; [[Principal (the ACL identity)]] = `identify ?? conn.id`; [[Replica origin]] is a distinct per-writer id; the [[Store surface (off-contract, generic)]] is untyped (ADR-0003); [[Access control (accessRules)]] is server-authoritative, deny-by-default; [[Clustering mode (relay | self)]] is Store-declared; [[Named store]]s are independently-configured pairs; the client uses a [[Resource handle]]; [[Store inspector events]] give Control Center visibility; [[Packaging]] keeps Yjs in super-store. CRDT binding = Yjs via [[super-store]] (ADR-0002, supersedes ADR-0001).
 

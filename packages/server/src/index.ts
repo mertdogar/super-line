@@ -45,6 +45,8 @@ import {
   type SharedServerRequests,
   type DataOf,
   type AnyData,
+  type EnvOf,
+  type AnyEnv,
 } from '@super-line/core'
 import { Conn, resolvePrincipal } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
@@ -81,7 +83,7 @@ type Awaitable<T> = T | Promise<T>
  * handler surface and `ctx` together.
  */
 export type AuthResult<C extends Contract> = {
-  [R in RoleOf<C>]: { role: R; ctx: unknown }
+  [R in RoleOf<C>]: { role: R; ctx: unknown; env?: EnvOf<C, R> }
 }[RoleOf<C>]
 type CtxFor<A, R> = A extends { role: R; ctx: infer X } ? X : never
 type CtxUnion<A> = A extends { ctx: infer X } ? X : never
@@ -99,6 +101,7 @@ const PLUGIN = 'x:' // reserved prefix for plugin-private channels: `x:<plugin>:
 type PersonalEnvelope =
   | { p: 'emit'; f: EvtFrame }
   | { p: 'close' }
+  | { p: 'env'; d: unknown } // vend/update the target conn(s)' client-visible env (ADR-0012)
   | { p: 'req'; o: string; i: number; m: string; d: unknown } // server→client request from origin node `o`
 // Reply to a server→client request, routed back to the origin node on its REPLY channel.
 type ReplyEnvelope =
@@ -110,7 +113,7 @@ type RoleHandlers<C extends Contract, A, R extends RoleOf<C>> = {
   [K in keyof RoleRequests<C, R>]: (
     input: ServerInput<RoleRequests<C, R>[K]>,
     ctx: CtxFor<A, R>,
-    conn: Conn<Events<C, R>, CtxFor<A, R>, R, DataOf<C, R>>,
+    conn: Conn<Events<C, R>, CtxFor<A, R>, R, DataOf<C, R>, EnvOf<C, R>>,
   ) => Awaitable<Output<RoleRequests<C, R>[K]>>
 }
 
@@ -119,7 +122,7 @@ type SharedHandlers<C extends Contract, A> = {
   [K in keyof SharedRequests<C>]: (
     input: ServerInput<SharedRequests<C>[K]>,
     ctx: CtxUnion<A>,
-    conn: Conn<SharedEvents<C>, CtxUnion<A>, RoleOf<C>, AnyData<C>>,
+    conn: Conn<SharedEvents<C>, CtxUnion<A>, RoleOf<C>, AnyData<C>, AnyEnv<C>>,
   ) => Awaitable<Output<SharedRequests<C>[K]>>
 }
 
@@ -233,6 +236,8 @@ export interface ConnTarget<C extends Contract> {
   ): Promise<Output<SharedServerRequests<C>[M]>>
   /** Close this connection (cross-node kick). */
   close(): void
+  /** Vend/update this connection's client-visible `env` (ADR-0012), cross-node. Validated per-conn on arrival. */
+  setEnv(env: AnyEnv<C>): void
 }
 
 /** All of a user's connections (0..N devices), reachable across nodes. */
@@ -241,6 +246,8 @@ export interface UserTarget<C extends Contract> {
   emit<E extends keyof SharedEvents<C>>(event: E, data: EmitData<SharedEvents<C>[E]>): void
   /** Disconnect every one of the user's connections (cross-node). */
   disconnect(): void
+  /** Vend/update `env` (ADR-0012) on every one of the user's connections, cross-node. Validated per-conn on arrival. */
+  setEnv(env: AnyEnv<C>): void
 }
 
 /** Lens for role-scoped server sends, returned by `srv.forRole(role)`. */
@@ -388,9 +395,9 @@ export interface PluginContext {
   /** Subscribe server-side to a shared topic, cluster-wide (local echo). Returns an unsubscribe fn. */
   subscribe(topic: string, handler: (data: unknown, meta: BusMeta) => void): () => void
   /** Target a single connection by id, on whatever node holds it. */
-  toConn(id: string): { emit(event: string, data: unknown): void; close(): void }
+  toConn(id: string): { emit(event: string, data: unknown): void; close(): void; setEnv(env: unknown): void }
   /** Target all of a user's connections across nodes. */
-  toUser(userId: string): { emit(event: string, data: unknown): void; disconnect(): void }
+  toUser(userId: string): { emit(event: string, data: unknown): void; disconnect(): void; setEnv(env: unknown): void }
   /** Server-controlled room membership + broadcast (loosely typed, mirroring toConn/toUser). */
   room(name: string): {
     add(conn: Conn): void
@@ -741,6 +748,18 @@ export function createSuperLineServer<
       for (const conn of set) conn.close()
       return
     }
+    if (env.p === 'env') {
+      // per-conn: setEnv validates against that conn's role env schema + pushes the frame; a bad value on one
+      // conn (e.g. a differently-typed role sharing the user key) must not block the others.
+      for (const conn of set) {
+        try {
+          conn.setEnv(env.d as never)
+        } catch {
+          /* invalid for this conn's schema — skip it */
+        }
+      }
+      return
+    }
     if (env.p === 'req') {
       // owner side: forward to the local client under a fresh local id, remember where to reply
       const localId = nextSReq++
@@ -956,7 +975,7 @@ export function createSuperLineServer<
   // Core owns the auth decision; each transport calls this at its native moment and rejects natively on throw.
   const authHook = async (handshake: Handshake): Promise<AuthOutcome> => {
     const auth = await opts.authenticate(handshake)
-    return { role: auth.role, ctx: auth.ctx, transport: handshake.transport }
+    return { role: auth.role, ctx: auth.ctx, env: auth.env, transport: handshake.transport }
   }
 
   // A transport accepted (and authenticated) a connection — wire it up. Reserved conns (a role the server
@@ -975,6 +994,8 @@ export function createSuperLineServer<
       taps.length
         ? (event, data) => emitTap({ type: 'msg.event', target: connId, name: event, data })
         : undefined,
+      contract.roles[role]?.env, // the role's `env` schema — conn.setEnv validates against it (ADR-0012)
+      taps.length ? (env) => emitTap({ type: 'env.set', connId, nodeId: instanceId, env }) : undefined,
     )
     conn.transport = auth.transport
     conn.principal = resolvePrincipal(conn, opts.identify) // ACL identity for stores; always defined
@@ -1012,7 +1033,14 @@ export function createSuperLineServer<
       })
       fireDisconnect(conn, ctx, code)
     })
-    fireConnection(conn, ctx) // may seed conn.data before the snapshot
+    // Seed the initial client-visible env (ADR-0012) from authenticate's `env`, BEFORE onConnection so a
+    // host hook may override it. Always sends one `env` frame (value or null) so `client.env.ready` resolves.
+    try {
+      conn.setEnv((auth.env ?? null) as never)
+    } catch {
+      conn.setEnv(null as never) // host returned an env that failed its schema — degrade to null, keep the conn
+    }
+    fireConnection(conn, ctx) // may seed conn.data (or call conn.setEnv again) before the snapshot
     const descriptor = buildDescriptor(conn) // snapshot (reads conn.data)
     void adapter.presence?.set(descriptor)
     emitTap({ type: 'connect', descriptor })
@@ -1298,6 +1326,7 @@ export function createSuperLineServer<
   function personalTarget(channel: string): {
     emit: (event: string, data: unknown) => void
     close: () => void
+    setEnv: (env: unknown) => void
   } {
     return {
       emit(event, data) {
@@ -1313,6 +1342,9 @@ export function createSuperLineServer<
       },
       close() {
         void adapter.publish(channel, serializer.encode({ p: 'close' } satisfies PersonalEnvelope))
+      },
+      setEnv(value) {
+        void adapter.publish(channel, serializer.encode({ p: 'env', d: value } satisfies PersonalEnvelope))
       },
     }
   }
@@ -1394,12 +1426,13 @@ export function createSuperLineServer<
       return {
         emit: t.emit,
         close: t.close,
+        setEnv: t.setEnv,
         request: (name, input, opts) => requestConn(id, String(name), input, opts),
       } as ConnTarget<C>
     },
     toUser(userId) {
       const t = personalTarget(USER + userId)
-      return { emit: t.emit, disconnect: t.close }
+      return { emit: t.emit, disconnect: t.close, setEnv: t.setEnv }
     },
     implement(handlers) {
       const map = handlers as unknown as Impl
@@ -1502,11 +1535,11 @@ export function createSuperLineServer<
       subscribe: (topic, handler) => api.subscribe(topic as never, handler as never),
       toConn: (id) => {
         const t = api.toConn(id)
-        return { emit: (event, data) => t.emit(event as never, data as never), close: t.close }
+        return { emit: (event, data) => t.emit(event as never, data as never), close: t.close, setEnv: (env) => t.setEnv(env as never) }
       },
       toUser: (userId) => {
         const t = api.toUser(userId)
-        return { emit: (event, data) => t.emit(event as never, data as never), disconnect: t.disconnect }
+        return { emit: (event, data) => t.emit(event as never, data as never), disconnect: t.disconnect, setEnv: (env) => t.setEnv(env as never) }
       },
       room: (name) => {
         const r = room(name)

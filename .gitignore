@@ -12,3 +12,5 @@ docs/reference/*
 !docs/reference/cheatsheets/
 .impeccable/
 .super-talk/
+.agents/
+.codex/

@@ -134,6 +134,13 @@ export interface StreamEventSink {
   push(...events: ChatStreamEvent[]): void | Promise<void>
 }
 
+/**
+ * One settled chat turn folded into model input — the discriminated shape Mastra's and the AI
+ * SDK's message arrays both accept. `onChatMessage` assembles these; `mastraEngine.run` consumes
+ * them.
+ */
+export type ChatTurnMessage = { role: 'user'; content: string } | { role: 'assistant'; content: string }
+
 export type ChatChannel = z.infer<typeof channelSchema>
 export type ChatMembership = z.infer<typeof membershipSchema>
 /**

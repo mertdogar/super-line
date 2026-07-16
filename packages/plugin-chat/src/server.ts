@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { eq, isIn, or, SuperLineError } from '@super-line/core'
 import type { Contract, Expr, OrderBy } from '@super-line/core'
 import type { PluginContext, SuperLinePlugin } from '@super-line/server'
-import type { AuthContext } from '@super-line/plugin-auth'
+import type { AuthContext, AuthUser } from '@super-line/plugin-auth'
 import { memId, partId } from './index.js'
 import type {
   ChatChannel,
@@ -1135,4 +1135,99 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
   }
 
   return { plugin, channels, members, messages }
+}
+
+// ── bot provisioning (PLAN-chat-mastra) ───────────────────────────────────────────────────────────
+
+/** The slice of plugin-auth's kit `provisionChatBot` drives — structural, so any auth-shaped host fits. */
+export interface ProvisionBotAuthKit {
+  users: {
+    find(opts?: { filter?: Expr; includeDeactivated?: boolean }): Promise<AuthUser[]>
+    create(input: {
+      email: string
+      displayName: string
+      roles?: string[]
+      metadata?: Record<string, unknown>
+    }): Promise<AuthUser>
+    reactivate(id: string): Promise<void>
+  }
+  apiKeys: {
+    create(userId: string, opts: { role: string; label: string }): Promise<{ id: string; key: string }>
+    listFor(userId: string): Promise<{ id: string; label?: string }[]>
+    revoke(id: string): Promise<void>
+  }
+}
+
+export interface ProvisionChatBotOptions {
+  /**
+   * The bot's display name — the find-or-create identity key. (The public users row carries no
+   * email; that lives in the deny-all credentials collection, so the name is the one readable
+   * stable key.) Keep it unique among your bots.
+   */
+  name: string
+  /** The account email, used at first creation only. Default: `<slug(name)>@bots.local`. */
+  email?: string
+  /** The API key's connect role. Default `'user'`. */
+  role?: string
+  /** Same-label keys are revoked and re-minted each call, so restarts don't accumulate live keys. Default `<slug(name)>-bot`. */
+  keyLabel?: string
+  /** User metadata on first creation. Default `{ bot: true }`. */
+  metadata?: Record<string, unknown>
+  /** Channel ids to join as a member (idempotent — already-a-member is fine). */
+  channels?: string[]
+}
+
+/**
+ * Idempotent bot identity: find-or-create the user by display name (reactivating a soft-deleted
+ * one), revoke + re-mint its same-label API key, and join the given channels. Passwordless — the
+ * bot connects with the returned `apiKey` only. Call it once per process start:
+ *
+ * ```ts
+ * const { user, apiKey } = await provisionChatBot(authKit, chatKit, { name: 'Supervisor' })
+ * const client = createSuperLineClient(app, { transport, role: 'user', params: { apiKey } })
+ * const bot = chatClient(client, { userId: user.id })
+ * ```
+ *
+ * Revoke-then-mint is not atomic: a rolling multi-instance restart can transiently hold two live
+ * keys under one label. Fine for the intended one-process-per-bot shape.
+ */
+export async function provisionChatBot(
+  authKit: ProvisionBotAuthKit,
+  chatKit: { members: Pick<ChatMembersApi, 'add'> },
+  opts: ProvisionChatBotOptions,
+): Promise<{ user: AuthUser; apiKey: string }> {
+  const slug = opts.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'bot'
+  const email = (opts.email ?? `${slug}@bots.local`).toLowerCase()
+  const label = opts.keyLabel ?? `${slug}-bot`
+
+  const findExisting = async (): Promise<AuthUser | undefined> =>
+    (await authKit.users.find({ filter: eq('displayName', opts.name), includeDeactivated: true }))[0]
+  let user = await findExisting()
+  if (!user) {
+    try {
+      user = await authKit.users.create({ email, displayName: opts.name, metadata: opts.metadata ?? { bot: true } })
+    } catch (e) {
+      // a concurrent provision can win the create race — resolve by name once more before giving up
+      // (a genuine email clash with a DIFFERENTLY-named account stays an error: pass an explicit email)
+      if ((e as { code?: string }).code !== 'CONFLICT') throw e
+      user = await findExisting()
+      if (!user) throw e
+    }
+  }
+  if (user.deletedAt !== null && user.deletedAt !== undefined) {
+    await authKit.users.reactivate(user.id)
+    user = { ...user, deletedAt: null }
+  }
+
+  for (const k of await authKit.apiKeys.listFor(user.id)) if (k.label === label) await authKit.apiKeys.revoke(k.id)
+  const { key } = await authKit.apiKeys.create(user.id, { role: opts.role ?? 'user', label })
+
+  for (const channelId of opts.channels ?? []) {
+    try {
+      await chatKit.members.add(channelId, user.id)
+    } catch (e) {
+      if ((e as { code?: string }).code !== 'CONFLICT') throw e
+    }
+  }
+  return { user, apiKey: key }
 }

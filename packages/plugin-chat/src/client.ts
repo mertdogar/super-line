@@ -8,6 +8,7 @@ import type {
   ChatMessage,
   ChatMessagePart,
   ChatStreamEvent,
+  ChatTurnMessage,
   MemberRole,
   MessageStatus,
 } from './index.js'
@@ -116,6 +117,8 @@ export interface ChatClient<C extends Contract> {
 
   /** Resolves once the membership watcher is armed (userId resolved + own-membership snapshot applied). */
   readonly ready: Promise<void>
+  /** The resolved own user id (`null` for a guest). Populated by `ready` — read it after awaiting. */
+  readonly userId: string | null
   /** Close every store and the membership watcher (NOT the underlying super-line client). */
   close(): void
 }
@@ -535,8 +538,10 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
   // ── the membership watcher: ONE stable subscription drives every store's re-subscribe ────────────
   // Its filter (own rows) matches the policy's stable eq(userId) arm, so it never goes deaf itself.
   let watcher: LiveRowSet<unknown> | undefined
+  let selfId: string | null = null
   const ready = (async () => {
     const userId = opts?.userId !== undefined ? opts.userId : ((await dyn.whoami())?.userId ?? null)
+    selfId = userId
     if (!userId) return // guest: nothing to watch, stores stay empty
     watcher = dyn.collection('memberships').subscribe({ filter: eq('userId', userId) })
     const w = watcher
@@ -580,9 +585,160 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
     deleteMessage: async (id) => void (await dyn.deleteMessage({ id })),
 
     ready,
+    get userId() {
+      return selfId
+    },
     close: () => {
       for (const s of stores) s.close()
       watcher?.close()
     },
+  }
+}
+
+// ── the bot loop (PLAN-chat-mastra) ───────────────────────────────────────────────────────────────
+
+export interface ChatMessageContext<C extends Contract> {
+  channelId: string
+  /** The settled message that triggered this turn (never a still-streaming envelope). */
+  message: AssembledMessageOf<C>
+  /** The channel's recent settled turns, oldest→newest, the trigger included — ready for a model. */
+  history: ChatTurnMessage[]
+}
+
+export interface OnChatMessageOptions {
+  /**
+   * `'all'` (default): every channel the bot can SEE — RLS-scoped, i.e. public channels plus
+   * private ones it's already a member of — auto-joining on appear (a new channel is a new
+   * conversation). Or a fixed id list. Either way joining is idempotent; being kicked silences
+   * the bot in that channel (it never force-rejoins).
+   */
+  channels?: 'all' | string[]
+  /** Settled turns folded into `ctx.history` (default 8). */
+  historyLimit?: number
+}
+
+/**
+ * The bot message loop both examples used to hand-roll: watch channels, join on appear, detect new
+ * messages (backlog excluded, own messages excluded, streaming envelopes deferred until they
+ * settle), assemble history, and call `handler` — SERIALIZED per channel, so a message that
+ * arrives mid-answer queues and its turn sees the finished answer in history. Channels stay
+ * concurrent with each other. Reconnects self-heal (the stores own that); a failed join is logged
+ * and retried on the next directory tick instead of silently blinding the bot. Returns a detach
+ * function.
+ *
+ * Framework-agnostic: pair it with `mastraEngine(...).respond` or any AI-SDK producer.
+ */
+export function onChatMessage<C extends Contract>(
+  chat: ChatClient<C>,
+  handler: (ctx: ChatMessageContext<C>) => void | Promise<void>,
+  opts?: OnChatMessageOptions,
+): () => void {
+  const historyLimit = opts?.historyLimit ?? 8
+  const mode = opts?.channels ?? 'all'
+  let stopped = false
+  let selfId: string | null = null
+
+  interface Watched {
+    feed?: ChatLiveStore<AssembledMessageOf<C>>
+    unsub: () => void
+  }
+  const watched = new Map<string, Watched>()
+  const chains = new Map<string, Promise<void>>()
+  let dir: ChatLiveStore<ChannelRowOf<C>> | undefined
+
+  // implementation works on the structural row view (property access on the deferred contract
+  // conditional doesn't resolve inside a generic body — same convention as the stores above)
+  const rowsOf = (feed: ChatLiveStore<AssembledMessageOf<C>>): ChatMessage[] => feed.rows() as unknown as ChatMessage[]
+
+  const historyOf = (feed: ChatLiveStore<AssembledMessageOf<C>>): ChatTurnMessage[] =>
+    rowsOf(feed)
+      .filter((m) => m.status !== 'streaming')
+      .slice(-historyLimit)
+      .map((m): ChatTurnMessage => {
+        const content =
+          m.content === undefined
+            ? `[${m.status ?? 'message'}${m.error !== undefined ? `: ${m.error}` : ''} — no text]`
+            : typeof m.content === 'string'
+              ? m.content
+              : JSON.stringify(m.content)
+        return m.authorId === selfId ? { role: 'assistant', content } : { role: 'user', content }
+      })
+
+  // Decision 3: one turn at a time per channel. History is assembled at DEQUEUE time, so a queued
+  // message's turn already contains the previous answer.
+  const enqueue = (channelId: string, feed: ChatLiveStore<AssembledMessageOf<C>>, m: ChatMessage): void => {
+    const next = (chains.get(channelId) ?? Promise.resolve())
+      .then(async () => {
+        if (stopped) return
+        await handler({ channelId, message: m as unknown as AssembledMessageOf<C>, history: historyOf(feed) })
+      })
+      .catch((err) => console.error(`[plugin-chat] bot turn failed in channel ${channelId}`, err))
+    chains.set(channelId, next)
+  }
+
+  const watch = (channelId: string): void => {
+    if (stopped || watched.has(channelId)) return
+    const entry: Watched = { unsub: () => {} }
+    watched.set(channelId, entry) // synchronous mark — dedupes concurrent directory ticks
+    void (async () => {
+      try {
+        await chat.join(channelId)
+      } catch (err) {
+        if ((err as { code?: string }).code !== 'CONFLICT') {
+          // veto/rate-limit/transient — unmark so the next directory tick retries instead of
+          // permanently blinding the bot to this channel
+          watched.delete(channelId)
+          console.error(`[plugin-chat] bot could not join channel ${channelId}`, err)
+          return
+        }
+      }
+      if (stopped || watched.get(channelId) !== entry) return
+      const feed = chat.messages(channelId)
+      entry.feed = feed
+      await feed.ready
+      if (stopped) return
+      const seen = new Set(rowsOf(feed).map((m) => m.id)) // the backlog is context, not triggers
+      entry.unsub = feed.subscribe(() => {
+        for (const m of rowsOf(feed)) {
+          if (seen.has(m.id)) continue
+          if (m.status === 'streaming') continue // not seen yet — picked up when it settles
+          seen.add(m.id)
+          if (selfId !== null && m.authorId === selfId) continue
+          enqueue(channelId, feed, m)
+        }
+      })
+    })().catch((err) => console.error(`[plugin-chat] bot failed to watch channel ${channelId}`, err))
+  }
+
+  const drop = (channelId: string, entry: Watched): void => {
+    entry.unsub()
+    entry.feed?.close()
+    watched.delete(channelId)
+    chains.delete(channelId)
+  }
+
+  void (async () => {
+    await chat.ready
+    if (stopped) return
+    selfId = chat.userId
+    if (mode === 'all') {
+      dir = chat.channels()
+      const sync = (): void => {
+        const visible = new Set((dir!.rows() as unknown as ChatChannel[]).map((c) => c.id))
+        for (const id of visible) watch(id)
+        for (const [id, entry] of watched) if (!visible.has(id)) drop(id, entry) // deleted / no longer visible
+      }
+      dir.subscribe(sync)
+      await dir.ready
+      if (!stopped) sync()
+    } else {
+      for (const id of mode) watch(id)
+    }
+  })().catch((err) => console.error('[plugin-chat] onChatMessage failed to start', err))
+
+  return () => {
+    stopped = true
+    dir?.close()
+    for (const [id, entry] of watched) drop(id, entry)
   }
 }

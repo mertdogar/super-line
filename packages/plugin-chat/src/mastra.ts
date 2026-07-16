@@ -14,7 +14,7 @@
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
 import type { Contract } from '@super-line/core'
-import type { ChatStreamEvent, StreamEventSink } from './index.js'
+import type { ChatStreamEvent, ChatTurnMessage, StreamEventSink } from './index.js'
 import type { ChatClient, MessageRowOf } from './client.js'
 
 // ── the chunk mapper (a direct port of super-harness's chunk-adapter) ───────────────────────────
@@ -241,8 +241,7 @@ export interface MastraAgentLike {
   stream(input: any, options?: any): Promise<{ fullStream: any }>
 }
 
-/** The discriminated shape Mastra's `stream()` accepts for conversation input. */
-export type ChatTurnMessage = { role: 'user'; content: string } | { role: 'assistant'; content: string }
+export type { ChatTurnMessage } from './index.js'
 
 export interface MastraSubagent {
   agent: MastraAgentLike

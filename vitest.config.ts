@@ -18,6 +18,8 @@ export const alias = {
   '@super-line/plugin-auth/client': src('packages/plugin-auth/src/client.ts'),
   '@super-line/plugin-auth/react': src('packages/plugin-auth/src/react.tsx'),
   '@super-line/plugin-auth': src('packages/plugin-auth/src/index.ts'),
+  '@super-line/plugin-chat/server': src('packages/plugin-chat/src/server.ts'),
+  '@super-line/plugin-chat': src('packages/plugin-chat/src/index.ts'),
   '@super-line/collections-memory': src('packages/collections-memory/src/index.ts'),
   '@super-line/collections-crdt-memory': src('packages/collections-crdt-memory/src/index.ts'),
   '@super-line/collections-crdt-libsql': src('packages/collections-crdt-libsql/src/index.ts'),

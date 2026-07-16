@@ -72,6 +72,15 @@ surface (→ ADR-0010).
 11. **Last-owner protection.** `leaveChannel` / `removeMember` / `setMemberRole`(demote) throw
     `CONFLICT` if the channel would keep members but zero owners — promote first or delete the
     channel. No auto-promotion, no orphans. (`chatKit` can repair any state server-side.)
+    Review-hardened (Phase 1): demotion uses its own predicate (the demoted target REMAINS a member,
+    so demoting the last owner is blocked even in a sole-member channel); all channel/membership/send
+    mutations serialize through a per-channel in-process lock (the store has no CAS — closes every
+    single-node check-then-act race incl. concurrent co-owner leaves and join/send racing the
+    deleteChannel cascade); `removeMember` disconnects the kicked user cluster-wide (captured read
+    filters are only re-evaluated on re-subscribe, so a kick must cut live subscriptions); the guest
+    deny in read policies keys on `ctx.userId` (NOT `principal`, which the runtime falls back to a
+    conn-id string). KNOWN v1 caveat: under relay clustering, requests on OTHER nodes still interleave
+    (e.g. join vs addMember committing the same membership pk with different roles) — no cross-node CAS.
 12. **`chatKit` imperative surface** (grouped namespaces, all through the hooked domain cores,
     `initiator.kind === 'server'`):
     - `channels`: `create({ name, visibility, owner?, metadata? })` (owner given → owner-membership
@@ -95,7 +104,8 @@ surface (→ ADR-0010).
     `useMembers` / `useMessages`. TanStack joins remain a host-side recipe (docs). Optional
     `/tanstack` subpath deferred.
 15. **Packaging mirrors plugin-auth.** `@super-line/plugin-chat`, subpaths `.` (fragment
-    `chatContract({ content? })` + schemas/types) · `/server` (`chat({ contract, collections, hooks? })` →
+    `chatContract({ content? })` + schemas/types) · `/server` (`chat({ contract, hooks? })` — no
+    `collections` option: every read/write flows through the plugin co-writer →
     `chatKit`) · `/client` · `/react`. **plugin-auth is a peer dependency** (hard prerequisite):
     handlers read `connCtx as AuthContext`; `chat()` throws at startup if the contract lacks the
     auth+chat fragments. Collection names UNPREFIXED (`channels`/`memberships`/`messages`) — collision

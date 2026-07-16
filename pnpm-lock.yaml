@@ -1478,6 +1478,31 @@ importers:
         specifier: ^18.3.0
         version: 18.3.1
 
+  packages/plugin-chat:
+    dependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@super-line/client':
+        specifier: workspace:^
+        version: link:../client
+      '@super-line/collections-memory':
+        specifier: workspace:*
+        version: link:../collections-memory
+      '@super-line/plugin-auth':
+        specifier: workspace:^
+        version: link:../plugin-auth
+      '@super-line/server':
+        specifier: workspace:^
+        version: link:../server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../transport-websocket
+
   packages/plugin-inspector:
     dependencies:
       '@standard-community/standard-json':

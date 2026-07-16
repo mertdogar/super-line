@@ -88,16 +88,53 @@ recorded in [ADR-0010](https://github.com/mertdogar/super-line/blob/main/docs/ad
 - **Last-owner protection**: leaving, being removed, or self-demoting throws `CONFLICT` if it would leave a
   channel with members but no owner.
 
-## Server-side management + AI agents
+## `chatKit` — the server API
 
-`chatKit` exposes an imperative surface — running through the same hooked cores, with
-`initiator.kind === 'server'` — so agents and back-office code drive the model directly:
+`chat({ contract, hooks? })` returns the kit you register on the server and drive from back-office code and
+agents. Every method runs through the same hooked domain core as the matching client request, with
+`initiator.kind === 'server'`:
+
+```ts
+interface ChatServer {
+  plugin: SuperLinePlugin // → server `plugins: [...]` — read-RLS/write-deny policies + the 11 handlers
+
+  channels: {
+    create(input: { name, visibility?, owner?, metadata? }): Promise<ChatChannel> // owner → owner-membership written too
+    get(id): Promise<ChatChannel | undefined>
+    find(opts?: { filter?, limit?, offset? }): Promise<ChatChannel[]>
+    update(id, patch: { name?, metadata? }): Promise<ChatChannel>
+    delete(id): Promise<void>   // cascades the channel's memberships + messages
+  }
+
+  members: {
+    add(channelId, userId, opts?: { role?, metadata? }): Promise<ChatMembership>
+    remove(channelId, userId): Promise<void>
+    setRole(channelId, userId, role): Promise<ChatMembership>
+    of(channelId): Promise<ChatMembership[]>
+    channelsOf(userId): Promise<ChatMembership[]>
+  }
+
+  messages: {
+    send(input: { channelId, authorId, content, metadata? }): Promise<ChatMessage>
+    edit(id, patch: { content?, metadata? }): Promise<ChatMessage>  // stamps editedAt
+    delete(id): Promise<void>   // hard-delete
+    find(opts?: { filter?, orderBy?, limit?, offset? }): Promise<ChatMessage[]>
+  }
+}
+```
 
 ```ts
 const ops = await chatKit.channels.create({ name: 'ops', visibility: 'private', owner: adminId })
 await chatKit.members.add(ops.id, someUserId)
 await chatKit.messages.send({ channelId: ops.id, authorId: botId, content: 'deploy done' })
 ```
+
+**Client-side** `chatClient(client, { userId })` mirrors the mutations as typed requests —
+`createChannel` · `updateChannel` · `deleteChannel` · `join` · `leave` · `addMember` · `removeMember` ·
+`setMemberRole` · `send` · `editMessage` · `deleteMessage` — plus live stores `channels()` /
+`members(channelId)` / `messages(channelId, { limit? })`, each `{ rows(), subscribe(cb), ready, close() }`.
+
+## AI agents
 
 **AI agents are regular users** — provision one with [plugin-auth](https://www.npmjs.com/package/@super-line/plugin-auth)
 (`authKit.users.create` + `authKit.apiKeys.create`), add it to a channel, and let it connect with the same

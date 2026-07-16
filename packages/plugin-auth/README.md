@@ -81,20 +81,52 @@ client half hides the dance: `signIn()` connects as `guest`, mints a session, th
   `apiKeys` / `passwordResets` are deny-all. Reference the directory from your own rows with
   `references: { authorId: 'users' }`, and key your policies on the `principal` (now the `userId`).
 
-## Server-side management (provision users + agents)
+## `authKit` — the server API
 
-`authKit` exposes an imperative surface for back-office code and provisioning — including AI-agent users:
+`auth({ contract, collections, defaultRoles?, jwt?, sendPasswordReset? })` returns the kit you wire into the
+server and drive from back-office code:
 
 ```ts
-// a passwordless user (invite flow) + a fixed-role API key it connects with
-const bot = await authKit.users.create({ email: 'bot@app.dev', displayName: 'Ask AI' })
+interface AuthServer {
+  // ── wiring ──────────────────────────────────────────────────────────────────────
+  authenticate(handshake): Promise<{ role, ctx: AuthContext }> // → server `authenticate:`
+  identify(conn): string | undefined                           // → server `identify:` (principal := userId)
+  plugin: SuperLinePlugin                                       // → server `plugins: [...]`
+  revoke(userId: string): Promise<void>  // delete all sessions + disconnect live connections cluster-wide
+
+  // ── users: provisioning + back-office (requires the running server) ───────────────
+  users: {
+    get(id): Promise<AuthUser | undefined>
+    find(opts?: { filter?, limit?, offset?, includeDeactivated? }): Promise<AuthUser[]>
+    create(input: { email, password?, displayName, roles?, metadata? }): Promise<AuthUser> // omit password → invite flow
+    update(id, patch: { displayName?, metadata? }): Promise<AuthUser>
+    setRoles(id, roles: string[]): Promise<void>       // validated against contract roles (connect-time)
+    deactivate(id): Promise<void>   // soft-delete: stamp deletedAt, flush sessions/keys/resets, kick connections
+    reactivate(id): Promise<void>   // lift the deactivation
+    setPassword(id, newPassword): Promise<void>        // admin rotation; flushes sessions + reset tokens
+  }
+
+  // ── apiKeys: agent + service provisioning (requires the running server) ───────────
+  apiKeys: {
+    create(userId, opts: { role, label, expiresInMs? }): Promise<ApiKeyInfo & { key }> // raw slp_… returned ONCE
+    listFor(userId): Promise<ApiKeyInfo[]>
+    revoke(id): Promise<void>
+  }
+}
+```
+
+Provision an AI-agent (or any headless service) as a real user:
+
+```ts
+const bot = await authKit.users.create({ email: 'bot@app.dev', displayName: 'Ask AI' }) // passwordless
 const { key } = await authKit.apiKeys.create(bot.id, { role: 'user', label: 'agent' })
 // createSuperLineClient(app, { …, params: { apiKey: key } }) → the bot is a real user on the bus
 ```
 
-- `authKit.users`: `get` · `find` · `create` · `update` · `setRoles` · `deactivate` / `reactivate`
-  (soft-delete: stamps `deletedAt`, flushes sessions/keys, kicks connections) · `setPassword`.
-- `authKit.apiKeys`: `create` (raw key returned once) · `listFor` · `revoke`.
+**Client-side requests** (typed methods on a connected client): `signUp` · `signIn` · `signOut` · `whoami`
+· `createApiKey({ label, role, expiresInMs? })` (raw key once) · `listApiKeys` · `revokeApiKey({ id })` ·
+`getToken` (JWT; needs `jwt:` enabled) · `requestPasswordReset` · `confirmPasswordReset`. In React/JS they
+sit behind `createAuth()` / `authClient()` as `signIn` / `signUp` / `signOut` + reactive `state`.
 
 ## Subpaths
 

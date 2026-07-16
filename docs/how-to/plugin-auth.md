@@ -136,6 +136,32 @@ Provide a `sendPasswordReset({ user, token })` callback (email/SMS is yours to d
 a constant response — it never reveals whether an email exists — and `confirmPasswordReset` resets the password and
 flushes existing sessions.
 
+## Server-side management (`authKit`)
+
+Beyond the three wiring members (`authenticate` / `identify` / `plugin`) and `revoke(userId)`, the kit
+exposes imperative surfaces for back-office code and provisioning — including AI-agent users. They need the
+running server (the co-writer binds at plugin setup):
+
+```ts
+// authKit.users — the directory, back-office edits, and provisioning
+authKit.users.get(id)                                         // → AuthUser | undefined
+authKit.users.find({ filter?, limit?, offset?, includeDeactivated? }) // → AuthUser[] (active-only by default)
+authKit.users.create({ email, password?, displayName, roles?, metadata? }) // omit password → invite flow
+authKit.users.update(id, { displayName?, metadata? })
+authKit.users.setRoles(id, roles)                             // validated against contract roles (connect-time)
+authKit.users.deactivate(id)   // soft-delete: stamp deletedAt, flush sessions/keys/resets, kick connections
+authKit.users.reactivate(id)   // lift the deactivation
+authKit.users.setPassword(id, newPassword)                   // admin rotation; flushes sessions + reset tokens
+
+// authKit.apiKeys — provision agents & services
+authKit.apiKeys.create(userId, { role, label, expiresInMs? }) // → { …info, key } — raw slp_… returned ONCE
+authKit.apiKeys.listFor(userId)                              // → ApiKeyInfo[]
+authKit.apiKeys.revoke(id)
+```
+
+Users **soft-delete** rather than vanish (`deactivate` / `reactivate`), so old rows keep rendering author
+names; the `credentials` row stays (the email is reserved) and all three auth paths degrade to guest.
+
 ## Examples
 
 - **`examples/auth`** — a runnable CLI walkthrough of the whole flow.

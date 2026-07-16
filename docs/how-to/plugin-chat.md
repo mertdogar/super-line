@@ -114,7 +114,32 @@ const messages = useMessages(channelId)
 ## Server-side management + AI agents
 
 `chatKit` exposes an imperative surface for server code — channels, members, and messages — running through
-the same hooked domain cores (with `initiator.kind === 'server'`):
+the same hooked domain cores (with `initiator.kind === 'server'`), so a server write trips the same hooks as
+a client one:
+
+```ts
+// chatKit.channels
+chatKit.channels.create({ name, visibility?, owner?, metadata? }) // owner → owner-membership written atomically
+chatKit.channels.get(id)                                          // → ChatChannel | undefined
+chatKit.channels.find({ filter?, limit?, offset? })              // → ChatChannel[]
+chatKit.channels.update(id, { name?, metadata? })
+chatKit.channels.delete(id)                                       // cascades memberships + messages
+
+// chatKit.members
+chatKit.members.add(channelId, userId, { role?, metadata? })
+chatKit.members.remove(channelId, userId)
+chatKit.members.setRole(channelId, userId, role)
+chatKit.members.of(channelId)                                     // → ChatMembership[]
+chatKit.members.channelsOf(userId)                               // → ChatMembership[]
+
+// chatKit.messages
+chatKit.messages.send({ channelId, authorId, content, metadata? })
+chatKit.messages.edit(id, { content?, metadata? })               // stamps editedAt
+chatKit.messages.delete(id)                                       // hard-delete
+chatKit.messages.find({ filter?, orderBy?, limit?, offset? })    // → ChatMessage[]
+```
+
+A quick tour — create a private channel, staff it, post to it:
 
 ```ts
 const ops = await chatKit.channels.create({ name: 'ops', visibility: 'private', owner: adminId })

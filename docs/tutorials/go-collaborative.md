@@ -206,10 +206,11 @@ And the guard is **deny-by-default** — this demo opened `read`/`write` to ever
 ## Next
 
 <div class="sl-result">
-  <p class="sl-result__h">You've done the whole series</p>
-  <p>A typed round-trip, a live row collection, and a merging document — the three shapes of state super-line moves. From here, go deeper on collections or watch the pattern do real work.</p>
+  <p class="sl-result__h">One lesson left</p>
+  <p>A typed round-trip, a live row collection, and a merging document — the three shapes of state super-line moves. Now assemble them into a real feature with a reusable plugin.</p>
 </div>
 
+- **[Tutorial 4 · Assemble a chat backbone →](/tutorials/chat-backbone)** — merge the auth and chat plugins into one contract and watch two users talk over a model you never wrote a policy or handler for.
 - [Collections overview](/collections/) — rows and documents side by side, and when to reach for each.
 - [CRDT document collections](/collections/crdt-documents) — validate-before-commit, schema tolerance, and the server co-writer in depth.
 - [`examples/store-sync-json`](https://github.com/mertdogar/super-line/tree/main/examples/store-sync-json) — this tutorial as a real browser app: edit arbitrary JSON in two tabs and watch it merge live.

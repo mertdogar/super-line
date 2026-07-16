@@ -66,6 +66,7 @@ export default defineConfig({
             { text: '1 · Your first typed round-trip', link: '/tutorials/first-round-trip' },
             { text: '2 · Your first collection', link: '/tutorials/first-collection' },
             { text: '3 · Go collaborative (a CRDT doc)', link: '/tutorials/go-collaborative' },
+            { text: '4 · Assemble a chat backbone', link: '/tutorials/chat-backbone' },
           ],
         },
       ],

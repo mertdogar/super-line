@@ -120,6 +120,10 @@ srv.implement({
 
 The type system holds both ends honest: forgetting the plugin (while its surface is merged) is a compile error — `implement` still requires the key; double-implementing it is a compile error too, backed by a runtime throw naming the key as the floor. Handling a key the contract never merged throws at construction ("did you forget to merge its surface?"). That is the sense in which **a plugin is a merge into the contract** — not a side-registry, but part of the one materialized definition both ends import. See [The contract](/concepts/the-contract).
 
+::: tip Two full contract-fragment plugins ship today
+[`@super-line/plugin-auth`](/how-to/plugin-auth) merges identity (users/sessions collections + `signIn`/`signUp`/… requests) and [`@super-line/plugin-chat`](/how-to/plugin-chat) merges a whole chat model (channels/memberships/messages collections + 11 mutation requests). plugin-chat is the reference for the **requests-first plugin idiom**: its collections are client-**read-only** (RLS `read`, `write` denied), and every mutation flows through a server-authoritative handler wrapped in a before/after **domain hook** a host can't bypass — the trade-off recorded in [ADR-0010](https://github.com/mertdogar/super-line/blob/main/docs/adr/0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md).
+:::
+
 ## The client half
 
 The client plugin is smaller — it grows the client's first real lifecycle callbacks and lets a library answer its own server→client requests:

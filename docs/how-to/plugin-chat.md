@@ -119,7 +119,7 @@ the same hooked domain cores (with `initiator.kind === 'server'`):
 ```ts
 const ops = await chatKit.channels.create({ name: 'ops', visibility: 'private', owner: adminId })
 await chatKit.members.add(ops.id, someUserId)
-await chatKit.messages.send({ channelId: ops.id, authorId: botId, text: 'deploy done' })
+await chatKit.messages.send({ channelId: ops.id, authorId: botId, content: 'deploy done' })
 ```
 
 **AI agents are regular users.** Provision one with [plugin-auth](/how-to/plugin-auth)'s server API — a

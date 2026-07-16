@@ -1,11 +1,11 @@
 # Tutorials
 
-Three lessons, in order. Each one is a **hands-on build** with a guaranteed outcome at the end — follow the steps and it works. This is the fastest way to feel how super-line fits together; once a pattern clicks here, the [How-to guides](/how-to/) and [Concepts](/concepts/) go deeper on demand.
+Four lessons, in order. Each one is a **hands-on build** with a guaranteed outcome at the end — follow the steps and it works. This is the fastest way to feel how super-line fits together; once a pattern clicks here, the [How-to guides](/how-to/) and [Concepts](/concepts/) go deeper on demand.
 
 <div class="sl-qs-hero">
 
 <p class="sl-qs-meta">
-  <span>~30 minutes end to end</span>
+  <span>~40 minutes end to end</span>
   <span>Node 18+</span>
   <span>TypeScript · zero codegen</span>
 </p>
@@ -31,6 +31,12 @@ Add **persisted, typed state**: declare a collection on the contract, give the s
 Open a **CRDT document collection** by id, bind it to a UI, and open two tabs — concurrent edits to different fields **merge** instead of clobbering, and every write is still schema-validated on the contract.
 
 *You'll touch:* [CRDT document collections](/collections/crdt-documents), `client.collection(...).open(id)`, the reactive `DocHandle`.
+
+### 4 · [Assemble a chat backbone (a plugin)](/tutorials/chat-backbone)
+
+Merge two **plugins** into one contract — [`@super-line/plugin-auth`](/how-to/plugin-auth) for identity, [`@super-line/plugin-chat`](/how-to/plugin-chat) for channels, membership, and messages — then watch two users talk over a model you never wrote a policy or handler for. This is where the hand-rolled collection from Tutorial 2 becomes a reusable, hookable backbone.
+
+*You'll touch:* [contract-fragment plugins](/concepts/plugins), [the chat plugin](/how-to/plugin-chat), domain hooks, `chatClient`.
 
 ## Before you start
 

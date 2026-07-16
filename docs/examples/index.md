@@ -20,6 +20,16 @@ A live React chat (Vite + a WS server). Open two browser tabs to chat in real ti
 pnpm --filter @super-line/example-react-chat dev   # http://localhost:5173
 ```
 
+## collections-chat — a Slack-like app on the chat plugin (+ a live AI agent)
+
+The flagship showcase for [`@super-line/plugin-chat`](/how-to/plugin-chat): a Slack-like app whose **entire durable model** — public/private channels, owner/member roles, send/edit/delete — comes from the plugin, with identity from [`@super-line/plugin-auth`](/how-to/plugin-auth). Sign up with a real email + password, create channels, manage membership (try to remove the last owner and the server refuses), and edit or delete your own messages — every mutation is a [server-authoritative request](/how-to/plugin-chat), not an optimistic row-write ([ADR-0010](https://github.com/mertdogar/super-line/blob/main/docs/adr/0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md)). The server declares **no** channel/message policies or handlers of its own — only ephemeral presence/typing garnish, proving host-land signals still compose on a plugin backbone. Every new user lands in **#ask-ai**, where a bot — a *genuine user* the server provisions and runs as a headless `chatClient` — replies (canned offline by default; a [Vercel AI Gateway](https://vercel.com/ai-gateway) key gives it a real brain). Vite + React 19 + Tailwind v4 + shadcn/ui, durable to SQLite.
+
+```bash
+pnpm --filter @super-line/example-collections-chat dev   # web http://localhost:5173 · server ws://localhost:8791
+```
+
+Demonstrates: [the chat plugin](/how-to/plugin-chat), [plugin auth](/how-to/plugin-auth), [row-level policies](/collections/policies), the imperative `chatKit` + [AI agents](/how-to/ai-agents).
+
 ## store-sync-json — a collaborative JSON editor (CRDT)
 
 A React app over a [CRDT document collection](/collections/crdt-documents) (`@super-line/collections-crdt-memory`, Yjs-backed): a [`@visual-json`](https://visual-json.dev) editor bound to one shared document via [`useDoc`](/how-to/react). Open two tabs (or add `?name=bob`), edit any field, and watch edits **merge** live — concurrent edits to different fields both survive, unlike last-writer-wins. **Server nudge** triggers a server co-write.

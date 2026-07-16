@@ -23,6 +23,7 @@ export const app = defineContract({ roles: { user: {} }, plugins: [authContract(
 // server — register the kit's plugin; wrap any operation with a hook
 import { chat } from '@super-line/plugin-chat/server'
 const chatKit = chat({ contract: app, hooks: { sendMessage: { after: (m) => notify(m) } } })
+// server-side / agents: chatKit.messages.send({ channelId, authorId, content: 'hello' })
 
 // client — typed requests + live stores (no React/TanStack dependency; agents use it too)
 import { chatClient } from '@super-line/plugin-chat/client'

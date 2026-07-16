@@ -27,6 +27,7 @@ Authorize, extend, and observe the server-authoritative core.
 
 - [Roles & auth](/how-to/roles-auth) — freeze a role at connect with `authenticate(handshake)`.
 - [Plugin auth](/how-to/plugin-auth) — drop in first-party sessions, API keys, and JWT via `@super-line/plugin-auth`.
+- [Chat backbone](/how-to/plugin-chat) — add channels, membership control, and messages via `@super-line/plugin-chat`.
 - [Middleware & lifecycle](/how-to/middleware-lifecycle) — hook connect, disconnect, and per-message handling.
 - [Errors](/how-to/errors) — throw and handle `SuperLineError` across the wire.
 - [Introspection & presence](/how-to/introspection-and-presence) — inspect topology, connections, and who's online.

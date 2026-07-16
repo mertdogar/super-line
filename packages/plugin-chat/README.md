@@ -33,7 +33,8 @@ await chatCli.send(ch.id, 'hello')
 ```
 
 Subpaths: `.` (contract fragment + schemas) · `/server` (`chat()` → `chatKit`) · `/client`
-(`chatClient`) · `/react` (`createChatHooks`).
+(`chatClient`) · `/react` (`createChatHooks`) · `/ai` (`chatAgentTools` — a Vercel AI SDK `ToolSet` so an
+LLM can drive chat over its own permission-checked connection; `ai` is an optional peer dependency).
 
 The message body is host-parametrized — `chatContract({ content })` — defaulting to plain text.
 

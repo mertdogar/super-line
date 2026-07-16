@@ -439,7 +439,7 @@ Notes:
 
 ## @super-line/plugin-chat
 
-A reusable **chat backbone** as a paired plugin — channels (public/private), owner/member membership control, and messages (send/edit/delete) as typed collections. Subpaths: `.` (contract) · `/server` · `/client` · `/react`. **Requires `@super-line/plugin-auth`** (identity + the `users` directory the FKs reference). Design: every mutation is a server-authoritative, hookable **request**; collections are client-read-only (ADR-0010).
+A reusable **chat backbone** as a paired plugin — channels (public/private), owner/member membership control, and messages (send/edit/delete) as typed collections. Subpaths: `.` (contract) · `/server` · `/client` · `/react` · `/ai` (AI SDK agent toolset). **Requires `@super-line/plugin-auth`** (identity + the `users` directory the FKs reference). Design: every mutation is a server-authoritative, hookable **request**; collections are client-read-only (ADR-0010).
 
 ```ts
 // . (contract half) — generic over the message body (default z.string())
@@ -467,6 +467,12 @@ chatClient<C,R>(client, opts?: { userId?: string|null; messageLimit?: number }):
 // /react
 createChatHooks<C>(): { ChatProvider, useChat, useChannels, useMembers, useMessages }
 //   <ChatProvider chat={chatClient(client,{userId})}>…</ChatProvider>
+
+// /ai — Vercel AI SDK toolset for an LLM bot; `ai` is an OPTIONAL peer dep. Takes the RAW SuperLineClient (needs `users` for author names).
+chatAgentTools<C,R,S>(client, opts?: { content?: S; management?: boolean }): ToolSet   // spread into ToolLoopAgent({tools}) / generateText({tools})
+//   CLIENT-SIDE by design: every tool rides the bot's own connection, so the server re-authorizes it (RLS reads, membership sends, owner management) — the model can't exceed the bot's permissions. STATELESS (one-shot subscribe→rows→close reads, typed-request writes; nothing to close). snake_case names; content host-parametrized (opts.content, default z.string()); failures return structured { error: code, message } so the model adapts instead of aborting.
+//   core (default): list_channels(+member flag) · list_members · read_messages · send_message · join_channel · leave_channel
+//   { management: true } adds: create_channel/update_channel/delete_channel · add_member/remove_member/set_member_role · edit_message/delete_message · list_users
 ```
 
 Rules: **public** channels are self-service join/leave; **private** are add-by-owner and answer `NOT_FOUND` to a non-member's `joinChannel` (anti-probing). Creator is the first `owner`; owners manage membership + rename/delete. **Last-owner protection**: leave/remove/demote throws `CONFLICT` if it would leave members with zero owners. Messages **hard-delete**; edit stamps `editedAt`. Membership is required for EVERY send (server included) — add an agent to a channel before it posts. **AI agents = regular users**: provision via `authKit.users.create` (no password) + `authKit.apiKeys.create`, add to a channel, connect with `params: { apiKey }` and the same `chatClient`. Known v1 caveat: per-channel serialization is in-process, so under relay clustering requests on other nodes can still interleave (no cross-node CAS).

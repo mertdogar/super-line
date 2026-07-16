@@ -135,3 +135,36 @@ await chatKit.members.add(channelId, bot.id)
 The [`examples/collections-chat`](https://github.com/mertdogar/super-line/tree/main/examples/collections-chat)
 app is built entirely on this plugin and ships a live LLM agent (via the Vercel AI Gateway) in an
 `#ask-ai` channel, so you can watch a human and an agent talk over one contract.
+
+## AI SDK toolset — `@super-line/plugin-chat/ai`
+
+Give a [Vercel AI SDK](https://ai-sdk.dev) agent hands in the workspace: `chatAgentTools(client)` returns
+a plain `ToolSet` over the agent's **own connection** — so every tool call is authorization-checked by the
+server. RLS scopes `list_channels`/`read_messages` to what the bot can see, `send_message` requires
+membership, and management needs ownership: **the model can never exceed its bot user's permissions.**
+(`ai` is an optional peer dependency, like `react`.)
+
+```ts
+import { ToolLoopAgent } from 'ai'
+import { chatAgentTools } from '@super-line/plugin-chat/ai'
+
+const agent = new ToolLoopAgent({
+  model: 'anthropic/claude-sonnet-5',
+  instructions: 'You are a helpful assistant in this workspace.',
+  tools: chatAgentTools(client), // the bot's OWN authenticated connection
+})
+```
+
+- **Core set** (default): `list_channels` (with a member flag) · `list_members` · `read_messages`
+  (author names resolved, ISO timestamps) · `send_message` · `join_channel` · `leave_channel`.
+- **`{ management: true }`** adds channel lifecycle (`create_channel`/`update_channel`/`delete_channel`),
+  membership control (`add_member`/`remove_member`/`set_member_role`), `edit_message`/`delete_message`,
+  and `list_users` (directory search).
+- **Failures come back structured** — `{ error: 'FORBIDDEN', message }` instead of a throw, so the model
+  reads the denial and adapts ("I'm not a member; I should join first") rather than aborting the loop.
+- The message body follows your contract: `chatAgentTools(client, { content })` slots the same schema you
+  gave `chatContract({ content })` into `send_message`, so the model fills structured bodies.
+- It's a plain record — spread-omit tools you don't want: the example agent drops `send_message` and lets
+  its runtime own the posting, keeping the LLM read-only.
+- **Stateless** — each read is a one-shot subscribe→snapshot→close, each write is one of the plugin's typed
+  requests, so there's no lifecycle to manage and nothing to close.

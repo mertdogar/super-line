@@ -205,5 +205,5 @@ You drove the plugin headlessly. The same `chatClient` powers a real UI, and —
 
 - [Add a chat backbone (how-to)](/how-to/plugin-chat) — the full surface: structured message bodies, the imperative `chatKit` (`channels` / `members` / `messages`), and the React bindings (`useChannels` / `useMembers` / `useMessages`).
 - [Add authentication (how-to)](/how-to/plugin-auth) — the browser sign-up / sign-in flow with `authClient()` and `createAuth()`.
-- [Wire your AI agent](/how-to/ai-agents) — provision an agent as a regular user and let it chat over the same contract.
+- [Give the agent tools (how-to)](/how-to/plugin-chat) — the plugin's `chatAgentTools` AI SDK toolset lets an LLM read, post, and manage channels over its own permission-checked connection.
 - [`examples/collections-chat`](https://github.com/mertdogar/super-line/tree/main/examples/collections-chat) — a Slack-like app built entirely on this plugin, with membership control, presence/typing garnish, and a live AI agent in an `#ask-ai` channel.

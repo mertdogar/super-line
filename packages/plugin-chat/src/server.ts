@@ -183,7 +183,7 @@ export interface ChatMessagesApi {
 }
 
 export interface ChatServer {
-  /** Register in the server's `plugins: [...]` — the 11 request handlers + read-RLS/write-deny row policies. */
+  /** Register in the server's `plugins: [...]` — the 16 request handlers + read-RLS/write-deny row policies. */
   plugin: SuperLinePlugin<ChatSurface>
   channels: ChatChannelsApi
   members: ChatMembersApi
@@ -904,7 +904,7 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     },
   })
 
-  // ── the plugin: policies (read-RLS, write-deny) + the 11 request handlers ─────────────────────────
+  // ── the plugin: policies (read-RLS, write-deny) + the 16 request handlers ─────────────────────────
 
   /** Matches nothing — the deny filter for guests (no signed-in user ⇒ no chat visibility). */
   const NONE: Expr = isIn('id', [])

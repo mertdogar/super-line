@@ -39,3 +39,5 @@ export type User = RowOf<typeof chat, 'users'>
 export type Channel = RowOf<typeof chat, 'channels'>
 export type Membership = RowOf<typeof chat, 'memberships'>
 export type Message = RowOf<typeof chat, 'messages'>
+/** A message as the assembled feed serves it: streamed turns carry live `parts` (+ `status`). */
+export type FeedMessage = Message & { parts?: RowOf<typeof chat, 'messageParts'>[] }

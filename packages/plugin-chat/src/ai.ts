@@ -1,12 +1,12 @@
 import { tool } from 'ai'
-import type { ToolSet } from 'ai'
+import type { ToolSet, UIMessageChunk } from 'ai'
 import { z } from 'zod'
 import { and, eq, gt, ilike, isIn, not } from '@super-line/core'
 import type { CollectionQuery, Contract, RoleOf } from '@super-line/core'
 import type { LiveRowSet, SuperLineClient } from '@super-line/client'
 import type { AuthUser } from '@super-line/plugin-auth'
 import { CHANNEL_VISIBILITIES, MEMBER_ROLES } from './index.js'
-import type { ChatChannel, ChatMembership, ChatMessage } from './index.js'
+import type { ChatChannel, ChatMembership, ChatMessage, ChatStreamEvent } from './index.js'
 
 export interface ChatAgentToolsOptions<S extends z.ZodTypeAny = z.ZodString> {
   /**
@@ -364,4 +364,123 @@ export function chatAgentTools<C extends Contract, R extends RoleOf<C>, S extend
   }
 
   return { ...core, ...management }
+}
+
+/** The writer shape `pipeUIMessageStream` drives — both `chatClient`'s handle and `chatKit`'s writer fit. */
+export interface StreamEventSink {
+  push(...events: ChatStreamEvent[]): void | Promise<void>
+}
+
+/**
+ * Pipe an AI SDK v6 `UIMessageChunk` stream (`streamText(...).toUIMessageStream()`,
+ * `agent.stream(...).then(r => r.toUIMessageStream())`) into a plugin-chat stream writer — the
+ * one-line bridge between an AI SDK producer and a streamed chat message.
+ *
+ * Mapping: text/reasoning lifecycles → text/reasoning parts (writer keys namespaced `t:`/`r:` so
+ * they can never collide with toolCallIds); tool chunks → ONE tool part per `toolCallId`
+ * (input-available → args, output-available → result, output-error/denied → structured `isError`
+ * result). `tool-input-delta`, step/message framing, `file`/`source-*`/data chunks are dropped —
+ * outside the part vocabulary (PLAN-chat-streaming decision 2).
+ *
+ * It never settles the message: the producer owns `finalize`/`abort` (put them in a `finally`).
+ * A turn-level `error` chunk is returned, not thrown — pass it to `finalize({ status: 'error' })`.
+ */
+export async function pipeUIMessageStream(
+  writer: StreamEventSink,
+  stream: AsyncIterable<UIMessageChunk> | ReadableStream<UIMessageChunk>,
+): Promise<{ error?: string }> {
+  const startedTools = new Set<string>()
+  let error: string | undefined
+  // text/reasoning chunk ids are only unique WITHIN one generation step — the SDK's own reducer
+  // resets its id maps on every step boundary, so a 2-step tool-then-text turn reuses id '0'.
+  // Namespace writer keys by a step counter or the second step's part_start CONFLICTs server-side.
+  let step = 0
+
+  const map = (chunk: UIMessageChunk): ChatStreamEvent[] => {
+    switch (chunk.type) {
+      case 'start-step':
+        step++
+        return []
+      case 'text-start':
+        return [{ type: 'part_start', key: `t:${step}:${chunk.id}`, partType: 'text' }]
+      case 'text-delta':
+        return chunk.delta.length > 0 ? [{ type: 'delta', key: `t:${step}:${chunk.id}`, text: chunk.delta }] : []
+      case 'text-end':
+        return [{ type: 'part_end', key: `t:${step}:${chunk.id}` }]
+      case 'reasoning-start':
+        return [{ type: 'part_start', key: `r:${step}:${chunk.id}`, partType: 'reasoning' }]
+      case 'reasoning-delta':
+        return chunk.delta.length > 0 ? [{ type: 'delta', key: `r:${step}:${chunk.id}`, text: chunk.delta }] : []
+      case 'reasoning-end':
+        return [{ type: 'part_end', key: `r:${step}:${chunk.id}` }]
+      case 'tool-input-start':
+        startedTools.add(chunk.toolCallId)
+        return [{ type: 'part_start', key: chunk.toolCallId, partType: 'tool', toolName: chunk.toolName }]
+      case 'tool-input-available': {
+        // input-available may arrive without a preceding input-start (non-streamed args)
+        const start: ChatStreamEvent[] = startedTools.has(chunk.toolCallId)
+          ? []
+          : [{ type: 'part_start', key: chunk.toolCallId, partType: 'tool', toolName: chunk.toolName }]
+        startedTools.add(chunk.toolCallId)
+        return [...start, { type: 'part_patch', key: chunk.toolCallId, args: chunk.input }]
+      }
+      case 'tool-input-error': {
+        const start: ChatStreamEvent[] = startedTools.has(chunk.toolCallId)
+          ? []
+          : [{ type: 'part_start', key: chunk.toolCallId, partType: 'tool', toolName: chunk.toolName }]
+        startedTools.add(chunk.toolCallId)
+        return [
+          ...start,
+          {
+            type: 'part_patch',
+            key: chunk.toolCallId,
+            args: chunk.input,
+            result: { error: chunk.errorText },
+            isError: true,
+            state: 'done',
+          },
+        ]
+      }
+      case 'tool-output-available':
+        // preliminary results stream WHILE the tool still runs — pinning state keeps the server's
+        // monotonic guard from flipping the part to a terminal 'done' on the first progress update
+        return [
+          chunk.preliminary === true
+            ? { type: 'part_patch', key: chunk.toolCallId, result: chunk.output, state: 'running' }
+            : { type: 'part_patch', key: chunk.toolCallId, result: chunk.output },
+        ]
+      case 'tool-output-error':
+        return [
+          { type: 'part_patch', key: chunk.toolCallId, result: { error: chunk.errorText }, isError: true, state: 'done' },
+        ]
+      case 'tool-output-denied':
+        return [{ type: 'part_patch', key: chunk.toolCallId, result: { denied: true }, isError: true, state: 'done' }]
+      case 'error':
+        error = chunk.errorText
+        return []
+      default:
+        return [] // step/message framing, files, sources, data parts — outside the part vocabulary
+    }
+  }
+
+  const iterable: AsyncIterable<UIMessageChunk> =
+    Symbol.asyncIterator in stream ? (stream as AsyncIterable<UIMessageChunk>) : readAll(stream as ReadableStream<UIMessageChunk>)
+  for await (const chunk of iterable) {
+    const events = map(chunk)
+    if (events.length > 0) await writer.push(...events)
+  }
+  return error !== undefined ? { error } : {}
+}
+
+async function* readAll<T>(stream: ReadableStream<T>): AsyncGenerator<T> {
+  const reader = stream.getReader()
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) return
+      yield value
+    }
+  } finally {
+    reader.releaseLock()
+  }
 }

@@ -443,26 +443,34 @@ A reusable **chat backbone** as a paired plugin — channels (public/private), o
 
 ```ts
 // . (contract half) — generic over the message body (default z.string())
-chatContract<S>(opts?: { content?: S }): ContractPlugin   // adds channels/memberships/messages + 11 shared requests
+chatContract<S>(opts?: { content?: S }): ContractPlugin   // adds channels/memberships/messages + 16 shared requests
 // plugins: [authContract(), chatContract()]  OR  chatContract({ content: myZodSchema })
 // schemas/types: channelSchema/membershipSchema/messageSchema, ChatChannel/ChatMembership/ChatMessage, memId(channelId,userId)
 
 // /server — factory is `chat`; bind to `chatKit`
-chat<C>(opts: { contract: C; hooks?: ChatHooks }): ChatServer   // throws at startup if the contract lacks the auth+chat fragments
+chat<C>(opts: { contract: C; hooks?: ChatHooks; streaming?: { checkpointMs?; maxParts?; maxPartBytes?; maxEventsPerAppend?; project?(parts)→content } }): ChatServer
 // hooks wrap DOMAIN cores → fire for client requests AND imperative chatKit calls, with an initiator { kind:'client',userId } | { kind:'server' }
 //   ChatOpHook<In,Out> = { before?(input,initiator)→In|void (transform or throw-to-veto); after?(result,initiator) (throw propagates, write stays) }
 //   hook keys: createChannel/updateChannel/deleteChannel/joinChannel/leaveChannel/addMember/removeMember/setMemberRole/sendMessage/editMessage/deleteMessage
+//              + startMessage/finalizeMessage (STREAMING gates intent/audit only — appends are hook-free; forced aborts skip `before`, `after` always fires)
 interface ChatServer {
-  plugin: SuperLinePlugin            // read-RLS/write-deny policies + the 11 request handlers
+  plugin: SuperLinePlugin            // read-RLS/write-deny policies + the 16 request handlers
   channels: { create({name,visibility?,owner?,metadata?}) / get / find({filter?,limit?,offset?}) / update / delete(cascades) }
   members:  { add(channelId,userId,{role?}) / remove / setRole / of(channelId) / channelsOf(userId) }
-  messages: { send({channelId,authorId,content,metadata?}) / edit / delete / find({filter?,orderBy?,limit?,offset?}) }
+  messages: { send({channelId,authorId,content,metadata?}) / edit / delete / find({filter?,orderBy?,limit?,offset?})
+              / stream({channelId,authorId})→ChatStreamWriter{push,finalize,abort} / abort(id,error?) (kill-switch)
+              / partsOf(messageId) / sweepStale({olderThanMs}) (crashed-node repair — host-invoked, never automatic) }
 }
 
 // /client — NO TanStack/React dependency; owns the membership-driven re-subscribe mechanic. Agents use this too.
-chatClient<C,R>(client, opts?: { userId?: string|null; messageLimit?: number }): ChatClient<C>
+chatClient<C,R>(client, opts?: { userId?: string|null; messageLimit?: number; partsLimit?: number }): ChatClient<C>
 //   request methods: createChannel/updateChannel/deleteChannel/join/leave/addMember/removeMember/setMemberRole/send/editMessage/deleteMessage
-//   live stores: channels() / members(channelId) / messages(channelId,{limit?})  → each { rows(), subscribe(cb), ready, close() }
+//   live stores: channels() / members(channelId) / messages(channelId,{limit?,partsLimit?,streaming?})  → each { rows(), subscribe(cb), ready, close() }
+//   STREAMING (ADR-0011): messages() serves ONE ASSEMBLED feed — a streamed message gains `status` ('streaming'|'complete'|'aborted'|'error')
+//   and live tree-ordered `parts` (text/reasoning/tool; subagent lanes nest via `parent`); plain messages untouched. Producer:
+//   stream(channelId)→ChatStreamHandle{ push(...events) (sync, micro-batched), flush(), finalize(), abort() } — settle in a `finally`.
+//   Events: part_start{key,partType,toolName?,parent?} · delta{key,text} · part_patch{key,args?,result?,isError?,state?} · part_end{key,text?}
+//   (tool part key === toolCallId). Old turns whose parts left the partsLimit recency window render via `content` (parts absent).
 
 // /react
 createChatHooks<C>(): { ChatProvider, useChat, useChannels, useMembers, useMessages }
@@ -473,6 +481,8 @@ chatAgentTools<C,R,S>(client, opts?: { content?: S; management?: boolean }): Too
 //   CLIENT-SIDE by design: every tool rides the bot's own connection, so the server re-authorizes it (RLS reads, membership sends, owner management) — the model can't exceed the bot's permissions. STATELESS (one-shot subscribe→rows→close reads, typed-request writes; nothing to close). snake_case names; content host-parametrized (opts.content, default z.string()); failures return structured { error: code, message } so the model adapts instead of aborting.
 //   core (default): list_channels(+member flag) · list_members · read_messages · send_message · join_channel · leave_channel
 //   { management: true } adds: create_channel/update_channel/delete_channel · add_member/remove_member/set_member_role · edit_message/delete_message · list_users
+pipeUIMessageStream(writer, stream): Promise<{ error?: string }>   // AI SDK v6 bridge: streamText(...).toUIMessageStream() / agent.stream(...) → a streamed chat message
+//   maps text/reasoning/tool chunks onto parts (tool-input-delta + step framing + files/sources dropped); NEVER settles — finalize/abort stay yours; a turn-level error chunk is RETURNED, not thrown
 ```
 
 Rules: **public** channels are self-service join/leave; **private** are add-by-owner and answer `NOT_FOUND` to a non-member's `joinChannel` (anti-probing). Creator is the first `owner`; owners manage membership + rename/delete. **Last-owner protection**: leave/remove/demote throws `CONFLICT` if it would leave members with zero owners. Messages **hard-delete**; edit stamps `editedAt`. Membership is required for EVERY send (server included) — add an agent to a channel before it posts. **AI agents = regular users**: provision via `authKit.users.create` (no password) + `authKit.apiKeys.create`, add to a channel, connect with `params: { apiKey }` and the same `chatClient`. Known v1 caveat: per-channel serialization is in-process, so under relay clustering requests on other nodes can still interleave (no cross-node CAS).

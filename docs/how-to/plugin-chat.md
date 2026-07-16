@@ -19,7 +19,7 @@ wrap any operation with a hook. That trade-off is recorded in
 
 ### 1 · Contract
 
-`chatContract()` merges three collections (`channels` / `memberships` / `messages`) and the 11 mutation
+`chatContract()` merges three collections (`channels` / `memberships` / `messages`) and the 16 mutation
 requests into your contract. It sits alongside `authContract()`.
 
 ```ts
@@ -47,7 +47,7 @@ plugins: [authContract(), chatContract({ content })]
 ### 2 · Server
 
 `chat({ contract, hooks? })` returns `chatKit`. Register `chatKit.plugin` — it ships the row policies
-(read = membership-scoped RLS; write = deny, so collections are a read-only sync surface) and the 11
+(read = membership-scoped RLS; write = deny, so collections are a read-only sync surface) and the 16
 request handlers. Everything else is subtracted from your `implement()`.
 
 ```ts
@@ -110,6 +110,44 @@ const messages = useMessages(channelId)
   always self-leave.
 - **Last-owner protection**: leaving, being removed, or self-demoting throws `CONFLICT` if it would leave a
   channel with members but no owner — promote someone first, or delete the channel.
+
+## Streaming messages — an agent's whole turn in one message
+
+A message can be **streamed**: opened empty, appended to live, settled at the end — and it stores
+the *entire* turn as typed **parts** (`text` · `reasoning` · `tool` calls with args/result/state),
+including **subagent trees** (a part may nest under a delegate tool call via `parent`). Viewers see
+token-smooth text (ephemeral per-channel deltas) on top of a durable floor: the in-flight part's
+row checkpoints ~1s, so late joiners, reloads, and crashes always reconstruct the turn so far.
+Decision record: [ADR-0011](https://github.com/mertdogar/super-line/blob/main/docs/adr/0011-streamed-messages-are-parts-rows-plus-ephemeral-deltas.md).
+
+```ts
+// producer (client or chatKit.messages.stream — same writer shape)
+const w = await chat.stream(channelId)
+try {
+  w.push({ type: 'part_start', key: 't', partType: 'text' })
+  w.push({ type: 'delta', key: 't', text: 'Hello ' }, { type: 'delta', key: 't', text: 'world' })
+  w.push({ type: 'part_end', key: 't' })
+  await w.finalize() // derives the plain `content` projection; hooks fire (start/finalize only)
+} finally {
+  await w.abort().catch(() => {}) // no-op if already settled; never leave a stream open
+}
+```
+
+Consumers do nothing: the same `chat.messages(channelId)` feed serves streamed messages
+**assembled** — `msg.parts` (tree-ordered, live text already spliced) and `msg.status`
+(`streaming → complete | aborted | error`); plain messages are untouched. Render with one branch:
+`msg.parts ? <AgentTurn/> : <Bubble/>`.
+
+Worth knowing:
+
+- **Lifetime**: the author's disconnect auto-aborts its open streams, partials preserved;
+  `chatKit.messages.abort(id)` is the server-side kill-switch; `sweepStale` repairs crashed-node
+  orphans (host-invoked). Graceful `server.close()` drains open streams.
+- **Structured content hosts** (`chatContract({ content })` beyond a string) must supply
+  `chat({ streaming: { project } })` to derive the settled `content` from the final parts — the
+  default text-join fails loudly with guidance.
+- **Caps** (`maxParts`/`maxPartBytes`/`maxEventsPerAppend`) settle the stream `aborted` and
+  surface `BAD_REQUEST` — a runaway producer cannot grow a row forever.
 
 ## Server-side management + AI agents
 
@@ -193,3 +231,8 @@ const agent = new ToolLoopAgent({
   its runtime own the posting, keeping the LLM read-only.
 - **Stateless** — each read is a one-shot subscribe→snapshot→close, each write is one of the plugin's typed
   requests, so there's no lifecycle to manage and nothing to close.
+- **Streaming bridge**: `pipeUIMessageStream(writer, result.toUIMessageStream())` maps an AI SDK v6
+  chunk stream (from `streamText` or `agent.stream`) onto a streamed message — reasoning, tool
+  calls, and text land live as parts. It never settles the message (`finalize`/`abort` stay yours);
+  a turn-level error chunk is *returned*, not thrown. The collections-chat example's bot answers
+  this way — its tool calls visibly stream into #ask-ai.

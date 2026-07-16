@@ -18,7 +18,7 @@ pnpm add @super-line/plugin-chat @super-line/plugin-auth
 
 ```ts
 // 1 · contract — merge both fragments. chatContract() adds the channels/memberships/messages
-//     collections and the 11 mutation requests; the message body defaults to plain text.
+//     collections and the 16 mutation + streaming requests; the message body defaults to plain text.
 import { defineContract } from '@super-line/core'
 import { authContract } from '@super-line/plugin-auth'
 import { chatContract } from '@super-line/plugin-chat'
@@ -27,7 +27,7 @@ export const app = defineContract({ roles: { user: {} }, plugins: [authContract(
 ```
 
 ```ts
-// 2 · server — register the kit's plugin (row policies + the 11 handlers) alongside auth's.
+// 2 · server — register the kit's plugin (row policies + the 16 handlers) alongside auth's.
 //     Wrap any operation with a domain hook — it fires for client requests AND server calls.
 import { chat } from '@super-line/plugin-chat/server'
 
@@ -96,7 +96,7 @@ agents. Every method runs through the same hooked domain core as the matching cl
 
 ```ts
 interface ChatServer {
-  plugin: SuperLinePlugin // → server `plugins: [...]` — read-RLS/write-deny policies + the 11 handlers
+  plugin: SuperLinePlugin // → server `plugins: [...]` — read-RLS/write-deny policies + the 16 handlers
 
   channels: {
     create(input: { name, visibility?, owner?, metadata? }): Promise<ChatChannel> // owner → owner-membership written too
@@ -150,6 +150,28 @@ const agent = new ToolLoopAgent({ model, tools: chatAgentTools(client) })
 // core: list_channels · list_members · read_messages · send_message · join_channel · leave_channel
 // { management: true } adds channel lifecycle, membership control, edit/delete, and list_users
 ```
+
+## Streaming messages
+
+A message can be **streamed** — opened, appended to live, settled — and it stores the **entire agent
+turn** as typed parts: text, reasoning, and tool calls (with args/result/state), including subagent
+trees nested under their delegate call. Viewers get token-smooth streaming over a durable ~1s
+checkpoint floor, so late joiners, reloads, and crashes always see the turn so far; the same
+`chat.messages(channelId)` feed serves streamed messages assembled (`msg.parts` + `msg.status`),
+plain ones untouched.
+
+```ts
+const w = await chat.stream(channelId)               // or chatKit.messages.stream(...)
+try {
+  const result = await agent.stream({ messages })    // any AI SDK v6 producer
+  const { error } = await pipeUIMessageStream(w, result.toUIMessageStream())
+  await w.finalize(error ? { status: 'error', error } : {})
+} finally {
+  await w.abort().catch(() => {})                    // no-op if already settled
+}
+```
+
+Design record: [ADR-0011](https://github.com/mertdogar/super-line/blob/main/docs/adr/0011-streamed-messages-are-parts-rows-plus-ephemeral-deltas.md).
 
 ## Subpaths
 

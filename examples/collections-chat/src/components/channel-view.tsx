@@ -1,14 +1,16 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
-import { Hash, Lock, Pencil, Send, Trash2, Users } from 'lucide-react'
+import { Hash, Lock, Menu, Pencil, Send, Trash2, Users, Wrench } from 'lucide-react'
 import { Avatar } from '@/components/avatar'
 import { MembersPanel } from '@/components/members-panel'
 import { Button } from '@/components/ui/button'
 import { ChatInput } from '@/components/ui/chat/chat-input'
 import { ChatMessageList } from '@/components/ui/chat/chat-message-list'
-import type { Channel, Message } from '@/contract'
+import type { Channel, FeedMessage } from '@/contract'
 import { useChat, useMessages, useUsers } from '@/lib/chat'
 import { useRequest } from '@/lib/superline'
 import { cn } from '@/lib/utils'
+
+type FeedPart = NonNullable<FeedMessage['parts']>[number]
 
 const GROUP_WINDOW = 5 * 60 * 1000 // group consecutive messages from the same author within 5 min
 
@@ -17,9 +19,11 @@ interface ChannelViewProps {
   channel: Channel
   isMember: boolean
   typingUsers: string[]
+  /** Opens the mobile sidebar drawer (the hamburger only renders below `md`). */
+  onOpenNav?: () => void
 }
 
-export function ChannelView({ myUserId, channel, isMember, typingUsers }: ChannelViewProps): React.JSX.Element {
+export function ChannelView({ myUserId, channel, isMember, typingUsers, onOpenNav }: ChannelViewProps): React.JSX.Element {
   const chat = useChat()
   const users = useUsers()
   const messages = useMessages(channel.id) // live, membership-scoped: empty until you join
@@ -41,6 +45,15 @@ export function ChannelView({ myUserId, channel, isMember, typingUsers }: Channe
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-background">
       <header className="flex items-center gap-2 border-b px-4 py-3 shadow-sm">
+        {onOpenNav && (
+          <button
+            onClick={onOpenNav}
+            aria-label="Open channel list"
+            className="-ml-1 grid h-8 w-8 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        )}
         {channel.visibility === 'private' ? (
           <Lock className="h-5 w-5 text-muted-foreground" />
         ) : (
@@ -129,7 +142,7 @@ function MessageRows({
   onEdit,
   onDelete,
 }: {
-  items: Message[]
+  items: FeedMessage[]
   myUserId: string
   nameOf: (id: string) => string
   onEdit: (id: string, content: string) => void
@@ -175,7 +188,7 @@ function MessageRow({
   onEdit,
   onDelete,
 }: {
-  m: Message
+  m: FeedMessage
   author: string
   grouped: boolean
   mine: boolean
@@ -184,7 +197,7 @@ function MessageRow({
 }): React.JSX.Element {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
-  const text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+  const text = typeof m.content === 'string' ? m.content : m.content === undefined ? '' : JSON.stringify(m.content)
 
   const startEdit = (): void => {
     setDraft(text)
@@ -239,6 +252,8 @@ function MessageRow({
               Cancel
             </Button>
           </div>
+        ) : m.status !== undefined ? (
+          <StreamedBody m={m} />
         ) : (
           <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-foreground">
             {text}
@@ -248,13 +263,15 @@ function MessageRow({
       </div>
       {mine && !editing && (
         <div className="hidden shrink-0 items-start gap-1 group-hover:flex">
-          <button
-            onClick={startEdit}
-            aria-label="Edit message"
-            className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
+          {m.status === undefined && (
+            <button
+              onClick={startEdit}
+              aria-label="Edit message"
+              className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          )}
           <button
             onClick={() => onDelete(m.id)}
             aria-label="Delete message"
@@ -266,6 +283,101 @@ function MessageRow({
       )}
     </div>
   )
+}
+
+/**
+ * A STREAMED message (the agent's turn): parts render in tree order — reasoning collapsible, tool
+ * calls as expandable chips with a state badge, text as prose — with subagent lanes indented under
+ * their delegate call, a live cursor while streaming, and an honest tail for aborted/errored turns.
+ * A settled turn whose parts left the recency window falls back to its `content` projection.
+ */
+function StreamedBody({ m }: { m: FeedMessage }): React.JSX.Element {
+  const parts = m.parts ?? []
+  const streaming = m.status === 'streaming'
+  if (parts.length === 0) {
+    const text = typeof m.content === 'string' ? m.content : m.content === undefined ? '' : JSON.stringify(m.content)
+    return (
+      <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-foreground">
+        {text}
+        {streaming && <Cursor />}
+        <StatusTail m={m} />
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-1">
+      {parts.map((p) => (
+        <PartView key={p.id} p={p} live={streaming && !p.done} nested={p.parent !== null} />
+      ))}
+      {/* between parts (model thinking, tool about to start) nothing is in flight — keep a pulse
+          visible so the turn reads as alive, not stalled */}
+      {streaming && parts.every((p) => p.done) && (
+        <div>
+          <Cursor />
+        </div>
+      )}
+      <StatusTail m={m} />
+    </div>
+  )
+}
+
+function StatusTail({ m }: { m: FeedMessage }): React.JSX.Element | null {
+  if (m.status === 'aborted')
+    return <div className="mt-1 text-xs italic text-muted-foreground">⏹ interrupted{m.error ? ` — ${m.error}` : ''}</div>
+  if (m.status === 'error') return <div className="mt-1 text-xs text-destructive">⚠ {m.error ?? 'failed'}</div>
+  return null
+}
+
+function PartView({ p, live, nested }: { p: FeedPart; live: boolean; nested: boolean }): React.JSX.Element {
+  const indent = nested ? 'ml-3 border-l-2 border-border pl-3' : ''
+  if (p.type === 'text')
+    return (
+      <div className={cn('whitespace-pre-wrap break-words text-[15px] leading-relaxed text-foreground', indent)}>
+        {p.text}
+        {live && <Cursor />}
+      </div>
+    )
+  if (p.type === 'reasoning')
+    return (
+      <details className={cn('text-sm text-muted-foreground', indent)}>
+        <summary className="cursor-pointer select-none text-xs font-medium">💭 Reasoning{live ? '…' : ''}</summary>
+        <div className="whitespace-pre-wrap break-words italic">
+          {p.text}
+          {live && <Cursor />}
+        </div>
+      </details>
+    )
+  const badge = p.isError ? 'error' : p.state === 'done' ? 'done' : p.state === 'running' ? 'running' : 'input…'
+  return (
+    <details className={cn('rounded-md border bg-muted/40 px-2 py-1 text-sm', indent)}>
+      <summary className="flex cursor-pointer select-none items-center gap-2">
+        <Wrench className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="font-mono text-xs">{p.toolName ?? p.toolCallId}</span>
+        <span
+          className={cn(
+            'rounded-full px-1.5 py-px text-[10px] font-medium',
+            p.isError ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground',
+          )}
+        >
+          {badge}
+        </span>
+      </summary>
+      {p.args !== undefined && <Json label="args" value={p.args} />}
+      {p.result !== undefined && <Json label="result" value={p.result} />}
+    </details>
+  )
+}
+
+function Json({ label, value }: { label: string; value: unknown }): React.JSX.Element {
+  return (
+    <pre className="mt-1 overflow-x-auto rounded bg-background/60 p-1.5 text-[11px] leading-snug text-muted-foreground">
+      {label}: {JSON.stringify(value, null, 1)}
+    </pre>
+  )
+}
+
+function Cursor(): React.JSX.Element {
+  return <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-foreground align-middle" />
 }
 
 function DayDivider({ at }: { at: number }): React.JSX.Element {

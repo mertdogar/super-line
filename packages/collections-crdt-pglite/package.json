@@ -1,6 +1,6 @@
 {
   "name": "@super-line/collections-crdt-pglite",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Self-clustering CRDT (Yjs, via super-store) document collection backend for super-line — an append-only op-log in central Postgres that ElectricSQL ships to a per-node PGlite replica; validate-before-commit at ingress; no adapter.",
   "license": "MIT",

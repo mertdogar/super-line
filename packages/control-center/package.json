@@ -1,6 +1,6 @@
 {
   "name": "@super-line/control-center",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "type": "module",
   "description": "Control Center — a debugging webapp for inspecting a running super-line platform.",
   "license": "MIT",

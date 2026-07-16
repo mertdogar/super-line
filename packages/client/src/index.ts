@@ -177,8 +177,19 @@ export interface CrdtCollectionHandle<Doc = unknown> {
 
 /** What went wrong, passed to the client `onError` sink alongside the caught error. */
 export interface ClientErrorInfo {
-  /** Which lifecycle hook threw. */
-  kind: 'connect' | 'disconnect' | 'reconnect'
+  /**
+   * Which lifecycle hook threw — or `resubscribe` when a *settled* collection subscription or open document
+   * failed to re-establish after a reconnect (e.g. `FORBIDDEN` because the read policy is re-evaluated on
+   * every resubscribe, or `TIMEOUT`). `ready` is long resolved by then, so this sink is the only signal.
+   *
+   * A `resubscribe` error means that subscription is no longer live: the failure itself triggers no retry, and
+   * nothing else will until the next transport reopen. Treat it as dead — resubscribe, or fail the process.
+   */
+  kind: 'connect' | 'disconnect' | 'reconnect' | 'resubscribe'
+  /** For `resubscribe`: the collection whose subscription failed. */
+  collection?: string
+  /** For `resubscribe`: the document id, when it was a CRDT `open` rather than a row subscription. */
+  id?: string
 }
 
 /**
@@ -343,13 +354,17 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   const connectHooks = [opts.onConnect, ...clientPlugins.map((p) => p.onConnect)]
   const disconnectHooks = [opts.onDisconnect, ...clientPlugins.map((p) => p.onDisconnect)]
   const reconnectHooks = [opts.onReconnect, ...clientPlugins.map((p) => p.onReconnect)]
-  function routeError(error: unknown, kind: ClientErrorInfo['kind']): void {
+  function routeError(error: unknown, kind: ClientErrorInfo['kind'], where?: { collection?: string; id?: string }): void {
     if (opts.onError) {
       try {
-        opts.onError(error, { kind })
+        opts.onError(error, { kind, ...where })
       } catch {
         // an onError that itself throws has nowhere left to go
       }
+    } else if (kind === 'resubscribe') {
+      // Loud by default: with no sink this would otherwise be a silently deaf subscription on a live client.
+      const what = where?.id ? `${where.collection}/${where.id}` : where?.collection
+      console.error(`[super-line] client failed to re-subscribe ${what} — it is no longer live`, error)
     } else console.error(`[super-line] client ${kind} handler threw`, error)
   }
   function fireLifecycle(hooks: Array<((code: number) => void) | undefined>, kind: ClientErrorInfo['kind'], code: number): void {
@@ -722,7 +737,9 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
         if (!entry.settled) {
           entry.settled = true
           entry.ready.reject(err)
+          return
         }
+        routeError(err, 'resubscribe', { collection: entry.n, id: entry.id }) // settled: see sendCollectionSub
       })
   }
 
@@ -850,7 +867,12 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
         if (!sub.settled) {
           sub.settled = true
           sub.ready.reject(err)
+          return
         }
+        // Already settled: `ready` was resolved on the first subscribe, so a failed RE-subscribe has nowhere to
+        // throw. Route it — the sub stays registered but no longer receives changes, and dropping this silently
+        // leaves a long-lived client deaf while still reporting `connected`.
+        routeError(err, 'resubscribe', { collection: sub.n })
       })
   }
 

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { defineContract } from '@super-line/core'
+import { defineContract, SuperLineError } from '@super-line/core'
+import { memoryCollections } from '@super-line/collections-memory'
+import type { ClientErrorInfo } from '@super-line/client'
 import type { Conn } from '@super-line/server'
 import { createHarness, tick, waitFor } from './harness.js'
 
@@ -15,6 +17,13 @@ const contract = defineContract({
       },
     },
   },
+})
+
+const tasksContract = defineContract({
+  collections: {
+    tasks: { schema: z.object({ id: z.string(), text: z.string() }), key: 'id' },
+  },
+  roles: { user: { clientToServer: { noop: { input: z.void(), output: z.void() } } } },
 })
 
 const h = createHarness()
@@ -66,5 +75,82 @@ describe('client reconnect', () => {
     lastConn!.terminate()
 
     await expect(inflight).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  })
+
+  // The topic case above is mirrored here for row collections: it is the property an out-of-process client
+  // (an agent whose only inputs arrive over a subscription) bets its correctness on.
+  it('auto-re-subscribes a collection after an abrupt drop, delivering rows written during the outage', async () => {
+    let lastConn: Conn | undefined
+    const { srv, url } = await h.server<typeof tasksContract, { role: 'user'; ctx: Record<string, never> }>(tasksContract, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      identify: () => 'u1',
+      collections: memoryCollections(),
+      policies: { tasks: { read: () => undefined, write: () => true } },
+      onConnection: (c) => {
+        lastConn = c
+      },
+    })
+    await srv.collection('tasks').insert({ id: 't1', text: 'before' })
+
+    const client = h.client(tasksContract, { url, role: 'user', reconnectBaseMs: 10, reconnectMaxMs: 50 })
+    const sub = client.collection('tasks').subscribe({})
+    await sub.ready
+    expect(sub.rows().map((r) => r.id)).toEqual(['t1'])
+
+    const firstConn = lastConn
+    firstConn!.terminate() // simulate a network drop
+    await waitFor(() => !client.connected, 3000) // the write below must land while the client is away
+
+    await srv.collection('tasks').insert({ id: 't2', text: 'during the outage' })
+
+    await waitFor(() => lastConn !== firstConn && client.connected, 3000)
+    await waitFor(() => sub.rows().length === 2, 3000)
+    expect(sub.rows().map((r) => r.id).sort()).toEqual(['t1', 't2']) // the outage write arrives via the re-seed
+  })
+
+  it('surfaces a settled subscription’s re-subscribe failure on onError rather than going silently deaf', async () => {
+    let lastConn: Conn | undefined
+    let revoked = false
+    const { url } = await h.server<typeof tasksContract, { role: 'user'; ctx: Record<string, never> }>(tasksContract, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      identify: () => 'u1',
+      collections: memoryCollections(),
+      policies: {
+        // The read policy is re-evaluated on every (re)subscribe, so authorization lost during an outage
+        // makes the re-`csub` throw — the reachable path this test pins.
+        tasks: {
+          read: () => {
+            if (revoked) throw new SuperLineError('FORBIDDEN', 'access revoked during the outage')
+            return undefined
+          },
+          write: () => true,
+        },
+      },
+      onConnection: (c) => {
+        lastConn = c
+      },
+    })
+
+    const errors: Array<{ error: unknown; info: ClientErrorInfo }> = []
+    const client = h.client(tasksContract, {
+      url,
+      role: 'user',
+      reconnectBaseMs: 10,
+      reconnectMaxMs: 50,
+      onError: (error, info) => errors.push({ error, info }),
+    })
+    const sub = client.collection('tasks').subscribe({})
+    await sub.ready // settled — `ready` can never reject again, so onError is the only channel left
+
+    revoked = true
+    const firstConn = lastConn
+    firstConn!.terminate()
+    await waitFor(() => lastConn !== firstConn && client.connected, 3000)
+
+    await waitFor(() => errors.some((e) => e.info.kind === 'resubscribe'), 3000)
+    const failure = errors.find((e) => e.info.kind === 'resubscribe')!
+    expect(failure.info.collection).toBe('tasks')
+    expect(failure.error).toMatchObject({ code: 'FORBIDDEN' })
+    expect(client.connected).toBe(true) // the point: connected, but that subscription is dead
   })
 })

@@ -8,6 +8,7 @@ When the socket falls over, the client restores itself along a few axes automati
 
 - **Auto-reconnect** with exponential backoff + full jitter. The schedule is governed by `reconnectBaseMs` (500), `reconnectMaxMs` (30000), and `reconnectFactor` (2); set `reconnect: false` to opt out entirely.
 - **Topics re-subscribe on their own.** A topic subscription is *client-controlled* state, so the client replays it after every reconnect — you never re-call `subscribe`.
+- **Collection subscriptions and open documents re-subscribe too**, on the same principle. The re-subscribe is answered with a **full snapshot** from the durable store, which the client diffs against the rows it already held and emits as ordinary insert/update/delete events. So rows written *while you were offline* do arrive after reconnect — a collection is durable state, not a live feed you can miss. This is the one place the at-most-once rule below doesn't bite.
 - **In-flight requests reject** with `DISCONNECTED` the moment the socket drops. They are not retried for you.
 - **Calls made *while* reconnecting are queued** and flushed once the link is back, so application code doesn't have to gate every call on connection state.
 
@@ -21,6 +22,24 @@ const client = createSuperLineClient(api, {
 ```
 
 The backoff math is exported as a pure function, `backoffDelay(attempt, opts)`, if you want to reuse or test the same schedule elsewhere.
+
+## When a re-subscribe fails
+
+A replayed subscription can be *rejected*, and this is the one reconnect failure you have to handle yourself. The read policy is re-evaluated on **every** (re)subscribe, so a principal who lost authorization during the outage gets `FORBIDDEN` on the way back; a slow server can produce `TIMEOUT`. Either way `ready` resolved long ago, on the first subscribe — it cannot reject twice — so the failure surfaces on the client's `onError` sink instead:
+
+```ts
+const client = createSuperLineClient(api, {
+  transport: webSocketClientTransport({ url }), role: 'user',
+  onError: (error, info) => {
+    if (info.kind === 'resubscribe') {
+      // info.collection (+ info.id for a CRDT doc) identifies what went dead.
+      console.error(`lost ${info.collection}`, error)
+    }
+  },
+})
+```
+
+Treat a `resubscribe` error as **that subscription being dead**: the failure itself triggers no retry, and nothing re-attempts it until the next transport reopen. The subscription stays registered, so a *later* drop-and-reconnect would replay it — but nothing forces one, and until then the handle looks healthy while receiving nothing. For a long-lived process this is the failure worth being loud about: `client.connected` is still `true` and the rows simply stop. Resubscribe explicitly, or fail the process and let it restart. (With no `onError` sink the client logs the failure rather than swallowing it.)
 
 ## Client-controlled vs server-controlled state
 

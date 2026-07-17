@@ -58,6 +58,7 @@ export const heavy = [
   'packages/adapter-libp2p/test/**/*.test.ts',
   'packages/transport-libp2p/test/**/*.test.ts',
   'packages/collections-crdt-pglite/test/collections-crdt-pglite.integration.test.ts',
+  'packages/collections-pglite/test/collections-pglite.integration.test.ts',
   // in-process PGlite (WASM) is CPU-bound: its compaction waitFor starves under parallel forks
   'packages/collections-crdt-pglite/test/collections-crdt-pglite.test.ts',
 ]

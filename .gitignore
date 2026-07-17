@@ -14,3 +14,4 @@ docs/reference/*
 .super-talk/
 .agents/
 .codex/
+.env

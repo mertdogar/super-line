@@ -315,13 +315,16 @@ export interface SuperLinePlugin<S extends Directional = {}> {
    */
   handlers?: (ctx: PluginContext) => HandlersFor<S>
   /**
-   * Row-security policies for the collections the plugin's contract fragment declares (see {@link CollectionPolicy}).
+   * Access policies for contract collections, keyed by collection name. LWW row collections take an
+   * RLS-style {@link CollectionPolicy} (read → filter); CRDT document collections take a guard-shaped
+   * {@link CrdtCollectionPolicy} (read → bool) — same one-map-two-shapes rule as the host option.
    * Merged into the host's `policies`; a collection already policied by the host or another plugin throws at
    * construction, and a policy for a collection no fragment declared throws too. Deny-by-default still holds —
-   * a collection nobody policies is server-only. Lets a plugin ship its collections locked down (e.g. deny-all
-   * on secret tables) without the host hand-spreading them.
+   * a collection nobody policies is server-only. A plugin may policy a collection it did NOT declare (e.g.
+   * chat's kind registry contributing membership gates onto host-declared CRDT collections) — the
+   * collision-throw is what keeps that unambiguous: whoever policies a collection owns its access story.
    */
-  policies?: Record<string, CollectionPolicy<unknown, unknown>>
+  policies?: Record<string, CollectionPolicy<unknown, unknown> | CrdtCollectionPolicy<unknown, unknown>>
   /**
    * A plugin-owned (reserved) connection class — its own role, handshake negotiation, and parallel contract,
    * served over observer-invisible connections. See {@link PluginConnection}. (Phase 2.)

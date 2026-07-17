@@ -254,8 +254,8 @@ export function crdtCollectionsClient(opts?: { origin?: string }): CrdtCollectio
   const origin = opts?.origin ?? randomId()
   return {
     origin,
-    open(_n, id, docOpts) {
-      return new CrdtDocReplica(id, origin, docOpts)
+    open(_n, id, docOpts, openOrigin) {
+      return new CrdtDocReplica(id, openOrigin ?? origin, docOpts)
     },
   }
 }

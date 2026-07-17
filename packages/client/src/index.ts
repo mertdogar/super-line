@@ -212,8 +212,12 @@ export interface DocHandle<Doc = unknown> {
 
 /** Client-side handle for one CRDT document collection, reached via `client.collection(name)` (opened by id). */
 export interface CrdtCollectionHandle<Doc = unknown> {
-  /** Open a reactive handle for a document (catch-up snapshot + live merges + write-through). */
-  open(id: string): DocHandle<Doc>
+  /**
+   * Open a reactive handle for a document (catch-up snapshot + live merges + write-through).
+   * `origin` tags THIS handle's writes on the wire (echo-break + inspector/CC attribution — e.g.
+   * `agent:planner`). Client-claimed and untrusted; policies never see it. Default: the engine id.
+   */
+  open(id: string, opts?: { origin?: string }): DocHandle<Doc>
 }
 
 /** What went wrong, passed to the client `onError` sink alongside the caught error. */
@@ -803,12 +807,12 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       })
   }
 
-  function openDoc(n: string, id: string): DocHandle {
+  function openDoc(n: string, id: string, o?: { origin?: string }): DocHandle {
     if (!crdtClient)
       throw new SuperLineError('NOT_FOUND', `No CRDT collection engine configured — pass crdtCollections: crdtCollectionsClient()`)
     const def = c.collections?.[n]
     const docOpts = def && isCrdtCollection(def) ? def.crdt : undefined
-    const replica = crdtClient.open(n, id, docOpts)
+    const replica = crdtClient.open(n, id, docOpts, o?.origin)
     const key = docKey(n, id)
     let entry = openDocs.get(key)
     if (!entry) {
@@ -849,7 +853,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   }
 
   function crdtCollectionHandle(name: string): CrdtCollectionHandle {
-    return { open: (id) => openDoc(name, id) }
+    return { open: (id, o) => openDoc(name, id, o) }
   }
 
   // Route client.collection(n) by the contract's declared mode: CRDT doc collections → open-by-id handle,

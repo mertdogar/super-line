@@ -88,6 +88,18 @@ describe('CRDT document collections (ADR-0007)', () => {
     expect((b.getSnapshot() as Scene).title).toBe('world')
   })
 
+  it('per-open origin tags one handle`s writes; a sibling handle on the SAME connection converges via the echo', async () => {
+    env = setup()
+    await env.srv.collection('scenes').create('s1', { title: 'a' })
+    const client = env.makeClient('alice')
+    const tagged = client.collection('scenes').open('s1', { origin: 'agent:planner' })
+    const plain = client.collection('scenes').open('s1')
+    await Promise.all([tagged.ready, plain.ready])
+    tagged.update({ title: 'tagged write' })
+    // distinct origins ⇒ the plain handle must NOT echo-break the tagged handle's change
+    await waitFor(() => (plain.getSnapshot() as Scene).title === 'tagged write')
+  })
+
   it('concurrent edits to different fields converge (CRDT merge, not LWW clobber)', async () => {
     env = setup()
     await env.srv.collection('scenes').create('s1', {})

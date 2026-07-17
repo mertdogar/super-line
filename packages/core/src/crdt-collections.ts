@@ -110,6 +110,11 @@ export interface CrdtCollectionStore {
 export interface CrdtCollectionClient {
   /** This client's per-writer id, stamped as {@link DocChange.origin} for echo-break. */
   readonly origin: string
-  /** Open a reactive local replica for one document, built with the collection's {@link DocOptions}. */
-  open(n: string, id: string, opts: DocOptions | undefined): ResourceReplica
+  /**
+   * Open a reactive local replica for one document, built with the collection's {@link DocOptions}.
+   * `origin` overrides the engine-level writer id FOR THIS REPLICA (per-open attribution — e.g. an
+   * agent host tagging one doc's writes `agent:planner`). Client-claimed and UNTRUSTED: echo-break +
+   * inspector/Control Center attribution only, never a policy input.
+   */
+  open(n: string, id: string, opts: DocOptions | undefined, origin?: string): ResourceReplica
 }

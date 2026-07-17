@@ -2,7 +2,7 @@
 
 A channel's members usually work *on* something — a canvas, a shared todo list, a brief. Channel
 resources make that first-class: the **host declares its own [CRDT document
-collections](/collections/crdt)** (the schemas stay yours), and `@super-line/plugin-chat` turns them
+collections](/collections/crdt-documents)** (the schemas stay yours), and `@super-line/plugin-chat` turns them
 channel-native — a **link registry** per channel, **server-authoritative creation**,
 **membership-gated access** (every member reads and writes, nobody else), an **acked write path**
 built for agents, and coarse **who's-open presence**. Design record: `PLAN-chat-resources.md`.

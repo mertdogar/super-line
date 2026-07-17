@@ -128,7 +128,7 @@ export type SuperLineClient<C extends Contract, R extends RoleOf<C>> = ClientMet
   /** This client's role. */
   readonly role: R
   /**
-   * The server-vended, client-visible per-connection {@link https://…|env} (ADR-0012): a reactive handle
+   * The server-vended, client-visible per-connection `env` (ADR-0012): a reactive handle
    * over the state the server pushed to THIS connection. `current` is the latest value (`null` until the
    * first push, or for a role that declares no `env`); `ready` resolves after the first push (await it
    * before reading); `subscribe` fires on every update (rotation, re-scope). Code-only — an agent's runtime

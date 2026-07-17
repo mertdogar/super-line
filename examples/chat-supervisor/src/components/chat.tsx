@@ -4,9 +4,10 @@
 // web cockpit — but everything here is plain plugin-chat rows, durable across reloads.
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { Bot, Menu, Send, User as UserIcon, Wrench } from 'lucide-react'
+import { Bot, Menu, PanelRight, Send, User as UserIcon, Wrench } from 'lucide-react'
 import { useChannels, useChat, useMessages } from '@/App'
 import { Sidebar } from '@/components/sidebar'
+import { ResourcePane } from '@/components/resources'
 import type { FeedMessage, MessagePart } from '@/contract'
 
 export function Chat({ me, myName, onSignOut }: { me: string; myName: string; onSignOut: () => void }): React.JSX.Element {
@@ -14,6 +15,7 @@ export function Chat({ me, myName, onSignOut }: { me: string; myName: string; on
   const channels = useChannels()
   const [activeId, setActiveId] = useState<string | null>(null)
   const [navOpen, setNavOpen] = useState(false)
+  const [paneOpen, setPaneOpen] = useState(false) // <lg only — the pane is always visible on lg+
   const active = channels.find((c) => c.id === activeId) ?? channels[0]
 
   const select = (id: string): void => {
@@ -59,9 +61,25 @@ export function Chat({ me, myName, onSignOut }: { me: string; myName: string; on
           <span className="hidden truncate text-sm text-muted-foreground sm:inline">
             — a supervisor that delegates; subagents stream in cards
           </span>
+          <button
+            onClick={() => setPaneOpen(true)}
+            aria-label="Open resources"
+            className="ml-auto grid h-8 w-8 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
+          >
+            <PanelRight className="h-5 w-5" />
+          </button>
         </header>
         {active ? <Feed key={active.id} channelId={active.id} me={me} /> : <div className="flex-1" />}
       </section>
+
+      {paneOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" aria-hidden onClick={() => setPaneOpen(false)} />}
+      <div
+        className={`fixed inset-y-0 right-0 z-40 w-[85vw] max-w-[26rem] transition-transform lg:static lg:z-auto lg:w-[24rem] lg:shrink-0 lg:translate-x-0 xl:w-[27rem] ${
+          paneOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'
+        }`}
+      >
+        {active && <ResourcePane key={active.id} channelId={active.id} me={me} />}
+      </div>
     </div>
   )
 }
@@ -80,8 +98,9 @@ function Feed({ channelId, me }: { channelId: string; me: string }): React.JSX.E
         <div className="mx-auto flex max-w-3xl flex-col gap-4">
           {messages.length === 0 && (
             <p className="mt-8 text-center text-sm text-muted-foreground">
-              Ask something that needs live data — e.g. “compare the weather in Ankara and Berlin” — and watch
-              the supervisor delegate.
+              Ask something that needs live data — “compare the weather in Ankara and Berlin” — or point at the
+              shared canvas: “add a note for each of this sprint's goals”. Either way, watch the supervisor
+              delegate.
             </p>
           )}
           {messages.map((m) => (
@@ -285,7 +304,7 @@ function Composer({ onSend }: { onSend: (text: string) => void }): React.JSX.Ele
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Ask the supervisor — try a weather question"
+          placeholder="Ask the supervisor — a weather question, or “add three notes to the canvas”"
           rows={1}
           className="max-h-40 min-h-[40px] w-full resize-none bg-transparent px-2 py-2 text-sm focus:outline-none"
         />

@@ -6,6 +6,8 @@ import http from 'node:http'
 import { createSuperLineServer } from '@super-line/server'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { sqliteCollections } from '@super-line/collections-sqlite'
+import { crdtLibsqlCollections } from '@super-line/collections-crdt-libsql'
+import type { DocOptions } from '@super-line/core'
 import { auth } from '@super-line/plugin-auth/server'
 import { chat } from '@super-line/plugin-chat/server'
 import { app } from './contract.js'
@@ -14,13 +16,31 @@ import { startSupervisor, AGENT_CHANNEL } from './runtime.js'
 const PORT = Number(process.env.PORT ?? 8792)
 
 const backend = sqliteCollections({ file: './chat-supervisor.db', collections: app.collections })
+// The channel resources' CRDT docs, durable too (snapshot-per-doc; canvases survive restarts
+// like everything else here). docOptions MUST mirror the contract's crdt options (rehydration).
+const docsBackend = await crdtLibsqlCollections({
+  url: 'file:./chat-supervisor-docs.db',
+  docOptions: (n) => (app.collections as Record<string, { crdt?: DocOptions }>)[n]?.crdt,
+})
 const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
-const chatKit = chat({ contract: app })
+// Registering a kind IS the wiring (PLAN-chat-resources): createResource enabled, membership-gated
+// doc policies contributed, delete-cascade enrolled. Both kinds 'owned' — minted by chat, die with
+// their channel.
+const chatKit = chat({
+  contract: app,
+  resources: {
+    kinds: {
+      canvas: { collection: 'canvases', init: () => ({ title: 'Canvas', items: {} }) },
+      doc: { collection: 'docs', init: () => ({ title: 'Doc', blocks: { start: { order: 0, text: '' } } }) },
+    },
+  },
+})
 
 const server = http.createServer()
 const srv = createSuperLineServer(app, {
   transports: [webSocketServerTransport({ server })],
   collections: backend,
+  crdtCollections: docsBackend,
   nodeName: 'chat-supervisor',
   plugins: [authKit.plugin, chatKit.plugin],
   authenticate: authKit.authenticate,

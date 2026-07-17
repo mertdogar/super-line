@@ -123,7 +123,11 @@ export function planColumns(def: LwwCollectionDef): ColumnPlan {
   for (const [name, field] of Object.entries(schema.shape as Record<string, ZodTypeAny>)) {
     checkIdent(name)
     const { leaf, optional, nullable } = unwrap(field)
-    columns.push({ name, kind: kindOf(leaf), optional, nullable })
+    // A scalar column stores both "absent" and "null" as SQL NULL — fine when only one is possible,
+    // ambiguous when a field is optional AND nullable. Demote those to json: absent ⇒ SQL NULL,
+    // null ⇒ the JSON text 'null', so the evaluator's missing ≠ null distinction survives storage.
+    const kind = optional && nullable ? 'json' : kindOf(leaf)
+    columns.push({ name, kind, optional, nullable })
   }
   const key = columns.find((c) => c.name === def.key)
   if (!key) throw new Error(`planColumns: key '${def.key}' is not a field of the schema`)

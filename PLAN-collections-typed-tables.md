@@ -20,7 +20,14 @@ legacy `ALTER TABLE` shims go, and existing dev `.db` files are simply recreated
   exported from core. 14 tests over the census shapes (`core/test/column-plan.test.ts`). Fast lane
   65 files / 524 tests, typecheck + oxlint clean. Gotcha: zod 3's refine effect discriminator is
   `'refinement'`, not `'refine'`.
-- **Phase 1 (sqlite typed tables) — NOT STARTED.**
+- **Phase 1 (sqlite typed tables) — BUILT & GREEN (2026-07-17), not committed.** `collections-sqlite`
+  rewritten: `col_<name>` typed tables + `col_meta` fingerprints (additive auto-ALTER, refusal
+  otherwise), factory takes required `collections`, exactness-tracked IR→SQL compiler (two-valued
+  `IS`/`COALESCE` forms; exact queries push ORDER BY/LIMIT/OFFSET and skip the JS re-run; text
+  range/order never pushed — UTF-8 byte vs UTF-16 code-unit order diverge). Planner amendment:
+  optional+nullable scalars demote to `json` kind (SQL NULL can't carry both absent and null).
+  Call sites updated (server integration test, collections-chat, chat-supervisor; stale dev .db
+  files deleted). 32 backend tests incl. conformance; fast lane 65 files / 528 tests green.
 - **Phase 2 (pglite typed tables + real-Electric harness) — NOT STARTED.**
 
 ## What the analysis established (why this is safe)

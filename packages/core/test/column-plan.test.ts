@@ -66,7 +66,8 @@ describe('planColumns — the census shapes', () => {
     const plan = planColumns(users)
     expect(col('roles')(plan)).toEqual({ name: 'roles', kind: 'json', optional: false, nullable: false })
     expect(col('metadata')(plan)).toEqual({ name: 'metadata', kind: 'json', optional: true, nullable: false })
-    expect(col('deletedAt')(plan)).toEqual({ name: 'deletedAt', kind: 'real', optional: true, nullable: true })
+    // optional AND nullable: a scalar column's SQL NULL can't carry both "absent" and "null" — demoted to json
+    expect(col('deletedAt')(plan)).toEqual({ name: 'deletedAt', kind: 'json', optional: true, nullable: true })
   })
 
   it('handles plugin-chat style factory schemas (host-parametrized content)', () => {

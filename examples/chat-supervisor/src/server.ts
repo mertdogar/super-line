@@ -13,7 +13,7 @@ import { startSupervisor, AGENT_CHANNEL } from './runtime.js'
 
 const PORT = Number(process.env.PORT ?? 8792)
 
-const backend = sqliteCollections({ file: './chat-supervisor.db' })
+const backend = sqliteCollections({ file: './chat-supervisor.db', collections: app.collections })
 const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
 const chatKit = chat({ contract: app })
 

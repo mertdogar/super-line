@@ -18,7 +18,7 @@ const ctxOf = (conn: Conn) => conn.ctx as AuthContext
 const server = http.createServer()
 
 // One CollectionStore shared by the server AND the auth kit (so authenticate reads sessions/users from it).
-const backend = sqliteCollections({ file: DB_FILE })
+const backend = sqliteCollections({ file: DB_FILE, collections: chat.collections })
 
 // plugin-auth owns identity (users/credentials/sessions + the guest role). plugin-chat owns the whole
 // chat model: its policies (read-RLS, write-deny) and 11 request handlers ship INSIDE chatKit.plugin —

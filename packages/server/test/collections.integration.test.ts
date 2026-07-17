@@ -233,7 +233,7 @@ describe('collections — durable backend drop-in', () => {
     const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
       authenticate,
       identify,
-      collections: sqliteCollections({ file: ':memory:' }), // same CollectionStore contract as memory
+      collections: sqliteCollections({ file: ':memory:', collections: chat.collections }), // same CollectionStore contract as memory
       policies: { messages: { read: () => undefined, write: authorOnly } },
     })
     await srv.collection('messages').insert(msg('m1', 'general', 'u9', 1))

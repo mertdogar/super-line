@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process'
 import { GenericContainer, Network, Wait, type StartedNetwork, type StartedTestContainer } from 'testcontainers'
-import type { RowChange, SelfCollectionStore } from '@super-line/core'
+import { z } from 'zod'
+import type { CollectionDef, RowChange, SelfCollectionStore } from '@super-line/core'
 import { pgliteCollections } from '@super-line/collections-pglite'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
@@ -60,10 +61,15 @@ afterAll(async () => {
   await network?.stop()
 })
 
+const defs: Record<string, CollectionDef> = {
+  messages: { schema: z.object({ id: z.string(), channelId: z.string(), likes: z.number() }), key: 'id' },
+  users: { schema: z.object({ id: z.string(), name: z.string() }), key: 'id' },
+}
+
 let seq = 0
 const stores: SelfCollectionStore[] = []
-async function node(table: string): Promise<{ store: SelfCollectionStore; seen: RowChange[] }> {
-  const store = await pgliteCollections({ pgUrl, electricUrl, table })
+async function node(tablePrefix: string): Promise<{ store: SelfCollectionStore; seen: RowChange[] }> {
+  const store = await pgliteCollections({ pgUrl, electricUrl, collections: defs, tablePrefix })
   stores.push(store)
   const seen: RowChange[] = []
   store.onChange((c) => seen.push(c))
@@ -77,9 +83,9 @@ const row = (id: string, likes: number, extra: Record<string, unknown> = {}) => 
 
 describe.skipIf(!dockerAvailable)('collections-pglite — LWW rows over real Electric (2 nodes)', () => {
   it('delivers a write to every node as a COMPLETE row, with origin intact', async () => {
-    const table = `rows_${seq++}`
-    const a = await node(table)
-    const b = await node(table)
+    const prefix = `r${seq++}_`
+    const a = await node(prefix)
+    const b = await node(prefix)
 
     await a.store.apply([{ op: 'insert', n: 'messages', id: 'm1', row: row('m1', 1) }], 'o-a')
 
@@ -115,9 +121,9 @@ describe.skipIf(!dockerAvailable)('collections-pglite — LWW rows over real Ele
   }, 60_000)
 
   it('serves strong reads from central regardless of feed lag, and keeps collections distinct', async () => {
-    const table = `rows_${seq++}`
-    const a = await node(table)
-    const b = await node(table)
+    const prefix = `r${seq++}_`
+    const a = await node(prefix)
+    const b = await node(prefix)
 
     await a.store.apply(
       [

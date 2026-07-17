@@ -61,6 +61,8 @@ export const heavy = [
   'packages/collections-pglite/test/collections-pglite.integration.test.ts',
   // in-process PGlite (WASM) is CPU-bound: its compaction waitFor starves under parallel forks
   'packages/collections-crdt-pglite/test/collections-crdt-pglite.test.ts',
+  // same story since typed tables: N-table DDL + per-table live.changes per store starves parallel timing tests
+  'packages/collections-pglite/test/collections-pglite.test.ts',
 ]
 
 export default defineConfig({

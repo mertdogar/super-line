@@ -28,7 +28,17 @@ legacy `ALTER TABLE` shims go, and existing dev `.db` files are simply recreated
   optional+nullable scalars demote to `json` kind (SQL NULL can't carry both absent and null).
   Call sites updated (server integration test, collections-chat, chat-supervisor; stale dev .db
   files deleted). 32 backend tests incl. conformance; fast lane 65 files / 528 tests green.
-- **Phase 2 (pglite typed tables + real-Electric harness) — NOT STARTED.**
+- **Phase 2 (pglite typed tables + real-Electric harness) — BUILT & GREEN (2026-07-17), not committed.**
+  2a: first real-Electric integration test for LWW rows (testcontainers Postgres+Electric, 2 nodes,
+  heavy lane) pinning whole-row `next`, origin round-trip, prev-less deletes — landed against the old
+  backend first, then re-verified against the rewrite. 2b: `collections-pglite` rewritten — per-collection
+  typed tables (`tablePrefix`, default `col_`), `<prefix>meta` fingerprints, construction DDL serialized
+  behind `pg_advisory_xact_lock` inside one tx (IF-NOT-EXISTS forms replace the swallowed-error taxonomy —
+  a poisoned-tx hazard under BEGIN), one Electric shape + one `live.changes` per table (SOH `pk` hack
+  deleted), **full-row re-read from the local replica on partial UPDATE diffs**, json columns read
+  `::text` everywhere so postgres.js and PGlite decode identically, superset-only Postgres WHERE
+  narrowing (fixes the fetch-everything ponytail; JS stays authoritative). pglite unit suite moved to the
+  heavy lane (same WASM-CPU starvation as crdt-pglite). Both lanes green (fast 64/510 · integration 31/146).
 
 ## What the analysis established (why this is safe)
 

@@ -33,6 +33,12 @@ typed collections. Every mutation is a server-authoritative, hookable request,
 and it ships an imperative server API so agents and back-office code drive the
 same model as clients. Requires [`@super-line/plugin-auth`](/how-to/plugin-auth).
 
+Guides: [wire it in](/how-to/plugin-chat) ·
+[stream an agent's turn](/how-to/chat-streaming) ·
+[run an AI chat bot](/how-to/chat-bots) ·
+[tutorial: assemble a backbone](/tutorials/chat-backbone) ·
+[tutorial: add a live AI agent](/tutorials/ai-agent-chat).
+
 ### Control Center inspector
 
 **First-party · Observability**

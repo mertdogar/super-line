@@ -46,7 +46,7 @@ yarn add @super-line/plugin-auth @super-line/plugin-chat @super-line/collections
 
 ## 2. Merge both plugins into the contract
 
-A plugin's collections, roles, and surface merge **straight into the contract** via `plugins: [...]` on `defineContract`. `authContract()` brings identity; `chatContract()` brings the entire chat model — three collections (`channels` / `memberships` / `messages`) and the 11 mutation requests (`createChannel`, `join`, `addMember`, `sendMessage`, `editMessage`, …). You declare almost nothing yourself.
+A plugin's collections, roles, and surface merge **straight into the contract** via `plugins: [...]` on `defineContract`. `authContract()` brings identity; `chatContract()` brings the entire chat model — four collections (`channels` / `memberships` / `messages` / `messageParts`) and the 16 mutation requests (`createChannel`, `joinChannel`, `addMember`, `sendMessage`, `editMessage`, `startMessage`, …). You declare almost nothing yourself.
 
 ```ts [src/contract.ts]
 import { defineContract, type RowOf } from '@super-line/core'
@@ -71,7 +71,7 @@ export type Message = RowOf<typeof chat, 'messages'>
 
 ## 3. Wire the server — no policies, no handlers
 
-Here's the payoff. `auth()` returns an `authKit`; `chat()` returns a `chatKit`. Register **both plugins** and the chat model's row policies (read = membership-scoped RLS, write = deny) and all 11 request handlers ship *inside* `chatKit.plugin`. This file writes **no** channel/message policy or handler of its own — compare that to the hand-rolled `policies.messages` you wrote in [Tutorial 2](/tutorials/first-collection).
+Here's the payoff. `auth()` returns an `authKit`; `chat()` returns a `chatKit`. Register **both plugins** and the chat model's row policies (read = membership-scoped RLS, write = deny) and all 16 request handlers ship *inside* `chatKit.plugin`. This file writes **no** channel/message policy or handler of its own — compare that to the hand-rolled `policies.messages` you wrote in [Tutorial 2](/tutorials/first-collection).
 
 The one thing you *do* get to add is a **hook**: a before/after wrapper around a domain operation that fires for client requests and server-side calls alike — the un-bypassable extension seam ([ADR-0010](https://github.com/mertdogar/super-line/blob/main/docs/adr/0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md)).
 
@@ -183,7 +183,7 @@ super-line chat server on ws://localhost:3000
 
 <div class="sl-result">
   <p class="sl-result__h">Two users just chatted over a model you never wrote.</p>
-  <p>Ada created a <strong>private</strong> channel and <strong>added</strong> Bob to it; her <code>send</code> travelled to the server, which validated the body, ran your <code>sendMessage</code> hook (notice the padding was <strong>trimmed</strong>), stamped the id and timestamp, and fanned it out — and Bob's live <code>messages</code> window, opened only because he's a member, delivered it. The channel row, the membership RLS, the message security, the 11 request handlers: all of it came from <code>chatKit.plugin</code>.</p>
+  <p>Ada created a <strong>private</strong> channel and <strong>added</strong> Bob to it; her <code>send</code> travelled to the server, which validated the body, ran your <code>sendMessage</code> hook (notice the padding was <strong>trimmed</strong>), stamped the id and timestamp, and fanned it out — and Bob's live <code>messages</code> window, opened only because he's a member, delivered it. The channel row, the membership RLS, the message security, the 16 request handlers: all of it came from <code>chatKit.plugin</code>.</p>
 </div>
 
 ## What just happened
@@ -199,11 +199,13 @@ Each line you wrote is one seam of the plugin backbone — the plugin owns the d
 
 The membership model is the part worth internalising: a **private** channel is invisible to non-members and its messages never cross the wire to them; a **public** one is discoverable and self-join (`chatClient.join`). Members carry an `owner` or `member` role — the creator is the first owner, owners manage membership, and the server refuses to strip a channel's **last owner**. All of it is enforced at the source, so tampering with a client just earns a `FORBIDDEN`.
 
-## Next: a browser app and a live AI agent
+## Next: a live AI agent
 
-You drove the plugin headlessly. The same `chatClient` powers a real UI, and — because an agent is just a provisioned user with an API key — a live LLM participant:
+You drove the plugin headlessly. The obvious next step: because an agent is just a provisioned user with an API key, that same `chatClient` becomes a live LLM participant.
 
-- [Add a chat backbone (how-to)](/how-to/plugin-chat) — the full surface: structured message bodies, the imperative `chatKit` (`channels` / `members` / `messages`), and the React bindings (`useChannels` / `useMembers` / `useMessages`).
+- **[Tutorial 5 · Put a live AI agent in the chat](/tutorials/ai-agent-chat)** — provision a bot, run its message loop, and stream its answer into the channel. The natural sequel to this lesson.
+- [Add a chat backbone (how-to)](/how-to/plugin-chat) — the full surface: structured message bodies, the imperative `chatKit` (`channels` / `members` / `messages`), the hooks, and the React bindings (`useChannels` / `useMembers` / `useMessages`).
+- [Stream an agent's turn (how-to)](/how-to/chat-streaming) — the streamed-message model: one message that accumulates typed parts (text · tool calls · subagent trees) live and survives reloads.
+- [Run an AI chat bot (how-to)](/how-to/chat-bots) — `provisionChatBot`, `onChatMessage`, the `chatAgentTools` AI SDK toolset, and the Mastra engine.
 - [Add authentication (how-to)](/how-to/plugin-auth) — the browser sign-up / sign-in flow with `authClient()` and `createAuth()`.
-- [Give the agent tools (how-to)](/how-to/plugin-chat) — the plugin's `chatAgentTools` AI SDK toolset lets an LLM read, post, and manage channels over its own permission-checked connection.
 - [`examples/collections-chat`](https://github.com/mertdogar/super-line/tree/main/examples/collections-chat) — a Slack-like app built entirely on this plugin, with membership control, presence/typing garnish, and a live AI agent in an `#ask-ai` channel.

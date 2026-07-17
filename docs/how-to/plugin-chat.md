@@ -22,6 +22,8 @@ Two companion guides go deeper:
   empty, accumulates typed parts (text · reasoning · tool calls · subagent trees) live, and settles.
 - **[Run an AI chat bot](/how-to/chat-bots)** — provision a bot user, run its message loop, and give
   it a permission-checked AI SDK or Mastra brain.
+- **[Attach channel resources](/how-to/chat-resources)** — link host-declared CRDT docs (canvases,
+  todo lists…) to channels: membership-gated collaboration for every member, humans and agents alike.
 
 ::: tip New here? Build it first
 [Tutorial 4 · Assemble a chat backbone](/tutorials/chat-backbone) stands the whole thing up in one
@@ -32,8 +34,8 @@ runnable file. This page is the reference you reach for afterwards.
 
 ### 1 · Contract
 
-`chatContract()` merges four collections (`channels` / `memberships` / `messages` / `messageParts`) and
-the 16 mutation requests into your contract. It sits alongside `authContract()`.
+`chatContract()` merges six collections (`channels` / `memberships` / `messages` / `messageParts` /
+`resources` / `resourcePresence`) and the 20 mutation requests into your contract. It sits alongside `authContract()`.
 
 ```ts
 import { defineContract } from '@super-line/core'

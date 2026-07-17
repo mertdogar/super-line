@@ -148,8 +148,35 @@ import { chatAgentTools } from '@super-line/plugin-chat/ai'
 
 const agent = new ToolLoopAgent({ model, tools: chatAgentTools(client) })
 // core: list_channels · list_members · read_messages · send_message · join_channel · leave_channel
+//       + the resource tools: list/read/create/detach/write_resource (see Channel resources below)
 // { management: true } adds channel lifecycle, membership control, edit/delete, and list_users
 ```
+
+## Channel resources
+
+Channels can carry **shared objects** — canvases, todo lists, briefs — declared by YOUR contract as
+[CRDT document collections](https://super-line.dogar.biz/collections/crdt) and made channel-native by
+the plugin (design: `PLAN-chat-resources.md`). Register kinds on `chat()` and the plugin owns the
+rest: a per-channel link registry (`resources` rows), server-authoritative **create-or-attach**
+(`createResource`, host `init` seeds the doc), **membership-gated read/write policies contributed
+automatically** for those collections, a delete cascade (`owned` kinds die with their channel;
+`linked` kinds are shareable and never chat-deleted), resource **cards** in the message stream,
+coarse who's-open **presence** (`resourcePresence` rows + `useResourcePresence`), and an **acked
+write path** (`writeResource`) that agents use to get honest `VALIDATION` errors instead of silent
+optimistic resyncs.
+
+```ts
+const chatKit = chat({
+  contract: app,
+  resources: { kinds: {
+    todo:   { collection: 'todos', init: () => ({ items: {} }) },                  // owned
+    canvas: { collection: 'canvases', lifecycle: 'linked', init: (c) => seed(c.params) },
+  } },
+})
+```
+
+Guide: <https://super-line.dogar.biz/how-to/chat-resources> · runnable:
+[`examples/chat-resources`](https://github.com/mertdogar/super-line/tree/main/examples/chat-resources).
 
 ## Streaming messages
 

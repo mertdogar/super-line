@@ -264,6 +264,43 @@ importers:
         specifier: ^4.19.2
         version: 4.22.4
 
+  examples/chat-resources:
+    dependencies:
+      '@super-line/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@super-line/collections-crdt-memory':
+        specifier: workspace:*
+        version: link:../../packages/collections-crdt-memory
+      '@super-line/collections-memory':
+        specifier: workspace:*
+        version: link:../../packages/collections-memory
+      '@super-line/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@super-line/plugin-auth':
+        specifier: workspace:*
+        version: link:../../packages/plugin-auth
+      '@super-line/plugin-chat':
+        specifier: workspace:*
+        version: link:../../packages/plugin-chat
+      '@super-line/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../../packages/transport-websocket
+      ai:
+        specifier: ^6.0.0
+        version: 6.0.209(zod@3.25.76)
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
+
   examples/chat-supervisor:
     dependencies:
       '@ai-sdk/gateway':

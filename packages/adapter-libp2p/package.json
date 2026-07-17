@@ -1,6 +1,6 @@
 {
   "name": "@super-line/adapter-libp2p",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "type": "module",
   "description": "libp2p (gossipsub) adapter for super-line — decentralized, broker-less multi-node fan-out + presence.",
   "license": "MIT",

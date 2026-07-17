@@ -1,6 +1,6 @@
 {
   "name": "@super-line/collections-crdt-memory",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "In-memory CRDT (Yjs, via super-store) document collection backend for super-line — merging collaborative docs under the collection API.",
   "license": "MIT",

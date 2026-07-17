@@ -1,6 +1,6 @@
 {
   "name": "@super-line/adapter-rabbitmq",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "type": "module",
   "description": "RabbitMQ adapter for super-line — broker-routed multi-node room/topic fan-out + presence.",
   "license": "MIT",

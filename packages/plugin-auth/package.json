@@ -1,6 +1,6 @@
 {
   "name": "@super-line/plugin-auth",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "First-party authentication for super-line — email/password, sessions, and roles backed by typed collections. A paired plugin (contract · server · client).",
   "license": "MIT",

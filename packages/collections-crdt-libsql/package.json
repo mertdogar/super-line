@@ -1,6 +1,6 @@
 {
   "name": "@super-line/collections-crdt-libsql",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Durable CRDT (Yjs, via super-store) document collection backend for super-line — snapshot-per-doc to libsql/Turso.",
   "license": "MIT",

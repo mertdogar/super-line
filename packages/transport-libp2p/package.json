@@ -1,6 +1,6 @@
 {
   "name": "@super-line/transport-libp2p",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "type": "module",
   "description": "libp2p protocol-stream client↔server transport for super-line (bring your own node).",
   "license": "MIT",

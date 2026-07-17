@@ -4,9 +4,9 @@
   "type": "module",
   "description": "Mastra supervisor + subagent streaming a nested turn-tree into a plugin-chat channel — no harness, just super-line",
   "scripts": {
-    "dev": "concurrently -k -n server,web -c magenta,green \"tsx --env-file-if-exists=.env --env-file-if-exists=../collections-chat/.env src/server.ts\" \"vite\"",
+    "dev": "concurrently -k -n server,web -c magenta,green \"tsx --env-file-if-exists=.env --env-file-if-exists=../collections-chat/.env src/server.ts\" \"vite --host\"",
     "dev:server": "tsx --env-file-if-exists=.env --env-file-if-exists=../collections-chat/.env src/server.ts",
-    "dev:web": "vite",
+    "dev:web": "vite --host",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -38,7 +38,7 @@ const srv = createSuperLineServer(app, {
 })
 srv.implement({})
 
-server.listen(PORT, async () => {
+server.listen(PORT, '0.0.0.0', async () => {
   console.log(`chat-supervisor server on ws://localhost:${PORT}`)
   await startSupervisor({ authKit, chatKit, url: `ws://localhost:${PORT}` }).catch((err) =>
     console.error('supervisor failed to start', err),

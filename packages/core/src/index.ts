@@ -123,6 +123,8 @@ export type {
   RowTimestamps,
 } from './collections.js'
 export { withRowMeta, ROW_CREATED_AT, ROW_UPDATED_AT } from './collections.js'
+export { planColumns, DEGENERATE_DATA_COLUMN } from './column-plan.js'
+export type { ColumnKind, ColumnSpec, ColumnPlan } from './column-plan.js'
 export type { CrdtCollectionStore, DocChange, DocSummary, DocListOpts, CrdtServerReplica, CrdtCollectionClient } from './crdt-collections.js'
 
 export {

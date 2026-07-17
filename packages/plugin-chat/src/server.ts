@@ -1,20 +1,25 @@
 import { randomUUID } from 'node:crypto'
-import { eq, isIn, or, SuperLineError } from '@super-line/core'
-import type { Contract, Expr, OrderBy } from '@super-line/core'
-import type { PluginContext, SuperLinePlugin } from '@super-line/server'
+import { and, eq, isIn, or, SuperLineError, validateSync } from '@super-line/core'
+import type { Contract, Expr, OrderBy, Schema } from '@super-line/core'
+import type { PluginContext, ServerCrdtCollectionHandle, SuperLinePlugin } from '@super-line/server'
 import type { AuthContext, AuthUser } from '@super-line/plugin-auth'
-import { memId, partId } from './index.js'
+import { docKeyOf, memId, partId, presenceId, resourceId } from './index.js'
 import type {
   ChatChannel,
   ChatMembership,
   ChatMessage,
   ChatMessagePart,
+  ChatResource,
   ChatStreamEvent,
   ChatSurface,
   ChannelVisibility,
   MemberRole,
   MessageStatus,
   PartType,
+  ResourceCard,
+  ResourceLifecycle,
+  ResourcePresence,
+  ResourceWriteOp,
   ToolState,
 } from './index.js'
 
@@ -73,6 +78,26 @@ export interface StartMessageArgs {
   authorId: string
   metadata?: Record<string, unknown>
 }
+export interface CreateResourceArgs {
+  channelId: string
+  kind: string
+  title?: string
+  /** Linked kinds only — supply to create/attach under a host-meaningful doc id. Owned ids are server-minted. */
+  id?: string
+  /** Opaque kind-specific init input; the host's `init` is its validator. */
+  params?: Record<string, unknown>
+}
+export interface DetachResourceArgs {
+  channelId: string
+  kind: string
+  docId: string
+}
+export interface WriteResourceArgs {
+  channelId: string
+  kind: string
+  docId: string
+  ops: ResourceWriteOp[]
+}
 export interface FinalizeMessageArgs {
   id: string
   status?: Exclude<MessageStatus, 'streaming'>
@@ -102,6 +127,41 @@ export interface ChatHooks {
   startMessage?: ChatOpHook<StartMessageArgs, ChatMessage>
   /** The moderation/audit point: fires on every settle — complete, aborted (incl. disconnect), and error. */
   finalizeMessage?: ChatOpHook<FinalizeMessageArgs, ChatStreamedMessage>
+  createResource?: ChatOpHook<CreateResourceArgs, ChatResource>
+  detachResource?: ChatOpHook<DetachResourceArgs, ChatResource>
+  /** The content-moderation point for the acked doc-write path (agents route through it). */
+  writeResource?: ChatOpHook<WriteResourceArgs, { snapshot: unknown }>
+}
+
+/** What a resource kind's `init` receives: the resolved identity plus the caller's connection ctx (undefined on kit calls). */
+export interface ResourceInitCtx {
+  channelId: string
+  kind: string
+  id: string
+  title: string
+  params: Record<string, unknown>
+  /** The acting user (null on server/kit-initiated creates). */
+  userId: string | null
+  /** The caller's connection ctx (AuthContext + whatever the host's authenticate attached); undefined on kit calls. */
+  ctx: unknown
+}
+
+/**
+ * One registered resource kind (PLAN-chat-resources). Registering a kind is the single act with three
+ * effects: it enables `createResource` for it, CONTRIBUTES the membership-gated CRDT read/write
+ * policies for `collection` (so do NOT also policy that collection yourself — the server throws
+ * "policy … collides" at construction: registration IS the policy), and enrolls the kind in the
+ * channel-delete cascade. The collection's schema must be presence-tolerant (ADR-0008): fields
+ * multiple members edit concurrently need `.catch()`/`.optional()`; `required` is safe only for
+ * fields `init` sets once.
+ */
+export interface ResourceKindDef {
+  /** A CRDT collection declared on the contract (`{ schema, crdt }`). */
+  collection: string
+  /** Default `'owned'`. */
+  lifecycle?: ResourceLifecycle
+  /** Produces the doc's initial data (async fine — external seeds). Throw `SuperLineError('VALIDATION', …)` on bad `params`. */
+  init: (ctx: ResourceInitCtx) => unknown | Promise<unknown>
 }
 
 /** Streaming knobs (PLAN-chat-streaming decision 11). Few by design; the defaults are the contract. */
@@ -129,6 +189,8 @@ export interface ChatServerOptions<C extends Contract> {
   hooks?: ChatHooks
   /** Streaming-message knobs; see {@link ChatStreamingOptions}. */
   streaming?: ChatStreamingOptions
+  /** Channel-resource kinds (PLAN-chat-resources); see {@link ResourceKindDef}. */
+  resources?: { kinds: Record<string, ResourceKindDef> }
 }
 
 /**
@@ -182,15 +244,39 @@ export interface ChatMessagesApi {
   sweepStale(opts: { olderThanMs: number }): Promise<ChatMessage[]>
 }
 
+/** Imperative channel-resource management (PLAN-chat-resources). Same cores as the requests — hooks fire with `initiator.kind: 'server'`. */
+export interface ChatResourcesApi {
+  /** Create-or-attach a resource. Server-initiated: no membership requirement, `createdBy: null`, no card. */
+  create(input: CreateResourceArgs): Promise<ChatResource>
+  /** Detach (owned kinds: also deletes the doc). */
+  detach(channelId: string, kind: string, docId: string): Promise<ChatResource>
+  /** The channel's registry rows. */
+  of(channelId: string): Promise<ChatResource[]>
+  /**
+   * Host-invoked presence reaper (the `sweepStale` pattern — the plugin runs no timers): deletes
+   * presence rows whose `heartbeatAt` is older than `olderThanMs`. Readers already filter by
+   * recency, so sweeping is hygiene, not correctness.
+   */
+  sweepPresence(opts: { olderThanMs: number }): Promise<number>
+}
+
 export interface ChatServer {
-  /** Register in the server's `plugins: [...]` — the 16 request handlers + read-RLS/write-deny row policies. */
+  /** Register in the server's `plugins: [...]` — the request handlers + read-RLS/write-deny row policies. */
   plugin: SuperLinePlugin<ChatSurface>
   channels: ChatChannelsApi
   members: ChatMembersApi
   messages: ChatMessagesApi
+  resources: ChatResourcesApi
 }
 
 const SERVER: ChatInitiator = { kind: 'server' }
+
+/** `.catch(swallow('NOT_FOUND'))` — ignore exactly one expected race outcome, rethrow everything else. */
+const swallow =
+  (code: string) =>
+  (e: unknown): void => {
+    if ((e as { code?: string }).code !== code) throw e
+  }
 
 /**
  * Build the server half of the chat plugin. Requires plugin-auth on the same server (identity +
@@ -211,13 +297,31 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
   const hooks = opts.hooks ?? {}
 
   // fail fast at startup: both fragments must be merged into the contract
-  const declared = new Set(Object.keys((opts.contract as { collections?: Record<string, unknown> }).collections ?? {}))
-  for (const need of ['users', 'channels', 'memberships', 'messages', 'messageParts'] as const) {
+  const contractCollections = (opts.contract as { collections?: Record<string, unknown> }).collections ?? {}
+  const declared = new Set(Object.keys(contractCollections))
+  for (const need of ['users', 'channels', 'memberships', 'messages', 'messageParts', 'resources', 'resourcePresence'] as const) {
     if (!declared.has(need))
       throw new Error(
         `plugin-chat: the contract is missing the '${need}' collection — declare plugins: [authContract(), chatContract()] in defineContract`,
       )
   }
+
+  // resource kinds: every kind must point at a CRDT collection the contract declares
+  const kinds = opts.resources?.kinds ?? {}
+  for (const [kindName, def] of Object.entries(kinds)) {
+    // the composite pks (`${channelId}:${kind}:${docId}`) stay unambiguous only while kind names are
+    // colon-free (channel ids are server UUIDs; docId is the final segment so its colons are fine)
+    if (kindName.includes(':'))
+      throw new Error(`plugin-chat: resource kind '${kindName}' must not contain ':' (it is a composite-pk segment)`)
+    const cdef = contractCollections[def.collection]
+    if (!cdef)
+      throw new Error(`plugin-chat: resource kind '${kindName}' points at unknown collection '${def.collection}'`)
+    if (typeof cdef !== 'object' || cdef === null || !('crdt' in cdef))
+      throw new Error(
+        `plugin-chat: resource kind '${kindName}' points at '${def.collection}', which is not a CRDT collection — declare it as { schema, crdt } on the contract`,
+      )
+  }
+  const lifecycleOf = (kind: string): ResourceLifecycle => kinds[kind]?.lifecycle ?? 'owned'
 
   // captured at plugin setup; every read/write below goes through the co-writer so changes fan out live
   let pluginCtx: PluginContext | undefined
@@ -228,7 +332,11 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
       )
     return pluginCtx
   }
-  const col = (n: 'channels' | 'memberships' | 'messages' | 'messageParts' | 'users') => requireCtx().collection(n)
+  const col = (n: 'channels' | 'memberships' | 'messages' | 'messageParts' | 'resources' | 'resourcePresence' | 'users') =>
+    requireCtx().collection(n)
+  // PluginContext.collection is statically the LWW handle; CRDT collections need the cast
+  // (plugin-inspector's pattern) — safe because the kind check above proved the def carries `crdt`
+  const docCol = (n: string): ServerCrdtCollectionHandle => requireCtx().collection(n) as unknown as ServerCrdtCollectionHandle
 
   // Per-channel serialization of membership/channel/message mutations. The last-owner guard and the
   // deleteChannel cascade are check-then-act over snapshots (the store has no CAS), so without this two
@@ -263,6 +371,25 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     col('memberships').snapshot({ filter: eq('channelId', channelId) }) as Promise<ChatMembership[]>
   const channelIdsOf = async (userId: string): Promise<string[]> =>
     ((await col('memberships').snapshot({ filter: eq('userId', userId) })) as ChatMembership[]).map((m) => m.channelId)
+
+  /**
+   * The ONE access resolver for resource docs (critique: policies and the write path must never drift):
+   * which channels grant access to `(collection, docId)`? Empty = unattached = invisible through chat.
+   */
+  const channelsOfDoc = async (collection: string, docId: string): Promise<string[]> =>
+    (
+      (await col('resources').snapshot({
+        filter: and(eq('collection', collection), eq('docId', docId)),
+      })) as ChatResource[]
+    ).map((r) => r.channelId)
+
+  /** True iff `userId` is a member of any channel granting access to the doc. */
+  const canAccessDoc = async (collection: string, docId: string, userId: string): Promise<boolean> => {
+    const granting = await channelsOfDoc(collection, docId)
+    if (granting.length === 0) return false
+    const mine = new Set(await channelIdsOf(userId))
+    return granting.some((c) => mine.has(c))
+  }
 
   /** Client initiators must OWN the channel; the server may do anything. */
   const requireOwner = async (initiator: ChatInitiator, channelId: string): Promise<void> => {
@@ -354,6 +481,12 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
       await Promise.all(doomed.map((s) => onLane(s, async () => dropStream(s))))
       const parts = (await col('messageParts').snapshot({ filter: eq('channelId', target.id) })) as ChatMessagePart[]
       await Promise.all(parts.map((p) => col('messageParts').delete(p.id)))
+      // resources: rows FIRST (a registry row must never point at nothing), then owned docs — a crash
+      // between leaves an invisible orphan doc (G10-class, accepted), never a dangling row. Linked
+      // docs belong to the host and possibly other channels: registry rows only.
+      const resRows = (await col('resources').snapshot({ filter: eq('channelId', target.id) })) as ChatResource[]
+      await Promise.all(resRows.map((r) => col('resources').delete(r.id)))
+      for (const r of resRows) if (lifecycleOf(r.kind) === 'owned') await docCol(r.collection).delete(r.docId)
       const room = requireCtx().room(streamRoom(target.id))
       for (const c of room.connections) room.remove(c)
       return target
@@ -464,6 +597,243 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     })
     if (changed) await hooks.setMemberRole?.after?.(next, initiator)
     return next
+  }
+
+  // ── channel resources (PLAN-chat-resources) ──────────────────────────────────────────────────────
+
+  /**
+   * The resource card: a regular message through sendMessageCore (hooks/moderation see it), content
+   * ABSENT (the streaming-envelope precedent), payload in the reserved `metadata.resource`. Only
+   * client-initiated ops card (a kit call has no author to speak as). Best-effort: the resource
+   * write already committed, so a card failure (e.g. a host hook vetoing it) must not fail the op.
+   */
+  const postResourceCard = async (
+    resource: ChatResource,
+    action: ResourceCard['action'],
+    initiator: ChatInitiator,
+  ): Promise<void> => {
+    if (initiator.kind !== 'client') return
+    const card: ResourceCard = { action, kind: resource.kind, docId: resource.docId, title: resource.title }
+    try {
+      await sendMessageCore(
+        { channelId: resource.channelId, authorId: initiator.userId, content: undefined, metadata: { resource: card } },
+        initiator,
+      )
+    } catch (err) {
+      console.error(`[plugin-chat] resource card for ${resource.kind}/${resource.docId} was not posted`, err)
+    }
+  }
+
+  const createResourceCore = async (args: CreateResourceArgs & { connCtx?: unknown }, initiator: ChatInitiator): Promise<ChatResource> => {
+    const input = await runBefore(hooks.createResource, args, initiator)
+    const kind = kinds[input.kind]
+    if (!kind) throw new SuperLineError('NOT_FOUND', `no resource kind '${input.kind}'`)
+    const lifecycle = kind.lifecycle ?? 'owned'
+    if (lifecycle === 'owned' && input.id !== undefined)
+      throw new SuperLineError('VALIDATION', `kind '${input.kind}' is owned — its doc ids are server-minted, omit 'id'`)
+    // same lock as the delete cascade: a create can't slip rows in behind a concurrent cascade's snapshots
+    const { resource, action } = await withChannelLock(input.channelId, async () => {
+      await mustChannel(input.channelId)
+      const userId = initiator.kind === 'client' ? initiator.userId : null
+      if (userId !== null && !(await membershipOf(input.channelId, userId)))
+        throw new SuperLineError('FORBIDDEN', 'not a member of this channel')
+      const docId = input.id ?? randomUUID()
+      const title = input.title ?? input.kind
+      // create-or-attach: the existence PRE-CHECK spares a plain attach the cost of a side-effecting
+      // `init` (seed fetches, external allocations); the catch-CONFLICT below stays the CORRECTNESS
+      // mechanism — a racer that loses between check and create still lands as an attach (its init
+      // result is discarded, the one unavoidable case).
+      let docCreated = false
+      const exists =
+        input.id !== undefined && lifecycle === 'linked'
+          ? (await docCol(kind.collection).read(docId)) !== undefined
+          : false
+      if (!exists) {
+        try {
+          const data = await kind.init({
+            channelId: input.channelId,
+            kind: input.kind,
+            id: docId,
+            title,
+            params: input.params ?? {},
+            userId,
+            ctx: args.connCtx,
+          })
+          await docCol(kind.collection).create(docId, data)
+          docCreated = true
+        } catch (e) {
+          // owned ids are fresh UUIDs — a CONFLICT there is a real error, not an attach
+          if ((e as { code?: string }).code !== 'CONFLICT' || lifecycle === 'owned') throw e
+        }
+      }
+      const row: ChatResource = {
+        id: resourceId(input.channelId, input.kind, docId),
+        channelId: input.channelId,
+        kind: input.kind,
+        collection: kind.collection,
+        docId,
+        title,
+        createdBy: userId,
+        createdAt: Date.now(),
+      }
+      // CONFLICT on the registry pk ⇒ already attached to this channel — return the existing row as success
+      try {
+        await col('resources').insert(row)
+      } catch (e) {
+        if ((e as { code?: string }).code !== 'CONFLICT') throw e
+        return { resource: (await col('resources').read(row.id)) as ChatResource, action: undefined }
+      }
+      return { resource: row, action: (docCreated ? 'created' : 'attached') as ResourceCard['action'] }
+    })
+    await hooks.createResource?.after?.(resource, initiator)
+    if (action !== undefined) await postResourceCard(resource, action, initiator)
+    return resource
+  }
+
+  /** Apply one path op to a PLAIN clone (the validation projection — never the live doc). */
+  const applyOpToPlain = (target: Record<string, unknown>, op: ResourceWriteOp): void => {
+    let cur: Record<string, unknown> = target
+    for (const key of op.path.slice(0, -1)) {
+      const next = cur[key]
+      if (typeof next !== 'object' || next === null) {
+        if ('delete' in op) return // nothing at the path — a delete is a no-op
+        cur[key] = {}
+      }
+      // an op stepping INTO an array would diverge from the CRDT store (arrays are opaque leaves
+      // there — the replayed partial would replace the array with a map); the guard below rejects it
+      if (Array.isArray(cur[key]))
+        throw new SuperLineError(
+          'VALIDATION',
+          `op path [${op.path.join(', ')}] indexes into an array — replace the whole array by setting it at its object key`,
+        )
+      cur = cur[key] as Record<string, unknown>
+    }
+    const last = op.path[op.path.length - 1]!
+    if ('delete' in op) delete cur[last]
+    else if ('set' in op) cur[last] = op.set
+    else throw new SuperLineError('VALIDATION', `op at [${op.path.join(', ')}] carries neither 'set' nor 'delete'`)
+  }
+
+  /** A path set as a single-key nested partial — `replica.update` merges per-property, so siblings survive. */
+  const nestedPartial = (path: string[], value: unknown): Record<string, unknown> => {
+    const root: Record<string, unknown> = {}
+    let cur = root
+    for (const key of path.slice(0, -1)) cur = cur[key] = {}
+    return (cur[path[path.length - 1]!] = value), root
+  }
+
+  /**
+   * The acked write path (G11): gate on the EXACT registry triple + membership (this path bypasses
+   * collection policy — the handler must re-prove what the policy proves), validate the ops on a JSON
+   * projection of the current snapshot (server co-writer replicas do NOT validate — this is what turns
+   * a bad write into an honest VALIDATION the caller/LLM reads), then replay onto the real replica.
+   * Best-effort by design: a concurrent delta between validate and replay is the accepted tiny race.
+   * Deliberately NOT under `withChannelLock`: the gate-then-apply window matches the policy path's
+   * own cdwr semantics — a linked detach landing mid-write is the same accepted staleness class.
+   */
+  const writeResourceCore = async (args: WriteResourceArgs, initiator: ChatInitiator): Promise<{ snapshot: unknown }> => {
+    const input = await runBefore(hooks.writeResource, args, initiator)
+    const kind = kinds[input.kind]
+    if (!kind) throw new SuperLineError('NOT_FOUND', `no resource kind '${input.kind}'`)
+    const userId = initiator.kind === 'client' ? initiator.userId : null
+    if (userId !== null && !(await membershipOf(input.channelId, userId)))
+      throw new SuperLineError('FORBIDDEN', 'not a member of this channel')
+    const row = (await col('resources').read(resourceId(input.channelId, input.kind, input.docId))) as
+      | ChatResource
+      | undefined
+    if (!row) throw new SuperLineError('NOT_FOUND', `no resource '${input.kind}/${input.docId}' in this channel`)
+
+    const handle = docCol(kind.collection)
+    const current = await handle.read(input.docId)
+    if (current === undefined) throw new SuperLineError('NOT_FOUND', `resource doc '${input.docId}' no longer exists`)
+    const projected = structuredClone(current) as Record<string, unknown>
+    for (const op of input.ops) applyOpToPlain(projected, op)
+    const schema = (contractCollections[kind.collection] as { schema: Schema }).schema
+    try {
+      validateSync(schema, projected)
+    } catch (e) {
+      // validateSync's message is the fixed 'Validation failed'; the issues live in `.data` — fold
+      // them into the message so an agent tool reads WHAT failed and can correct (design principle 5)
+      const issues = (e as { data?: unknown }).data
+      const detail = issues !== undefined ? JSON.stringify(issues).slice(0, 2048) : (e as Error).message
+      throw new SuperLineError('VALIDATION', `write rejected by the '${input.kind}' schema: ${detail}`)
+    }
+
+    const replica = handle.open(input.docId, { origin: userId !== null ? `user:${userId}` : 'server' })
+    try {
+      for (const op of input.ops) {
+        if ('delete' in op) replica.delete(op.path)
+        else replica.update(nestedPartial(op.path, op.set))
+      }
+      const result = { snapshot: replica.getSnapshot() }
+      await hooks.writeResource?.after?.(result, initiator)
+      return result
+    } finally {
+      replica.close()
+    }
+  }
+
+  /**
+   * Presence upsert/expire (hook-free — heartbeat cadence). Per USER, not per connection: crashed
+   * tabs age out via `heartbeatAt` (readers filter by recency; `sweepPresence` reaps). Client-only —
+   * server code has no "presence".
+   */
+  const announceResourceCore = async (
+    args: { kind: string; docId: string; state: 'open' | 'heartbeat' | 'close' },
+    userId: string,
+  ): Promise<void> => {
+    const kind = kinds[args.kind]
+    if (!kind) throw new SuperLineError('NOT_FOUND', `no resource kind '${args.kind}'`)
+    if (!(await canAccessDoc(kind.collection, args.docId, userId)))
+      throw new SuperLineError('FORBIDDEN', 'no channel of yours has this resource')
+    const id = presenceId(kind.collection, args.docId, userId)
+    // read-then-write with race guards, not a lock: an unmount `close` racing the 20s heartbeat (or
+    // two tabs of one user) must land as an upsert/no-op, never a request-level NOT_FOUND/CONFLICT
+    if (args.state === 'close') {
+      const prev = (await col('resourcePresence').read(id)) as ResourcePresence | undefined
+      if (prev) await col('resourcePresence').delete(id).catch(swallow('NOT_FOUND'))
+      return
+    }
+    const now = Date.now()
+    const row = (prev: ResourcePresence | undefined): ResourcePresence => ({
+      id,
+      docKey: docKeyOf(kind.collection, args.docId),
+      collection: kind.collection,
+      docId: args.docId,
+      userId,
+      openedAt: prev?.openedAt ?? now,
+      heartbeatAt: now,
+    })
+    const prev = (await col('resourcePresence').read(id)) as ResourcePresence | undefined
+    if (prev)
+      await col('resourcePresence')
+        .update(row(prev))
+        .catch(async (e) => {
+          if ((e as { code?: string }).code !== 'NOT_FOUND') throw e
+          await col('resourcePresence').insert(row(undefined)) // deleted mid-flight — re-open
+        })
+    else await col('resourcePresence').insert(row(undefined)).catch(swallow('CONFLICT')) // raced another open
+  }
+
+  const detachResourceCore = async (args: DetachResourceArgs, initiator: ChatInitiator): Promise<ChatResource> => {
+    const input = await runBefore(hooks.detachResource, args, initiator)
+    const resource = await withChannelLock(input.channelId, async () => {
+      const userId = initiator.kind === 'client' ? initiator.userId : null
+      if (userId !== null && !(await membershipOf(input.channelId, userId)))
+        throw new SuperLineError('FORBIDDEN', 'not a member of this channel')
+      const row = (await col('resources').read(resourceId(input.channelId, input.kind, input.docId))) as
+        | ChatResource
+        | undefined
+      if (!row) throw new SuperLineError('NOT_FOUND', `no resource '${input.kind}/${input.docId}' in this channel`)
+      // row BEFORE doc — the invariant is "a registry row's existence implies its doc exists"
+      await col('resources').delete(row.id)
+      // owned docs are exclusively this channel's; linked docs belong to the host (and possibly other channels)
+      if (lifecycleOf(row.kind) === 'owned') await docCol(row.collection).delete(row.docId)
+      return row
+    })
+    await hooks.detachResource?.after?.(resource, initiator)
+    await postResourceCard(resource, 'detached', initiator)
+    return resource
   }
 
   // Strictly-monotonic message stamps (per node): a same-ms burst would otherwise tie on createdAt and
@@ -953,6 +1323,45 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
           return uid ? isIn('channelId', await channelIdsOf(uid)) : NONE
         },
       },
+      resources: {
+        read: async (_principal: string, ctx: unknown) => {
+          const uid = uidOf(ctx)
+          return uid ? isIn('channelId', await channelIdsOf(uid)) : NONE
+        },
+      },
+      resourcePresence: {
+        // visible for docs registered in ANY of your channels — the same registry lookup the CRDT
+        // guards make, expressed as a subscribe-time filter (captured-at-subscribe staleness applies,
+        // same class as every other row policy here)
+        read: async (_principal: string, ctx: unknown) => {
+          const uid = uidOf(ctx)
+          if (!uid) return NONE
+          const rows = (await col('resources').snapshot({
+            filter: isIn('channelId', await channelIdsOf(uid)),
+          })) as ChatResource[]
+          return isIn('docKey', [...new Set(rows.map((r) => docKeyOf(r.collection, r.docId)))])
+        },
+      },
+      // Auto-contributed CRDT guards for every registered kind's collection (deduped — kinds may share
+      // one). Registration IS the policy: a host policy on the same collection throws "collides" at
+      // construction. Membership in ANY channel the doc is registered in grants read+write; the
+      // registry lookup is the gate — doc ids are host-suppliable, so nothing is encoded in them (R4).
+      // Read re-runs on every open (incl. reconnect re-opens); write on every cdwr (G12).
+      ...Object.fromEntries(
+        [...new Set(Object.values(kinds).map((k) => k.collection))].map((collection) => [
+          collection,
+          {
+            read: async (_principal: string, id: string, _snapshot: unknown, ctx: unknown) => {
+              const uid = uidOf(ctx)
+              return uid !== null && (await canAccessDoc(collection, id, uid))
+            },
+            write: async (_principal: string, id: string, ctx: unknown) => {
+              const uid = uidOf(ctx)
+              return uid !== null && (await canAccessDoc(collection, id, uid))
+            },
+          },
+        ]),
+      ),
     },
     onDisconnect: (conn) => {
       // disconnect-abort (decision 7): the starting connection owns the stream lifetime; partial
@@ -1033,6 +1442,27 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
           // strip the assembled parts — the wire output is the message schema, viewers read parts rows
           const { parts: _parts, ...message } = await finalizeMessageCore(input, asUser(connCtx))
           return message
+        },
+        createResource: async (input, connCtx) => {
+          const initiator = asUser(connCtx)
+          return createResourceCore(
+            {
+              channelId: input.channelId,
+              kind: input.kind,
+              ...(input.title !== undefined ? { title: input.title } : {}),
+              ...(input.id !== undefined ? { id: input.id } : {}),
+              ...(input.params !== undefined ? { params: input.params } : {}),
+              connCtx,
+            },
+            initiator,
+          )
+        },
+        detachResource: async (input, connCtx) => detachResourceCore(input, asUser(connCtx)),
+        writeResource: async (input, connCtx) =>
+          writeResourceCore({ ...input, ops: input.ops as ResourceWriteOp[] }, asUser(connCtx)),
+        announceResource: async (input, connCtx) => {
+          await announceResourceCore(input, asUser(connCtx).userId)
+          return { ok: true }
         },
         watchChannel: async (input, connCtx, conn) => {
           const initiator = asUser(connCtx)
@@ -1134,7 +1564,21 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     },
   }
 
-  return { plugin, channels, members, messages }
+  const resources: ChatResourcesApi = {
+    create: (input) => createResourceCore(input, SERVER),
+    detach: (channelId, kind, docId) => detachResourceCore({ channelId, kind, docId }, SERVER),
+    of: async (channelId) =>
+      (await col('resources').snapshot({ filter: eq('channelId', channelId) })) as ChatResource[],
+    sweepPresence: async ({ olderThanMs }) => {
+      const cutoff = Date.now() - olderThanMs
+      const rows = (await col('resourcePresence').snapshot({})) as ResourcePresence[]
+      const stale = rows.filter((p) => p.heartbeatAt < cutoff)
+      for (const p of stale) await col('resourcePresence').delete(p.id)
+      return stale.length
+    },
+  }
+
+  return { plugin, channels, members, messages, resources }
 }
 
 // ── bot provisioning (PLAN-chat-mastra) ───────────────────────────────────────────────────────────

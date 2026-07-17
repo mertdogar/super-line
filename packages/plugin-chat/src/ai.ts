@@ -1,12 +1,12 @@
 import { tool } from 'ai'
 import type { ToolSet, UIMessageChunk } from 'ai'
 import { z } from 'zod'
-import { and, eq, gt, ilike, isIn, not } from '@super-line/core'
+import { and, eq, gt, ilike, isIn, not, SuperLineError } from '@super-line/core'
 import type { CollectionQuery, Contract, RoleOf } from '@super-line/core'
 import type { LiveRowSet, SuperLineClient } from '@super-line/client'
 import type { AuthUser } from '@super-line/plugin-auth'
-import { CHANNEL_VISIBILITIES, MEMBER_ROLES } from './index.js'
-import type { ChatChannel, ChatMembership, ChatMessage, ChatStreamEvent, StreamEventSink } from './index.js'
+import { CHANNEL_VISIBILITIES, MEMBER_ROLES, resourceWriteOpSchema } from './index.js'
+import type { ChatChannel, ChatMembership, ChatMessage, ChatResource, ChatStreamEvent, StreamEventSink } from './index.js'
 
 export interface ChatAgentToolsOptions<S extends z.ZodTypeAny = z.ZodString> {
   /**
@@ -21,6 +21,13 @@ export interface ChatAgentToolsOptions<S extends z.ZodTypeAny = z.ZodString> {
    * `add_member` just gets a structured FORBIDDEN back.
    */
   management?: boolean
+  /**
+   * One-line doc-shape notes by resource KIND (mirror the server's `resources.kinds` registry), e.g.
+   * `{ note: '{ title: string, body: string }' }` — appended to `write_resource`/`read_resource`'s
+   * descriptions so the model knows each kind's shape. Optional: without it the tools still work,
+   * the model just reads before it writes (the server validates either way).
+   */
+  resourceShapes?: Record<string, string>
 }
 
 /** The wire surface the tools use — the same shape `chatClient` casts to (requests live on `shared`). */
@@ -37,7 +44,13 @@ interface Dyn {
   sendMessage(i: unknown): Promise<unknown>
   editMessage(i: unknown): Promise<unknown>
   deleteMessage(i: unknown): Promise<unknown>
-  collection(n: string): { subscribe(q?: CollectionQuery): LiveRowSet<unknown> }
+  createResource(i: unknown): Promise<unknown>
+  detachResource(i: unknown): Promise<unknown>
+  writeResource(i: unknown): Promise<unknown>
+  collection(n: string): {
+    subscribe(q?: CollectionQuery): LiveRowSet<unknown>
+    open(id: string): { getSnapshot(): unknown; readonly ready: Promise<void>; close(): void }
+  }
 }
 
 /** Tool results never throw — FORBIDDEN/CONFLICT/NOT_FOUND come back structured so the model can adapt. */
@@ -83,6 +96,22 @@ export function chatAgentTools<C extends Contract, R extends RoleOf<C>, S extend
 
   let me: Promise<string | null> | undefined
   const myUserId = (): Promise<string | null> => (me ??= dyn.whoami().then((r) => r?.userId ?? null))
+
+  // resource-tool helpers: snapshot size cap (LLM context, not a wire limit) + optional per-kind shape notes
+  const READ_CAP = 16 * 1024
+  const schemaNote = opts?.resourceShapes
+    ? ` Doc shapes by kind: ${Object.entries(opts.resourceShapes)
+        .map(([k, shape]) => `${k}: ${shape}`)
+        .join(' · ')}`
+    : ''
+  /** The registry row for (channel, kind, doc) — resolves which CRDT collection to open. */
+  const resourceRow = async (channelId: string, kind: string, docId: string): Promise<ChatResource> => {
+    const rows = await oneShot<ChatResource>('resources', {
+      filter: and(eq('channelId', channelId), and(eq('kind', kind), eq('docId', docId))),
+    })
+    if (rows.length === 0) throw new SuperLineError('NOT_FOUND', `no resource '${kind}/${docId}' in this channel`)
+    return rows[0]!
+  }
 
   const namesOf = async (userIds: string[]): Promise<Map<string, string>> => {
     if (userIds.length === 0) return new Map()
@@ -206,6 +235,104 @@ export function chatAgentTools<C extends Contract, R extends RoleOf<C>, S extend
         try {
           await dyn.leaveChannel({ channelId })
           return { ok: true }
+        } catch (e) {
+          return asError(e)
+        }
+      },
+    }),
+
+    // ── channel resources (PLAN-chat-resources): shared docs any member co-edits ────────────────────
+
+    list_resources: tool({
+      description:
+        'List the shared resources (collaborative documents — canvases, notes, todo lists…) attached to a channel you are in. Returns kind + docId (the handle other resource tools take) and title.',
+      inputSchema: z.object({ channelId: z.string().describe('The channel id (from list_channels)') }),
+      execute: async ({ channelId }) => {
+        try {
+          const rows = await oneShot<ChatResource>('resources', { filter: eq('channelId', channelId) })
+          return rows.map((r) => ({ kind: r.kind, docId: r.docId, title: r.title, createdAt: iso(r.createdAt) }))
+        } catch (e) {
+          return asError(e)
+        }
+      },
+    }),
+
+    read_resource: tool({
+      description: `Read the current content of a channel resource as JSON.${schemaNote}`,
+      inputSchema: z.object({
+        channelId: z.string().describe('The channel id'),
+        kind: z.string().describe('The resource kind (from list_resources)'),
+        docId: z.string().describe('The doc id (from list_resources)'),
+      }),
+      execute: async ({ channelId, kind, docId }) => {
+        try {
+          const row = await resourceRow(channelId, kind, docId)
+          const doc = dyn.collection(row.collection).open(docId)
+          try {
+            await doc.ready
+            const snapshot = doc.getSnapshot()
+            const json = JSON.stringify(snapshot)
+            if (json.length <= READ_CAP) return { snapshot }
+            return { truncated: true, note: `content truncated at ${READ_CAP} bytes`, json: json.slice(0, READ_CAP) }
+          } finally {
+            doc.close()
+          }
+        } catch (e) {
+          return asError(e)
+        }
+      },
+    }),
+
+    create_resource: tool({
+      description:
+        'Create a shared resource in a channel (a collaborative doc every member can edit). Kinds are host-defined — if unsure, try or ask; unknown kinds return NOT_FOUND.',
+      inputSchema: z.object({
+        channelId: z.string().describe('The channel id'),
+        kind: z.string().describe('The resource kind (host-defined, e.g. "note", "todo", "canvas")'),
+        title: z.string().optional().describe('A short display title'),
+        params: z.record(z.string(), z.unknown()).optional().describe('Kind-specific creation parameters, if the host documents any'),
+      }),
+      execute: async (input) => {
+        try {
+          const r = (await dyn.createResource(input)) as ChatResource
+          return { kind: r.kind, docId: r.docId, title: r.title }
+        } catch (e) {
+          return asError(e)
+        }
+      },
+    }),
+
+    detach_resource: tool({
+      description: 'Remove a resource from a channel. Owned kinds are DELETED with it — irreversible.',
+      inputSchema: z.object({
+        channelId: z.string().describe('The channel id'),
+        kind: z.string().describe('The resource kind (from list_resources)'),
+        docId: z.string().describe('The doc id (from list_resources)'),
+      }),
+      execute: async (input) => {
+        try {
+          await dyn.detachResource(input)
+          return { ok: true }
+        } catch (e) {
+          return asError(e)
+        }
+      },
+    }),
+
+    write_resource: tool({
+      description: `Edit a channel resource with path operations (acknowledged server-side — a VALIDATION error tells you what violated the doc schema and nothing changed; fix the ops and retry). Each op sets a value at an OBJECT-KEY path (e.g. ["items", "i-2", "done"]) or deletes the key at it. Paths address object keys only — to change an array, set the whole array at its key. Read the resource first to know its current shape.${schemaNote}`,
+      inputSchema: z.object({
+        channelId: z.string().describe('The channel id'),
+        kind: z.string().describe('The resource kind (from list_resources)'),
+        docId: z.string().describe('The doc id (from list_resources)'),
+        ops: z.array(resourceWriteOpSchema).min(1).max(64).describe('Path operations, applied in order'),
+      }),
+      execute: async (input) => {
+        try {
+          const { snapshot } = (await dyn.writeResource(input)) as { snapshot: unknown }
+          const json = JSON.stringify(snapshot)
+          if (json.length <= READ_CAP) return { ok: true, snapshot }
+          return { ok: true, note: `write landed; snapshot truncated at ${READ_CAP} bytes`, json: json.slice(0, READ_CAP) }
         } catch (e) {
           return asError(e)
         }

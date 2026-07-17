@@ -1,6 +1,15 @@
 import { createContext, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react'
 import type { Contract } from '@super-line/core'
-import type { AssembledMessageOf, ChannelRowOf, ChatClient, ChatLiveStore, MembershipRowOf } from './client.js'
+import { PRESENCE_LIVE_MS } from './index.js'
+import type {
+  AssembledMessageOf,
+  ChannelRowOf,
+  ChatClient,
+  ChatLiveStore,
+  MembershipRowOf,
+  ResourcePresenceRowOf,
+  ResourceRowOf,
+} from './client.js'
 
 export interface ChatBinding<C extends Contract> {
   /** Mount near your root with a {@link ChatClient} instance (rebuild it when the auth client swaps connections). */
@@ -16,6 +25,14 @@ export interface ChatBinding<C extends Contract> {
     channelId: string,
     opts?: { limit?: number; partsLimit?: number; streaming?: boolean },
   ) => AssembledMessageOf<C>[]
+  /** Live resource registry of one channel. Open a row's doc with `@super-line/react`'s own `useDoc(row.collection, row.docId)`. */
+  useChannelResources: (channelId: string) => ResourceRowOf<C>[]
+  /**
+   * Who's-open presence on one resource: announces open on mount, heartbeats every 20s, closes on
+   * unmount, and returns the LIVE rows (recency-filtered; a crashed peer's row drops on the next
+   * store change or sweep). Pass the registry row (or any `{ kind, collection, docId }`).
+   */
+  useResourcePresence: (row: { kind: string; collection: string; docId: string }) => ResourcePresenceRowOf<C>[]
 }
 
 /**
@@ -72,5 +89,26 @@ export function createChatHooks<C extends Contract>(): ChatBinding<C> {
     )
   }
 
-  return { ChatProvider, useChat, useChannels, useMembers, useMessages }
+  function useChannelResources(channelId: string): ResourceRowOf<C>[] {
+    const chat = useChat()
+    return useStoreRows(() => chat.resources(channelId), [chat, channelId])
+  }
+
+  function useResourcePresence(row: { kind: string; collection: string; docId: string }): ResourcePresenceRowOf<C>[] {
+    const chat = useChat()
+    const { kind, collection, docId } = row
+    useEffect(() => {
+      void chat.announceResource(kind, docId, 'open').catch(() => {})
+      const beat = setInterval(() => void chat.announceResource(kind, docId, 'heartbeat').catch(() => {}), 20_000)
+      return () => {
+        clearInterval(beat)
+        void chat.announceResource(kind, docId, 'close').catch(() => {})
+      }
+    }, [chat, kind, docId])
+    const rows = useStoreRows(() => chat.resourcePresence(collection, docId), [chat, collection, docId])
+    const cutoff = Date.now() - PRESENCE_LIVE_MS
+    return rows.filter((p) => (p as { heartbeatAt: number }).heartbeatAt > cutoff)
+  }
+
+  return { ChatProvider, useChat, useChannels, useMembers, useMessages, useChannelResources, useResourcePresence }
 }

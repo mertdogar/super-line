@@ -21,8 +21,24 @@ export type PartType = (typeof PART_TYPES)[number]
 export const TOOL_STATES = ['input-streaming', 'running', 'done'] as const
 export type ToolState = (typeof TOOL_STATES)[number]
 
-/** The host's opaque extension slot, present on all three collections (validate its shape in `before` hooks). */
+/**
+ * The host's opaque extension slot, present on all three collections (validate its shape in `before` hooks).
+ * On MESSAGES one key is reserved: `metadata.resource` carries the plugin's resource cards
+ * (created/attached/detached announcements, PLAN-chat-resources) — treat it like `metadata.bot` on users.
+ */
 const metadata = z.record(z.string(), z.unknown()).optional()
+
+/** A resource kind's lifecycle: `owned` = chat-minted, one channel, dies with it; `linked` = host-id'd, multi-channel, never chat-deleted. */
+export const RESOURCE_LIFECYCLES = ['owned', 'linked'] as const
+export type ResourceLifecycle = (typeof RESOURCE_LIFECYCLES)[number]
+
+/** The `metadata.resource` payload of a resource-card message (content stays absent — clients render from this). */
+export interface ResourceCard {
+  action: 'created' | 'attached' | 'detached'
+  kind: string
+  docId: string
+  title: string
+}
 
 // ── row schemas ──────────────────────────────────────────────────────────────────────────────────
 
@@ -98,6 +114,68 @@ export type ChatMessagePart = z.infer<typeof messagePartSchema>
 
 /** The parts pk — mirrors {@link memId}'s role for memberships. */
 export const partId = (messageId: string, idx: number): string => `${messageId}:${idx}`
+
+/**
+ * The channel-resource link registry (PLAN-chat-resources): which docs belong to which channel.
+ * pk = `${channelId}:${kind}:${docId}` (see {@link resourceId}) — duplicate attach is structurally
+ * impossible, and a create-or-attach race lands on the same row. `collection` is denormalized from
+ * the server-side kind registry at write time so rows self-describe which CRDT collection to open.
+ * `title` is immutable in v1. `createdBy: null` = created by server code.
+ */
+export const resourceSchema = z.object({
+  id: z.string(),
+  channelId: z.string(),
+  kind: z.string(),
+  collection: z.string(),
+  docId: z.string(),
+  title: z.string(),
+  createdBy: z.string().nullable(),
+  createdAt: z.number(),
+})
+export type ChatResource = z.infer<typeof resourceSchema>
+
+/** The resources pk — mirrors {@link memId}'s role for memberships. */
+export const resourceId = (channelId: string, kind: string, docId: string): string => `${channelId}:${kind}:${docId}`
+
+/**
+ * Coarse who's-open presence on a resource doc (PLAN-chat-resources). DOC-scoped, deliberately not
+ * channel-scoped — a channelId field would LWW-clobber when one linked doc is open via two channels.
+ * pk = `${collection}:${docId}:${userId}` (per user, not per tab). Liveness = `heartbeatAt` recency
+ * (recommended: 20s heartbeats, consider rows younger than 45s live); rows age out via
+ * `chatKit.resources.sweepPresence`, never a plugin timer.
+ */
+export const resourcePresenceSchema = z.object({
+  id: z.string(),
+  docKey: z.string(), // `${collection}:${docId}` — the read-filter key
+  collection: z.string(),
+  docId: z.string(),
+  userId: z.string(),
+  openedAt: z.number(),
+  heartbeatAt: z.number(),
+})
+export type ResourcePresence = z.infer<typeof resourcePresenceSchema>
+
+/** The presence doc key + pk helpers. */
+export const docKeyOf = (collection: string, docId: string): string => `${collection}:${docId}`
+export const presenceId = (collection: string, docId: string, userId: string): string =>
+  `${collection}:${docId}:${userId}`
+
+/** How fresh a presence row must be to count as live (see {@link resourcePresenceSchema}). */
+export const PRESENCE_LIVE_MS = 45_000
+
+/**
+ * One path write in a `writeResource` batch: set a value at an OBJECT-KEY path, or delete the key at
+ * it. Paths are string keys only — array elements cannot be addressed (the CRDT store treats arrays
+ * as opaque leaves, so an index write would silently replace the array with a map; replace the whole
+ * array by setting it at its object key instead). Deletes come FIRST in the union and both branches
+ * are strict — a hybrid `{ path, delete, set }` or a bare `{ path }` fails loudly instead of being
+ * silently reinterpreted.
+ */
+export const resourceWriteOpSchema = z.union([
+  z.object({ path: z.array(z.string()).min(1), delete: z.literal(true) }).strict(),
+  z.object({ path: z.array(z.string()).min(1), set: z.unknown() }).strict(),
+])
+export type ResourceWriteOp = { path: string[]; delete: true } | { path: string[]; set?: unknown }
 
 /**
  * The append vocabulary — a PLUGIN-OWNED union, deliberately not AI SDK `UIMessageChunk`
@@ -214,6 +292,39 @@ const requestDefs = <S extends z.ZodTypeAny>(content: S) => {
     // a channel (topics can't scope per-channel; decision 5)
     watchChannel: { input: z.object({ channelId: z.string() }), output: z.object({ ok: z.boolean() }) },
     unwatchChannel: { input: z.object({ channelId: z.string() }), output: z.object({ ok: z.boolean() }) },
+    // ── channel resources (PLAN-chat-resources): create-or-attach + detach; the registry is the read path ──
+    createResource: {
+      input: z.object({
+        channelId: z.string(),
+        kind: z.string(),
+        title: z.string().optional(),
+        // linked kinds only (owned ids are server-minted): supply to attach/create a doc under a host id
+        id: z.string().optional(),
+        // opaque kind-specific init input — the HOST's `init` validates it (throw VALIDATION)
+        params: z.record(z.string(), z.unknown()).optional(),
+      }),
+      output: resourceSchema,
+    },
+    detachResource: {
+      input: z.object({ channelId: z.string(), kind: z.string(), docId: z.string() }),
+      output: resourceSchema,
+    },
+    // the ACKED write path (G11): DocHandle writes are void+optimistic, so a writer that needs an
+    // honest synchronous answer (agents above all) routes ops through this request instead
+    writeResource: {
+      input: z.object({
+        channelId: z.string(),
+        kind: z.string(),
+        docId: z.string(),
+        ops: z.array(resourceWriteOpSchema).min(1).max(64),
+      }),
+      output: z.object({ snapshot: z.unknown() }),
+    },
+    // who's-open presence — deliberately hook-free (heartbeat cadence; the appendMessage precedent)
+    announceResource: {
+      input: z.object({ kind: z.string(), docId: z.string(), state: z.enum(['open', 'heartbeat', 'close']) }),
+      output: z.object({ ok: z.boolean() }),
+    },
   }
 }
 
@@ -270,6 +381,16 @@ export function chatContract<S extends z.ZodTypeAny = z.ZodString>(opts?: { cont
         schema: messagePartSchema,
         key: 'id',
         references: { messageId: 'messages', channelId: 'channels' },
+      },
+      resources: {
+        schema: resourceSchema,
+        key: 'id',
+        references: { channelId: 'channels', createdBy: 'users' },
+      },
+      resourcePresence: {
+        schema: resourcePresenceSchema,
+        key: 'id',
+        references: { userId: 'users' },
       },
     },
     shared: { clientToServer: requestDefs(content), serverToClient: chatEvents },

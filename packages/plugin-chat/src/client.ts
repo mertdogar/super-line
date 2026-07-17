@@ -1,4 +1,5 @@
 import { eq } from '@super-line/core'
+import { docKeyOf } from './index.js'
 import type { CollectionName, CollectionQuery, Contract, RoleOf, RowOf } from '@super-line/core'
 import type { LiveRowSet, SuperLineClient } from '@super-line/client'
 import type {
@@ -7,10 +8,13 @@ import type {
   ChatMembership,
   ChatMessage,
   ChatMessagePart,
+  ChatResource,
   ChatStreamEvent,
   ChatTurnMessage,
   MemberRole,
   MessageStatus,
+  ResourcePresence,
+  ResourceWriteOp,
 } from './index.js'
 
 /** Contract-aware row types with structural fallbacks (so the client half also types against a bare Contract). */
@@ -21,6 +25,8 @@ export type ChannelRowOf<C extends Contract> = Row<C, 'channels', ChatChannel>
 export type MembershipRowOf<C extends Contract> = Row<C, 'memberships', ChatMembership>
 export type MessageRowOf<C extends Contract> = Row<C, 'messages', ChatMessage>
 export type MessagePartRowOf<C extends Contract> = Row<C, 'messageParts', ChatMessagePart>
+export type ResourceRowOf<C extends Contract> = Row<C, 'resources', ChatResource>
+export type ResourcePresenceRowOf<C extends Contract> = Row<C, 'resourcePresence', ResourcePresence>
 /** The HOST-PARAMETRIZED message body type, extracted from the contract (decision 8). */
 export type ContentOf<C extends Contract> = MessageRowOf<C> extends { content?: infer T } ? NonNullable<T> : unknown
 
@@ -98,6 +104,14 @@ export interface ChatClient<C extends Contract> {
   ): ChatLiveStore<AssembledMessageOf<C>>
   /** Open a streamed message in a channel you are a member of and get its producer handle. */
   stream(channelId: string, opts?: { metadata?: Record<string, unknown> }): Promise<ChatStreamHandle<C>>
+  /**
+   * Live registry of one channel's resources (PLAN-chat-resources). Open a row's doc with the
+   * NATIVE surface: `client.collection(row.collection).open(row.docId)` / `useDoc` — chat wraps
+   * nothing there.
+   */
+  resources(channelId: string): ChatLiveStore<ResourceRowOf<C>>
+  /** Live who's-open rows for one resource doc. Liveness is `heartbeatAt` recency — filter with {@link PRESENCE_LIVE_MS}. */
+  resourcePresence(collection: string, docId: string): ChatLiveStore<ResourcePresenceRowOf<C>>
 
   createChannel(input: {
     name: string
@@ -114,6 +128,21 @@ export interface ChatClient<C extends Contract> {
   send(channelId: string, content: ContentOf<C>, metadata?: Record<string, unknown>): Promise<MessageRowOf<C>>
   editMessage(id: string, patch: { content?: ContentOf<C>; metadata?: Record<string, unknown> }): Promise<MessageRowOf<C>>
   deleteMessage(id: string): Promise<void>
+  /** Create-or-attach a resource: `id` (linked kinds) attaches/creates under a host doc id; `params` feed the kind's `init`. */
+  createResource(
+    channelId: string,
+    opts: { kind: string; title?: string; id?: string; params?: Record<string, unknown> },
+  ): Promise<ResourceRowOf<C>>
+  /** Detach a resource (owned kinds: the doc is deleted with it). */
+  detachResource(channelId: string, kind: string, docId: string): Promise<ResourceRowOf<C>>
+  /**
+   * The ACKED write path: path ops applied server-side with a synchronous answer — a schema-invalid
+   * result rejects with `VALIDATION` (the raw `DocHandle` is void+optimistic and can't tell you).
+   * Live UIs keep using the DocHandle; use this when you need to KNOW the write landed (agents do).
+   */
+  writeResource(channelId: string, kind: string, docId: string, ops: ResourceWriteOp[]): Promise<{ snapshot: unknown }>
+  /** Announce who's-open presence on a resource (open on mount, heartbeat ~20s, close on unmount — `useResourcePresence` does this for you). */
+  announceResource(kind: string, docId: string, state: 'open' | 'heartbeat' | 'close'): Promise<void>
 
   /** Resolves once the membership watcher is armed (userId resolved + own-membership snapshot applied). */
   readonly ready: Promise<void>
@@ -142,6 +171,10 @@ interface Dyn {
   finalizeMessage(i: unknown): Promise<unknown>
   watchChannel(i: unknown): Promise<unknown>
   unwatchChannel(i: unknown): Promise<unknown>
+  createResource(i: unknown): Promise<unknown>
+  detachResource(i: unknown): Promise<unknown>
+  writeResource(i: unknown): Promise<unknown>
+  announceResource(i: unknown): Promise<unknown>
   collection(n: string): { subscribe(q?: CollectionQuery): LiveRowSet<unknown> }
   on(event: string, handler: (data: never) => void): () => void
   onReconnect?(cb: () => void): () => void
@@ -567,6 +600,9 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
     members: (channelId) => makeStore(() => dyn.collection('memberships').subscribe({ filter: eq('channelId', channelId) })),
     messages: (channelId, o) => makeMessagesStore(channelId, o),
     stream: (channelId, sopts) => openStream(channelId, sopts),
+    resources: (channelId) => makeStore(() => dyn.collection('resources').subscribe({ filter: eq('channelId', channelId) })),
+    resourcePresence: (collection, docId) =>
+      makeStore(() => dyn.collection('resourcePresence').subscribe({ filter: eq('docKey', docKeyOf(collection, docId)) })),
 
     createChannel: (input) => dyn.createChannel(input) as Promise<ChannelRowOf<C>>,
     updateChannel: (id, patch) => dyn.updateChannel({ id, ...patch }) as Promise<ChannelRowOf<C>>,
@@ -583,6 +619,12 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
       dyn.sendMessage({ channelId, content, ...(metadata ? { metadata } : {}) }) as Promise<MessageRowOf<C>>,
     editMessage: (id, patch) => dyn.editMessage({ id, ...patch }) as Promise<MessageRowOf<C>>,
     deleteMessage: async (id) => void (await dyn.deleteMessage({ id })),
+    createResource: (channelId, o) => dyn.createResource({ channelId, ...o }) as Promise<ResourceRowOf<C>>,
+    detachResource: (channelId, kind, docId) =>
+      dyn.detachResource({ channelId, kind, docId }) as Promise<ResourceRowOf<C>>,
+    writeResource: (channelId, kind, docId, ops) =>
+      dyn.writeResource({ channelId, kind, docId, ops }) as Promise<{ snapshot: unknown }>,
+    announceResource: async (kind, docId, state) => void (await dyn.announceResource({ kind, docId, state })),
 
     ready,
     get userId() {
@@ -650,9 +692,12 @@ export function onChatMessage<C extends Contract>(
   // conditional doesn't resolve inside a generic body — same convention as the stores above)
   const rowsOf = (feed: ChatLiveStore<AssembledMessageOf<C>>): ChatMessage[] => feed.rows() as unknown as ChatMessage[]
 
+  const isResourceCard = (m: ChatMessage): boolean =>
+    (m.metadata as { resource?: unknown } | undefined)?.resource !== undefined
+
   const historyOf = (feed: ChatLiveStore<AssembledMessageOf<C>>): ChatTurnMessage[] =>
     rowsOf(feed)
-      .filter((m) => m.status !== 'streaming')
+      .filter((m) => m.status !== 'streaming' && !isResourceCard(m))
       .slice(-historyLimit)
       .map((m): ChatTurnMessage => {
         const content =
@@ -708,6 +753,7 @@ export function onChatMessage<C extends Contract>(
           if (seen.has(m.id)) continue
           if (m.status === 'streaming') continue // not seen yet — picked up when it settles
           seen.add(m.id)
+          if (isResourceCard(m)) continue // resource cards are events, not turns — never trigger a bot
           if (selfId !== null && m.authorId === selfId) continue
           enqueue(channelId, feed, m)
         }

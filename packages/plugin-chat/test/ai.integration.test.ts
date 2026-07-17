@@ -56,7 +56,20 @@ describe('plugin-chat/ai — agent toolset', () => {
     const core = chatAgentTools(botClient)
     const managed = chatAgentTools(botClient, { management: true })
     expect(Object.keys(core).sort()).toEqual(
-      ['join_channel', 'leave_channel', 'list_channels', 'list_members', 'read_messages', 'send_message'].sort(),
+      [
+        'join_channel',
+        'leave_channel',
+        'list_channels',
+        'list_members',
+        'read_messages',
+        'send_message',
+        // channel resources (PLAN-chat-resources) ride the core set — server re-authorizes every call
+        'list_resources',
+        'read_resource',
+        'create_resource',
+        'detach_resource',
+        'write_resource',
+      ].sort(),
     )
     expect(Object.keys(managed)).toEqual(expect.arrayContaining(['create_channel', 'add_member', 'list_users']))
     botClient.close()

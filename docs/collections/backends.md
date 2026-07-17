@@ -24,12 +24,12 @@ Don't confuse `self` clustering with the [transport](/concepts/transports-and-ad
 | **`@super-line/collections-sqlite`** | SQLite (better-sqlite3, WAL) | `relay` |
 | **`@super-line/collections-pglite`** | central Postgres + Electric→PGlite | **`self`** |
 
-`collections-sqlite` compiles the [query IR](/collections/row-collections#the-query-ir) to SQL to narrow snapshots at the source; `collections-pglite` is the self-clustering tier (central Postgres + per-node Electric replica, where `live.changes` carries only changed columns + the key).
+The SQL backends store each LWW collection in its **own typed table** (`col_<name>`): scalar schema fields become real columns, everything else a per-field JSON column, derived from the contract — so both factories take the contract's `collections` map. `collections-sqlite` compiles the [query IR](/collections/row-collections#the-query-ir) against those columns (an exactly-compilable query runs entirely in SQL); `collections-pglite` is the self-clustering tier (central Postgres + one Electric shape per table streaming into each node's replica).
 
 ```ts
 // swap the backend — nothing else changes
 import { sqliteCollections } from '@super-line/collections-sqlite'
-createSuperLineServer(api, { /* … */, collections: sqliteCollections({ path: './data.db' }) })
+createSuperLineServer(api, { /* … */, collections: sqliteCollections({ file: './data.db', collections: api.collections }) })
 ```
 
 ## CRDT backends

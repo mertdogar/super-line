@@ -41,7 +41,7 @@ level and register the plugin. `signIn`/`signUp`/`signOut`/`whoami` are handled 
 import { createSuperLineServer } from '@super-line/server'
 import { auth } from '@super-line/plugin-auth/server'
 
-const backend = sqliteCollections({ file: 'app.db' })
+const backend = sqliteCollections({ file: 'app.db', collections: app.collections })
 const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
 
 createSuperLineServer(app, {

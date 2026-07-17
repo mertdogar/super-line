@@ -362,7 +362,7 @@ export const api = defineContract({
 
 ```ts
 // server.ts — ONE backend for ALL row collections + deny-by-default policies
-import { memoryCollections } from '@super-line/collections-memory'  // or sqliteCollections({ file }) · await pgliteCollections({ pgUrl })
+import { memoryCollections } from '@super-line/collections-memory'  // or sqliteCollections({ file, collections }) · await pgliteCollections({ pgUrl, collections })
 import { isIn, eq } from '@super-line/core'
 const srv = createSuperLineServer(api, {
   transports: [webSocketServerTransport({ server })],
@@ -422,7 +422,7 @@ export const app = defineContract({
 // 2 · server.ts — build the kit over the SAME collection backend, then wire 3 fields
 import { auth } from '@super-line/plugin-auth/server'
 import { sqliteCollections } from '@super-line/collections-sqlite'
-const backend = sqliteCollections({ file: 'app.db' })
+const backend = sqliteCollections({ file: 'app.db', collections: app.collections })
 const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'], jwt: { secret: process.env.JWT_SECRET! } })
 const srv = createSuperLineServer(app, {
   transports: [webSocketServerTransport({ server })],
@@ -540,6 +540,7 @@ const srv = createSuperLineServer(api, {                 // note: no adapter
   collections: await pgliteCollections({
     pgUrl: 'postgres://localhost:5432/app',              // source of truth (writes + strong reads)
     electricUrl: 'http://localhost:3000/v1/shape',       // Electric shape endpoint streaming the tables in
+    collections: api.collections,                        // typed tables are derived from the contract
   }),
   policies: { /* per-collection read→filter / write→bool */ },
 })

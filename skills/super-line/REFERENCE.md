@@ -315,7 +315,7 @@ defineContract({
 
 // SERVER — ONE backend serves all collections (single tx domain → atomic cross-collection batches) + row policies:
 createSuperLineServer(api, {
-  collections: memoryCollections(),            // or sqliteCollections({ file }) (relay) · await pgliteCollections({ pgUrl, electricUrl? }) (self)
+  collections: memoryCollections(),            // or sqliteCollections({ file, collections: api.collections }) (relay) · await pgliteCollections({ pgUrl, electricUrl?, collections: api.collections }) (self)
   checkReferences: true,                        // opt-in advisory FK existence check (no cascades)
   policies: {                                   // DENY-BY-DEFAULT: omit read/write ⇒ that op is server-only
     messages: {

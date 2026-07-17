@@ -1,6 +1,8 @@
 # PLAN-chat-mastra — first-class Mastra hookup for plugin-chat
 
-**Status: CONFIRMED 2026-07-17 (all 4 decisions settled — see bottom) — building.**
+**Status: BUILT 2026-07-17 — all 3 phases on local main (A `05373d3` · B `3e82f04` · C `3b8e3cf` ·
+review fixes `611925d`; adversarial review: 5 confirmed findings root-fixed, incl. a critical
+provisionChatBot displayName-hijack). Both examples rewritten + verified live over the wire.**
 
 ## Problem
 

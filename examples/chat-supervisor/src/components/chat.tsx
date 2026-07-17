@@ -226,7 +226,7 @@ function PartView({ p, live }: { p: MessagePart; live: boolean }): React.JSX.Ele
     )
   if (p.type === 'reasoning')
     return (
-      <details className="text-sm text-muted-foreground">
+      <details open={live} className="text-sm text-muted-foreground">
         <summary className="cursor-pointer select-none text-xs font-medium">💭 Reasoning{live ? '…' : ''}</summary>
         <div className="whitespace-pre-wrap break-words italic">
           {p.text}

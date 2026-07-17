@@ -224,6 +224,24 @@ What the engine owns, so your agents stay vanilla:
 - **Abort, one mechanism** — `opts.abortSignal` and a dead sink (checked once per LLM step: kill-switch,
   cap violation, disconnect) both cancel every in-flight lane at every depth.
 
+### Streaming reasoning {#thinking}
+
+Thinking tokens stream as `reasoning` parts the moment the model emits them — enabling them is model
+configuration on **your** Agent, not an engine option:
+
+```ts
+const thinking = {
+  providerOptions: { anthropic: { thinking: { type: 'enabled' as const, budgetTokens: 2048 } } },
+}
+const worker = new Agent({ id: 'worker', /* … */ defaultOptions: thinking })
+```
+
+Mastra deep-merges `defaultOptions` under the engine's per-lane call options, so the setting follows
+the agent into every lane — a thinking worker streams its reasoning *inside its delegation card*. The
+AI-SDK path is symmetric: the same `providerOptions` on `ToolLoopAgent`/`streamText`
+(`toUIMessageStream` forwards reasoning by default). One Anthropic caveat: with tools, thinking lands
+at the **start** of a turn; thinking *between* tool calls is a separate interleaved-thinking beta.
+
 `engine.run(sink, input)` is the composable half (any `StreamEventSink`, never settles);
 `pipeMastraStream(sink, fullStream)` is the single-lane escape hatch, the Mastra sibling of
 `pipeUIMessageStream`. The

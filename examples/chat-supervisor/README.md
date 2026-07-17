@@ -20,6 +20,9 @@ What it demonstrates:
   `parent` nesting, and the harness-ported chunk mapping (the same mapper runs at every depth, so
   subagents stream with full fidelity). `provisionChatBot` mints the identity;
   `onChatMessage` runs the channel loop, turns serialized per channel.
+- **Reasoning streams too.** Both agents enable Anthropic extended thinking via `defaultOptions`
+  on their own plain Agent (Mastra merges it under the engine's per-lane options, so workers think
+  inside their cards as well); thinking tokens land as `reasoning` parts, auto-opened while live.
 - **The bot is a regular user** (plugin-auth API key) on the same WebSocket wire as the browser.
 
 ## Run it

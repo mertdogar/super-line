@@ -9,6 +9,13 @@ import { z } from 'zod'
 
 export const MODEL = process.env.MODEL ?? process.env.CHAT_MODEL ?? 'anthropic/claude-haiku-4.5'
 
+// Extended thinking → the model streams reasoning tokens, which the engine maps to reasoning
+// parts. Mastra deep-merges defaultOptions under the engine's per-lane stream options, so this
+// applies in every lane the agent runs in (supervisor turn or worker delegation).
+const thinking = {
+  providerOptions: { anthropic: { thinking: { type: 'enabled' as const, budgetTokens: 2048 } } },
+}
+
 const weatherTool = createTool({
   id: 'weather',
   description: 'Get the current weather for a city: temperature, humidity, wind, and conditions.',
@@ -44,6 +51,7 @@ export const worker = new Agent({
     'You are a focused worker. Use your weather tool to get real data, then report a short, concrete result.',
   model: gateway(MODEL),
   tools: { weather: weatherTool },
+  defaultOptions: thinking,
 })
 
 export const supervisor = new Agent({
@@ -55,4 +63,5 @@ export const supervisor = new Agent({
     'then summarize its report in one short sentence. For everything else, answer conversationally and briefly. ' +
     'Everyone in the channel watches your delegations stream live.',
   model: gateway(MODEL),
+  defaultOptions: thinking,
 })

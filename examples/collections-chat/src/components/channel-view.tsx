@@ -339,7 +339,7 @@ function PartView({ p, live, nested }: { p: FeedPart; live: boolean; nested: boo
     )
   if (p.type === 'reasoning')
     return (
-      <details className={cn('text-sm text-muted-foreground', indent)}>
+      <details open={live} className={cn('text-sm text-muted-foreground', indent)}>
         <summary className="cursor-pointer select-none text-xs font-medium">💭 Reasoning{live ? '…' : ''}</summary>
         <div className="whitespace-pre-wrap break-words italic">
           {p.text}

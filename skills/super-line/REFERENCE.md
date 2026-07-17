@@ -495,6 +495,10 @@ mastraEngine({ agent, subagents?: [{agent, delegatesTo?, maxSteps?}], delegatesT
 //   respond(chat, channelId, input, opts?): Promise<MessageRowOf|undefined>  — open→run→settle: error-finalize on turn error, DELETES
 //     never-pushed empty turns (returns undefined), abort+rethrow on throw.
 pipeMastraStream(sink, fullStream, { lane?, suppressTools? }): Promise<{ text, error? }>   // single-lane escape hatch, sibling of pipeUIMessageStream
+//   Reasoning tokens stream as `reasoning` parts automatically ONCE THE MODEL EMITS THEM — enable thinking on the user's Agent, not the engine:
+//   `defaultOptions: { providerOptions: { anthropic: { thinking: { type: 'enabled', budgetTokens: N≥1024 } } } }` (Mastra deep-merges it under
+//   the engine's per-lane options, so it applies at every delegation depth). AI-SDK path: same providerOptions on ToolLoopAgent/streamText
+//   (toUIMessageStream sends reasoning by default). With tools, Anthropic thinks at the START of each turn (interleaved thinking = separate beta).
 
 // bot runtime (framework-agnostic — pairs with mastraEngine OR any AI-SDK producer)
 provisionChatBot(authKit, chatKit, { name, email?, role? ('user'), keyLabel?, metadata?, channels? }): Promise<{ user, apiKey }>   // /server

@@ -126,6 +126,7 @@ function makeStreamer(
       'weather tool for real-world weather questions — members watch your reasoning and tool calls stream live. ' +
       'Reply in one short paragraph of plain text.',
     tools: { ...contextTools, weather: weatherTool },
+    providerOptions: { anthropic: { thinking: { type: 'enabled', budgetTokens: 2048 } } },
   })
   return async (_prompt, history) => {
     const w = await agentChat.stream(channelId)

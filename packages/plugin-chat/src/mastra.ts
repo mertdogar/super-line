@@ -336,8 +336,11 @@ function makeDelegateTool(agentTypes: string[], run: (agentType: string, task: s
 export function mastraEngine(cfg: MastraEngineOptions): MastraEngine {
   const subs = cfg.subagents ?? []
   const known = new Set<string>([cfg.agent.id, ...subs.map((s) => s.agent.id)])
-  const resolveEdges = (d: string[] | true | undefined, fallback: string[]): string[] => {
-    const edges = d === true ? [...known] : (d ?? fallback)
+  if (known.size !== subs.length + 1)
+    throw new Error('duplicate agent ids — every agent in a mastraEngine needs a distinct `id`')
+  const resolveEdges = (d: string[] | true | undefined, fallback: string[], ownId: string): string[] => {
+    // `true` = every OTHER agent — a self-edge would let the model recurse into itself to maxDepth
+    const edges = d === true ? [...known].filter((id) => id !== ownId) : (d ?? fallback)
     for (const t of edges) if (!known.has(t)) throw new Error(`delegatesTo references unregistered agent '${t}'`)
     return edges
   }
@@ -354,11 +357,15 @@ export function mastraEngine(cfg: MastraEngineOptions): MastraEngine {
   const registry = new Map<string, Entry>()
   registry.set(cfg.agent.id, {
     agent: cfg.agent,
-    delegatesTo: resolveEdges(cfg.delegatesTo, subs.map((s) => s.agent.id)),
+    delegatesTo: resolveEdges(cfg.delegatesTo, subs.map((s) => s.agent.id), cfg.agent.id),
     maxSteps: cfg.maxSteps,
   })
   for (const s of subs)
-    registry.set(s.agent.id, { agent: s.agent, delegatesTo: resolveEdges(s.delegatesTo, []), maxSteps: s.maxSteps })
+    registry.set(s.agent.id, {
+      agent: s.agent,
+      delegatesTo: resolveEdges(s.delegatesTo, [], s.agent.id),
+      maxSteps: s.maxSteps,
+    })
 
   async function run(
     sink: StreamEventSink,

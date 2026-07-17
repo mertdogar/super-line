@@ -210,6 +210,32 @@ describe('plugin-chat/mastra — mastraEngine', () => {
 
     expect(() => mastraEngine({ agent: supervisor, delegatesTo: ['ghost'] })).toThrow(/unregistered agent 'ghost'/)
     expect(() => mastraEngine({ agent: supervisor, suppressTools: ['delegate'] })).toThrow(/anchor/)
+    // duplicate ids would silently clobber each other in the registry — fail fast instead
+    expect(() =>
+      mastraEngine({ agent: supervisor, subagents: [{ agent: worker }, { agent: fakeAgent('worker', async function* () {}) }] }),
+    ).toThrow(/duplicate agent ids/)
+  })
+
+  it("delegatesTo: true means every OTHER agent — never a self-edge the model could recurse into", async () => {
+    const worker = fakeAgent('worker', async function* () {
+      yield text('w')
+    })
+    const supervisor = fakeAgent('supervisor', async function* (_i, opts) {
+      yield* delegateVia(opts, 'tcSelf', 'supervisor', 'recurse!')
+      yield* delegateVia(opts, 'tcOk', 'worker', 'fine')
+    })
+    const engine = mastraEngine({ agent: supervisor, subagents: [{ agent: worker }], delegatesTo: true })
+    const { events, sink } = recordSink()
+    await engine.run(sink, 'hi')
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        key: 's:tcSelf',
+        result: { content: "'supervisor' may not delegate to 'supervisor'", isError: true },
+      }),
+    )
+    expect(events).toContainEqual(
+      expect.objectContaining({ key: 's:tcOk', result: { content: 'w', isError: false } }),
+    )
   })
 
   it('suppresses user tools by name; a root error chunk is returned while a worker error becomes the delegate isError', async () => {

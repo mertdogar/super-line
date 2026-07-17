@@ -14,11 +14,12 @@ What it demonstrates:
 - **Everything survives reload.** Parts are rows, checkpointed ~1s while streaming — reload
   mid-turn and the cards re-render from the database, then keep streaming. No ephemeral-only
   state anywhere.
-- **The harness event mapping, preserved.** `src/chunk-adapter.ts` is a direct port of
-  super-harness's Mastra `fullStream` chunk-adapter (same `ChunkLike` view, same stateful
-  per-lane mapper with `suppressToolNames`, same case vocabulary) — only the output vocabulary
-  changed, from `HarnessEvent`s to plugin-chat stream events. The same mapper runs at every
-  depth, so subagents stream with full fidelity.
+- **The wiring is three library calls.** `@super-line/plugin-chat/mastra`'s `mastraEngine` takes
+  the two PLAIN Mastra agents and owns everything this example used to hand-roll: the `delegate`
+  tool (injected per stream call via toolsets — the agents never declare it), the lanes and
+  `parent` nesting, and the harness-ported chunk mapping (the same mapper runs at every depth, so
+  subagents stream with full fidelity). `provisionChatBot` mints the identity;
+  `onChatMessage` runs the channel loop, turns serialized per channel.
 - **The bot is a regular user** (plugin-auth API key) on the same WebSocket wire as the browser.
 
 ## Run it
@@ -38,11 +39,8 @@ Berlin”* — then watch the supervisor delegate. Reload mid-stream to see the 
 ## Layout
 
 - `src/contract.ts` — the app IS the two plugins: `plugins: [authContract(), chatContract()]`.
-- `src/agents.ts` — Mastra `worker` (weather tool) + `supervisor` (delegate tool, harness-shaped
-  `{ agentType, task } → { content, isError }`).
-- `src/chunk-adapter.ts` — the ported mapper: Mastra chunks → plugin-chat stream events, per lane
-  (`prefix` + `parent`).
-- `src/runtime.ts` — the bot: watches `#agents`, answers each human message as one streamed
-  message; the delegate tool's `execute()` streams the worker's lane into the same writer with
-  `parent = the delegate call's tool part`.
+- `src/agents.ts` — two vanilla Mastra agents: `worker` (weather tool) + `supervisor`. No
+  factories, no delegate tool — the engine injects it.
+- `src/runtime.ts` — the whole bot: `provisionChatBot` (identity) + `mastraEngine` (the
+  delegation tree → one streamed message) + `onChatMessage` (the channel loop).
 - `src/components/chat.tsx` — the feed: tree-ordered parts folded into delegation cards.

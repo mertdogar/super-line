@@ -1171,7 +1171,7 @@ export interface ProvisionChatBotOptions {
   role?: string
   /** Same-label keys are revoked and re-minted each call, so restarts don't accumulate live keys. Default `<slug(name)>-bot`. */
   keyLabel?: string
-  /** User metadata on first creation. Default `{ bot: true }`. */
+  /** User metadata on first creation. `bot: true` is always added — it's the adoption marker. */
   metadata?: Record<string, unknown>
   /** Channel ids to join as a member (idempotent — already-a-member is fine). */
   channels?: string[]
@@ -1200,12 +1200,17 @@ export async function provisionChatBot(
   const email = (opts.email ?? `${slug}@bots.local`).toLowerCase()
   const label = opts.keyLabel ?? `${slug}-bot`
 
+  // Adopt ONLY accounts this function created: displayName has no uniqueness anywhere, so a human
+  // who signed up (or squatted) as 'Ask AI' must never be hijacked — the unconditional
+  // `bot: true` marker written at creation is the discriminator.
   const findExisting = async (): Promise<AuthUser | undefined> =>
-    (await authKit.users.find({ filter: eq('displayName', opts.name), includeDeactivated: true }))[0]
+    (await authKit.users.find({ filter: eq('displayName', opts.name), includeDeactivated: true })).find(
+      (u) => u.metadata?.bot === true,
+    )
   let user = await findExisting()
   if (!user) {
     try {
-      user = await authKit.users.create({ email, displayName: opts.name, metadata: opts.metadata ?? { bot: true } })
+      user = await authKit.users.create({ email, displayName: opts.name, metadata: { ...opts.metadata, bot: true } })
     } catch (e) {
       // a concurrent provision can win the create race — resolve by name once more before giving up
       // (a genuine email clash with a DIFFERENTLY-named account stays an error: pass an explicit email)

@@ -674,6 +674,11 @@ export function onChatMessage<C extends Contract>(
       })
       .catch((err) => console.error(`[plugin-chat] bot turn failed in channel ${channelId}`, err))
     chains.set(channelId, next)
+    // cleanup only once THIS link settles and the channel is gone — dropping the entry while a
+    // turn is still running would let a quick unwatch/rewatch start a PARALLEL chain
+    void next.then(() => {
+      if (chains.get(channelId) === next && !watched.has(channelId)) chains.delete(channelId)
+    })
   }
 
   const watch = (channelId: string): void => {
@@ -714,7 +719,8 @@ export function onChatMessage<C extends Contract>(
     entry.unsub()
     entry.feed?.close()
     watched.delete(channelId)
-    chains.delete(channelId)
+    // the chain entry is NOT cleared here — an in-flight turn must keep serializing a rewatch;
+    // enqueue's settle hook deletes it once idle and unwatched
   }
 
   void (async () => {

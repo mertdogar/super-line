@@ -237,4 +237,18 @@ describe('plugin-chat/server — provisionChatBot', () => {
     expect(again.user.deletedAt).toBeNull()
     expect((await authKit.users.get(first.user.id))?.deletedAt).toBeNull()
   })
+
+  it('NEVER adopts a human account that squats the bot name — only its own bot-marked identity', async () => {
+    const { url, authKit, chatKit } = await boot()
+    const squatter = await newUser(url, 'human@x.com', 'Ask AI') // a real person named like the bot
+
+    const bot = await provisionChatBot(authKit, chatKit, { name: 'Ask AI', metadata: { team: 'support' } })
+    expect(bot.user.id).not.toBe(squatter.userId) // fresh identity, not a hijack
+    expect(bot.user.metadata).toMatchObject({ bot: true, team: 'support' }) // marker survives custom metadata
+    expect(await authKit.apiKeys.listFor(squatter.userId)).toEqual([]) // the human got NO credentials
+
+    const again = await provisionChatBot(authKit, chatKit, { name: 'Ask AI' })
+    expect(again.user.id).toBe(bot.user.id) // restarts adopt the bot-marked account, name clash or not
+    squatter.c.close()
+  })
 })

@@ -1,12 +1,16 @@
-# chat-supervisor — a Mastra supervisor + subagents, no harness
+# chat-supervisor — a canvas a human and an AI agent edit live
 
-The [super-harness](https://github.com/mertdogar/super-harness) `examples/web` flow rebuilt on
-**super-line alone**: a Mastra **supervisor** agent that delegates to specialist **subagents** — a
-**worker** (live Open-Meteo weather tool) and an **editor** that edits the channel's shared canvas
-and doc — with the WHOLE turn (the supervisor's text, each delegation, and the subagents' own tool
-calls, retries, and reports) streaming into a `@super-line/plugin-chat` channel as **one streamed
-message** (ADR-0011). And the split-pane on the right is a **channel resource** you and the agent
-collaborate on live.
+A shared sticky-note **canvas** (and a block **doc**) that a person and a server-side agent edit at
+the same time, inside a chat channel. You drag notes in the pane on the right; you ask the agent
+"add a note for each launch task" in the chat on the left, and its notes land on the *same* board
+mid-sentence. The collaboration surface is a `@super-line/plugin-chat` **channel resource** — a
+host-declared [CRDT document](https://super-line.dogar.biz/collections/crdt-documents) the plugin
+attaches to the channel — and the agent is a Mastra **supervisor** that delegates canvas edits to an
+**editor** subagent (and weather look-ups to a **worker**), the whole turn streaming into the channel
+as one message. It's the [super-harness](https://github.com/mertdogar/super-harness) `examples/web`
+flow rebuilt on **super-line alone** — no bespoke harness, no bespoke canvas store.
+
+![chat-supervisor: the agent's delegation streams on the left while its notes and a human's note share one canvas on the right](./screenshot.jpg)
 
 What it demonstrates:
 
@@ -43,13 +47,15 @@ echo 'AI_GATEWAY_API_KEY=…' > .env # Vercel AI Gateway key (also read from ../
 pnpm dev                           # server on :8792 + vite on :5173x
 ```
 
-Sign up, then try either half:
+Sign up, then try the headline first:
 
-- **weather** — *“compare the weather in Ankara and Berlin”* → the supervisor delegates to the
-  worker; reload mid-stream to see the durable floor.
 - **canvas/doc** — *“add a sticky note that says ship it”* or *“draft a 3-point launch brief in the
   doc”* → the supervisor delegates to the editor, which writes the shared resource live while you
-  watch (and edit alongside it).
+  watch. Double-click the board to add your own notes and drag them around at the same time — both
+  sides merge.
+- **weather** — *“compare the weather in Ankara and Berlin”* → the supervisor delegates to the
+  worker; reload mid-stream to see the durable floor (parts re-render from the database, then keep
+  streaming).
 
 `MODEL` (default `anthropic/claude-haiku-4.5`) picks the gateway model for all agents.
 

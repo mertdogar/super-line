@@ -7,7 +7,27 @@ channel-native — a **link registry** per channel, **server-authoritative creat
 **membership-gated access** (every member reads and writes, nobody else), an **acked write path**
 built for agents, and coarse **who's-open presence**. Design record: `PLAN-chat-resources.md`.
 
-Runnable end-to-end version: [`examples/chat-resources`](https://github.com/mertdogar/super-line/tree/main/examples/chat-resources).
+Two runnable versions: [`examples/chat-resources`](https://github.com/mertdogar/super-line/tree/main/examples/chat-resources) is the headless mechanics (CLI, no UI); [`examples/chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor) is the full web app — a human and an AI agent editing one canvas live. To build it yourself step by step, follow [Tutorial 6](/tutorials/collaborative-canvas-with-agent).
+
+![A human and an agent editing one canvas: the agent's delegation streams in the chat on the left, its notes and a human's note share the board on the right](/chat-supervisor.jpg)
+
+## The model
+
+A resource is **one CRDT document** plus a **registry row** that links it to a channel. The document is a normal [CRDT document collection](/collections/crdt-documents) you declare on the contract — the plugin never owns your schema. The registry (`resources`) is what makes it channel-native: it records *which* doc is attached to *which* channel, and every access check reads from it.
+
+```
+channel  ──< resources (registry) >──  CRDT document
+ #design      { channelId, kind,          { title, items: {...} }
+              collection, docId, title }   (your schema, opened by id)
+
+           membership(channel) ─┐
+                                ├─ gate every read + write + presence row
+           resolveResourceAccess(collection, docId) ─┘
+```
+
+**Why a link registry and not just an id convention?** You might imagine encoding the channel into the doc id (`design:canvas-1`) and skipping the registry. It doesn't hold up: a doc's id is often **host content that predates the channel** (a design scene's UUID, a document id) and can be **attached to more than one channel** (`linked` kinds). The id can't carry the membership relationship, so access has to be a lookup — "is this doc attached to a channel you're in?" — which is exactly what the registry answers. It's also what lets a resource move or fan out across channels without rewriting doc ids.
+
+Access is **membership-gated through that registry**: registering a kind auto-contributes read/write policies that resolve `channel(s) this doc is attached to → are you a member?`. Every member reads and writes; non-members can't see the doc, its registry row, or its presence rows.
 
 ## 1 · Declare the collections (host-owned schemas)
 
@@ -77,8 +97,27 @@ Every member — human, bot, or a pod-agent connected as a real client — passe
 gate; unattached docs are invisible through chat entirely.
 
 Creating/attaching/detaching drops a **resource card** into the message stream: a content-less
-message carrying `metadata.resource` (`{ action, kind, docId, title }`) — render the card from the
-metadata. `onChatMessage` skips cards automatically, so they never trigger bot turns.
+message carrying `metadata.resource` (`{ action, kind, docId, title }`). Because it's a normal
+message row, it arrives in the same `useMessages` feed — branch on the metadata to render it as a
+card instead of a bubble:
+
+```tsx
+function MessageRow({ m }: { m: FeedMessage }) {
+  const card = (m.metadata as { resource?: ResourceCard } | undefined)?.resource
+  if (card) {
+    return (
+      <div className="resource-card">
+        {card.action === 'created' ? 'created' : card.action === 'attached' ? 'attached' : 'removed'}{' '}
+        <strong>{card.kind}</strong> “{card.title}”
+      </div>
+    )
+  }
+  return <Bubble m={m} />
+}
+```
+
+`onChatMessage` skips cards automatically, so they never trigger a bot turn — the agent won't try
+to "answer" its own resource creation.
 
 ## 4 · Agent writes: the acked path
 
@@ -128,3 +167,10 @@ plugin runs no timers). Live cursors/selections are deliberately out of scope fo
   race. `.catch()` fields never reject — they self-heal at the next client-delta validation.
 - **The cascade is sequential, not atomic** (registry rows first, then owned docs): a crash
   mid-cascade can orphan an *invisible* doc (no registry row ⇒ no access), never a dangling row.
+
+## Where to go next
+
+- [**Tutorial 6 — build a chat channel where a human and an agent co-edit a canvas**](/tutorials/collaborative-canvas-with-agent): the guided, guaranteed-outcome build of the app in the screenshot above.
+- [**CRDT document collections**](/collections/crdt-documents): the underlying document model — merge semantics, validate-before-commit, and why the schemas must be presence-tolerant.
+- [**Chat bots**](/how-to/chat-bots): provisioning the agent as a real channel member so its `write_resource` calls pass the same membership gate as a human.
+- [`examples/chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor): the full source behind the screenshot.

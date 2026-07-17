@@ -1,11 +1,11 @@
 # Tutorials
 
-Five lessons, in order. Each one is a **hands-on build** with a guaranteed outcome at the end — follow the steps and it works. This is the fastest way to feel how super-line fits together; once a pattern clicks here, the [How-to guides](/how-to/) and [Concepts](/concepts/) go deeper on demand.
+Six lessons, in order. Each one is a **hands-on build** with a guaranteed outcome at the end — follow the steps and it works. This is the fastest way to feel how super-line fits together; once a pattern clicks here, the [How-to guides](/how-to/) and [Concepts](/concepts/) go deeper on demand.
 
 <div class="sl-qs-hero">
 
 <p class="sl-qs-meta">
-  <span>~50 minutes end to end</span>
+  <span>~65 minutes end to end</span>
   <span>Node 18+</span>
   <span>TypeScript · zero codegen</span>
 </p>
@@ -43,6 +43,12 @@ Merge two **plugins** into one contract — [`@super-line/plugin-auth`](/how-to/
 Add a third participant to that channel — an **AI agent**. Because super-line has no bot type, the agent is a regular API-key user on the same wire, and three library calls turn it into a live participant whose whole answer **streams** into the channel as one message. Runs fully offline, then swaps in a real LLM in one block.
 
 *You'll touch:* [`provisionChatBot` + `onChatMessage`](/how-to/chat-bots), [streamed messages](/how-to/chat-streaming), the `chatAgentTools` AI SDK toolset.
+
+### 6 · [A human and an agent co-edit a canvas](/tutorials/collaborative-canvas-with-agent)
+
+Attach a **CRDT document** to that channel as a [channel resource](/how-to/chat-resources) — a shared sticky-note canvas. The human edits it through the native handle; the agent edits the *same* document through an acked `write_resource` path, as an ordinary channel member. Both edits **merge**. This is the shape behind the [`chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor) app.
+
+*You'll touch:* [channel resources](/how-to/chat-resources), [`createResource` + `writeResource`](/how-to/chat-resources), the `DocHandle`, and the two co-writer doors.
 
 ## Before you start
 

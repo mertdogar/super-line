@@ -1,5 +1,9 @@
 # Use super-line with your AI agent
 
+::: tip Building an app *with* an agent in it?
+This page is about installing the super-line **skill** into your coding agent (Claude Code / Cursor / Copilot). If instead you want to put a live AI agent into a chat channel — one that answers, streams, or **co-edits a shared canvas** — see [Run an AI chat bot](/how-to/chat-bots), [Attach collaborative resources to channels](/how-to/chat-resources), and [Tutorial 6](/tutorials/collaborative-canvas-with-agent).
+:::
+
 super-line ships an **agent guide** — the contract model, the interaction flavors, auth, scaling, testing, and the common pitfalls — so your AI coding agent writes correct super-line code instead of guessing. Install it into your project and your agent picks it up.
 
 It comes in two forms:

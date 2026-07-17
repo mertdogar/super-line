@@ -31,13 +31,19 @@ server-authoritative connection as your application.
 private), owner/member membership control, and messages (send, edit, delete) as
 typed collections. Every mutation is a server-authoritative, hookable request,
 and it ships an imperative server API so agents and back-office code drive the
-same model as clients. Requires [`@super-line/plugin-auth`](/how-to/plugin-auth).
+same model as clients. It also turns your own [CRDT documents](/collections/crdt-documents)
+into [**channel resources**](/how-to/chat-resources) — shared canvases and docs a
+human and an agent co-edit live. Requires [`@super-line/plugin-auth`](/how-to/plugin-auth).
 
 Guides: [wire it in](/how-to/plugin-chat) ·
 [stream an agent's turn](/how-to/chat-streaming) ·
 [run an AI chat bot](/how-to/chat-bots) ·
+[attach channel resources](/how-to/chat-resources) ·
 [tutorial: assemble a backbone](/tutorials/chat-backbone) ·
-[tutorial: add a live AI agent](/tutorials/ai-agent-chat).
+[tutorial: add a live AI agent](/tutorials/ai-agent-chat) ·
+[tutorial: co-edit a canvas](/tutorials/collaborative-canvas-with-agent).
+
+Flagship examples: [`chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor) (a human + agent co-editing a canvas) · [`chat-resources`](https://github.com/mertdogar/super-line/tree/main/examples/chat-resources) (the resource mechanics headless) · [`collections-chat`](https://github.com/mertdogar/super-line/tree/main/examples/collections-chat) (a Slack-like app).
 
 ### Control Center inspector
 

@@ -507,7 +507,57 @@ onChatMessage(chat, handler: ({channelId, message, history}) => …, { channels?
 //   'all' = RLS-visible channels (public + member-private), auto-join public on appear; backlog/own messages skipped; other producers'
 //   streaming envelopes DEFER until settled; history = model-ready ChatTurnMessage[] w/ honest `[status — no text]` placeholders;
 //   turns SERIALIZED per channel (queued msg's history sees the finished answer), channels concurrent; failed join retries next directory tick.
-//   chatClient also exposes `userId` (resolved own id, read after `ready`).
+//   chatClient also exposes `userId` (resolved own id, read after `ready`). onChatMessage SKIPS resource cards (they never trigger a turn).
+
+// ── Channel resources (PLAN-chat-resources) — your CRDT documents, attached to channels ─────────────
+// A resource = one CRDT document (a `collections: { n: { schema, crdt } }` collection YOU declare) + a
+// registry row linking it to a channel. Access is membership-gated through the registry. Needs the
+// server's `crdtCollections:` backend + the client's `crdtCollections: crdtCollectionsClient()`.
+
+// . / server — register kinds on the chat() factory (ONE act = createResource + policies + cascade):
+chat({ contract, resources: { kinds: { [kind]: ResourceKindDef } }, hooks?, streaming? }): ChatServer
+interface ResourceKindDef { collection: string; lifecycle?: 'owned'|'linked' (owned); init: (ctx: ResourceInitCtx) => data|Promise<data> }
+//   ResourceInitCtx = { channelId, kind, id, title, params, userId: string|null, ctx: unknown }  — throw SuperLineError('VALIDATION') on bad params
+//   Registering a kind AUTO-contributes membership-gated read/write policies for its collection — do NOT also declare `policies` for that
+//   collection (server boot-throws "policy … collides", G4). Kind names must not contain ':' (composite-pk segment). Boot-throws if the
+//   collection is missing or not a `crdt` collection. owned: chat mints the id, one channel, deleted on detach/channel-delete. linked:
+//   host-supplied id (createResource({id})), attachable to MANY channels, doc NEVER chat-deleted (it's your content).
+interface ChatServer { …; resources: {          // added to the kit
+  create({ channelId, kind, title?, id?, params? }): Promise<ChatResource>   // create-or-attach; server-initiated (createdBy:null, NO card)
+  detach(channelId, kind, docId): Promise<ChatResource>                       // owned ⇒ also deletes the doc
+  of(channelId): Promise<ChatResource[]>
+  sweepPresence({ olderThanMs }): Promise<number>                             // reap stale presence rows (host-invoked, never automatic)
+} }
+
+// /client (chatClient) — resource methods + live stores:
+resources(channelId): ChatLiveStore<ChatResource>                              // the channel's registry rows
+resourcePresence(collection, docId): ChatLiveStore<ResourcePresence>           // who's-open rows for one doc
+createResource(channelId, { kind, title?, id?, params? }): Promise<ChatResource>   // create-or-attach; client-initiated ⇒ drops a resource CARD
+detachResource(channelId, kind, docId): Promise<ChatResource>
+writeResource(channelId, kind, docId, ops: ResourceWriteOp[] (≤64)): Promise<{ snapshot }>
+//   ResourceWriteOp = { path: string[] (object-KEYS only, ≥1), set } | { path: string[], delete: true }  — arrays are opaque leaves: set the
+//   whole array at its key, never index into one (→ VALIDATION). Acked: applied server-side, JSON-projection validated (honest VALIDATION whose
+//   zod message the model reads), returns the post-write snapshot. Best-effort (a concurrent delta between validate+apply is an accepted race);
+//   .catch() fields never reject. Contrast srv.collection(n).open(id): trusted, unvalidated, off the membership model — use writeResource for an
+//   agent that is a channel MEMBER, srv.collection for an in-process privileged actor.
+announceResource(kind, docId, state: 'open'|'heartbeat'|'close'): Promise<void>    // coarse presence; the human edits the doc via client.collection(n).open(id)
+
+// the human edits the doc through the NATIVE surface — chat wraps nothing here:
+client.collection(n).open(id): DocHandle          // or react useDoc(n, id); id = the resource row's docId
+
+// /react
+createChatHooks<C>(): { …, useChannelResources, useResourcePresence }
+useChannelResources(channelId): ChatResource[]                                  // live registry rows
+useResourcePresence(row: { kind, collection, docId }): ResourcePresence[]       // announces open on mount, 20s heartbeat, close on unmount; recency-filtered rows
+
+// /ai — chatAgentTools gains 5 resource tools (core set): list_resources · read_resource (16KB-capped snapshot) · create_resource ·
+//   detach_resource · write_resource. Pass opts.resourceShapes: { [kind]: '{ shape note }' } → appended to read/write descriptions so the model
+//   writes without a read-first round-trip.
+
+// shapes: ChatResource = { id (`${channelId}:${kind}:${docId}`), channelId, kind, collection, docId, title, createdBy: string|null, createdAt }
+//   ResourcePresence = { id (`${collection}:${docId}:${userId}`), docKey (`${collection}:${docId}`), collection, docId, userId, openedAt, heartbeatAt }
+//   resource CARD = a content-less message with metadata.resource = { action: 'created'|'attached'|'detached', kind, docId, title }
+//   presence liveness = heartbeatAt recency (PRESENCE_LIVE_MS 45s; useResourcePresence heartbeats every 20s)
 ```
 
 Rules: **public** channels are self-service join/leave; **private** are add-by-owner and answer `NOT_FOUND` to a non-member's `joinChannel` (anti-probing). Creator is the first `owner`; owners manage membership + rename/delete. **Last-owner protection**: leave/remove/demote throws `CONFLICT` if it would leave members with zero owners. Messages **hard-delete**; edit stamps `editedAt`. Membership is required for EVERY send (server included) — add an agent to a channel before it posts. **AI agents = regular users**: provision via `authKit.users.create` (no password) + `authKit.apiKeys.create`, add to a channel, connect with `params: { apiKey }` and the same `chatClient`. Known v1 caveat: per-channel serialization is in-process, so under relay clustering requests on other nodes can still interleave (no cross-node CAS).

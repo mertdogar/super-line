@@ -77,6 +77,7 @@ export default defineConfig({
             { text: '3 · Go collaborative (a CRDT doc)', link: '/tutorials/go-collaborative' },
             { text: '4 · Assemble a chat backbone', link: '/tutorials/chat-backbone' },
             { text: '5 · Put a live AI agent in the chat', link: '/tutorials/ai-agent-chat' },
+            { text: '6 · Co-edit a canvas with an agent', link: '/tutorials/collaborative-canvas-with-agent' },
           ],
         },
       ],

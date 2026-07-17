@@ -463,6 +463,75 @@ function Gate() {
 - `jwt` is opt-in: without it `getToken()` throws and only session tokens / API keys connect. An API key (`slp_…`) carries one fixed role and is revocable; a JWT is stateless and unrevocable until it expires.
 - `sendPasswordReset` is a host callback; without it `requestPasswordReset` is a silent no-op (never leaks whether an email exists). Runnable: `examples/auth` (CLI) · `examples/collections-chat` (real login).
 
+## Chat (`@super-line/plugin-chat`)
+
+Channels + membership + messages as a paired plugin (requires `plugin-auth`). Bots are **regular users**; the reply is a **streamed message**.
+
+### Provision a bot + run its loop
+
+```ts
+import { chat as chatKitFactory, provisionChatBot } from '@super-line/plugin-chat/server'
+import { chatClient, onChatMessage } from '@super-line/plugin-chat/client'
+
+const chatKit = chatKitFactory({ contract })                 // + plugins: [authKit.plugin, chatKit.plugin] on the server
+const room = await chatKit.channels.create({ name: 'ask-ai', visibility: 'public' })
+
+// restart-idempotent identity + API key, joined to its channels
+const { user, apiKey } = await provisionChatBot(authKit, chatKit, { name: 'Ask AI', channels: [room.id] })
+const bot = chatClient(
+  createSuperLineClient(contract, { transport: webSocketClientTransport({ url }), role: 'user', params: { apiKey } }),
+  { userId: user.id },
+)
+await bot.ready
+
+onChatMessage(bot, async ({ channelId, history }) => {       // turns serialized per channel; own/backlog skipped
+  const w = await bot.stream(channelId)
+  try {
+    w.push({ type: 'part_start', key: 't', partType: 'text' })
+    w.push({ type: 'delta', key: 't', text: 'thinking…' })
+    w.push({ type: 'part_end', key: 't' })
+    await w.finalize()
+  } finally { await w.abort().catch(() => {}) }              // settle in a finally — never leak a streaming message
+}, { channels: [room.id] })
+```
+
+### Stream a Mastra supervisor + subagents into one message
+
+```ts
+import { mastraEngine } from '@super-line/plugin-chat/mastra'
+const engine = mastraEngine({ agent: supervisor, subagents: [{ agent: worker }] })   // plain Mastra Agents; delegate tool injected
+onChatMessage(bot, ({ channelId, history }) => engine.respond(bot, channelId, history))
+// each delegation nests under its delegate part (parent lanes); reasoning streams if the Agent enables thinking via defaultOptions
+```
+
+### Agent co-edits a channel resource (canvas/doc) — the headline
+
+```ts
+// 1) declare YOUR CRDT doc collection + register it as a kind (create + policies + cascade, one act)
+const contract = defineContract({
+  collections: { canvases: { schema: canvasSchema, crdt: { mode: 'document' } } },
+  roles: { user: {}, guest: {} }, plugins: [authContract(), chatContract()],
+})
+const chatKit = chatKitFactory({ contract, resources: { kinds: { canvas: { collection: 'canvases', init: () => ({ title: 'Canvas', notes: {} }) } } } })
+// server needs crdtCollections: crdtMemoryCollections(); client needs crdtCollections: crdtCollectionsClient()
+
+// 2) human edits via the NATIVE doc handle
+const canvas = await human.createResource(channelId, { kind: 'canvas', title: 'Board' })
+const doc = humanRaw.collection('canvases').open(canvas.docId); await doc.ready
+doc.update({ notes: { n1: { x: 40, y: 40, color: '#fef08a', text: 'kickoff' } } })
+
+// 3) agent edits the SAME doc via the acked, membership-gated write_resource path
+const { snapshot } = await bot.writeResource(channelId, 'canvas', canvas.docId, [
+  { path: ['notes', 'n2'], set: { x: 240, y: 40, color: '#bfdbfe', text: 'ship it' } },  // object-key paths only; ≤64 ops
+])                                                                                        // acked → snapshot, or throws VALIDATION
+```
+
+- **Two co-writer doors:** `writeResource` (agent as a channel MEMBER — membership+registry gated, best-effort validated, honest `VALIDATION`) vs `srv.collection(n).open(id)` (trusted, unvalidated, in-process). Use `writeResource` for an agent inside the channel.
+- Paths address **object keys only** — set a whole array at its key, never index into one (CRDT arrays are opaque leaves → `VALIDATION`).
+- For the LLM, `chatAgentTools(botRawClient, { resourceShapes: { canvas: '{ … }' } })` adds `list/read/create/detach/write_resource`; pass shapes so it writes without reading first.
+- Presence: `useResourcePresence(row)` (React) announces open/heartbeat/close; reap with `chatKit.resources.sweepPresence({ olderThanMs })`.
+- Runnable: `examples/chat-supervisor` (human + agent co-edit a canvas, full UI) · `examples/chat-resources` (headless mechanics). Guide: `/how-to/chat-resources`; Tutorial 6.
+
 ## Author a plugin · compose a library
 
 Two ways to ship reusable super-line surface: a **contract plugin** (merged into a host's contract, like auth) or a **composed surface** (spliced into one role). Both keep types end-to-end.

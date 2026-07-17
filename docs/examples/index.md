@@ -30,6 +30,27 @@ pnpm --filter @super-line/example-collections-chat dev   # web http://localhost:
 
 Demonstrates: [the chat plugin](/how-to/plugin-chat), [plugin auth](/how-to/plugin-auth), [row-level policies](/collections/policies), the imperative `chatKit` + [AI agents](/how-to/ai-agents).
 
+## chat-supervisor — a human and an AI agent co-edit a canvas
+
+The flagship for [**channel resources**](/how-to/chat-resources): a shared sticky-note **canvas** and a block **doc** that a person and a server-side agent edit at the same time, inside a chat channel. Ask the supervisor *"add a note for each launch task"* and its notes land on the same board you're dragging notes around on — the collaboration surface is a [CRDT document](/collections/crdt-documents) the plugin attaches to the channel, the human edits it through the native [`useDoc`](/how-to/react) handle, and the agent — an **editor** subagent — writes the *same* doc through the acked `write_resource` tool path, both sides merging live (id-keyed maps). The agent is a plain Mastra **supervisor** that delegates canvas edits to the editor and weather look-ups to a **worker**, the whole delegation tree streaming into the channel as [one message](/how-to/chat-streaming); presence avatars in the pane header show who — human or bot — has the doc open. It's the [super-harness](https://github.com/mertdogar/super-harness) supervisor/worker flow rebuilt on super-line alone — no bespoke harness, no bespoke canvas store.
+
+```bash
+echo 'AI_GATEWAY_API_KEY=…' > examples/chat-supervisor/.env   # or reuse ../collections-chat/.env
+pnpm --filter @super-line/example-chat-supervisor dev   # web http://localhost:5173 · server ws://localhost:8792
+```
+
+Demonstrates: [channel resources](/how-to/chat-resources), [CRDT document collections](/collections/crdt-documents), [the chat plugin](/how-to/plugin-chat), [streamed messages](/how-to/chat-streaming), [chat bots](/how-to/chat-bots).
+
+## chat-resources — attach collaborative resources to a channel (CLI)
+
+The channel-resources mechanics on their own, no UI: a headless script that declares an **owned** todo list and a **linked** canvas, creates/attaches them to a channel, and drives the same tools an agent would — `createResource`, the native `DocHandle`, the acked `writeResource` path (watch a bad write bounce with a `VALIDATION` error the model could read), the delete cascade, and who's-open presence. The quickest way to read exactly how [channel resources](/how-to/chat-resources) work end to end before wiring your own UI.
+
+```bash
+pnpm --filter @super-line/example-chat-resources start
+```
+
+Demonstrates: [channel resources](/how-to/chat-resources), [CRDT document collections](/collections/crdt-documents), the `owned`/`linked` lifecycle, the acked agent-write path.
+
 ## store-sync-json — a collaborative JSON editor (CRDT)
 
 A React app over a [CRDT document collection](/collections/crdt-documents) (`@super-line/collections-crdt-memory`, Yjs-backed): a [`@visual-json`](https://visual-json.dev) editor bound to one shared document via [`useDoc`](/how-to/react). Open two tabs (or add `?name=bob`), edit any field, and watch edits **merge** live — concurrent edits to different fields both survive, unlike last-writer-wins. **Server nudge** triggers a server co-write.

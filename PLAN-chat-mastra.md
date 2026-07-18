@@ -4,6 +4,12 @@
 review fixes `611925d`; adversarial review: 5 confirmed findings root-fixed, incl. a critical
 provisionChatBot displayName-hijack). Both examples rewritten + verified live over the wire.**
 
+**Amendment 2026-07-18 (`33827ca`, thin-glue reshape): the `maxSteps` mirrors sketched below were
+REMOVED before first publish — per-agent config (maxSteps, thinking, memory) lives on the host's
+`Agent` via Mastra `defaultOptions` (a function of the forwarded `requestContext` for per-turn
+values, e.g. root-only per-channel memory). The engine's stream calls carry only
+`abortSignal` + `requestContext` + the delegate toolset. See `docs/how-to/chat-bots.md#memory`.**
+
 ## Problem
 
 `examples/chat-supervisor` proves streamed delegation trees work, but its wiring is the opposite of

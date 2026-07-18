@@ -535,6 +535,27 @@ onChatMessage(bot, ({ channelId, history }) => engine.respond(bot, channelId, hi
 // each delegation nests under its delegate part (parent lanes); reasoning streams if the Agent enables thinking via defaultOptions
 ```
 
+### Per-channel bot memory (root agent only)
+
+```ts
+// Agents arrive FULLY CONFIGURED — the engine never proxies Mastra config. Memory = the root
+// Agent's own defaultOptions, a function of the requestContext the engine forwards per turn:
+import { RequestContext } from '@mastra/core/request-context'
+
+const supervisor = new Agent({
+  /* … */ memory,                                            // a Mastra Memory instance
+  defaultOptions: ({ requestContext }) => ({
+    memory: { thread: String(requestContext?.get('channelId')), resource: 'bot' },
+  }),
+})
+onChatMessage(bot, ({ channelId, history }) => {
+  const rc = new RequestContext(); rc.set('channelId', channelId)
+  return engine.respond(bot, channelId, history.slice(-1), { requestContext: rc })
+})
+// workers stay stateless BY CONSTRUCTION (their Agents don't derive memory); pass ONLY the new
+// turn as input — Mastra saves stream input to the thread + recalls the past; full history doubles both
+```
+
 ### Agent co-edits a channel resource (canvas/doc) — the headline
 
 ```ts

@@ -1,6 +1,6 @@
 {
   "name": "@super-line/collections-pglite",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Self-clustering CollectionStore for super-line — central Postgres + per-node Electric-synced PGlite replica (live.changes). Postgres is the only fan-out infra; no adapter.",
   "license": "MIT",

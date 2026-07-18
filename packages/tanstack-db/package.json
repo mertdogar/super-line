@@ -26,15 +26,15 @@
     "build": "tsup",
     "prepublishOnly": "tsup"
   },
-  "dependencies": {
-    "@super-line/core": "workspace:^",
-    "@super-line/client": "workspace:^"
-  },
   "peerDependencies": {
+    "@super-line/client": "workspace:^",
+    "@super-line/core": "workspace:^",
     "@tanstack/db": ">=0.1"
   },
   "devDependencies": {
+    "@super-line/client": "workspace:^",
     "@super-line/collections-memory": "workspace:*",
+    "@super-line/core": "workspace:^",
     "@super-line/server": "workspace:*",
     "@super-line/transport-websocket": "workspace:*",
     "@tanstack/db": "^0.5.0",

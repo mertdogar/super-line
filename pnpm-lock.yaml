@@ -1577,9 +1577,6 @@ importers:
 
   packages/plugin-auth:
     dependencies:
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
       jose:
         specifier: ^5.9.6
         version: 5.10.0
@@ -1593,6 +1590,9 @@ importers:
       '@super-line/collections-memory':
         specifier: workspace:*
         version: link:../collections-memory
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
       '@super-line/server':
         specifier: workspace:^
         version: link:../server
@@ -1648,10 +1648,10 @@ importers:
       '@standard-community/standard-json':
         specifier: ^0.3.5
         version: 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(zod-to-json-schema@3.25.2(zod@4.4.3))(zod@4.4.3)
+    devDependencies:
       '@super-line/core':
         specifier: workspace:^
         version: link:../core
-    devDependencies:
       '@super-line/server':
         specifier: workspace:^
         version: link:../server
@@ -1789,17 +1789,16 @@ importers:
         version: 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76)
 
   packages/tanstack-db:
-    dependencies:
+    devDependencies:
       '@super-line/client':
         specifier: workspace:^
         version: link:../client
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
-    devDependencies:
       '@super-line/collections-memory':
         specifier: workspace:*
         version: link:../collections-memory
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
       '@super-line/server':
         specifier: workspace:*
         version: link:../server

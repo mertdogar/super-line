@@ -27,13 +27,14 @@
     "prepublishOnly": "tsup"
   },
   "dependencies": {
-    "@super-line/core": "workspace:^",
     "@standard-community/standard-json": "^0.3.5"
   },
   "peerDependencies": {
+    "@super-line/core": "workspace:^",
     "@super-line/server": "workspace:^"
   },
   "devDependencies": {
+    "@super-line/core": "workspace:^",
     "@super-line/server": "workspace:^"
   }
 }

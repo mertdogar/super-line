@@ -6,7 +6,10 @@ has **three faces on one server**: the web app, a full **terminal cockpit**, and
 channel, the same streaming delegation cards, and the same live sticky-note canvas, rendered with
 [OpenTUI](https://github.com/sst/opentui) in your terminal.
 
-![The TUI cockpit mid-delegation: the editor subagent's card streams on the left while its sticky notes land on the canvas pane](/chat-supervisor-tui.png)
+![The TUI cockpit live: the supervisor delegates, the editor's sticky notes land on the canvas pane, and the human nudges them from the keyboard](/chat-supervisor-tui.gif)
+
+A crisp still of the same flow: [full-resolution screenshot](/chat-supervisor-tui.png). Both are
+reproducible — the example checks in the `vhs` tape and the `captureSpans`-based screenshot script.
 
 ## The point: the hooks don't care about the DOM
 

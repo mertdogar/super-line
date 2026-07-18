@@ -68,7 +68,10 @@ the **live canvas/doc pane** (drag notes with the mouse, nudge with arrows, edit
 your terminal. Run the web app and the TUI side by side against one server and watch the same note
 move in both.
 
-![The TUI cockpit: a delegation card streaming on the left while the editor's sticky notes land in the canvas pane](./tui-screenshot.png)
+![The TUI cockpit live: ask for sticky notes, watch the delegation stream and the editor's notes land in the canvas pane, then nudge them from the keyboard](./tui-demo.gif)
+
+(Recorded by the checked-in [`tui-demo.tape`](./tui-demo.tape) — `vhs tui-demo.tape` re-records it;
+a still is in [`tui-screenshot.png`](./tui-screenshot.png), re-captured by `src/tui/screenshot.tsx`.)
 
 ```bash
 pnpm dev:server   # terminal 1 (or reuse the one from pnpm dev)

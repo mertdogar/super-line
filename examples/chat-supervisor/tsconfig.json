@@ -23,5 +23,6 @@
       "@super-line/plugin-chat": ["../../packages/plugin-chat/src/index.ts"]
     }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts"],
+  "exclude": ["node_modules", "src/tui"]
 }

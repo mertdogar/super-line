@@ -39,7 +39,9 @@ echo 'AI_GATEWAY_API_KEY=…' > examples/chat-supervisor/.env   # or reuse ../co
 pnpm --filter @super-line/example-chat-supervisor dev   # web http://localhost:5173 · server ws://localhost:8792
 ```
 
-Demonstrates: [channel resources](/how-to/chat-resources), [CRDT document collections](/collections/crdt-documents), [the chat plugin](/how-to/plugin-chat), [streamed messages](/how-to/chat-streaming), [chat bots](/how-to/chat-bots).
+The example has **three faces on one server**: the web app, a full [**terminal cockpit**](/examples/chat-supervisor-tui) (the same react hooks under OpenTUI — mouse-draggable canvas notes included), and a [**headless line protocol**](/how-to/chat-headless) a script or another agent can drive (`pnpm tui --json | jq`).
+
+Demonstrates: [channel resources](/how-to/chat-resources), [CRDT document collections](/collections/crdt-documents), [the chat plugin](/how-to/plugin-chat), [streamed messages](/how-to/chat-streaming), [chat bots](/how-to/chat-bots), [the terminal cockpit](/examples/chat-supervisor-tui), [headless scripting](/how-to/chat-headless).
 
 ## chat-resources — attach collaborative resources to a channel (CLI)
 

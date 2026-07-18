@@ -1,0 +1,15 @@
+{
+  "//": "Bun-runtime config for the TUI (bun --tsconfig-override). Bun's native resolver applies these paths to EVERY react/react-dom import — including inside the @super-line/* binding packages, which otherwise resolve their own react@18 from packages/*/node_modules and emit Context.Provider elements the @opentui/react (React 19) reconciler rejects. Pinning the react family to the example's single react@19 copy is the bun equivalent of Vite's resolve.dedupe. Typecheck uses tsconfig.json instead (its react path targets @types/react).",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@opentui/react",
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "react": ["../../node_modules/react"],
+      "react/*": ["../../node_modules/react/*"],
+      "react-dom": ["../../node_modules/react-dom"],
+      "react-dom/*": ["../../node_modules/react-dom/*"]
+    }
+  }
+}

@@ -59,6 +59,44 @@ Sign up, then try the headline first:
 
 `MODEL` (default `anthropic/claude-haiku-4.5`) picks the gateway model for all agents.
 
+## The terminal cockpit (TUI)
+
+The same example has a **third face**: a full terminal client built on
+[OpenTUI](https://github.com/sst/opentui) + the very same `@super-line/react` /
+`plugin-chat/react` hooks the web client uses — login, channels, streaming delegation cards, and
+the **live canvas/doc pane** (drag notes with the mouse, nudge with arrows, edit in dialogs) all in
+your terminal. Run the web app and the TUI side by side against one server and watch the same note
+move in both.
+
+![The TUI cockpit: a delegation card streaming on the left while the editor's sticky notes land in the canvas pane](./tui-screenshot.png)
+
+```bash
+pnpm dev:server   # terminal 1 (or reuse the one from pnpm dev)
+pnpm tui          # terminal 2 — requires bun (OpenTUI uses bun:ffi)
+```
+
+First run shows a login/register dialog; the session token is cached to
+`~/.chat-supervisor-tui.json` (0600) so later runs reconnect silently. Keys: `/` opens the command
+popover (`/channels`, `/session`, `/help`…), **Tab on an empty prompt** focuses the resource pane
+(`1`/`2` tabs, arrows pick, `m` + arrows nudge, `e` edit, `n` new, `x` delete, mouse click/drag
+works anywhere), `Shift+Enter` for newlines, `↑` recalls history, `Ctrl+C` quits.
+
+### Headless mode — drive it from scripts
+
+Pipe the same binary and it turns into a line protocol (auto-selected when stdout isn't a TTY, or
+pass `--headless`). Human mode prints lifecycle markers + plain lines; `--json` is **pure JSONL** —
+curated `message` / `delta` / `part` / `resource` / `status` events, one `jq` parses everything:
+
+```bash
+pnpm tui --channel agents | tee chat.log      # markers + "#agents Supervisor: …" lines
+pnpm tui --headless --channel agents --json | jq -c 'select(.type=="delta")'
+pnpm tui --headless --channel agents --control /tmp/ctl.fifo   # echo '/who' > /tmp/ctl.fifo
+```
+
+Auth reuses the cockpit's cached session (`--token` / `CHAT_SUPERVISOR_TOKEN` to override). A bare
+line sends to the current channel; `/channel <name>` switches. Full protocol:
+[Drive a channel from scripts](https://super-line.dogar.biz/how-to/chat-headless).
+
 ## Layout
 
 - `src/contract.ts` — the two plugins (`authContract()`, `chatContract()`) **plus the host's own
@@ -72,3 +110,6 @@ Sign up, then try the headline first:
   split-pane wiring.
 - `src/components/resources.tsx` — the resource pane: tabbed sticky-note canvas + block doc over
   `useDoc`, with `useResourcePresence` avatars.
+- `src/tui/` — the terminal cockpit + headless shell: the same hooks under `@opentui/react`
+  (`app.tsx` cockpit, `resources.tsx` pane, `prompt.tsx` harness-style prompt, `headless.ts` the
+  JSONL line protocol; `smoke.tsx` proves it all against a live server).

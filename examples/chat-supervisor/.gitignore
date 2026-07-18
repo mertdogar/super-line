@@ -6,3 +6,5 @@
 # local secrets — the AI Gateway key for the Ask AI agent (see .env.example)
 .env
 .env.local
+tui-frame-spans.json
+tui-frame.txt

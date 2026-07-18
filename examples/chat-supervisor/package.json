@@ -7,11 +7,15 @@
     "dev": "concurrently -k -n server,web -c magenta,green \"tsx --env-file-if-exists=.env --env-file-if-exists=../collections-chat/.env src/server.ts\" \"vite --host\"",
     "dev:server": "tsx --env-file-if-exists=.env --env-file-if-exists=../collections-chat/.env src/server.ts",
     "dev:web": "vite --host",
+    "tui": "bun --tsconfig-override src/tui/tsconfig.runtime.json src/tui/index.tsx",
+    "tui:smoke": "bun --tsconfig-override src/tui/tsconfig.runtime.json src/tui/smoke.tsx",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.16",
     "@mastra/core": "1.50.1",
+    "@opentui/core": "^0.4.5",
+    "@opentui/react": "^0.4.5",
     "ai": "^6.0.0",
     "@super-line/client": "workspace:*",
     "@super-line/collections-crdt-libsql": "workspace:*",

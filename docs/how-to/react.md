@@ -60,6 +60,7 @@ function Room({ room }: { room: string }) {
 | `useSubscription(topic)` | latest value (`undefined` before the first message) | Subscribes on mount, re-renders on each new value, unsubscribes on unmount. |
 | `useEvent(event, handler)` | — | Invokes `handler` for each pushed event; the latest handler is always used (no stale closures). |
 | `useClient()` | `SuperLineClient<C, R>` | The underlying client, for anything the hooks don't cover. |
+| `useEnv()` | `EnvOf<C, R> \| null` | Tracks the connection's server-vended [`env`](/how-to/connection-env); `null` until the first push (or for a role with no `env`), then the latest value — re-renders on every server-side update. |
 
 For the wire patterns behind these — see [requests](/how-to/requests), [events & rooms](/how-to/events-rooms), and [topics](/how-to/topics).
 
@@ -96,6 +97,23 @@ function Doc({ id }: { id: string }) {
 - **`deleted`** flips to `true` once the server fans the document's deletion across the cluster (a `cddel` reaches this node). Until then a deleted doc reads as a silent empty snapshot, so branch on `deleted` to tell "deleted" apart from "still loading".
 
 For client query joins and optimistic UI over collections, wire them into TanStack DB — see [the TanStack DB adapter](/collections/tanstack-db).
+
+## Read the connection's env
+
+**`useEnv()`** tracks the connection's server-vended, client-visible [`env`](/how-to/connection-env) (ADR-0012)
+reactively: `null` until the first push (or for a role with no `env`), then the latest value — re-renders on
+every server-side `setEnv`.
+
+```tsx
+function Toolbar() {
+  const env = useEnv() // typed EnvOf<C, R>; null until the first push
+  if (!env) return null
+  return <span>project: {env.projectId}</span>
+}
+```
+
+`env` carries credentials — wire it into effects/calls, never render a raw secret. See
+[connection env](/how-to/connection-env) for declaring the shape, seeding it at connect, and rotating it live.
 
 ## Guard StrictMode
 

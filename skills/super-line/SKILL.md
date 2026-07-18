@@ -90,6 +90,7 @@ Decide: **Need a reply?** request. **Pushing to recipients *you* pick?** event (
 | Ask a client (server→client req) | server: `await srv.toConn(id).request('confirm', input, { timeout?, signal? })`; client: `client.implement({ confirm: async (input) => output })` |
 | Heartbeat / reaping | `heartbeat: { interval: 30_000, maxMissed: 2 }` (or `false`) in server opts; read `conn.lastPongAt` |
 | Per-conn state | declare `data:` schema in a role block → `conn.data` typed per role, mutable, starts `{}` |
+| Server-vended, client-visible state | declare `env:` schema in a role block (ADR-0012) → seeded by `authenticate`'s `env`, updated live via `conn.setEnv(v)` / `srv.toConn(id).setEnv(v)` / `srv.toUser(uid).setEnv(v)`; read as `client.env.current`/`.ready`/`.subscribe(cb)`, React `useEnv()`. **Server-vended — clients cannot write it.** See REFERENCE.md → Connection env |
 | Backpressure | `backpressure: { maxBufferedBytes, onExceed: 'close' | 'drop' }` in server opts |
 
 Full signatures → **REFERENCE.md**. End-to-end best-practice patterns (roles, auth, presence, DMs, scaling, the cluster event bus, testing) → **RECIPES.md**.
@@ -136,6 +137,7 @@ Full signatures → **REFERENCE.md**. End-to-end best-practice patterns (roles, 
 - **A CRDT-doc `update`/`set` MERGES keys — `delete(path)` is the only removal.** `delete(path)` is **surgical** and merges with a concurrent edit to a sibling key; a whole-document `set` clobbers that concurrent edit. Prefer `update` to add/change, `delete(path)` to remove, `set` only for a genuine whole-document replace. (LWW row collections don't have this — you `insert`/`update`/`delete(id)` whole rows.)
 - **A CRDT write can be REJECTED — and the client then resyncs.** The optimistic edit was applied locally; on a schema/policy reject the client re-opens and hard-**resets** to authoritative (the bad edit vanishes, `onStoreError` fires). Keep CRDT-doc schemas **presence-tolerant** (`.catch`/`.optional`) so a transient concurrent-overwrite gap doesn't trip validation and wedge the writer.
 - **An in-process AI agent / bot should co-write through `srv.collection(n).open(id)` (a CRDT collection), not a loopback client.** The handle is server-authoritative (no policy check, no transport), reads reactively (`subscribe` sees client edits), and applies edits in-process. `open({ origin })` tags writes for Control Center attribution.
+- **`env` is server-vended and client-visible — the client cannot write it (ADR-0012).** There's no client-side `set`; only `conn.setEnv` / `srv.toConn(id).setEnv` / `srv.toUser(uid).setEnv` push a new value (full-value replace, last-write-wins). It's the visibility-mirror of `conn.data` (server-only) — use it to hand a connection working credentials, wired into outbound calls by the client's OWN code, never surfaced to an LLM. The Control Center **masks `env` values by default** (`•••` per key, shape still shown) — the opposite of `ctx`/`data`'s deny-list `redact` — allow-list safe keys with `inspector({ revealEnvKeys: [...] })`.
 
 ## ❌ → ✅
 

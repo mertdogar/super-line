@@ -27,7 +27,7 @@ const feed = createLiveQueryCollection((q) =>
 )
 ```
 
-The adapter translates TanStack's query predicates into the super-line [IR](/collections/row-collections#the-query-ir), **pushing per-query subsets to the server** so only the rows you query cross the wire. Joins, ordering, and incremental recomputation all run in the browser over the synced rows.
+Joins, ordering, and incremental recomputation all run **in the browser** over the synced rows — TanStack's query predicates are never pushed to the server. What crosses the wire is set per collection by the `query:` [IR](/collections/row-collections#the-query-ir) filter you hand to `superLineCollectionOptions` (above, `messages` is narrowed to one channel; `users` syncs whole).
 
 ## React
 

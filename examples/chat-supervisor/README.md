@@ -44,7 +44,7 @@ What it demonstrates:
 pnpm install                       # repo root
 cd examples/chat-supervisor
 echo 'AI_GATEWAY_API_KEY=…' > .env # Vercel AI Gateway key (also read from ../collections-chat/.env)
-pnpm dev                           # server on :8792 + vite on :5173x
+pnpm dev                           # server on :8792 + vite on :5173
 ```
 
 Sign up, then try the headline first:

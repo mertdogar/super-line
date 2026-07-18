@@ -53,9 +53,10 @@ brokerless mesh working:
   click any row to expand its payload;
 - the **contract** explorer and a per-connection drawer.
 
-The nodes run with `inspector: true`, and Caddy pins `/inspect` to **node-1**, so node-1's
-connections show their live `ctx` (the chat `name`) while other nodes' connections show the
-cross-node `ctxAvailable: false` boundary — node-local `ctx` never leaves its node.
+The nodes run with `plugins: [inspector()]` (from `@super-line/plugin-inspector`), and Caddy pins
+`/inspect` to **node-1**, so node-1's connections show their live `ctx` (the chat `name`) while
+other nodes' connections show the cross-node `ctxAvailable: false` boundary — node-local `ctx`
+never leaves its node.
 
 ## What you'll see
 

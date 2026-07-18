@@ -39,7 +39,7 @@ Hero code sample = **assembly-collapse**: one small contract that declares a **r
 2. **The assembly tax, shown** — the stack you hand-glue today vs. one contract.
 3. **Proof — the contract is the law** *(opinions 1+2)*: rename a payload → an untyped client ships it and crashes at runtime; with super-line the client won't compile, and the server validates every inbound message so even an untyped peer can't sneak past.
 4. **Proof — it works on one node, then you add a second** *(the bus)*: node-A/node-B miss → pass an adapter, the *same* `publish` now hits in-process subscribers (local echo, no network hop) **and** every other node across the backbone; `meta.from` tells you the origin. Real: `examples/bus-cluster`.
-5. **Control Center** *(observability)*: `inspector: true` + `npx @super-line/control-center` — live topology, connections + `ctx`, the running contract, a live event feed, cluster-wide. On the home it's a stylized topology mock (cyan dashed bus spine + node cards + `Adapter · bus` pill); swap for a clean screenshot later.
+5. **Control Center** *(observability)*: the `inspector()` plugin + `npx @super-line/control-center` — live topology, connections + `ctx`, the running contract, a live event feed, cluster-wide. On the home it's a stylized topology mock (cyan dashed bus spine + node cards + `Adapter · bus` pill); swap for a clean screenshot later.
 6. **Character — server-authoritative** *(opinion 3 + roles)*: server owns rooms, authorizes topics, roles fixed at the upgrade (cross-role → `NOT_FOUND`).
 7. **Reassurance** — pattern recap (requests · events · subscriptions), the comparison table, install, honest Status.
 

@@ -61,6 +61,7 @@ export const api = defineContract({
 | Targeted cross-node send | `srv.toConn(id).emit('ev', d)` / `srv.toUser(uid).emit('ev', d)` · `.close()` / `.disconnect()` to kick |
 | Ask a client | `await srv.toConn(id).request('confirm', input, { timeout? })`; client: `client.implement({ confirm: async (input) => output })` |
 | Heartbeat / per-conn state / backpressure | `heartbeat: { interval, maxMissed }` · `data:` schema in a role → typed `conn.data` · `backpressure: { maxBufferedBytes, onExceed }` |
+| Connection env (ADR-0012) | `env:` schema in a role → server-vended, CLIENT-VISIBLE `conn.env`; seeded by `authenticate`'s `env`, updated live via `conn.setEnv(v)` / `srv.toConn(id).setEnv(v)` / `srv.toUser(uid).setEnv(v)`; client reads `client.env.current`/`.ready`/`.subscribe`, React `useEnv()`. Clients cannot write it |
 | Client call/listen/subscribe | `await client.send(input)` · `client.on('event', cb)` · `client.subscribe('feed', cb)` (await `.ready`) |
 | Multi-node | pass an `adapter:` to every server — `createRedisAdapter('redis://…')` (or `-libp2p` / `-rabbitmq` / `-zeromq`, each with a `scaling-*` example). A `clustering:'self'` collection backend needs **none** |
 | Transport | server `transports: [webSocketServerTransport({ server })]` · client `transport: webSocketClientTransport({ url })`; swap in `http*Transport` (SSE/long-poll), `libp2p*Transport` (BYO node), or `loopback*Transport` (tests) |
@@ -100,6 +101,7 @@ export const api = defineContract({
 - **The client is a proxy, not awaitable** — `await client.someRequest(...)`, never `await client`.
 - **`client.collection(n)` is polymorphic by contract.** A `{ schema, key }` collection → query handle (`subscribe(query)` / `insert` / `update` / `delete(id)` / `batch`); a `crdt` collection → open-by-id `DocHandle` (needs `crdtCollections: crdtCollectionsClient()` or `open` throws `NOT_FOUND`). Await `sub.ready` / `doc.ready` before depending on live delivery.
 - **A CRDT-doc `update`/`set` MERGES keys; `delete(path)` is the only removal** (surgical — merges with a sibling-key edit; a whole-doc `set` clobbers). A CRDT write can be **rejected** → the client hard-resets its replica to authoritative (`onStoreError` fires). Keep CRDT-doc schemas presence-tolerant (`.catch`/`.optional`) so a transient concurrent-overwrite gap doesn't wedge the writer.
+- **`env` is server-vended, client-visible, and read-only to the client (ADR-0012).** Only `conn.setEnv`/`srv.toConn(id).setEnv`/`srv.toUser(uid).setEnv` push a value (full-value replace); there's no client-side `set`. The Control Center masks `env` values by default (`•••`) — the opposite of `ctx`/`data`'s deny-list `redact` — allow-list safe keys via `inspector({ revealEnvKeys: [...] })`.
 
 ## ❌ → ✅
 

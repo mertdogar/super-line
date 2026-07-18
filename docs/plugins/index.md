@@ -39,6 +39,7 @@ Guides: [wire it in](/how-to/plugin-chat) ·
 [stream an agent's turn](/how-to/chat-streaming) ·
 [run an AI chat bot](/how-to/chat-bots) ·
 [attach channel resources](/how-to/chat-resources) ·
+[drive a channel from scripts](/how-to/chat-headless) ·
 [tutorial: assemble a backbone](/tutorials/chat-backbone) ·
 [tutorial: add a live AI agent](/tutorials/ai-agent-chat) ·
 [tutorial: co-edit a canvas](/tutorials/collaborative-canvas-with-agent).
@@ -60,7 +61,9 @@ it when you need to inspect a running cluster without custom instrumentation.
 [Super Harness](/plugins/super-harness) adds a persistent, streaming
 supervisor and subagent runtime to an existing super-line server. It uses
 typed collections for the durable session tree and preserves full-fidelity
-streaming at every depth.
+streaming at every depth. For chat-shaped apps, `@super-line/plugin-chat`
+covers channels, streaming agent messages, and shared channel resources
+natively — see [when each fits](/plugins/super-harness#harness-or-plugin-chat).
 
 ## Next steps
 

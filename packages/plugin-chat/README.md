@@ -17,8 +17,9 @@ pnpm add @super-line/plugin-chat @super-line/plugin-auth
 ## Wire it in
 
 ```ts
-// 1 · contract — merge both fragments. chatContract() adds the channels/memberships/messages
-//     collections and the 16 mutation + streaming requests; the message body defaults to plain text.
+// 1 · contract — merge both fragments. chatContract() adds the channels/memberships/messages/
+//     messageParts/resources/resourcePresence collections and the 20 mutation + streaming
+//     requests; the message body defaults to plain text.
 import { defineContract } from '@super-line/core'
 import { authContract } from '@super-line/plugin-auth'
 import { chatContract } from '@super-line/plugin-chat'
@@ -27,7 +28,7 @@ export const app = defineContract({ roles: { user: {} }, plugins: [authContract(
 ```
 
 ```ts
-// 2 · server — register the kit's plugin (row policies + the 16 handlers) alongside auth's.
+// 2 · server — register the kit's plugin (row policies + the 20 handlers) alongside auth's.
 //     Wrap any operation with a domain hook — it fires for client requests AND server calls.
 import { chat } from '@super-line/plugin-chat/server'
 
@@ -96,14 +97,14 @@ agents. Every method runs through the same hooked domain core as the matching cl
 
 ```ts
 interface ChatServer {
-  plugin: SuperLinePlugin // → server `plugins: [...]` — read-RLS/write-deny policies + the 16 handlers
+  plugin: SuperLinePlugin // → server `plugins: [...]` — read-RLS/write-deny policies + the 20 handlers
 
   channels: {
     create(input: { name, visibility?, owner?, metadata? }): Promise<ChatChannel> // owner → owner-membership written too
     get(id): Promise<ChatChannel | undefined>
     find(opts?: { filter?, limit?, offset? }): Promise<ChatChannel[]>
     update(id, patch: { name?, metadata? }): Promise<ChatChannel>
-    delete(id): Promise<void>   // cascades the channel's memberships + messages
+    delete(id): Promise<void>   // cascades memberships + messages + parts + resources (owned docs deleted)
   }
 
   members: {

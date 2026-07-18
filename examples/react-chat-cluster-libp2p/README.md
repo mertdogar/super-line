@@ -59,9 +59,10 @@ adapter: await createLibp2pAdapter({ identity: myKey, listen: [`/ip4/0.0.0.0/tcp
   broadcast, the `presence` publish) as they cross nodes over the mesh in real time;
 - the **contract** explorer and a per-connection drawer.
 
-The nodes run with `inspector: true`, and Caddy pins `/inspect` to **node-1**, so node-1's
-connections show their live `ctx` (the chat `name`) while node-2's show the cross-node
-`ctxAvailable: false` boundary — node-local `ctx` never leaves its node.
+The nodes run with `plugins: [inspector()]` (from `@super-line/plugin-inspector`), and Caddy pins
+`/inspect` to **node-1**, so node-1's connections show their live `ctx` (the chat `name`) while
+node-2's show the cross-node `ctxAvailable: false` boundary — node-local `ctx` never leaves its
+node.
 
 > The inspector channel is **read-only but unauthenticated** (dev/trusted-network only). The
 > inspector rides the WebSocket, not the adapter, so it works identically over libp2p.

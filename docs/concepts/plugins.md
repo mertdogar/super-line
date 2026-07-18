@@ -75,7 +75,7 @@ A library plugin ships alongside a [surface](/how-to/composition). Type the plug
 
 ### Persisted state
 
-A plugin that needs durable state declares **collections** on its contract fragment (the contract-time half) — validated on every write like any other collection — and may contribute deny-by-default `policies`, merged into the server's. There is no separate plugin storage seam: a plugin's state is just collections that happen to belong to the plugin.
+A plugin that needs durable state declares **collections** on its contract fragment (the contract-time half) — validated on every write like any other collection — and may contribute deny-by-default `policies`, merged into the server's. Those contributed policies aren't limited to the RLS-filter shape: a plugin can own a **CRDT** collection's guard-shaped `read`/`write` just as well (boolean, not a filter — the collection is opened by id, not queried), same deny-by-default rule. `@super-line/plugin-chat`'s channel resources are the shipped example — registering a resource kind contributes the membership-gated CRDT policy for that collection. There is no separate plugin storage seam: a plugin's state is just collections that happen to belong to the plugin.
 
 ### Plugin-owned connections
 
@@ -121,7 +121,7 @@ srv.implement({
 The type system holds both ends honest: forgetting the plugin (while its surface is merged) is a compile error — `implement` still requires the key; double-implementing it is a compile error too, backed by a runtime throw naming the key as the floor. Handling a key the contract never merged throws at construction ("did you forget to merge its surface?"). That is the sense in which **a plugin is a merge into the contract** — not a side-registry, but part of the one materialized definition both ends import. See [The contract](/concepts/the-contract).
 
 ::: tip Two full contract-fragment plugins ship today
-[`@super-line/plugin-auth`](/how-to/plugin-auth) merges identity (users/sessions collections + `signIn`/`signUp`/… requests) and [`@super-line/plugin-chat`](/how-to/plugin-chat) merges a whole chat model (channels/memberships/messages/messageParts collections + 16 mutation requests). plugin-chat is the reference for the **requests-first plugin idiom**: its collections are client-**read-only** (RLS `read`, `write` denied), and every mutation flows through a server-authoritative handler wrapped in a before/after **domain hook** a host can't bypass — the trade-off recorded in [ADR-0010](https://github.com/mertdogar/super-line/blob/main/docs/adr/0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md).
+[`@super-line/plugin-auth`](/how-to/plugin-auth) merges identity (users/sessions collections + `signIn`/`signUp`/… requests) and [`@super-line/plugin-chat`](/how-to/plugin-chat) merges a whole chat model (six collections — channels/memberships/messages/messageParts/resources/resourcePresence — plus 20 mutation requests). plugin-chat is the reference for the **requests-first plugin idiom**: its collections are client-**read-only** (RLS `read`, `write` denied), and every mutation flows through a server-authoritative handler wrapped in a before/after **domain hook** a host can't bypass — the trade-off recorded in [ADR-0010](https://github.com/mertdogar/super-line/blob/main/docs/adr/0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md).
 :::
 
 ## The client half

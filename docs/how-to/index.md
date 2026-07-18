@@ -26,8 +26,13 @@ The pluggable client↔server wire. Pick one, then wire it on both ends.
 Authorize, extend, and observe the server-authoritative core.
 
 - [Roles & auth](/how-to/roles-auth) — freeze a role at connect with `authenticate(handshake)`.
+- [Connection env](/how-to/connection-env) — vend typed, server-owned per-connection state the client reads live.
 - [Plugin auth](/how-to/plugin-auth) — drop in first-party sessions, API keys, and JWT via `@super-line/plugin-auth`.
 - [Chat backbone](/how-to/plugin-chat) — add channels, membership control, and messages via `@super-line/plugin-chat`.
+- [Chat streaming](/how-to/chat-streaming) — store an agent's whole turn as typed parts that stream live and survive reloads.
+- [Chat bots](/how-to/chat-bots) — run an LLM as a regular authenticated user over its own connection.
+- [Chat resources](/how-to/chat-resources) — attach your CRDT documents to channels with membership-gated access.
+- [Chat headless](/how-to/chat-headless) — drive a channel from scripts over a stdin/stdout line protocol.
 - [Middleware & lifecycle](/how-to/middleware-lifecycle) — hook connect, disconnect, and per-message handling.
 - [Errors](/how-to/errors) — throw and handle `SuperLineError` across the wire.
 - [Introspection & presence](/how-to/introspection-and-presence) — inspect topology, connections, and who's online.

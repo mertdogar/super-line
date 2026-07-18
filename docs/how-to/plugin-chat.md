@@ -68,7 +68,7 @@ text-join only fits `z.string()`. See [Stream an agent's turn](/how-to/chat-stre
 ### 2 · Server
 
 `chat({ contract, hooks? })` returns `chatKit`. Register `chatKit.plugin` — it ships the row policies
-(read = membership-scoped RLS; write = deny, so collections are a read-only sync surface) and the 16
+(read = membership-scoped RLS; write = deny, so collections are a read-only sync surface) and the 20
 request handlers. Everything else is subtracted from your `implement()`.
 
 ```ts
@@ -151,10 +151,11 @@ does not disconnect but stops the ex-member from receiving the channel's traffic
 
 ## Server-side management — the imperative `chatKit`
 
-`chatKit` exposes an imperative surface for server code — channels, members, and messages — running through
-the same hooked domain cores (with `initiator.kind === 'server'`), so a server write trips the same hooks as
-a client one. It's live only **after** you pass `chatKit.plugin` to `createSuperLineServer` (it captures the
-running server's co-writer at setup); call it before that and it throws with guidance.
+`chatKit` exposes an imperative surface for server code — channels, members, messages, and channel
+resources — running through the same hooked domain cores (with `initiator.kind === 'server'`), so a server
+write trips the same hooks as a client one. It's live only **after** you pass `chatKit.plugin` to
+`createSuperLineServer` (it captures the running server's co-writer at setup); call it before that and it
+throws with guidance.
 
 ```ts
 // chatKit.channels
@@ -162,7 +163,7 @@ chatKit.channels.create({ name, visibility?, owner?, metadata? }) // owner → o
 chatKit.channels.get(id)                                          // → ChatChannel | undefined
 chatKit.channels.find({ filter?, limit?, offset? })              // → ChatChannel[]
 chatKit.channels.update(id, { name?, metadata? })
-chatKit.channels.delete(id)                                       // cascades memberships + messages + parts
+chatKit.channels.delete(id)                                       // cascades memberships + messages + parts + resources (owned docs deleted)
 
 // chatKit.members
 chatKit.members.add(channelId, userId, { role?, metadata? })
@@ -181,6 +182,12 @@ chatKit.messages.stream({ channelId, authorId, metadata? })      // → ChatStre
 chatKit.messages.abort(id, error?)                               // runtime kill-switch
 chatKit.messages.partsOf(messageId)                             // idx-ordered parts
 chatKit.messages.sweepStale({ olderThanMs })                    // repair crashed-node orphans
+
+// chatKit.resources — see /how-to/chat-resources for the full model
+chatKit.resources.create({ channelId, kind, title?, id?, params? }) // create-or-attach → ChatResource
+chatKit.resources.detach(channelId, kind, docId)                  // → ChatResource; owned kinds delete the doc too
+chatKit.resources.of(channelId)                                   // → ChatResource[] — the channel's registry rows
+chatKit.resources.sweepPresence({ olderThanMs })                 // reap stale who's-open presence rows, → count
 ```
 
 A quick tour — create a private channel, staff it, post to it:
@@ -194,6 +201,21 @@ await chatKit.messages.send({ channelId: ops.id, authorId: botId, content: 'depl
 `messages.send` requires the `authorId` to already be a **member** — provision agents (a passwordless
 user + API key) and add them to the channel first. That's the foundation the
 [AI-bot guide](/how-to/chat-bots) builds on.
+
+`chatKit.resources` is server-initiated the same way: no membership check and no resource card in the
+feed. [`examples/chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor)
+uses `of` + `create` to auto-seed every channel with a canvas and a doc as soon as it appears:
+
+```ts
+const existing = await chatKit.resources.of(channelId)
+for (const kind of ['canvas', 'doc'] as const) {
+  if (!existing.some((r) => r.kind === kind))
+    await chatKit.resources.create({ channelId, kind, title: kind === 'canvas' ? 'Canvas' : 'Doc' })
+}
+```
+
+See [Attach channel resources](/how-to/chat-resources) for the registry model, lifecycles
+(`owned` / `linked`), and the membership-gated policies registering a kind contributes.
 
 ## Hooks — the one extension point
 
@@ -213,7 +235,9 @@ hooks: {
 Hookable operations: `createChannel` · `updateChannel` · `deleteChannel` · `joinChannel` ·
 `leaveChannel` · `addMember` · `removeMember` · `setMemberRole` · `sendMessage` · `editMessage` ·
 `deleteMessage` · `startMessage` (gates who may open a stream) · `finalizeMessage` (fires on every
-settle — the moderation/audit point for streamed turns). Stream **appends** are hook-free by design.
+settle — the moderation/audit point for streamed turns) · `createResource` · `detachResource` ·
+`writeResource` (the content-moderation point for the acked doc-write path). Stream **appends** are
+hook-free by design.
 
 ## Where to go next
 

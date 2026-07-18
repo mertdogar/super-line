@@ -210,6 +210,16 @@ export default defineConfig({
         },
         { text: 'Packages', items: typedocSidebar },
       ],
+      // ── Examples — the runnable-app catalog, plus its deep-dive pages ─────
+      '/examples/': [
+        {
+          text: 'Examples',
+          items: [
+            { text: 'The catalog', link: '/examples/' },
+            { text: 'chat-supervisor · terminal cockpit', link: '/examples/chat-supervisor-tui' },
+          ],
+        },
+      ],
     },
     search: { provider: 'local' },
     socialLinks: [{ icon: 'github', link: 'https://github.com/mertdogar/super-line' }],

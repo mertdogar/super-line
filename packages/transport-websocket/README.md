@@ -42,9 +42,12 @@ const client = createSuperLineClient(api, {
   Each accepted socket becomes a `RawConn`.
 - **Client** — dials one server URL per `connect`, sending handshake params as query string. Uses the
   global `WebSocket` (browser, or Node 22+); pass `WebSocket` to override.
-- **Inspector** — with `inspector: true` the server negotiates the `superline.inspector.v1`
-  subprotocol so the [Control Center](https://www.npmjs.com/package/@super-line/control-center) can
-  connect a read-only channel. Dev/trusted only — it short-circuits `authenticate`.
+- **Reserved connections** — when a server plugin declares a reserved connection class (e.g.
+  [`@super-line/plugin-inspector`](https://www.npmjs.com/package/@super-line/plugin-inspector)'s
+  `superline.inspector.v1` subprotocol, which the
+  [Control Center](https://www.npmjs.com/package/@super-line/control-center) attaches over), the
+  transport negotiates that subprotocol and short-circuits `authenticate` for those connections.
+  Nothing is advertised unless a plugin declares it.
 
 ## Options
 
@@ -55,7 +58,6 @@ const client = createSuperLineClient(api, {
 | `server` | The `http.Server` to attach to (compose with Express/Fastify/Hono). |
 | `path` | Only handle upgrades for this pathname; other upgrades are left untouched. |
 | `backpressure` | Guard against slow consumers — see below. |
-| `inspector` | `true` to accept Control Center clients via the `superline.inspector.v1` subprotocol (dev/trusted only). |
 
 `webSocketClientTransport(opts)`:
 

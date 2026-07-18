@@ -21,7 +21,7 @@ const server = http.createServer()
 const backend = sqliteCollections({ file: DB_FILE, collections: chat.collections })
 
 // plugin-auth owns identity (users/credentials/sessions + the guest role). plugin-chat owns the whole
-// chat model: its policies (read-RLS, write-deny) and 11 request handlers ship INSIDE chatKit.plugin —
+// chat model: its policies (read-RLS, write-deny) and 20 request handlers ship INSIDE chatKit.plugin —
 // this file has NO hand-rolled channel/message policies or handlers anymore.
 const authKit = auth({ contract: chat, collections: backend, defaultRoles: ['user'] })
 const chatKit = chatKitFactory({

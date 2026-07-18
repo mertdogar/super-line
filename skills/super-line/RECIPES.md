@@ -220,6 +220,37 @@ srv.implement({
 onConnection: (conn) => { conn.data.lastSeenMsgId = 0 }
 ```
 
+## Show the signed-in user's entitlements live (`env`)
+
+`env` (ADR-0012) is the client-visible sibling of `conn.data` — typed, per-connection, mutable, but PUSHED to the client and never persisted. Use it to hand a connection working credentials/config; the client's OWN code wires them into outbound calls, never an LLM.
+
+```ts
+// contract: roles.user.env = z.object({ plan: z.enum(['free', 'pro']), apiKey: z.string() })
+
+// seed the INITIAL value from authenticate (env is optional; omit/undefined = none)
+authenticate: async (h) => {
+  const user = await lookupUser(h.query.uid)
+  return { role: 'user' as const, ctx: { uid: user.id }, env: { plan: user.plan, apiKey: user.apiKey } }
+}
+
+// update it LIVE later (plan change, key rotation) — node-local or cross-node, any of the user's devices
+conn.setEnv({ plan: 'pro', apiKey })                    // this connection only
+srv.toUser(userId).setEnv({ plan: 'pro', apiKey })       // every device, any node
+```
+
+```ts
+// client — a reactive handle; wire it into your own code, never expose it to an LLM
+await client.env.ready
+const { plan, apiKey } = client.env.current!
+client.env.subscribe((env) => reconfigureBilling(env.plan))
+
+// React
+const env = useEnv()   // EnvOf<C,R> | null — null until the first push / for a role with no env
+```
+
+- Masked by default in the Control Center (`•••` per key, shape still shown) — allow-list safe keys with `inspector({ revealEnvKeys: ['plan'] })`.
+- `@super-line/plugin-auth`: `auth({ resolveEnv: (ctx) => ({ plan, apiKey }) })` seeds it at connect from the resolved identity; `authKit.pushEnv(userId, env)` updates it later.
+
 ## Presence via a topic
 
 ```ts

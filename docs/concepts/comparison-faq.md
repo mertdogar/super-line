@@ -14,6 +14,7 @@ Where super-line sits relative to the tools it's most often weighed against, and
 | Topics (pub/sub) | ✅ | ⚠️ via rooms | subscriptions | ❌ |
 | Typed persisted collections | ✅ | ❌ | ❌ | ❌ |
 | Inter-server messaging | ✅ | ✅ | ❌ | ❌ |
+| Domain plugins on the contract (auth · chat · inspector) | ✅ | ❌ | ⚠️ routers only | ❌ |
 | Multi-node | ✅ adapter | ✅ adapter | ❌ | ❌ |
 | Zero codegen | ✅ | ✅ | ✅ | n/a |
 
@@ -24,6 +25,10 @@ Socket.IO splits its types into `ClientToServerEvents` / `ServerToClientEvents` 
 ### Why not tRPC?
 
 tRPC is excellent for request/response (and SSE subscriptions), but it doesn't model rooms or client-driven pub/sub topics, and it's not built for bidirectional realtime. super-line is purpose-built for it while keeping tRPC-grade end-to-end types.
+
+### Why not a batteries-included backend (Firebase, Supabase)?
+
+Those platforms hand you hosted batteries — auth, a database, realtime channels — but the contract is theirs: loosely-typed rows and payloads, client-driven writes you claw back with a rules language, and your domain surface living somewhere else entirely. super-line's batteries are **plugins that merge into *your* contract**: [`plugin-auth`](/how-to/plugin-auth) (sessions, API keys, JWT), [`plugin-chat`](/how-to/plugin-chat) (channels, streaming AI messages, shared channel resources), and the [Control Center inspector](/how-to/control-center) each contribute their collections and requests to the same typed, [server-authoritative](/concepts/server-authoritative) surface as your own handlers — self-hosted, one connection, no second SDK. See [the plugin model](/concepts/plugins) and the [plugin catalog](/plugins/).
 
 ### Why not a distributed event emitter?
 
@@ -57,4 +62,4 @@ The repo ships an [agent skill](https://github.com/mertdogar/super-line/tree/mai
 
 ### Is it stable?
 
-Pre-1.0, but broad. Implemented: role-scoped contracts, request/response, events, rooms, topics, inter-server messaging, auth, reconnect, middleware, plugins (inspector + auth), typed collections (last-writer-wins rows and CRDT documents) with the TanStack DB client engine, pluggable client↔server transports (WebSocket, HTTP, libp2p, loopback), pluggable server↔server adapters (in-memory, Redis, libp2p, RabbitMQ, ZeroMQ), and React hooks. Not yet: fire-and-forget signals, mutable per-connection state, a NATS adapter, session resume/replay, and parameterized-topic type inference.
+Pre-1.0, but broad. Implemented: role-scoped contracts, request/response, events, rooms, topics, inter-server messaging, auth, reconnect, middleware, [connection `env`](/how-to/connection-env) (server-vended, client-visible per-connection state), plugins (inspector + auth + chat), typed collections (last-writer-wins rows and CRDT documents) with the TanStack DB client engine, pluggable client↔server transports (WebSocket, HTTP, libp2p, loopback), pluggable server↔server adapters (in-memory, Redis, libp2p, RabbitMQ, ZeroMQ), and React hooks. Not yet: fire-and-forget signals, a NATS adapter, session resume/replay, and parameterized-topic type inference.

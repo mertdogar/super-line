@@ -31,7 +31,7 @@ A **channel resource** is one [CRDT document](/collections/crdt-documents) plus 
 | Writer | Door | Why |
 | --- | --- | --- |
 | the **human** | `client.collection(n).open(id)` → a `DocHandle` | optimistic, live; a rejected write silently resyncs |
-| the **agent** | `chat.writeResource(...)` (the [`write_resource`](/how-to/chat-resources#4-agent-writes-the-acked-path) tool) | **acked** — the write is applied server-side and returns the new snapshot, or a `VALIDATION` error the model can read and correct |
+| the **agent** | `chat.writeResource(...)` (the [`write_resource`](/how-to/chat-resources#_4-·-agent-writes-the-acked-path) tool) | **acked** — the write is applied server-side and returns the new snapshot, or a `VALIDATION` error the model can read and correct |
 
 Both go through the **same membership gate**: the agent is a real channel member (a [provisioned bot](/how-to/chat-bots)), so its writes are authorized exactly like a human's. That's the whole idea — the agent isn't a privileged co-writer bolted onto the server; it's a participant with the same access as everyone else in the channel.
 
@@ -61,7 +61,7 @@ export const chat = defineContract({
 Registering the kind on the chat kit is what makes it channel-native — one act, three effects (`createResource` enabled, membership-gated policies contributed, delete-cascade enrolled). You'll wire this into `chatKit` in the next step.
 
 ::: tip `owned` vs `linked`
-This canvas is **`owned`** (the default): chat mints its id and deletes it when the channel goes. Use **`linked`** instead when the document is content that outlives the channel and may attach to several — a design scene, a shared doc. See [the lifecycle table](/how-to/chat-resources#2-register-the-kinds-one-act-three-effects).
+This canvas is **`owned`** (the default): chat mints its id and deletes it when the channel goes. Use **`linked`** instead when the document is content that outlives the channel and may attach to several — a design scene, a shared doc. See [the lifecycle table](/how-to/chat-resources#_2-·-register-the-kinds-one-act-three-effects).
 :::
 
 ## 3. Stand up the server and provision the bot
@@ -136,7 +136,7 @@ onChatMessage(botChat, async ({ channelId, message }) => {
 ```
 
 ::: tip Why `writeResource` and not the raw co-writer
-super-line also has a *server-side* co-writer (`srv.collection(n).open(id)`) — trusted, unvalidated, off the membership model. `writeResource` is the other choice: the agent acts as an ordinary **member**, its writes are membership-checked and best-effort validated, and it gets an honest `VALIDATION` error instead of a silent resync. For an agent that should live *inside* the channel like any user, reach for `writeResource`. See the [two-doors comparison](/how-to/chat-resources#4-agent-writes-the-acked-path).
+super-line also has a *server-side* co-writer (`srv.collection(n).open(id)`) — trusted, unvalidated, off the membership model. `writeResource` is the other choice: the agent acts as an ordinary **member**, its writes are membership-checked and best-effort validated, and it gets an honest `VALIDATION` error instead of a silent resync. For an agent that should live *inside* the channel like any user, reach for `writeResource`. See the [two-doors comparison](/how-to/chat-resources#_4-·-agent-writes-the-acked-path).
 :::
 
 ## 4. The human creates the canvas and edits it live

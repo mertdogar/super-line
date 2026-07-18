@@ -53,16 +53,6 @@ pnpm --filter @super-line/example-chat-resources start
 
 Demonstrates: [channel resources](/how-to/chat-resources), [CRDT document collections](/collections/crdt-documents), the `owned`/`linked` lifecycle, the acked agent-write path.
 
-## store-sync-json — a collaborative JSON editor (CRDT)
-
-A React app over a [CRDT document collection](/collections/crdt-documents) (`@super-line/collections-crdt-memory`, Yjs-backed): a [`@visual-json`](https://visual-json.dev) editor bound to one shared document via [`useDoc`](/how-to/react). Open two tabs (or add `?name=bob`), edit any field, and watch edits **merge** live — concurrent edits to different fields both survive, unlike last-writer-wins. **Server nudge** triggers a server co-write.
-
-```bash
-pnpm --filter @super-line/example-store-sync-json dev   # http://localhost:5273
-```
-
-Demonstrates: [CRDT document collections](/collections/crdt-documents), [React hooks](/how-to/react).
-
 ## synced-canvas — roll-your-own CRDT (raw relay)
 
 Two browser apps demonstrating **synced JSON state over super-line, backed by a CRDT** — a collaborative canvas where multiple tabs *and the server* co-edit one document, persisted server-side. super-line stays CRDT-agnostic: it relays opaque base64 update bytes per room and never parses the doc. A debug side panel mirrors the live state and logs each patch tagged by origin (`local` / `peer` / `server`), so you can watch the server's edits land. Built once with [Yjs](https://github.com/yjs/yjs) and once with [Automerge](https://automerge.org) — open either in two windows (run one at a time).

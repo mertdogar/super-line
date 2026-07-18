@@ -28,10 +28,11 @@ One server mounts all three **server** transports:
 ```ts
 createSuperLineServer(chat, {
   transports: [
-    webSocketServerTransport({ server, inspector: true }), // WS  — http upgrade channel
+    webSocketServerTransport({ server }),                   // WS  — http upgrade channel
     httpServerTransport({ server }),                        // HTTP — http request channel (same server)
     libp2pServerTransport({ node }),                        // libp2p — a started libp2p node
   ],
+  plugins: [inspector()],                                   // from @super-line/plugin-inspector
   authenticate: (h) => ({ role: 'user', ctx: { name: h.query.name, via: h.transport } }),
 })
 ```

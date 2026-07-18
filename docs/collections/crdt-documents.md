@@ -45,8 +45,8 @@ const srv = createSuperLineServer(contract, {
   crdtCollections: crdtMemoryCollections(),        // the CRDT backend
   policies: {
     scenes: {                                       // guard-shaped, deny-by-default
-      read:  (principal, id, snapshot) => snapshot?.ownerId === principal,
-      write: (principal, id) => true,
+      read:  (principal, id, snapshot, ctx) => snapshot?.ownerId === principal,
+      write: (principal, id, ctx) => true,
     },
   },
 })
@@ -74,6 +74,21 @@ doc.subscribe((snapshot) => { /* re-render */ })
 doc.update({ title: 'hello' })                      // merges + syncs to every open handle
 ```
 
+### Attributing writes with `origin`
+
+Every write is tagged with an `origin` — it's how the client echo-breaks its own writes on the merge feed, and how the Control Center's live feed attributes a change to whoever made it. `crdtCollectionsClient({ origin })` sets the engine-wide default (falling back to a random id); pass `{ origin }` to a single `open()` call to tag just that handle — handy when one client hosts more than one named writer, like a human tab alongside a co-located agent:
+
+```ts
+const client = createSuperLineClient(contract, {
+  transport, role: 'user',
+  crdtCollections: crdtCollectionsClient({ origin: 'agent:planner' }), // engine-wide default
+})
+
+const doc = client.collection('scenes').open('board', { origin: 'agent:planner:sub-task' }) // per-open override
+```
+
+`origin` is client-claimed and untrusted — policies never see it. It's for echo-break and attribution only.
+
 ### React
 
 ```tsx
@@ -86,8 +101,7 @@ Mount [`inspector()`](/how-to/control-center) and every document open/write/chan
 
 ## Run it
 
-- [`examples/store-sync-json`](https://github.com/mertdogar/super-line/tree/main/examples/store-sync-json) — a collaborative JSON editor over `@super-line/collections-crdt-memory`: edit any field in two tabs and watch edits **merge** (concurrent edits to different fields both survive).
-- [`examples/ai-canvas`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas) — a collaborative canvas with a **server-side AI agent** as a co-writer: `srv.collection('scene').open(id)` reads the live board and drives it while you keep editing; the edits merge.
+- [`examples/ai-canvas`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas) — a collaborative canvas over `@super-line/collections-crdt-memory` with a **server-side AI agent** as a co-writer: `srv.collection('scene').open(id)` reads the live board and drives it while you keep editing in two tabs; the edits **merge** (concurrent edits to different fields both survive).
 - [`examples/ai-canvas-pglite`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas-pglite) — the same board re-clustered across two nodes on `@super-line/collections-crdt-pglite` (central Postgres + Electric), validate-before-commit at the ingress node.
 - [`examples/chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor) — a CRDT document attached to a **chat channel** as a [channel resource](/how-to/chat-resources): a human and a Mastra agent co-edit one canvas, the agent writing through the chat plugin's acked `write_resource` path instead of a raw co-writer.
 

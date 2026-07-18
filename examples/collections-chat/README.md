@@ -79,7 +79,7 @@ and the **live feed** to watch the chat requests + `cchg` frames as you (and the
 - **Identity** — plugin-auth. Sign-up/login, sessions, the `users` directory; `identify()` returns your
   `userId`, the principal plugin-chat's read policies key on.
 - **The chat model** — plugin-chat. Its `chatKit.plugin` ships the row policies (read = membership-scoped
-  RLS; write = deny) and the 11 request handlers. This app has **no** channel/message policies or handlers
+  RLS; write = deny) and the 20 request handlers. This app has **no** channel/message policies or handlers
   of its own — see [`src/server.ts`](src/server.ts).
 - **Every mutation is a request**, not an optimistic row-write ([ADR-0010](../../docs/adr/0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md)).
   The server owns ids and timestamps, and a `sendMessage` **hook** trims + rejects empty bodies for humans

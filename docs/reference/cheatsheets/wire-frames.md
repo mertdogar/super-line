@@ -30,6 +30,7 @@ The frame types super-line puts on the client↔server wire, each tagged by a sh
 | `res` | response | a request's typed reply |
 | `err` | error | a request's [`SuperLineError`](/reference/cheatsheets/errors) |
 | `evt` | event | a pushed [event](/how-to/events-rooms) |
+| `env` | env push | the connection's current [`env`](/how-to/connection-env), full-value replace; seeded at connect, re-sent on every `setEnv` |
 | `pub` | publish | a [topic](/how-to/topics) publish to subscribers |
 | `sreq` | server-request | the server calling the client, awaiting a reply |
 | `pong` | keepalive | reply to `ping` |

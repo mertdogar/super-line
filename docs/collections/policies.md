@@ -16,9 +16,12 @@ policies: {
   messages: {
     // `read` returns a filter ANDed into every snapshot AND every live change for this caller:
     read: (principal, ctx) => isIn('channelId', ctx.channels), // you only ever see your channels
-    // `write` guards each row op:
-    write: (principal, op, next, prev) =>
-      op === 'delete' ? prev?.authorId === principal : next?.authorId === principal, // author-only
+    // `write` guards each row op — `ctx` carries the same principal-side state as `read`, so a
+    // membership check here can't be spoofed by a client claiming a `channelId` it isn't in:
+    write: (principal, op, next, prev, ctx) =>
+      op === 'delete'
+        ? prev?.authorId === principal
+        : next?.authorId === principal && ctx.channels.includes(next.channelId), // author-only, and only in channels you're in
   },
 }
 ```
@@ -29,7 +32,7 @@ policies: {
 
 ### `write` — a per-op guard
 
-`write(principal, op, next, prev)` returns a boolean for each `insert`/`update`/`delete`. `next` is the incoming row (absent on delete), `prev` the existing one (absent on insert) — enough to enforce author-only edits, immutable fields, or ownership transfer rules.
+`write(principal, op, next, prev, ctx)` returns a boolean for each `insert`/`update`/`delete`. `next` is the incoming row (absent on delete), `prev` the existing one (absent on insert), and `ctx` is the same per-connection context `read` sees — enough to enforce author-only edits, immutable fields, ownership transfer rules, or (as above) a membership check against principal-side state.
 
 ::: warning Policy staleness
 `read` is evaluated **at subscribe time**. Principal-side state captured there (e.g. the caller's channel list) goes stale until the client resubscribes; row-side predicates (`channelId in …`) re-evaluate on every change naturally. If a caller's visibility changes, have them resubscribe.
@@ -46,13 +49,13 @@ A [CRDT document collection](/collections/crdt-documents) is **opened by id, not
 ```ts
 policies: {
   scenes: {
-    read:  (principal, id, snapshot) => snapshot?.ownerId === principal, // may inspect the snapshot
-    write: (principal, id) => true,
+    read:  (principal, id, snapshot, ctx) => snapshot?.ownerId === principal, // may inspect the snapshot
+    write: (principal, id, ctx) => true,
   },
 }
 ```
 
-`read(principal, id, snapshot?)` decides whether the caller may open the document (and may inspect the current snapshot to decide); `write(principal, id)` decides whether they may write to it. There's no per-row filter because a document is opened whole. Creation is [server-authoritative](/collections/crdt-documents#server-a-backend-a-guard-and-create-the-doc) — clients only open.
+`read(principal, id, snapshot, ctx)` decides whether the caller may open the document (and may inspect the current snapshot to decide); `write(principal, id, ctx)` decides whether they may write to it. There's no per-row filter because a document is opened whole. Creation is [server-authoritative](/collections/crdt-documents#server-a-backend-a-guard-and-create-the-doc) — clients only open.
 
 ## Advisory foreign keys
 

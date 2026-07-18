@@ -98,8 +98,8 @@ const srv = createSuperLineServer(board, {
   crdtCollections: crdtMemoryCollections(), // the CRDT backend
   policies: {
     scenes: {
-      read: (_principal, _id, _snapshot) => true, // this open demo lets everyone read…
-      write: (_principal, _id) => true, // …and write the shared board
+      read: (_principal, _id, _snapshot, _ctx) => true, // this open demo lets everyone read…
+      write: (_principal, _id, _ctx) => true, // …and write the shared board
     },
   },
 })
@@ -213,6 +213,5 @@ And the guard is **deny-by-default** — this demo opened `read`/`write` to ever
 - **[Tutorial 4 · Assemble a chat backbone →](/tutorials/chat-backbone)** — merge the auth and chat plugins into one contract and watch two users talk over a model you never wrote a policy or handler for.
 - [Collections overview](/collections/) — rows and documents side by side, and when to reach for each.
 - [CRDT document collections](/collections/crdt-documents) — validate-before-commit, schema tolerance, and the server co-writer in depth.
-- [`examples/store-sync-json`](https://github.com/mertdogar/super-line/tree/main/examples/store-sync-json) — this tutorial as a real browser app: edit arbitrary JSON in two tabs and watch it merge live.
-- [`examples/ai-canvas`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas) — a collaborative canvas with a **server-side AI agent** as a co-writer (`srv.collection('scene').open(id)`): it reads the live board and drives it while you keep editing — and the edits merge.
+- [`examples/ai-canvas`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas) — this tutorial's ideas as a real browser app: a collaborative canvas with a **server-side AI agent** as a co-writer (`srv.collection('scene').open(id)`) — open two tabs, keep editing while the agent drives, and the edits merge.
 - [API reference](/reference/) — every export, option, and type.

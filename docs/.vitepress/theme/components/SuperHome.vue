@@ -395,6 +395,48 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
+    <!-- ░░ CHAT-SUPERVISOR — THREE FACES, ONE SERVER ░░ -->
+    <section class="sl-sec">
+      <div class="sl-shell">
+        <div class="sl-sec__head reveal">
+          <p class="sl-kicker"><span class="sl-new">New</span> Channel resources</p>
+          <h2>Three faces. One server.</h2>
+          <p>
+            In <code>examples/chat-supervisor</code>, a human and a Mastra
+            supervisor agent co-edit one CRDT canvas through a chat channel —
+            in the browser, in a full terminal cockpit, and as a headless JSONL
+            line protocol a script can drive.
+            <span class="sl-hl">Same contract, same hooks — three
+            renderers.</span>
+          </p>
+        </div>
+
+        <div class="sl-tui reveal">
+          <div class="sl-win">
+            <div class="sl-win__bar">
+              <span class="sl-win__dot" /><span class="sl-win__dot" /><span class="sl-win__dot" />
+              <span class="sl-win__name">chat-supervisor · terminal cockpit</span>
+            </div>
+            <img
+              class="sl-tui__gif"
+              :src="withBase('/chat-supervisor-tui.gif')"
+              loading="lazy"
+              alt="Terminal recording of the chat-supervisor cockpit: in the chat pane the supervisor agent streams a delegation card with reasoning and tool calls, while the sticky notes it creates land on the canvas pane beside it and the human drags them from the keyboard"
+            />
+          </div>
+        </div>
+
+        <p class="sl-real sl-chat-real">
+          The cockpit mounts the <em>same</em> React hooks the web app uses —
+          <code>useMessages</code>, <code>useChannelResources</code>, the live
+          doc handle — under a terminal renderer, and
+          <code>pnpm tui --json</code> strips the UI entirely.
+          <a :href="withBase('/examples/#chat-supervisor-a-human-and-an-ai-agent-co-edit-a-canvas')">The example →</a> ·
+          <a :href="withBase('/examples/chat-supervisor-tui')">The cockpit →</a>
+        </p>
+      </div>
+    </section>
+
     <!-- ░░ SAME APP, ANY WIRE (TRANSPORTS) ░░ -->
     <section class="sl-sec sl-sec--alt">
       <div class="sl-shell">
@@ -565,8 +607,8 @@ onBeforeUnmount(() => {
         <div class="sl-split__copy reveal">
           <h2>See the whole network.</h2>
           <p>
-            Flip on <code>inspector: true</code> and point Control Center at any
-            node. It draws your live topology, every connection with its
+            Mount the <code>inspector()</code> plugin and point Control Center at
+            any node. It draws your live topology, every connection with its
             <code>ctx</code>, the running contract, and a streaming event feed —
             cluster-wide, with no instrumentation to add.
           </p>
@@ -688,9 +730,11 @@ onBeforeUnmount(() => {
           </div>
           <p class="sl-status">
             Pre-1.0 — role-scoped contracts, req/res, events, rooms, topics, the
-            cluster event bus, presence, and reconnect are implemented and tested
-            — over pluggable transports (WebSocket, HTTP, libp2p, loopback) and
-            pluggable adapters (in-memory, Redis, libp2p, RabbitMQ, ZeroMQ).
+            cluster event bus, presence, reconnect, collections (typed rows +
+            CRDT documents), and plugins (auth, chat, inspector) are implemented
+            and tested — over pluggable transports (WebSocket, HTTP, libp2p,
+            loopback) and pluggable adapters (in-memory, Redis, libp2p,
+            RabbitMQ, ZeroMQ).
           </p>
         </div>
       </div>
@@ -1356,6 +1400,16 @@ onBeforeUnmount(() => {
 }
 .sl-chat-real {
   margin-top: clamp(1.2rem, 3vw, 1.9rem);
+}
+
+/* ── chat-supervisor: the terminal cockpit ──────────────────────── */
+.sl-tui {
+  max-width: 56rem;
+  margin: clamp(1.6rem, 3.5vw, 2.4rem) auto 0;
+}
+.sl-tui__gif {
+  display: block;
+  width: 100%;
 }
 
 .sl-axes {

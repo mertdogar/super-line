@@ -13,7 +13,8 @@ defineContract(<const C>): C                 // identity; preserves literal keys
     serverToClient?: Record<string, ServerEntry>                          // event | topic | server→client request
   }
   roles: Record<string, {                    // at least one role
-    data?: Schema                            // optional: types this role's mutable conn.data
+    data?: Schema                            // optional: types this role's mutable, server-only conn.data
+    env?: Schema                             // optional: types this role's server-vended, CLIENT-VISIBLE conn.env (ADR-0012)
     clientToServer?: Record<string, { input: Schema; output: Schema }>
     serverToClient?: Record<string, ServerEntry>
   }>
@@ -51,7 +52,7 @@ interface Adapter {                          // cross-node fan-out seam
 // contract type: Contract, Directional, RoleBlock, RequestDef, ServerMessageDef, ServerRequestDef, ServerEntry, Schema
 // surface helpers: RoleOf<C>, Requests<C,R>, ServerMessages<C,R>, Events<C,R>, Topics<C,R>,
 //   SharedRequests<C>, RoleRequests<C,R>, SharedEvents<C>, SharedTopics<C>, RoleTopics<C,R>,
-//   ServerRequests<C,R>, SharedServerRequests<C>, DataOf<C,R>, AnyData<C>
+//   ServerRequests<C,R>, SharedServerRequests<C>, DataOf<C,R>, AnyData<C>, EnvOf<C,R>, AnyEnv<C>
 // presence: PresenceStore, ConnDescriptor, NodeStat
 // transport interfaces: RawConn, Handshake, AuthOutcome, ServerTransport, ClientTransport, PingFrame, PongFrame
 //   (the WS transport is @super-line/transport-websocket; HTTP/SSE + libp2p transports are separate packages)
@@ -65,13 +66,14 @@ interface Adapter {                          // cross-node fan-out seam
 createSuperLineServer<C, A extends AuthResult<C>>(contract: C, opts: SuperLineServerOptions<C, A>): SuperLineServer<C, A>
 // A is inferred from authenticate's return — the discriminated { role, ctx } union.
 
-type AuthResult<C> = { [R in keyof C['roles']]: { role: R; ctx: unknown } }[keyof C['roles']]
+type AuthResult<C> = { [R in keyof C['roles']]: { role: R; ctx: unknown; env?: EnvOf<C, R> } }[keyof C['roles']]
 
 interface SuperLineServerOptions<C, A> {
   transports: ServerTransport[]               // REQUIRED. e.g. [webSocketServerTransport({ server })] from @super-line/transport-websocket
   serializer?: Serializer                     // default jsonSerializer; MUST match the client
   adapter?: Adapter                           // default: per-server in-memory; use redis for multi-node
-  authenticate: (h: Handshake) => A | Promise<A>   // REQUIRED. Return { role, ctx }; throw -> 401. h = { transport, headers, query, peer?, raw }
+  authenticate: (h: Handshake) => A | Promise<A>   // REQUIRED. Return { role, ctx, env? }; throw -> 401. h = { transport, headers, query, peer?, raw }
+  // env (ADR-0012, optional) seeds the connection's client-visible conn.env before the connection is ready — see "Connection env" below
   authorizeSubscribe?: (topic, ctx, conn) => boolean | void | Promise<boolean | void> // false/throw -> deny
   use?: Middleware<A>[]                        // run before request/subscribe handlers
   onConnection?: (conn, ctx) => void           // runs just BEFORE the presence snapshot (seed conn.data here)
@@ -126,10 +128,12 @@ interface ConnTarget<C> {                                            // single, 
   emit<E extends keyof SharedEvents<C>>(event: E, data): void        // shared events only
   request<M extends keyof SharedServerRequests<C>>(name: M, input, opts?: { timeout?: number; signal?: AbortSignal }): Promise<output>
   close(): void                                                      // cross-node kick
+  setEnv(env: AnyEnv<C>): void                                       // vend/update this conn's client-visible env, cross-node (ADR-0012)
 }
 interface UserTarget<C> {                                            // 0..N devices — NO request() (ambiguous)
   emit<E extends keyof SharedEvents<C>>(event: E, data): void
   disconnect(): void
+  setEnv(env: AnyEnv<C>): void                                       // vend/update env on EVERY one of the user's conns, cross-node (ADR-0012)
 }
 // ConnDescriptor: serializable snapshot (NOT a live Conn). { id, role, nodeId, connectedAt, userId?, rooms, ...describeConn }
 // lastPongAt is node-local and NOT in the registry. Snapshot is taken at connect (seed via onConnection).
@@ -152,18 +156,20 @@ type Middleware<A> = (ctx, info: MiddlewareInfo, next: () => Promise<void>) => v
 interface MiddlewareInfo { kind: 'request' | 'subscribe'; name: string; conn: Conn }
 // call next() to proceed; throw to short-circuit (reject).
 
-class Conn<Ev, Ctx, Role, Data = unknown> {
+class Conn<Ev, Ctx, Role, Data = unknown, Env = unknown> {
   readonly id: string                          // server-assigned unique id (stable for life)
   readonly role: Role                          // this connection's role (typed literal)
   readonly ctx: Ctx
   readonly connectedAt: number                 // Date.now() at the upgrade
   lastPongAt?: number                          // last heartbeat pong (liveness) — node-local
   lastPingAt?: number                          // last heartbeat ping sent
-  data: Data                                   // mutable per-conn state, typed per role (contract `data` schema); starts {}
+  data: Data                                   // mutable, SERVER-ONLY per-conn state, typed per role (contract `data` schema); starts {}
+  env: Env                                     // server-vended, CLIENT-VISIBLE per-conn state (contract `env` schema, ADR-0012); null if the role declares none
   readonly channels: Set<string>
   send(frame): void                            // internal frame (you rarely call this)
   sendRaw(payload): void
   emit<E extends keyof Ev>(event: E, data): void   // push an event to THIS conn (node-local, role-scoped)
+  setEnv(value: Env): void                      // vend/update THIS conn's env (node-local); validates against the role's schema, pushes an `env` frame
   close(): void
   terminate(): void                            // abruptly drop the underlying transport
 }
@@ -214,6 +220,13 @@ type SuperLineClient<C, R> = {
   close(): void
   readonly connected: boolean
   readonly role: R
+  readonly env: EnvHandle<EnvOf<C, R> | null>   // server-vended, client-visible per-conn state (ADR-0012). See "Connection env" below.
+}
+
+interface EnvHandle<E> {
+  readonly current: E                // latest env pushed by the server (null until the first push / for a role with no env)
+  readonly ready: Promise<void>       // resolves after the first `env` push — await before reading `current`
+  subscribe(cb: (env: E) => void): () => void
 }
 
 interface CallOptions { timeoutMs?: number; signal?: AbortSignal }
@@ -295,9 +308,49 @@ createSuperLineHooks<C, R extends keyof C['roles']>(): {
     update: (partial) => void                              // merge keys
     delete: (path: (string | number)[]) => void            // surgical key removal
   }
+  useEnv(): EnvOf<C, R> | null   // reactive client.env.current (ADR-0012); null until the first server push / for a role with no env
 }
 ```
 Create the client once (e.g. `useState(() => createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user' }))`, `webSocketClientTransport` from `@super-line/transport-websocket`), wrap with `<Provider client={client}>`, then use the hooks inside.
+
+## Connection env (ADR-0012)
+
+`env` is a typed, per-connection, **server-owned, client-visible**, mutable, ephemeral state bag — the visibility-mirror of `conn.data` (server-only): `data` is your server-side scratch, `env` is the same but the client sees it. It exists to hand a live connection working credentials/config (an external API key, a project id) that the CLIENT's own code — never an LLM — wires into outbound calls. Never persisted; re-seeded on every reconnect.
+
+```ts
+// CONTRACT — declared per role, sibling to `data`:
+roles: {
+  user: { env: z.object({ apiKey: z.string() }), clientToServer: {…}, serverToClient: {…} },
+}
+// EnvOf<C,R> — role R's env type (its schema's output, or `null` if the role declares no `env`)
+// AnyEnv<C>  — union over every role's env
+
+// SERVER — authenticate seeds the INITIAL value (env is optional; omit/return undefined = none):
+authenticate: async (h) => ({ role: 'user', ctx, env: { apiKey: await mintKey() } })
+// AuthResult<C> = { [R]: { role: R; ctx: unknown; env?: EnvOf<C,R> } }[R] — ctx/env are one connect-time call,
+// two separate bags: ctx is frozen + server-only (authorization keys on it); env is mutable + client-visible.
+
+// updated LIVE later (rotation/re-scope) — each call validates against the role's env schema and pushes
+// a full-value `env` wire frame (last-write-wins, no client-held history):
+conn.setEnv(value)                    // node-local — THIS connection only
+srv.toConn(id).setEnv(value)          // cross-node — one connection, wherever it lives
+srv.toUser(userId).setEnv(value)      // cross-node — every one of the user's connections
+
+// CLIENT — a reactive handle, `client.env` (EnvHandle<EnvOf<C,R> | null>):
+await client.env.ready                // resolves after the first push — kills the connect-time race
+client.env.current                    // latest value (null until the first push / for a role with no env)
+client.env.subscribe((env) => { … })  // fires on every update; returns an unsubscribe fn
+
+// REACT
+const env = useEnv()                  // EnvOf<C,R> | null; reactive, re-renders on every push
+```
+
+- **Server-vended — the client cannot write it.** There is no client-side `set`; only `conn.setEnv` / `srv.toConn(id).setEnv` / `srv.toUser(uid).setEnv` push a new value.
+- **`@super-line/plugin-auth` integration:** `auth({ resolveEnv })` computes the initial `env` from the resolved `AuthContext` at connect — `resolveEnv?: (ctx: AuthContext) => AnyEnv<C> | undefined | Promise<AnyEnv<C> | undefined>` (`undefined` = none; since `authKit` owns `authenticate` on the host's behalf, this is where identity-keyed env logic lives). `authKit.pushEnv(userId, env): void` updates it live, cluster-wide, later (a key rotation/re-scope) — a thin wrapper over `srv.toUser(userId).setEnv(env)`.
+- **Never persisted.** Lives only in memory on the connection; re-seeded from `authenticate`/`resolveEnv` on reconnect. Any durable *authorization* is the host app's concern, not super-line's.
+- **Inspector: masked by default.** The Control Center's `ConnView` and its `env.set` live-feed event show `env`'s shape but mask every value to `•••` — the OPPOSITE of `ctx`/`data`'s deny-list `redact`. Allow-list the safe keys with `inspector({ revealEnvKeys: ['projectId'] })`.
+
+Code-only: wire `env` into tool implementations / outbound calls in your own code; never render or forward a raw value to an LLM. Design: `docs/adr/0012-connection-env-is-server-vended-client-visible-state.md`.
 
 ## Collections (typed rows)
 
@@ -398,12 +451,14 @@ interface AuthServerOptions<C> {
   jwt?: { secret: string; ttlMs?: number }   // enables getToken + stateless ?jwt= connect; ttl default 15 min
   sendPasswordReset?: (a: { user: AuthUser; token: string }) => void | Promise<void>
   passwordResetTtlMs?: number           // default 1 hour
+  resolveEnv?: (ctx: AuthContext) => AnyEnv<C> | undefined | Promise<AnyEnv<C> | undefined>   // ADR-0012: seeds client.env at connect from the resolved identity; undefined = none
 }
 interface AuthServer<C> {
-  authenticate: (h: Handshake) => Promise<AuthResult<C>>   // → { role, ctx: { userId, roles, sessionId } }
+  authenticate: (h: Handshake) => Promise<AuthResult<C>>   // → { role, ctx: { userId, roles, sessionId }, env? }
   identify: (conn) => string | undefined                   // principal = ctx.userId
   plugin: SuperLinePlugin                                  // runtime half: auth handlers + row policies for the identity collections
   revoke: (userId: string) => Promise<void>               // delete the user's sessions + toUser(userId).disconnect() cluster-wide
+  pushEnv: (userId: string, env: AnyEnv<C>) => void        // ADR-0012: update client.env live, cluster-wide (rotation/re-scope) — wraps srv.toUser(userId).setEnv
 }
 
 // /client
@@ -436,6 +491,7 @@ Notes:
 - **Handshake precedence in `authenticate`:** `role === 'guest'` → guest; else `params.apiKey` (`slp_…`, one fixed role, stateful + revocable); else `params.jwt` (only if `jwt.secret` set — stateless, unrevocable pre-expiry); else `params.token` (session). Token/JWT paths throw `BAD_REQUEST` if no role requested, `FORBIDDEN` if the role isn't granted.
 - `getToken()` throws `BAD_REQUEST` unless the server enabled `jwt`. `createApiKey` returns the raw `slp_…` value **once** and requires you already hold the requested role. `revoke(userId)` deletes sessions + disconnects cluster-wide but does NOT revoke API keys (do those per-key). `requestPasswordReset` is a silent no-op without `sendPasswordReset` and always returns `{ ok: true }` (never leaks email existence); `confirmPasswordReset` flushes all the user's sessions.
 - **Imperative server management** (on `AuthServer`, for provisioning users + agents from server code — all require the running server): `authKit.users.get/find/create/update/setRoles/deactivate/reactivate/setPassword` and `authKit.apiKeys.create/listFor/revoke`. `users.create({ email, password?, displayName, roles?, metadata? })` — omit `password` for the **invite flow** (unclaimed until a password reset). Users **soft-delete**: `deactivate(id)` stamps `deletedAt` (the `users` row gains optional `deletedAt` + `metadata`), flushes sessions/keys/reset-tokens, kicks live connections, and blocks all three auth paths; `reactivate(id)` restores. `apiKeys.create(userId, { role, label, expiresInMs? })` mints an agent's key server-side (raw `slp_…` returned once). This is how you provision an **AI-agent user** for `@super-line/plugin-chat`.
+- **`env` (ADR-0012):** since `authKit` owns `authenticate` on the host's behalf, `resolveEnv(ctx)` is where identity-keyed `client.env` business logic lives — it runs right after identity resolves and seeds the connection's initial `env`. `pushEnv(userId, env)` updates it later (a key rotation/re-scope), cluster-wide. See REFERENCE.md → Connection env.
 
 ## @super-line/plugin-chat
 
@@ -443,7 +499,7 @@ A reusable **chat backbone** as a paired plugin — channels (public/private), o
 
 ```ts
 // . (contract half) — generic over the message body (default z.string())
-chatContract<S>(opts?: { content?: S }): ContractPlugin   // adds channels/memberships/messages + 16 shared requests
+chatContract<S>(opts?: { content?: S }): ContractPlugin   // adds SIX collections (channels/memberships/messages/messageParts/resources/resourcePresence) + 20 shared requests
 // plugins: [authContract(), chatContract()]  OR  chatContract({ content: myZodSchema })
 // schemas/types: channelSchema/membershipSchema/messageSchema, ChatChannel/ChatMembership/ChatMessage, memId(channelId,userId)
 
@@ -453,8 +509,9 @@ chat<C>(opts: { contract: C; hooks?: ChatHooks; streaming?: { checkpointMs?; max
 //   ChatOpHook<In,Out> = { before?(input,initiator)→In|void (transform or throw-to-veto); after?(result,initiator) (throw propagates, write stays) }
 //   hook keys: createChannel/updateChannel/deleteChannel/joinChannel/leaveChannel/addMember/removeMember/setMemberRole/sendMessage/editMessage/deleteMessage
 //              + startMessage/finalizeMessage (STREAMING gates intent/audit only — appends are hook-free; forced aborts skip `before`, `after` always fires)
+//              + createResource/detachResource/writeResource (CHANNEL RESOURCES — announceResource is hook-free, same as appends)
 interface ChatServer {
-  plugin: SuperLinePlugin            // read-RLS/write-deny policies + the 16 request handlers
+  plugin: SuperLinePlugin            // read-RLS/write-deny policies + the 20 request handlers
   channels: { create({name,visibility?,owner?,metadata?}) / get / find({filter?,limit?,offset?}) / update / delete(cascades) }
   members:  { add(channelId,userId,{role?}) / remove / setRole / of(channelId) / channelsOf(userId) }
   messages: { send({channelId,authorId,content,metadata?}) / edit / delete / find({filter?,orderBy?,limit?,offset?})
@@ -595,4 +652,4 @@ mergeSurfaces<A, B>(a: A, b: B): MergedSurface<A, B>         // merges per direc
 
 ## Control Center inspector (plugin)
 
-`inspector(opts?: { redact?: string[] }): SuperLinePlugin` from `@super-line/plugin-inspector` is the **only** way to enable the Control Center — pass it in `plugins: [inspector()]`. The server no longer takes an `inspector` option and the WS transport no longer takes an `inspector` field. It taps every event (safe-snapshot + field-redact), publishes cluster-wide on its plugin channel, and serves the `InspectorContract` (`getContract` / `getTopology` / `listConnections` / `getNode` / `getConn` / `listCollections` / `queryCollection` + an `events` topic) over a reserved connection class. Dev / trusted-network only.
+`inspector(opts?: { redact?: string[]; revealEnvKeys?: string[] }): SuperLinePlugin` from `@super-line/plugin-inspector` is the **only** way to enable the Control Center — pass it in `plugins: [inspector()]`. The server no longer takes an `inspector` option and the WS transport no longer takes an `inspector` field. It taps every event (safe-snapshot + field-redact), publishes cluster-wide on its plugin channel, and serves the `InspectorContract` (`getContract` / `getTopology` / `listConnections` / `getNode` / `getConn` / `listCollections` / `queryCollection` + an `events` topic) over a reserved connection class. `redact` is a DENY-list masking named fields in `ctx`/`data`/payload snapshots; `revealEnvKeys` is the OPPOSITE — an ALLOW-list, because `env` (ADR-0012) is masked (`•••`) by default. Dev / trusted-network only.

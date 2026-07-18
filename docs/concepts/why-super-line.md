@@ -12,6 +12,7 @@ super-line replaces all of that with a single `defineContract({...})` object tha
 - **Runtime validation** — the same schemas that type your payloads also validate them. The server rejects malformed input automatically.
 - **Interaction flavors** over one connection — requests, events, topics, and rooms. A shared topic also doubles as a cluster-wide event bus (`server.publish` / `server.subscribe`) so nodes converge without a separate messaging API. See [The cluster event bus](/how-to/cluster-event-bus).
 - **Persisted state** — the contract can also declare **collections**: typed rows you filter and subscribe to in subsets, and CRDT documents whose concurrent edits merge. Every write is schema-validated; a client reads and writes and the server — and every other node — sees it converge. See [Collections](/collections/).
+- **Whole domains as plugins** — a plugin merges its own collections, roles, and requests straight into your contract: first-party [authentication](/how-to/plugin-auth) (sessions, API keys, JWT), a [chat backbone](/how-to/plugin-chat) with streaming AI messages and shared channel resources, and a [cluster inspector](/how-to/control-center) each drop in as one line, typed end to end like code you wrote. See [Plugins](/concepts/plugins).
 - **Any wire** — the same contract and the same code run over WebSocket, HTTP, or libp2p/WebRTC. The transport is one line; everything above it is identical. See [Transports and adapters](/concepts/transports-and-adapters).
 
 One contract collapses the assembly tax into a single typed surface. Nothing on the wire is untyped; nothing is validated twice by hand.
@@ -34,6 +35,7 @@ See [The contract](/concepts/the-contract) for the full model.
 | Per-role contracts | ✅ | ❌ | ❌ |
 | Rooms & topics | ✅ | ⚠️ rooms only | subscriptions |
 | Inter-server messaging | ✅ | ✅ | ❌ |
+| Domain plugins on the contract (auth · chat · inspector) | ✅ | ❌ | ⚠️ routers only |
 | Pluggable wire (WS · HTTP · WebRTC) | ✅ | ⚠️ WS + polling | ⚠️ link-dependent |
 
 Socket.IO splits its types into `ClientToServerEvents` / `ServerToClientEvents` / `InterServerEvents` interfaces you wire as **positional generics** (easy to swap) with no runtime validation. super-line keeps the directional split but in **one shared object**, validates inbound automatically, and adds **per-role contracts**. See the full [comparison & FAQ](/concepts/comparison-faq).

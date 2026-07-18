@@ -218,6 +218,40 @@ export const activityPlugin: SuperLinePlugin = {
 
 A collection name that collides with a host collection — or another plugin's — throws at construction.
 
+### CRDT collections take a guard-shaped policy instead
+
+A [CRDT document collection](/collections/crdt-documents) is opened by id, not queried, so its
+policy isn't a row filter — it's a **guard**: `read`/`write` return a plain `boolean`. Declare the
+collection with `crdt` instead of `key`, and contribute a `CrdtCollectionPolicy` instead of a
+`CollectionPolicy`:
+
+```ts
+import type { CrdtCollectionPolicy, SuperLinePlugin } from '@super-line/server'
+
+export const activityContract = () =>
+  defineContractPlugin('activity', {
+    collections: { 'activity.notes': { schema: noteSchema, crdt: { mode: 'document' } } },
+  })
+
+const notesPolicy: CrdtCollectionPolicy = {
+  // (principal, id, snapshot, ctx) => boolean | Promise<boolean> — sees the post-merge doc, so access can be content-based
+  read: (principal, id, snapshot, ctx) => isMember(principal, id),
+  // (principal, id, ctx) => boolean | Promise<boolean> — no `create`: creation is server-authoritative (`srv.collection(n).create`)
+  write: (principal, id, ctx) => isMember(principal, id),
+}
+
+export const activityPlugin: SuperLinePlugin = {
+  name: 'activity',
+  policies: { 'activity.notes': notesPolicy },
+}
+```
+
+Row and CRDT policies live in the same `policies` map — a plugin can mix both shapes across its
+collections, keyed one per collection name. `@super-line/plugin-chat`'s channel resources are the
+shipped reference: registering a resource kind contributes exactly this guard shape, resolving
+"is this doc attached to a channel you're a member of?" (see [Attach collaborative resources to
+channels](/how-to/chat-resources)).
+
 ## 7 · Optional: a plugin-owned connection
 
 The deepest seam: a plugin can own its **own connection class** — a reserved role the transport negotiates, dispatched against the plugin's *own* fixed contract (never merged into the app's), and **observer-invisible** (excluded from `conns`, presence, the heartbeat, and user lifecycle hooks). This is how a plugin attaches a side-channel — an admin console, a metrics scraper, or a live dashboard — without polluting the app's roles or presence.

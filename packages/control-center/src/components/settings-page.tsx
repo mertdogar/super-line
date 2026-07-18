@@ -25,7 +25,7 @@ export function SettingsPage({
         <CardHeader>
           <CardTitle>Inspector connection</CardTitle>
           <p className="text-xs text-muted-foreground">
-            The WebSocket endpoint of a super-line server started with <code>inspector: true</code>. Saved
+            The WebSocket endpoint of a super-line server with the <code>inspector()</code> plugin mounted. Saved
             to this browser and reused next time.
           </p>
         </CardHeader>

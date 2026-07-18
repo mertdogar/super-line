@@ -1274,7 +1274,7 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     },
   })
 
-  // ── the plugin: policies (read-RLS, write-deny) + the 16 request handlers ─────────────────────────
+  // ── the plugin: policies (read-RLS, write-deny) + the 20 request handlers ─────────────────────────
 
   /** Matches nothing — the deny filter for guests (no signed-in user ⇒ no chat visibility). */
   const NONE: Expr = isIn('id', [])

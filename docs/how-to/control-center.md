@@ -63,7 +63,7 @@ A table of every connection cluster-wide — role, **transport**, id, user, owni
 
 <img src="/control-center/connections.png" alt="Control Center connections view — a table of every connection across the cluster with role, id, user, node, rooms, and connected time" class="sl-shot" />
 
-Click a row to open its descriptor — including the wire it came in over — plus a best-effort, **node-local** snapshot of `ctx` and `conn.data`. A connection owned by another node shows descriptor-only — point the Control Center at that node to read its `ctx`.
+Click a row to open its descriptor — including the wire it came in over — plus a best-effort, **node-local** snapshot of `ctx`, `conn.data`, and, when the role declares one, `conn.env` — the server-vended, client-visible [`env`](/how-to/connection-env). `env` is **masked by default** (the opposite of `ctx`/`data`): values render as `•••` unless the key is allow-listed via `inspector({ revealEnvKeys: [...] })`. A connection owned by another node shows descriptor-only — point the Control Center at that node to read its `ctx`.
 
 ### Contract
 
@@ -85,7 +85,7 @@ Lifecycle churn — `connect` / `disconnect` / `room.add` / `room.remove` / `top
 
 <img src="/control-center/live-feed.png" alt="Control Center live feed — a real-time stream of lifecycle, message, and collection events with Lifecycle, Requests, Events, and Collections filters" class="sl-shot" />
 
-It also streams **message traffic** — `msg.request` / `msg.response` / `msg.broadcast` / `msg.publish` / `msg.event`, plus `msg.serverRequest` / `msg.serverReply` between nodes — and **collection traffic**: row writes and CRDT-document edits (`collection.sub` / `collection.write` / `collection.change`, `crdt.open` / `crdt.write` / `crdt.change` / `crdt.delete`). Filter by **Lifecycle**, **Requests**, **Events**, or **Collections**, pause the stream, and expand any row to inspect its payload (redacted per your `inspector({ redact })` config).
+It also streams **message traffic** — `msg.request` / `msg.response` / `msg.broadcast` / `msg.publish` / `msg.event`, plus `msg.serverRequest` / `msg.serverReply` between nodes — **collection traffic**: row writes and CRDT-document edits (`collection.sub` / `collection.write` / `collection.change`, `crdt.open` / `crdt.write` / `crdt.change` / `crdt.delete`) — and **env traffic**: `env.set`, whenever a connection's server-vended [`env`](/how-to/connection-env) (ADR-0012) is seeded or updated. Filter by **Lifecycle**, **Requests**, **Events**, **Collections**, or **Env**, pause the stream, and expand any row to inspect its payload (redacted per your `inspector({ redact })` config — an `env.set` row is masked per `revealEnvKeys` instead, same as the connection detail above).
 
 CRDT deltas are opaque on the wire, so a `crdt.write` / `crdt.open` row expands to the **decoded post-merge document snapshot** the server validated — the readable state *after* the edit, not the binary delta — while a `crdt.change` fan-out shows the writer `origin` and delta size. A server-side agent co-writing a document (as in [`examples/ai-canvas`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas)) therefore shows up as `crdt.write` rows stamped with its `origin`.
 

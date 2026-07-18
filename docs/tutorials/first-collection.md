@@ -101,7 +101,7 @@ const srv = createSuperLineServer(chat, {
       // `read` returns a query-IR filter ANDed into every snapshot AND every live change for this caller:
       read: (_principal, ctx) => isIn('channelId', ctx.channels), // you only ever see your channels
       // `write` guards each row op — insert/update/delete:
-      write: (principal, op, next, prev) =>
+      write: (principal, op, next, prev, ctx) =>
         op === 'delete' ? prev?.authorId === principal : next?.authorId === principal, // author-only
     },
   },

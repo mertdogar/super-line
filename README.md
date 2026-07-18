@@ -203,8 +203,9 @@ See [Introspection & presence](https://super-line.dogar.biz/how-to/introspection
 
 The full docs live at **[super-line.dogar.biz](https://super-line.dogar.biz/)**:
 
-- **Learn** — [Your first typed round-trip](https://super-line.dogar.biz/tutorials/first-round-trip) · [Your first collection](https://super-line.dogar.biz/tutorials/first-collection) · [Go collaborative (CRDT)](https://super-line.dogar.biz/tutorials/go-collaborative)
-- **How-to** — [Requests](https://super-line.dogar.biz/how-to/requests) · [Events & rooms](https://super-line.dogar.biz/how-to/events-rooms) · [Topics](https://super-line.dogar.biz/how-to/topics) · [Roles & auth](https://super-line.dogar.biz/how-to/roles-auth) · [Middleware & lifecycle](https://super-line.dogar.biz/how-to/middleware-lifecycle) · [Errors](https://super-line.dogar.biz/how-to/errors) · [Serialization](https://super-line.dogar.biz/how-to/serialization) · [React](https://super-line.dogar.biz/how-to/react) · [Choose an adapter](https://super-line.dogar.biz/how-to/choose-an-adapter) · [Testing](https://super-line.dogar.biz/how-to/testing)
+- **Learn** — [Your first typed round-trip](https://super-line.dogar.biz/tutorials/first-round-trip) · [Your first collection](https://super-line.dogar.biz/tutorials/first-collection) · [Go collaborative (CRDT)](https://super-line.dogar.biz/tutorials/go-collaborative) · [Assemble a chat backbone](https://super-line.dogar.biz/tutorials/chat-backbone) · [Put a live AI agent in the chat](https://super-line.dogar.biz/tutorials/ai-agent-chat) · [Co-edit a canvas with an agent](https://super-line.dogar.biz/tutorials/collaborative-canvas-with-agent)
+- **How-to** — [Requests](https://super-line.dogar.biz/how-to/requests) · [Events & rooms](https://super-line.dogar.biz/how-to/events-rooms) · [Topics](https://super-line.dogar.biz/how-to/topics) · [Roles & auth](https://super-line.dogar.biz/how-to/roles-auth) · [Connection env](https://super-line.dogar.biz/how-to/connection-env) · [Middleware & lifecycle](https://super-line.dogar.biz/how-to/middleware-lifecycle) · [Errors](https://super-line.dogar.biz/how-to/errors) · [Serialization](https://super-line.dogar.biz/how-to/serialization) · [React](https://super-line.dogar.biz/how-to/react) · [Choose an adapter](https://super-line.dogar.biz/how-to/choose-an-adapter) · [Testing](https://super-line.dogar.biz/how-to/testing)
+- **Plugins** — [Authentication](https://super-line.dogar.biz/how-to/plugin-auth) · [Chat backbone](https://super-line.dogar.biz/how-to/plugin-chat) · [Stream an agent's turn](https://super-line.dogar.biz/how-to/chat-streaming) · [Run an AI chat bot](https://super-line.dogar.biz/how-to/chat-bots) · [Channel resources](https://super-line.dogar.biz/how-to/chat-resources) · [Drive a channel from scripts](https://super-line.dogar.biz/how-to/chat-headless)
 - **Collections** — [Overview](https://super-line.dogar.biz/collections/) · [Row collections](https://super-line.dogar.biz/collections/row-collections) · [CRDT documents](https://super-line.dogar.biz/collections/crdt-documents) · [Policies](https://super-line.dogar.biz/collections/policies) · [TanStack DB](https://super-line.dogar.biz/collections/tanstack-db) · [Backends](https://super-line.dogar.biz/collections/backends)
 - **Concepts** — [Why super-line](https://super-line.dogar.biz/concepts/why-super-line) · [The contract](https://super-line.dogar.biz/concepts/the-contract) (roles, direction & the five flavors) · [Server-authoritative](https://super-line.dogar.biz/concepts/server-authoritative) · [Transports vs. adapters](https://super-line.dogar.biz/concepts/transports-and-adapters) · [Reconnection & delivery](https://super-line.dogar.biz/concepts/reconnection-delivery)
 - **[API reference](https://super-line.dogar.biz/reference/)** — generated from source: every export, option, and type.
@@ -220,9 +221,21 @@ pnpm --filter @super-line/example-chat start
 # Browser React chat (Vite + WS server; open two tabs to chat live):
 pnpm --filter @super-line/example-react-chat dev   # http://localhost:5173
 
-# Slack-like chat (Vite + React 19 + shadcn) — channels, presence, typing, unread badges, on
-# typed Collections (channels/messages/users as rows), persisted to SQLite:
+# Typed row collections end-to-end — RLS policies, live queries, TanStack DB on the client (one Node script):
+pnpm --filter @super-line/example-collections start
+
+# Slack-like chat (Vite + React 19 + shadcn) built on the plugin pair — real login via plugin-auth,
+# channels/membership/messages from plugin-chat, plus a live LLM agent to talk to; persisted to SQLite:
 pnpm --filter @super-line/example-collections-chat dev   # http://localhost:5173
+
+# FLAGSHIP — a human and a Mastra agent co-edit a CRDT canvas from inside a chat channel
+# (plugin-chat channel resources + streamed delegation cards), with three faces: web UI,
+# terminal cockpit (TUI), and headless JSONL. Needs an AI Gateway key:
+pnpm --filter @super-line/example-chat-supervisor dev   # http://localhost:5173 (set AI_GATEWAY_API_KEY)
+
+# Channel-resource mechanics, headless: owned vs linked CRDT docs attached to a chat channel,
+# acked writes, who's-open presence — one Node script, no UI, no LLM:
+pnpm --filter @super-line/example-chat-resources start
 
 # Collaborative canvas — synced JSON state over super-line, backed by a CRDT (open two tabs;
 # server is a co-writer, with a live state + patch debug panel). Run one at a time:
@@ -262,6 +275,12 @@ cd examples/scaling-zeromq && docker compose up
 
 # Cluster over a RabbitMQ broker: 3 nodes fan out via adapter-rabbitmq (needs Docker):
 cd examples/scaling-rabbitmq && docker compose up
+
+# The react-chat-cluster: Redis + 2 nodes + web + the Control Center in Docker (needs Docker):
+cd examples/react-chat-cluster && docker compose up --build
+
+# Same react-chat-cluster, decentralized: nodes peer over libp2p gossipsub — NO broker (needs Docker):
+cd examples/react-chat-cluster-libp2p && docker compose up --build
 
 # "Delete your broker": the react-chat-cluster with Redis removed, on a ZeroMQ mesh (needs Docker):
 cd examples/react-chat-cluster-zeromq && docker compose up --build
@@ -344,10 +363,22 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 | [`@super-line/adapter-rabbitmq`](packages/adapter-rabbitmq) | RabbitMQ (AMQP) adapter for multi-node fan-out |
 | [`@super-line/adapter-zeromq`](packages/adapter-zeromq) | ZeroMQ adapter for multi-node fan-out — brokerless mesh or a lightweight forwarder, with gossip presence |
 | [`@super-line/adapter-libp2p`](packages/adapter-libp2p) | Decentralized, broker-less libp2p (gossipsub) adapter — fan-out + presence, no broker |
+| **Collections** — typed persisted state backends ||
+| [`@super-line/collections-memory`](packages/collections-memory) | In-memory row-collection backend (`CollectionStore`) — the zero-dependency default |
+| [`@super-line/collections-sqlite`](packages/collections-sqlite) | Durable SQLite row-collection backend — rows survive a restart, IR→SQL snapshot pushdown |
+| [`@super-line/collections-pglite`](packages/collections-pglite) | Self-clustering row-collection backend — central Postgres + per-node Electric-synced PGlite replica, no adapter |
+| [`@super-line/collections-crdt-memory`](packages/collections-crdt-memory) | In-memory CRDT document-collection backend (Yjs) — plus `crdtCollectionsClient`, the universal client engine |
+| [`@super-line/collections-crdt-libsql`](packages/collections-crdt-libsql) | Durable CRDT document-collection backend — snapshot-per-doc to libSQL/Turso |
+| [`@super-line/collections-crdt-pglite`](packages/collections-crdt-pglite) | Self-clustering CRDT document-collection backend — Yjs op-log in central Postgres, Electric→PGlite replica, validate-before-commit at ingress |
+| [`@super-line/tanstack-db`](packages/tanstack-db) | [TanStack DB](https://tanstack.com/db) adapter — super-line collections as a sync source, with client-side live queries, joins & optimistic mutations |
+| **Plugins** — paired contract + runtime bundles ||
+| [`@super-line/plugin-inspector`](packages/plugin-inspector) | The Control Center inspector as a plugin — taps + a plugin-owned CC connection |
+| [`@super-line/plugin-auth`](packages/plugin-auth) | First-party authentication — email/password, sessions, API keys, JWT, data-driven roles, all in typed collections |
+| [`@super-line/plugin-chat`](packages/plugin-chat) | Chat backbone — channels, membership, messages, streamed AI turns & channel-linked CRDT resources (6 collections, 20 server-authoritative requests, hookable server-side); Mastra bridge on `/mastra`. Requires plugin-auth |
 
 ## Status
 
-Pre-1.0. **Implemented:** role-scoped contracts, req/res, events, rooms, topics, Stores (LWW + CRDT across in-memory, durable SQLite, and self-clustering Postgres+Electric backends — with a reactive server-side co-writer and cluster-wide deletion fan-out), the cluster event bus (`server.publish`/`server.subscribe`), pluggable client↔server transports (WebSocket · HTTP/SSE · libp2p · loopback), auth, reconnect, middleware, in-memory + Redis + RabbitMQ + ZeroMQ + libp2p adapters, React hooks. **Not yet:** fire-and-forget client→server signals (every client→server is req/res today), mutable per-connection state, NATS adapter, wildcard/retained topics, session resume/replay, parameterized-topic type inference (topics are typed by exact contract key for now), backpressure safeguards.
+Pre-1.0. **Implemented:** role-scoped contracts, req/res, events, rooms, topics, Collections (typed rows with row-level security + CRDT document collections, across in-memory, durable SQLite/libSQL, and self-clustering Postgres+Electric backends — with the TanStack DB client engine, a server-side co-writer, and cluster-wide deletion fan-out), contract-fragment plugins (inspector · auth · chat), connection env (server-vended, client-visible per-connection state), the cluster event bus (`server.publish`/`server.subscribe`), pluggable client↔server transports (WebSocket · HTTP/SSE · libp2p · loopback), auth, reconnect, middleware, heartbeat + WebSocket backpressure policies, in-memory + Redis + RabbitMQ + ZeroMQ + libp2p adapters, React hooks. **Not yet:** fire-and-forget client→server signals (every client→server is req/res today), NATS adapter, wildcard/retained topics, session resume/replay, parameterized-topic type inference (topics are typed by exact contract key for now).
 
 ## License
 

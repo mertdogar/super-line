@@ -45,16 +45,15 @@ each, join the same room.
 The connection endpoint is configured on the **Settings** page (saved to your browser), and the
 **Resources** page links out to the docs, repo, and npm.
 
-The nodes run with `inspector: true`, and Caddy pins `/inspect` to **node-1** (no `round_robin`),
-so the view is stable: node-1's connections show their live `ctx` (the chat `name`), while
-node-2's connections show the cross-node `ctxAvailable: false` boundary — node-local `ctx` never
-leaves its node.
+The nodes run with `plugins: [inspector()]` (from `@super-line/plugin-inspector`), and Caddy pins
+`/inspect` to **node-1** (no `round_robin`), so the view is stable: node-1's connections show their
+live `ctx` (the chat `name`), while node-2's connections show the cross-node `ctxAvailable: false`
+boundary — node-local `ctx` never leaves its node.
 
-> The inspector channel is **read-only but unauthenticated**, and `inspector: true` now mirrors
-> every message payload to the bus (so it costs an extra publish per message — dev/trusted-network
-> only, never on an internet-facing node). Sensitive fields can be masked with
-> `inspector: { redact: ['password', 'token'] }`, which applies to `ctx`, `conn.data`, **and**
-> message payloads.
+> The inspector channel is **read-only but unauthenticated**, and the plugin mirrors every message
+> payload to the bus (so it costs an extra publish per message — dev/trusted-network only, never on
+> an internet-facing node). Sensitive fields can be masked with `inspector({ redact: ['password',
+> 'token'] })`, which applies to `ctx`, `conn.data`, **and** message payloads.
 
 ## What you'll see
 

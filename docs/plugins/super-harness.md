@@ -49,6 +49,20 @@ Without it, clients can connect but can't read their session tree. The harness
 owns its `harness.*` handlers, so they are removed from your `implement()`
 obligation.
 
+## Harness or plugin-chat?
+
+If the application you're building is chat-shaped — channels, streaming agent
+messages, shared channel resources a human and an agent co-edit —
+[`@super-line/plugin-chat`](/how-to/plugin-chat) now covers that ground
+natively. The [chat-supervisor example](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor)
+rebuilds the Super Harness supervisor/worker flow on super-line alone — no
+bespoke harness, no bespoke canvas store; see
+[Run an AI chat bot](/how-to/chat-bots) for the agent side.
+
+Super Harness remains the fuller agent runtime: reach for it when you need
+durable session trees, human-in-the-loop approvals, or full-fidelity
+streaming at every depth of a subagent tree.
+
 ## Learn more
 
 For package installation, prerequisites, standalone hosting, React bindings,

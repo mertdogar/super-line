@@ -32,6 +32,16 @@ import { sqliteCollections } from '@super-line/collections-sqlite'
 createSuperLineServer(api, { /* … */, collections: sqliteCollections({ file: './data.db', collections: api.collections }) })
 ```
 
+::: warning What disqualifies a query
+Not every query compiles to SQL — a few operators can't be translated without diverging from the JS evaluator's semantics, so `collections-sqlite` falls back to a full table scan (JS-filtered, and JS-sorted if `orderBy` is affected too):
+
+- **`like` / `ilike`** — SQLite's `LIKE` case rules don't match the evaluator's regex semantics.
+- **`neq` on a JSON-backed column** — a non-scalar schema field (record/union/nested/optional+nullable), where SQL's `1`/`0` vs `true`/`false` collide under `IS NOT`.
+- **Any text range comparison** (`lt`/`lte`/`gt`/`gte` against a string) **or text `orderBy`** — SQLite orders text by UTF-8 bytes, the JS evaluator by UTF-16 code units, and the two disagree on astral-plane characters.
+
+None of this affects correctness — the JS evaluator stays authoritative either way — but it's a silent perf cliff: a filter or sort that touches one of these falls back to scanning and sorting the whole table in JS instead of letting SQLite do it.
+:::
+
 ## CRDT backends
 
 | Package | Durability | Clustering |

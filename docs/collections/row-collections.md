@@ -51,7 +51,7 @@ const srv = createSuperLineServer(api, {
     users: { read: () => undefined, write: () => true }, // world-readable directory
     messages: {
       read: (principal, ctx) => isIn('channelId', ctx.channels), // you only ever see your channels
-      write: (principal, op, next, prev) =>
+      write: (principal, op, next, prev, ctx) =>
         op === 'delete' ? prev?.authorId === principal : next?.authorId === principal, // author-only
     },
   },
@@ -98,7 +98,7 @@ The subscription's frames process concurrently, so `sub.ready` is the barrier be
 
 ## The query IR
 
-The subscription carries a small **query IR** — `filter` (`and`/`or`/`not`, `eq`/`neq`/comparisons/`in`/`like`), `orderBy`, and `limit`/`offset` — built with the helpers exported from `@super-line/core`:
+The subscription carries a small **query IR** — `filter` (`and`/`or`/`not`, `eq`/`neq`/comparisons/`in`/`like`/`ilike`), `orderBy`, and `limit`/`offset` — built with the helpers exported from `@super-line/core`:
 
 ```ts
 import { and, eq, gt, like } from '@super-line/core'
@@ -123,7 +123,7 @@ const { rows, insert, update, delete: del } = useCollection('messages', { filter
 ```
 
 ::: tip Watch it in the Control Center
-Beyond the [Collections schema graph + row browser](/how-to/control-center) — which lists each row's **created** / **updated** timestamps alongside its data — mounting [`inspector()`](/how-to/control-center) streams every subscribe and write to the live feed's **Collections** filter (`collection.sub` / `collection.write` / `collection.change`) — expand a row to see the written data, redacted per your `inspector({ redact })` config.
+Beyond the [Collections schema graph + row browser](/how-to/control-center) — which lists each row's **created** / **updated** timestamps alongside its data — mounting [`inspector()`](/how-to/control-center) streams every subscribe and write to the live feed's **Collections** filter (`collection.sub` / `collection.write` / `collection.change`) — expand a row to see the written data, redacted per your `inspector({ redact })` config. Those created/updated timestamps are inspector-only: they never travel over `client.collection(n).subscribe()`, so `sub.rows()` stays exactly your schema.
 :::
 
 ## Run it

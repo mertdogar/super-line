@@ -46,7 +46,7 @@ yarn add @super-line/plugin-auth @super-line/plugin-chat @super-line/collections
 
 ## 2. Merge both plugins into the contract
 
-A plugin's collections, roles, and surface merge **straight into the contract** via `plugins: [...]` on `defineContract`. `authContract()` brings identity; `chatContract()` brings the entire chat model — four collections (`channels` / `memberships` / `messages` / `messageParts`) and the 16 mutation requests (`createChannel`, `joinChannel`, `addMember`, `sendMessage`, `editMessage`, `startMessage`, …). You declare almost nothing yourself.
+A plugin's collections, roles, and surface merge **straight into the contract** via `plugins: [...]` on `defineContract`. `authContract()` brings identity; `chatContract()` brings the entire chat model — six collections (`channels` / `memberships` / `messages` / `messageParts` / `resources` / `resourcePresence`) and the 20 mutation requests (`createChannel`, `joinChannel`, `addMember`, `sendMessage`, `editMessage`, `startMessage`, `createResource`, …). You declare almost nothing yourself.
 
 ```ts [src/contract.ts]
 import { defineContract, type RowOf } from '@super-line/core'
@@ -71,7 +71,7 @@ export type Message = RowOf<typeof chat, 'messages'>
 
 ## 3. Wire the server — no policies, no handlers
 
-Here's the payoff. `auth()` returns an `authKit`; `chat()` returns a `chatKit`. Register **both plugins** and the chat model's row policies (read = membership-scoped RLS, write = deny) and all 16 request handlers ship *inside* `chatKit.plugin`. This file writes **no** channel/message policy or handler of its own — compare that to the hand-rolled `policies.messages` you wrote in [Tutorial 2](/tutorials/first-collection).
+Here's the payoff. `auth()` returns an `authKit`; `chat()` returns a `chatKit`. Register **both plugins** and the chat model's row policies (read = membership-scoped RLS, write = deny) and all 20 request handlers ship *inside* `chatKit.plugin`. This file writes **no** channel/message policy or handler of its own — compare that to the hand-rolled `policies.messages` you wrote in [Tutorial 2](/tutorials/first-collection).
 
 The one thing you *do* get to add is a **hook**: a before/after wrapper around a domain operation that fires for client requests and server-side calls alike — the un-bypassable extension seam ([ADR-0010](https://github.com/mertdogar/super-line/blob/main/docs/adr/0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md)).
 
@@ -183,7 +183,7 @@ super-line chat server on ws://localhost:3000
 
 <div class="sl-result">
   <p class="sl-result__h">Two users just chatted over a model you never wrote.</p>
-  <p>Ada created a <strong>private</strong> channel and <strong>added</strong> Bob to it; her <code>send</code> travelled to the server, which validated the body, ran your <code>sendMessage</code> hook (notice the padding was <strong>trimmed</strong>), stamped the id and timestamp, and fanned it out — and Bob's live <code>messages</code> window, opened only because he's a member, delivered it. The channel row, the membership RLS, the message security, the 16 request handlers: all of it came from <code>chatKit.plugin</code>.</p>
+  <p>Ada created a <strong>private</strong> channel and <strong>added</strong> Bob to it; her <code>send</code> travelled to the server, which validated the body, ran your <code>sendMessage</code> hook (notice the padding was <strong>trimmed</strong>), stamped the id and timestamp, and fanned it out — and Bob's live <code>messages</code> window, opened only because he's a member, delivered it. The channel row, the membership RLS, the message security, the 20 request handlers: all of it came from <code>chatKit.plugin</code>.</p>
 </div>
 
 ## What just happened

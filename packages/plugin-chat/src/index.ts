@@ -358,9 +358,10 @@ export type ChatSurface = typeof chatSurface
  * The contract-time half of the chat plugin. Spread into
  * `defineContract({ plugins: [authContract(), chatContract()] })` — @super-line/plugin-auth is a HARD
  * prerequisite (identity, principals, and the `users` directory the FKs point at). Adds the
- * `channels`/`memberships`/`messages` collections (client-READ-ONLY: every mutation is one of the 16
- * `shared` requests, all hookable server-side — see `chat()` in `/server`) and is generic over the
- * message body: `chatContract({ content: myBodySchema })`, default `z.string()`.
+ * `channels`/`memberships`/`messages`/`messageParts`/`resources`/`resourcePresence` collections
+ * (client-READ-ONLY: every mutation is one of the 20 `shared` requests, all hookable server-side —
+ * see `chat()` in `/server`) and is generic over the message body: `chatContract({ content:
+ * myBodySchema })`, default `z.string()`.
  */
 export function chatContract<S extends z.ZodTypeAny = z.ZodString>(opts?: { content?: S }) {
   const content = (opts?.content ?? z.string()) as S

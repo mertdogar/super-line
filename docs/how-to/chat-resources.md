@@ -78,6 +78,34 @@ Two lifecycles:
 them. `createResource` on a linked kind is **create-or-attach**: an existing id attaches (init
 skipped), and two racing creators both succeed onto one registry row.
 
+## Server-side: `chatKit.resources`
+
+The requests above have a server-side twin on `chatKit` — running through the same domain cores, but
+`initiator.kind === 'server'`, so there's no membership check and (being server-initiated) no card
+lands in the message feed:
+
+```ts
+chatKit.resources.create({ channelId, kind, title?, id?, params? }) // create-or-attach → ChatResource
+chatKit.resources.detach(channelId, kind, docId)                    // → ChatResource; owned kinds delete the doc too
+chatKit.resources.of(channelId)                                     // → ChatResource[] — the channel's registry rows
+```
+
+[`examples/chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor)
+uses `of` + `create` to auto-seed every channel with a canvas and a doc the moment it appears, so no
+member ever has to attach one by hand:
+
+```ts
+const existing = await chatKit.resources.of(channelId)
+for (const kind of ['canvas', 'doc'] as const) {
+  if (!existing.some((r) => r.kind === kind))
+    await chatKit.resources.create({ channelId, kind, title: kind === 'canvas' ? 'Canvas' : 'Doc' })
+}
+```
+
+See [the chat plugin how-to](/how-to/plugin-chat#server-side-management-—-the-imperative-chatkit) for the
+rest of `chatKit` (channels, members, messages) and `sweepPresence`, covered under
+[Presence](#_5-·-presence-who-s-in-the-doc) below.
+
 ## 3 · Use it from the client
 
 ```ts

@@ -1,6 +1,6 @@
 {
   "name": "@super-line/tanstack-db",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "type": "module",
   "description": "TanStack DB collection adapter for super-line — use super-line collections as a TanStack DB sync source with client-side live queries and joins.",
   "license": "MIT",

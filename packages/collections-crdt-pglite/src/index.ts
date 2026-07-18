@@ -267,7 +267,8 @@ export async function crdtPgliteCollections(opts: CrdtPgliteCollectionsOptions):
       ? await Promise.all(
           ([meta, ups] as const).map((t) =>
             (db.sync as NonNullable<StoreDb['sync']>).syncShapeToTable({
-              shape: { url: opts.electricUrl as string, params: { table: t } },
+              // Electric folds unquoted identifiers to lowercase; quoting matches the case-preserving DDL.
+              shape: { url: opts.electricUrl as string, params: { table: `"${t}"` } },
               table: t,
               primaryKey: t === meta ? ['collection', 'id'] : ['seq'],
               shapeKey: null,

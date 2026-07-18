@@ -280,7 +280,8 @@ export async function pgliteCollections(opts: PgliteCollectionsOptions): Promise
     for (const t of tables.values()) {
       shapes.push(
         await db.sync.syncShapeToTable({
-          shape: { url: opts.electricUrl, params: { table: t.name } },
+          // Electric folds unquoted identifiers to lowercase; quoting matches the case-preserving DDL.
+          shape: { url: opts.electricUrl, params: { table: `"${t.name}"` } },
           table: t.name,
           primaryKey: [t.plan.key],
           shapeKey: null,

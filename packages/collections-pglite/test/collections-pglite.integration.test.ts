@@ -64,6 +64,8 @@ afterAll(async () => {
 const defs: Record<string, CollectionDef> = {
   messages: { schema: z.object({ id: z.string(), channelId: z.string(), likes: z.number() }), key: 'id' },
   users: { schema: z.object({ id: z.string(), name: z.string() }), key: 'id' },
+  // camelCase name → case-sensitive table identifier; pins that the Electric shape param is quoted to match the DDL
+  passwordResets: { schema: z.object({ id: z.string(), token: z.string() }), key: 'id' },
 }
 
 let seq = 0
@@ -144,5 +146,17 @@ describe.skipIf(!dockerAvailable)('collections-pglite — LWW rows over real Ele
     // The batch was cross-collection and atomic; both nodes converge via the feed too.
     await waitFor(() => b.seen.filter((c) => c.k === 'insert').length === 2)
     expect(b.seen.map((c) => c.n).sort()).toEqual(['messages', 'users'])
+  }, 60_000)
+
+  it('syncs camelCase collection tables (case-sensitive identifiers) through Electric', async () => {
+    const prefix = `r${seq++}_`
+    const a = await node(prefix)
+    const b = await node(prefix)
+
+    await a.store.apply([{ op: 'insert', n: 'passwordResets', id: 'pr1', row: { id: 'pr1', token: 't' } }], 'o-a')
+
+    await waitFor(() => a.seen.some((c) => c.n === 'passwordResets' && c.k === 'insert' && c.id === 'pr1'))
+    await waitFor(() => b.seen.some((c) => c.n === 'passwordResets' && c.k === 'insert' && c.id === 'pr1'))
+    expect(b.seen.find((c) => c.n === 'passwordResets')!.next).toEqual({ id: 'pr1', token: 't' })
   }, 60_000)
 })

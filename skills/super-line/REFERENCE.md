@@ -542,9 +542,12 @@ pipeUIMessageStream(writer, stream): Promise<{ error?: string }>   // AI SDK v6 
 //   maps text/reasoning/tool chunks onto parts (tool-input-delta + step framing + files/sources dropped); NEVER settles — finalize/abort stay yours; a turn-level error chunk is RETURNED, not thrown
 
 // /mastra — plain Mastra Agents → streamed messages (the harness hookup, chat-scoped); `@mastra/core` OPTIONAL peer dep.
-mastraEngine({ agent, subagents?: [{agent, delegatesTo?, maxSteps?}], delegatesTo?, maxSteps?, maxDepth? (3), suppressTools? }): MastraEngine
-//   Agents stay VANILLA — the engine injects the `delegate` tool per stream call via toolsets ({agentType,task}→{content,isError}),
-//   owns edges/depth gates (violations = isError tool results), lane keys (root s:, worker w:{toolCallId}: nested via `parent` under
+mastraEngine({ agent, subagents?: [{agent, delegatesTo?}], delegatesTo?, maxDepth? (3), suppressTools? }): MastraEngine
+//   Agents arrive FULLY CONFIGURED — per-agent knobs (maxSteps, thinking, memory) are the host Agent's `defaultOptions` (may be a function
+//   of the forwarded requestContext, e.g. root-only per-channel memory { thread: channelId }; with memory on, pass ONLY the new turn as
+//   input — Mastra saves stream input to the thread + recalls the past itself). The engine's stream calls carry ONLY abortSignal +
+//   requestContext + the injected `delegate` tool (per call via toolsets, {agentType,task}→{content,isError}); the engine owns
+//   edges/depth gates (violations = isError tool results), lane keys (root s:, worker w:{toolCallId}: nested via `parent` under
 //   the delegate part — which is ALWAYS emitted: it is the nesting anchor; never suppress it), and the harness-ported chunk mapping.
 //   run(sink, input: string|ChatTurnMessage[], { abortSignal?, requestContext? }): Promise<{ text, error? }>  — never settles; root error RETURNED,
 //     subagent failure = the delegate's isError result (turn continues). Abort = ONE turn signal at every depth, also fired by a dead sink

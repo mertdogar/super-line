@@ -224,6 +224,11 @@ What the engine owns, so your agents stay vanilla:
 - **Abort, one mechanism** — `opts.abortSignal` and a dead sink (checked once per LLM step: kill-switch,
   cap violation, disconnect) both cancel every in-flight lane at every depth.
 
+And it owns nothing else: the engine's stream calls carry only the abort signal, the delegate
+toolset, and your per-turn `requestContext`. Every per-agent knob — `maxSteps`, provider options,
+memory — lives on **your** `Agent` via Mastra's `defaultOptions`, which deep-merges under the
+engine's call options. The two sections below are that rule in action.
+
 ### Streaming reasoning {#thinking}
 
 Thinking tokens stream as `reasoning` parts the moment the model emits them — enabling them is model
@@ -241,6 +246,40 @@ the agent into every lane — a thinking worker streams its reasoning *inside it
 AI-SDK path is symmetric: the same `providerOptions` on `ToolLoopAgent`/`streamText`
 (`toUIMessageStream` forwards reasoning by default). One Anthropic caveat: with tools, thinking lands
 at the **start** of a turn; thinking *between* tool calls is a separate interleaved-thinking beta.
+
+### Per-channel memory {#memory}
+
+Memory follows the same rule. Give the root agent a Mastra
+[`Memory`](https://mastra.ai/docs/memory/overview) instance and derive the thread from the
+`requestContext` you pass per turn — `defaultOptions` may be a function of it:
+
+```ts
+import { RequestContext } from '@mastra/core/request-context'
+
+const supervisor = new Agent({
+  id: 'supervisor',
+  /* … */
+  memory, // a Mastra Memory instance
+  defaultOptions: ({ requestContext }) => ({
+    memory: { thread: String(requestContext?.get('channelId')), resource: 'supervisor-bot' },
+  }),
+})
+
+onChatMessage(bot, ({ channelId, history }) => {
+  const rc = new RequestContext()
+  rc.set('channelId', channelId)
+  return engine.respond(bot, channelId, history.slice(-1), { requestContext: rc })
+})
+```
+
+Two things fall out of doing it this way:
+
+- **Workers stay stateless by construction.** The engine forwards `requestContext` to every lane,
+  but only agents whose `defaultOptions` derive `memory` from it get a thread — delegation briefs
+  stay self-contained, and worker turns never pollute the channel's thread.
+- **Hand the engine only the new turn** (`history.slice(-1)`), not the assembled history: with
+  memory on, Mastra saves the stream input to the thread and recalls prior turns itself — passing
+  full `history` would both snowball the thread and double the model's context.
 
 `engine.run(sink, input)` is the composable half (any `StreamEventSink`, never settles);
 `pipeMastraStream(sink, fullStream)` is the single-lane escape hatch, the Mastra sibling of

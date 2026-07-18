@@ -247,8 +247,6 @@ export interface MastraSubagent {
   agent: MastraAgentLike
   /** Who this agent may delegate to: agent ids, `true` = every registered agent. Default: none (leaf). */
   delegatesTo?: string[] | true
-  /** Mastra `maxSteps` for this agent's runs (Mastra's default ~5 caps real multi-tool turns). */
-  maxSteps?: number
 }
 
 export interface MastraEngineOptions {
@@ -257,8 +255,6 @@ export interface MastraEngineOptions {
   subagents?: MastraSubagent[]
   /** The root agent's delegation edges. Default: ALL subagents. */
   delegatesTo?: string[] | true
-  /** Mastra `maxSteps` for root runs. */
-  maxSteps?: number
   /** Delegation depth cap (root = 0). Default 3. */
   maxDepth?: number
   /** Tool names to hide from the transcript entirely. `'delegate'` is rejected — see header. */
@@ -267,7 +263,12 @@ export interface MastraEngineOptions {
 
 export interface MastraRunOptions {
   abortSignal?: AbortSignal
-  /** A Mastra `RequestContext`, handed verbatim to every node's `stream()` (model-tier pattern). */
+  /**
+   * A Mastra `RequestContext`, handed verbatim to every node's `stream()` — the one per-turn
+   * conduit down the tree. Everything per-AGENT (maxSteps, provider options, memory) belongs on
+   * the `Agent` itself via Mastra's `defaultOptions`, which may be a function of this context —
+   * e.g. the root agent deriving `memory: { thread }` from a channel id set here.
+   */
   requestContext?: unknown
 }
 
@@ -332,6 +333,11 @@ function makeDelegateTool(agentTypes: string[], run: (agentType: string, task: s
  * its delegate part), the chunk mapping, tail flushes, and error propagation. Abort is one
  * mechanism: `opts.abortSignal` and a rejected sink `flush()` (checked once per LLM step, when the
  * sink has one — `ChatStreamHandle` does) both cancel every in-flight lane at every depth.
+ *
+ * And it owns NOTHING else: agents arrive fully configured. `maxSteps`, provider options
+ * (thinking), and memory are the host's `Agent` `defaultOptions` — a function of the
+ * `requestContext` the engine forwards, so e.g. only the root agent derives a per-channel
+ * `memory: { thread }` and workers stay stateless by construction, not by engine policy.
  */
 export function mastraEngine(cfg: MastraEngineOptions): MastraEngine {
   const subs = cfg.subagents ?? []
@@ -352,19 +358,16 @@ export function mastraEngine(cfg: MastraEngineOptions): MastraEngine {
   interface Entry {
     agent: MastraAgentLike
     delegatesTo: string[]
-    maxSteps?: number
   }
   const registry = new Map<string, Entry>()
   registry.set(cfg.agent.id, {
     agent: cfg.agent,
     delegatesTo: resolveEdges(cfg.delegatesTo, subs.map((s) => s.agent.id), cfg.agent.id),
-    maxSteps: cfg.maxSteps,
   })
   for (const s of subs)
     registry.set(s.agent.id, {
       agent: s.agent,
       delegatesTo: resolveEdges(s.delegatesTo, [], s.agent.id),
-      maxSteps: s.maxSteps,
     })
 
   async function run(
@@ -408,8 +411,10 @@ export function mastraEngine(cfg: MastraEngineOptions): MastraEngine {
       depth: number,
     ): Promise<{ text: string; error?: string }> {
       const adapter = createChunkAdapter(suppress, lane)
+      // The engine passes ONLY what it owns: the turn abort, the per-turn context conduit, and
+      // the delegate toolset. Per-agent config (maxSteps, thinking, memory) is the host's Agent
+      // `defaultOptions` — Mastra deep-merges those under these call options.
       const streamOpts: Record<string, unknown> = { abortSignal: abort.signal }
-      if (entry.maxSteps !== undefined) streamOpts.maxSteps = entry.maxSteps
       if (opts?.requestContext !== undefined) streamOpts.requestContext = opts.requestContext
       if (entry.delegatesTo.length > 0) {
         const delegate = makeDelegateTool(entry.delegatesTo, (agentType, task, toolCallId) =>

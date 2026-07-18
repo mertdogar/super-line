@@ -38,7 +38,6 @@ interface DelegateToolLike {
 }
 interface SeenOpts {
   abortSignal?: AbortSignal
-  maxSteps?: number
   requestContext?: unknown
   toolsets?: { chat?: { delegate?: DelegateToolLike } }
 }
@@ -136,7 +135,7 @@ describe('plugin-chat/mastra — mastraEngine', () => {
       yield* delegateVia(opts, 'tc1', 'worker', 'go measure')
       yield text('Done.')
     })
-    const engine = mastraEngine({ agent: supervisor, subagents: [{ agent: worker, maxSteps: 3 }], maxSteps: 7 })
+    const engine = mastraEngine({ agent: supervisor, subagents: [{ agent: worker }] })
 
     const { events, sink } = recordSink()
     const { text: full, error } = await engine.run(sink, 'hi')
@@ -169,10 +168,10 @@ describe('plugin-chat/mastra — mastraEngine', () => {
     expect(dStart).toBeLessThan(wFirst)
     expect(wFirst).toBeLessThan(dResult)
 
-    // options plumbing: leaf worker gets NO toolsets, per-entry maxSteps, one shared abort signal
-    expect(worker.seen[0]!.toolsets).toBeUndefined()
-    expect(worker.seen[0]!.maxSteps).toBe(3)
-    expect(supervisor.seen[0]!.maxSteps).toBe(7)
+    // options plumbing — the thin-glue contract: the engine passes ONLY what it owns (the turn
+    // abort + the delegate toolset; requestContext when given). Agent config never crosses here.
+    expect(Object.keys(supervisor.seen[0]!).sort()).toEqual(['abortSignal', 'toolsets'])
+    expect(Object.keys(worker.seen[0]!).sort()).toEqual(['abortSignal']) // leaf: NO toolsets
     expect(supervisor.seen[0]!.toolsets?.chat?.delegate).toBeDefined()
     expect(worker.seen[0]!.abortSignal).toBe(supervisor.seen[0]!.abortSignal)
   })

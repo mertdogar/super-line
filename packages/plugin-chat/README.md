@@ -205,8 +205,10 @@ Design record: [ADR-0011](https://github.com/mertdogar/super-line/blob/main/docs
 
 Plain [Mastra](https://mastra.ai) `Agent`s hook up the way super-harness does it — hand them over,
 the engine owns the delegate tool (injected per call via `toolsets`, never baked into your Agent),
-the lanes/nesting, the chunk mapping, and abort. Provisioning and the channel loop are one call
-each:
+the lanes/nesting, the chunk mapping, and abort. Nothing else crosses the seam: per-agent config —
+`maxSteps`, thinking, memory — stays on your `Agent` via Mastra's `defaultOptions` (a function of
+the forwarded `requestContext` when it needs per-turn values, e.g. root-only per-channel memory).
+Provisioning and the channel loop are one call each:
 
 ```ts
 import { provisionChatBot } from '@super-line/plugin-chat/server'

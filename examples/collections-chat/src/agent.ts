@@ -167,14 +167,49 @@ function makeStreamer(
     }
     try {
       const result = await agent.stream({ messages: history, abortSignal: w.signal })
-      const { error } = await pipeUIMessageStream(sink, result.toUIMessageStream())
+      // For the finish event the AI SDK splices messageMetadata ONTO the `finish` chunk itself
+      // (a standalone `message-metadata` chunk is only emitted for OTHER part types), and 0.6.0
+      // offers dropped framing chunks — `finish` included — to mapDataPart: the turn's token
+      // usage lands as a durable data part.
+      const { error } = await pipeUIMessageStream(
+        sink,
+        result.toUIMessageStream({
+          messageMetadata: ({ part }) => (part.type === 'finish' ? { usage: part.totalUsage } : undefined),
+        }),
+        {
+          mapDataPart: (chunk) => {
+            if (chunk.type !== 'finish') return undefined
+            const usage = (chunk.messageMetadata as { usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } } | undefined)?.usage
+            // presence-based: a provider that reported no usage fields at all emits nothing,
+            // while a genuine 0-token turn still gets its row
+            if (usage?.totalTokens === undefined && usage?.inputTokens === undefined && usage?.outputTokens === undefined)
+              return undefined
+            return {
+              key: 'usage',
+              data: {
+                kind: 'usage' as const,
+                ...(usage.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
+                ...(usage.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
+                totalTokens: usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+              },
+            }
+          },
+        },
+      )
       if (!pushed) {
-        await w.abort('empty reply')
+        // ADR-0014: deleting a still-streaming message SETTLES it first server-side — one call
+        // replaces the old abort-then-delete recipe, no consumer ever sees a raw disappearance,
+        // and the cancel fanout releases this client's local writer handle moments later
         await agentChat.deleteMessage(w.messageId).catch(() => {})
         return
       }
+      // the settle contract (0.5 migration guide §10): a member cancel settles the row
+      // server-side — never finalize after it
+      if (w.signal.aborted) return
       await w.finalize(error !== undefined ? { status: 'error', error } : {})
     } catch (err) {
+      // w.abort is idempotent after a server-side settle (a cancel already settled the row → no-op),
+      // so a genuine error still surfaces here instead of being swallowed by a signal check
       await w.abort(String(err)).catch(() => {})
       throw err
     }

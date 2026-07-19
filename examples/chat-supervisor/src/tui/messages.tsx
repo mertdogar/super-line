@@ -109,7 +109,18 @@ function PartView({ part, live }: { part: MessagePart; live: boolean }) {
     )
   }
   if (part.type === 'tool') return <ToolRow part={part} />
-  if (part.type === 'data') return <text fg={COLORS.dim}>{short(part.data)}</text>
+  if (part.type === 'data') {
+    // contract-typed data parts: the usage kind gets a chip, anything future-shaped stays JSON
+    if (part.data.kind === 'usage') {
+      const u = part.data
+      const split =
+        u.inputTokens !== undefined || u.outputTokens !== undefined
+          ? ` (↑${(u.inputTokens ?? 0).toLocaleString()} ↓${(u.outputTokens ?? 0).toLocaleString()})`
+          : ''
+      return <text fg={COLORS.dim}>{`⚡ ${u.totalTokens.toLocaleString()} tokens${split}`}</text>
+    }
+    return <text fg={COLORS.dim}>{short(part.data)}</text>
+  }
   return <text fg={COLORS.text}>{`${part.text}${live ? '▌' : ''}`}</text>
 }
 

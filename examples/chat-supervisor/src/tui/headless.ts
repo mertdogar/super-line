@@ -259,6 +259,19 @@ export async function runHeadless(config: Config): Promise<void> {
         }
         return
       }
+      case 'cancel': {
+        // native cancel: the server settles the row `aborted` and signals the producer (§10 of the
+        // 0.5 migration guide) — scripts see the terminal status arrive as a normal turn_done
+        const streaming = (feedStore?.rows() as FeedMessage[] | undefined)?.find((m) => m.status === 'streaming')
+        if (!streaming) return info('error', 'nothing is streaming')
+        try {
+          await chat.cancelMessage(streaming.id, 'cancelled from the headless shell')
+          info('cancel', `cancelled ${streaming.id}`, { messageId: streaming.id })
+        } catch (e) {
+          emitter.emit({ type: 'error', message: errText(e) })
+        }
+        return
+      }
       case 'session': {
         const data = {
           user: `${myName} (${me})`,

@@ -26,6 +26,19 @@ export type CanvasDoc = z.infer<typeof canvasSchema>
 export type TextDoc = z.infer<typeof docSchema>
 
 /**
+ * The host-typed data-part payload (0.6.0): per-lane token usage, mapped from each lane's Mastra
+ * `finish` chunk by the runtime's `mapDataPart` — the supervisor and every delegated subagent
+ * report their own. Discriminated on `kind` so future data kinds slot in beside it.
+ */
+export const usageDataSchema = z.object({
+  kind: z.literal('usage'),
+  inputTokens: z.number().optional(),
+  outputTokens: z.number().optional(),
+  totalTokens: z.number(),
+})
+export type UsageData = z.infer<typeof usageDataSchema>
+
+/**
  * The app is the two plugins (identity from plugin-auth, channels + streamed agent turns from
  * plugin-chat) plus the host's OWN CRDT collections — the chat plugin turns them channel-native
  * via its resource kind registry (see server.ts).
@@ -36,7 +49,7 @@ export const app = defineContract({
     docs: { schema: docSchema, crdt: { mode: 'document' } },
   },
   roles: { user: {}, guest: {} },
-  plugins: [authContract(), chatContract()],
+  plugins: [authContract(), chatContract({ data: usageDataSchema })],
 })
 
 export type User = RowOf<typeof app, 'users'>

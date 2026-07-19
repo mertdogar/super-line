@@ -16,7 +16,7 @@ import { join } from 'node:path'
 export type HeadlessEvent =
   | { type: 'status'; kind: 'ready'; user: string; channel: string }
   | { type: 'status'; kind: 'turn_start'; channel: string; msg: string }
-  | { type: 'status'; kind: 'turn_done'; channel: string; msg: string; status: string }
+  | { type: 'status'; kind: 'turn_done'; channel: string; msg: string; status: string; tokens?: number }
   | { type: 'status'; kind: 'disconnected' }
   | { type: 'status'; kind: 'reconnected' }
   | { type: 'status'; kind: 'resume'; command: string }
@@ -84,7 +84,10 @@ export function makeEmitter(opts: { json: boolean; me: string; spillDir: string 
       case 'status':
         if (ev.kind === 'ready') return write(`<<READY user=${ev.user} channel=${ev.channel}>>`)
         if (ev.kind === 'turn_start') return write(`<<TURN_START channel=${ev.channel} msg=${ev.msg}>>`)
-        if (ev.kind === 'turn_done') return write(`<<TURN_DONE channel=${ev.channel} msg=${ev.msg}>>`)
+        if (ev.kind === 'turn_done')
+          return write(
+            `<<TURN_DONE channel=${ev.channel} msg=${ev.msg}${ev.tokens !== undefined ? ` tokens=${ev.tokens}` : ''}>>`,
+          )
         if (ev.kind === 'disconnected') return write('<<DISCONNECTED>>')
         if (ev.kind === 'reconnected') return write('<<RECONNECTED>>')
         return write(`<<RESUME ${ev.command}>>`)

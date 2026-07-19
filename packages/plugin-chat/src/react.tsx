@@ -37,8 +37,8 @@ export interface ChatBinding<C extends Contract> {
   useChat: () => ChatClient<C>
   /** Live channel directory (re-renders on change; the store re-subscribes on membership changes). */
   useChannels: () => ChannelRowOf<C>[]
-  /** Live member list of one channel. */
-  useMembers: (channelId: string) => MembershipRowOf<C>[]
+  /** Live member list of one channel. `null`/`undefined` channel = the idle state: `[]`, no subscription. */
+  useMembers: (channelId: string | null | undefined) => MembershipRowOf<C>[]
   /** Live chronological newest-N message envelopes for one channel. `null`/`undefined` channel = the idle state: `[]`, no subscription. */
   useMessages: (channelId: string | null | undefined, opts?: { limit?: number }) => MessageRowOf<C>[]
   /**
@@ -55,8 +55,8 @@ export interface ChatBinding<C extends Contract> {
   useChannelBusy: (channelId: string | null | undefined) => boolean
   /** A live recent window plus explicit keyset pagination for older message envelopes. */
   useChatHistory: (channelId: string, opts?: { liveLimit?: number; pageSize?: number }) => ChatHistoryResult<MessageRowOf<C>>
-  /** Live resource registry of one channel. Open a row's doc with `@super-line/react`'s own `useDoc(row.collection, row.docId)`. */
-  useChannelResources: (channelId: string) => ResourceRowOf<C>[]
+  /** Live resource registry of one channel (null-tolerant). Open a row's doc with `@super-line/react`'s own `useDoc(row.collection, row.docId)`. */
+  useChannelResources: (channelId: string | null | undefined) => ResourceRowOf<C>[]
   /**
    * Who's-open presence on one resource: announces open on mount, heartbeats every 20s, closes on
    * unmount, and returns the LIVE rows (recency-filtered; a crashed peer's row drops on the next
@@ -116,9 +116,9 @@ export function createChatHooks<C extends Contract>(): ChatBinding<C> {
     return useStoreRows(() => chat.channels(), [chat])
   }
 
-  function useMembers(channelId: string): MembershipRowOf<C>[] {
+  function useMembers(channelId: string | null | undefined): MembershipRowOf<C>[] {
     const chat = useChat()
-    return useStoreRows(() => chat.members(channelId), [chat, channelId])
+    return useStoreRows(channelId == null ? null : () => chat.members(channelId), [chat, channelId])
   }
 
   function useMessages(channelId: string | null | undefined, opts?: { limit?: number }): MessageRowOf<C>[] {
@@ -228,9 +228,9 @@ export function createChatHooks<C extends Contract>(): ChatBinding<C> {
     return { messages, loadOlder, hasOlder: hasOlder && live.length > 0, loading, error }
   }
 
-  function useChannelResources(channelId: string): ResourceRowOf<C>[] {
+  function useChannelResources(channelId: string | null | undefined): ResourceRowOf<C>[] {
     const chat = useChat()
-    return useStoreRows(() => chat.resources(channelId), [chat, channelId])
+    return useStoreRows(channelId == null ? null : () => chat.resources(channelId), [chat, channelId])
   }
 
   function useResourcePresence(row: { kind: string; collection: string; docId: string }): ResourcePresenceRowOf<C>[] {

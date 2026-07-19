@@ -17,7 +17,8 @@ const app = defineContract({
   plugins: [authContract(), chatContract()],
 })
 
-const { ChatProvider, useMessages, useMessageParts, useMe, useChannelBusy } = createChatHooks<typeof app>()
+const { ChatProvider, useMessages, useMessageParts, useMembers, useChannelResources, useMe, useChannelBusy } =
+  createChatHooks<typeof app>()
 
 const h = createHarness()
 afterEach(() => {
@@ -89,6 +90,23 @@ describe('plugin-chat/react — null-tolerant hooks under StrictMode', () => {
     expect(view.result.current).toEqual([])
     view.rerender({ chId: 'c1', msgId: null })
     expect(view.result.current).toEqual([])
+    ann.chat.close()
+  })
+
+  it('useMembers and useChannelResources are null-tolerant and go live on a real id', async () => {
+    const { url } = await boot()
+    const ann = await newChat(url, 'members@x.com')
+    const ch = await ann.chat.createChannel({ name: 'roster' })
+
+    const view = renderHook(
+      ({ id }: { id: string | null }) => ({ members: useMembers(id), resources: useChannelResources(id) }),
+      { initialProps: { id: null as string | null }, wrapper: wrap(ann.chat) },
+    )
+    expect(view.result.current.members).toEqual([])
+    expect(view.result.current.resources).toEqual([])
+
+    view.rerender({ id: ch.id })
+    await waitFor(() => expect(view.result.current.members).toHaveLength(1))
     ann.chat.close()
   })
 

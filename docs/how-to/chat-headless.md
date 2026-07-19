@@ -32,12 +32,13 @@ Markers mark **state transitions only**; everything else is a plain line. Messag
 <<TURN_START channel=agents msg=1d20083d-…>>
 #agents Supervisor: Done — four notes on the board.
 ⧉ canvas “Canvas” created by Supervisor
-<<TURN_DONE channel=agents msg=1d20083d-…>>
+<<TURN_DONE channel=agents msg=1d20083d-… tokens=1834>>
 <<RESUME bun src/tui/index.tsx --headless --channel agents>>
 ```
 
 The full marker set: `READY`, `TURN_START` / `TURN_DONE` (a bot message's `status` entering /
-leaving `streaming` — the thing scripts most often wait on), `ERROR`, `DISCONNECTED` /
+leaving `streaming` — the thing scripts most often wait on; `tokens=` sums the turn's per-lane
+usage data parts when the runtime maps them), `ERROR`, `DISCONNECTED` /
 `RECONNECTED`, and `RESUME` (the exact re-invocation, printed on clean exit). Oversized payloads
 spill to `--spill-dir` files with an inline `[+N chars -> path]` pointer instead of flooding the
 stream.

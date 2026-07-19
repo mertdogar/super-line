@@ -5,6 +5,7 @@ import { crdtCollectionsClient } from "@super-line/collections-crdt-memory";
 import { chatClient } from "@super-line/plugin-chat/client";
 import { chatAgentTools } from "@super-line/plugin-chat/ai-sdk";
 import { createMastraRunner } from "@super-line/plugin-chat/mastra";
+import { RequestContext } from "@mastra/core/request-context";
 import type { auth } from "@super-line/plugin-auth/server";
 import type { chat as chatKitFactory } from "@super-line/plugin-chat/server";
 import type { ModelMessage, Tool } from "ai";
@@ -120,6 +121,28 @@ export async function startSupervisor(deps: {
   const runner = createMastraRunner({
     agent: supervisor,
     subagents: [{ agent: worker }, { agent: editor }],
+    // 0.6.0: framing chunks reach mapDataPart before being dropped — each lane's `finish` chunk
+    // carries that agent's run usage, so the supervisor AND every delegated subagent persist
+    // their own token count as a durable data part in their own lane.
+    mapDataPart: (chunk) => {
+      if (chunk.type !== "finish") return undefined;
+      const usage = (
+        chunk.payload as {
+          output?: { usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } };
+        }
+      ).output?.usage;
+      // presence-based: no reported usage fields → no part; a genuine 0-token turn still gets one
+      if (usage?.totalTokens === undefined && usage?.inputTokens === undefined && usage?.outputTokens === undefined)
+        return undefined;
+      return {
+        data: {
+          kind: "usage" as const,
+          ...(usage.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
+          ...(usage.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
+          totalTokens: usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+        },
+      };
+    },
   });
 
   const contextMessage = async (channelId: string): Promise<ModelMessage> => {
@@ -160,10 +183,16 @@ export async function startSupervisor(deps: {
     try {
       const result = await runner.run(writer, input, {
         abortSignal: writer.signal,
-        requestContext: { channelId },
+        // Mastra ≥1.50 requires a RequestContext INSTANCE (.get()), not a plain object
+        requestContext: new RequestContext([["channelId", channelId]]),
       });
+      // The settle contract (0.5 migration guide §10): a member cancel settles the row SERVER-side
+      // — the producer must not finalize after it. A cancelled turn is a settled turn, not an error.
+      if (writer.signal.aborted) return;
       await writer.finalize(result.error ? { status: "error", error: result.error } : {});
     } catch (error) {
+      // writer.abort is idempotent after a server-side settle (a cancel already settled the row →
+      // no-op), so a genuine error still surfaces instead of being swallowed by a signal check
       await writer.abort(error instanceof Error ? error.message : String(error)).catch(() => {});
       throw error;
     } finally {

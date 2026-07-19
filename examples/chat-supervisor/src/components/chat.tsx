@@ -170,6 +170,7 @@ function groupTurn(parts: MessagePart[]): Group[] {
 }
 
 function Turn({ m }: { m: FeedMessage }): React.JSX.Element {
+  const chat = useChat()
   const parts = useMessageParts(m.channelId, m.id)
   const streaming = m.status === 'streaming'
   if (parts.length === 0) return <PlainBody m={m} />
@@ -183,6 +184,14 @@ function Turn({ m }: { m: FeedMessage }): React.JSX.Element {
         ),
       )}
       {streaming && parts.every((p) => p.done) && <Cursor />}
+      {streaming && (
+        <button
+          onClick={() => void chat.cancelMessage(m.id, 'stopped from the web UI').catch(() => {})}
+          className="rounded border px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          ⏹ stop
+        </button>
+      )}
       {m.status === 'aborted' && (
         <div className="text-xs italic text-muted-foreground">⏹ interrupted{m.error ? ` — ${m.error}` : ''}</div>
       )}
@@ -262,7 +271,11 @@ function PartView({ p, live }: { p: MessagePart; live: boolean }): React.JSX.Ele
         </div>
       </details>
     )
-  if (p.type === 'data') return <Json label="data" value={p.data} />
+  if (p.type === 'data') {
+    // the contract types data parts (`usageDataSchema`) — discriminate on `kind`, JSON as fallback
+    if (p.data.kind === 'usage') return <UsageChip u={p.data} />
+    return <Json label="data" value={p.data} />
+  }
   const badge = p.isError ? 'error' : p.state === 'done' ? 'completed' : p.state === 'running' ? 'running' : 'input…'
   return (
     <details className="rounded-md border bg-background/70 px-2 py-1 text-sm">
@@ -278,6 +291,21 @@ function PartView({ p, live }: { p: MessagePart; live: boolean }): React.JSX.Ele
       {p.args !== undefined && <Json label="args" value={p.args} />}
       {p.result !== undefined && <Json label="result" value={p.result} />}
     </details>
+  )
+}
+
+/** Per-lane token usage (0.6.0 `mapDataPart` on the finish chunk) — one chip per agent lane. */
+function UsageChip({ u }: { u: { inputTokens?: number; outputTokens?: number; totalTokens: number } }): React.JSX.Element {
+  const split = u.inputTokens !== undefined || u.outputTokens !== undefined
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 text-[11px] text-muted-foreground">
+      ⚡ {u.totalTokens.toLocaleString()} tokens
+      {split && (
+        <span className="opacity-70">
+          (↑{(u.inputTokens ?? 0).toLocaleString()} ↓{(u.outputTokens ?? 0).toLocaleString()})
+        </span>
+      )}
+    </span>
   )
 }
 

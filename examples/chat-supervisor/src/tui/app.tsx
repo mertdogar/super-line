@@ -133,9 +133,13 @@ function Cockpit({
   const [focus, setFocus] = useState<'prompt' | 'pane'>('prompt')
   const connected = useConnected(client)
 
+  // null-tolerant hooks (0.6.0): no channel selected = clean idle state, no '' hack, no subscription
   const active = channels.find((c) => c.id === activeId) ?? channels[0]
-  const messages = useMessages(active?.id ?? '')
-  const members = useMembers(active?.id ?? '')
+  const messages = useMessages(active?.id ?? null)
+  const members = useMembers(active?.id ?? null)
+  // derived from the feed we already hold; `useChannelBusy(id)` gives the same signal standalone
+  // for components that DON'T subscribe to the channel's messages
+  const busy = messages.some((m) => (m as FeedMessage).status === 'streaming')
   const names = useMemo(() => new Map(users.map((u) => [u.id, u.displayName])), [users])
 
   // The pane is a right split ≥96 cols wide (auto-hidden narrower — chat-only). Keyboard ownership:
@@ -193,6 +197,18 @@ function Cockpit({
         setPaneOpen(true)
         setTab('doc')
         break
+      case 'cancel': {
+        // native cancel (0.5.0) + the §10 settle contract: the server settles the row `aborted`
+        // and signals the runtime's writer — the model run unwinds via writer.signal
+        const streamingMsg = messages.find((m) => (m as FeedMessage).status === 'streaming')
+        if (!streamingMsg) notice('nothing is streaming')
+        else
+          void chat
+            .cancelMessage(streamingMsg.id, 'cancelled from the cockpit')
+            .then(() => notice('turn cancelled'))
+            .catch((e) => notice(`cancel failed: ${errText(e)}`))
+        break
+      }
       case 'session':
         setModal({ kind: 'session' })
         break
@@ -216,7 +232,6 @@ function Cockpit({
     void chat.send(active.id, line).catch((e) => notice(`send failed: ${errText(e)}`))
   }
 
-  const busy = messages.some((m) => (m as FeedMessage).status === 'streaming')
   const promptFocused = !modal && focus === 'prompt'
   const idleHint = showPane ? '⏎ send · / commands · ⇥ resources · ^C quit' : '⏎ send · / commands · ^C quit'
 

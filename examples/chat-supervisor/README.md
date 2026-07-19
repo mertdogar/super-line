@@ -15,6 +15,13 @@ available.
   and abort propagation.
 - `messages()` supplies live message envelopes; `messageParts()`/`useMessageParts()` supplies the
   complete detailed transcript for one message.
+- Per-lane token usage (0.6.0): the runtime's `mapDataPart` turns each lane's Mastra `finish` chunk
+  into a typed `usage` data part — the supervisor and every subagent report their own token chip in
+  the web and TUI transcripts, and the headless `<<TURN_DONE>>` marker carries the turn total.
+- Explicit cancellation: `/cancel` (cockpit and headless shell alike) or the web stop button settles
+  the turn `aborted` server-side and unwinds the model run via `writer.signal` — the runtime never
+  finalizes after a cancel (the settle contract,
+  [0.5 migration guide §10](../../docs/how-to/plugin-chat-0-5-migration.md#_10-wire-explicit-cancellation)).
 - Shared canvas/doc resources are host-owned CRDT collections protected by channel membership.
 - Browser, TUI, headless client, and automation all use standard super-line clients.
 

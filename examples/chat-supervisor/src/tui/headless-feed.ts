@@ -168,13 +168,28 @@ export class FeedDiffer {
       if (isBot && !st.settled) {
         const parts = partsByMessage.get(m.id) ?? []
         out.push(...this.diffParts(m, parts))
+        // Gating "turn finished" on a terminal status is SOUND since 0.6.0 (ADR-0014): a streamed
+        // message always settles before it vanishes — even a mid-stream delete lands `aborted`
+        // here first, so this fold can never wedge on a row that silently disappeared.
         if (m.status !== undefined && m.status !== 'streaming') {
           st.settled = true
           out.push(this.messageEvent(m, true, parts))
           if (m.status === 'error') {
             out.push({ type: 'error', message: m.error ?? 'failed', channel: this.channel, messageId: m.id })
           }
-          out.push({ type: 'status', kind: 'turn_done', channel: this.channel, msg: m.id, status: m.status })
+          // per-lane usage data parts (0.6.0 mapDataPart on finish chunks) sum to the turn total
+          const tokens = parts.reduce(
+            (sum, p) => (p.type === 'data' && p.data.kind === 'usage' ? sum + p.data.totalTokens : sum),
+            0,
+          )
+          out.push({
+            type: 'status',
+            kind: 'turn_done',
+            channel: this.channel,
+            msg: m.id,
+            status: m.status,
+            ...(tokens > 0 ? { tokens } : {}),
+          })
         }
       }
     }

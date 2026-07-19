@@ -27,6 +27,9 @@ export function ChannelView({ myUserId, channel, isMember, typingUsers, onOpenNa
   const chat = useChat()
   const users = useUsers()
   const messages = useMessages(channel.id) // live, membership-scoped: empty until you join
+  // the turn-in-flight signal (0.6.0): derived from the feed we already hold. A component that
+  // does NOT subscribe to a channel's messages can get the same signal from `useChannelBusy(id)`.
+  const busy = messages.some((m) => (m as FeedMessage).status === 'streaming')
   const [joining, setJoining] = useState(false)
   const [showMembers, setShowMembers] = useState(false)
 
@@ -90,6 +93,7 @@ export function ChannelView({ myUserId, channel, isMember, typingUsers, onOpenNa
 
           {isMember && (
             <>
+              {busy && <div className="px-4 text-xs italic text-muted-foreground">⚡ Ask AI is responding…</div>}
               <TypingIndicator users={typingUsers} />
               <Composer
                 channelName={channel.name}
@@ -346,7 +350,24 @@ function PartView({ p, live, nested }: { p: FeedPart; live: boolean; nested: boo
         </div>
       </details>
     )
-  if (p.type === 'data') return <Json label="data" value={p.data} />
+  if (p.type === 'data') {
+    // contract-typed data parts (0.6.0): the usage kind renders as a chip, future kinds fall to JSON
+    if (p.data.kind === 'usage') {
+      const u = p.data
+      const split = u.inputTokens !== undefined || u.outputTokens !== undefined
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 text-[11px] text-muted-foreground">
+          ⚡ {u.totalTokens.toLocaleString()} tokens
+          {split && (
+            <span className="opacity-70">
+              (↑{(u.inputTokens ?? 0).toLocaleString()} ↓{(u.outputTokens ?? 0).toLocaleString()})
+            </span>
+          )}
+        </span>
+      )
+    }
+    return <Json label="data" value={p.data} />
+  }
   const badge = p.isError ? 'error' : p.state === 'done' ? 'done' : p.state === 'running' ? 'running' : 'input…'
   return (
     <details className={cn('rounded-md border bg-muted/40 px-2 py-1 text-sm', indent)}>

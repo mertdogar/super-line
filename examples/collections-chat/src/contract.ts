@@ -12,6 +12,15 @@ import { chatContract } from '@super-line/plugin-chat'
  * All this app declares itself is the ephemeral, non-durable garnish that isn't rows — presence and
  * typing — proving host-land signals still compose cleanly on top of a plugin backbone.
  */
+/** Token usage of one agent turn, persisted as a typed data part (kind-discriminated for future data kinds). */
+export const usageDataSchema = z.object({
+  kind: z.literal('usage'),
+  inputTokens: z.number().optional(),
+  outputTokens: z.number().optional(),
+  totalTokens: z.number(),
+})
+export type UsageData = z.infer<typeof usageDataSchema>
+
 export const chat = defineContract({
   roles: {
     user: {
@@ -31,7 +40,10 @@ export const chat = defineContract({
   },
   // plugin-auth: guest role + users/credentials/sessions collections + signIn/signUp/signOut/whoami.
   // plugin-chat: channels/memberships/messages collections + the chat mutation requests (default text body).
-  plugins: [authContract(), chatContract()],
+  // `data` types the agent's durable data parts: per-turn token usage (0.6.0 mapDataPart on framing
+  // chunks). Any Standard Schema validator works here — your zod version doesn't have to match the
+  // one plugin-chat resolves internally (ADR-0013).
+  plugins: [authContract(), chatContract({ data: usageDataSchema })],
 })
 
 /** Typed rows, derived from the merged contract — one source of truth for server + client. */

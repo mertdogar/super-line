@@ -13,6 +13,7 @@ export const COMMANDS: Command[] = [
   { name: 'channels', desc: 'list / switch channels', takesArg: false },
   { name: 'new', arg: 'name', desc: 'create a channel', takesArg: true },
   { name: 'who', desc: 'members in this channel', takesArg: false },
+  { name: 'cancel', desc: 'stop the streaming turn', takesArg: false },
   { name: 'resources', desc: 'toggle the resource pane', takesArg: false },
   { name: 'canvas', desc: 'open the canvas', takesArg: false },
   { name: 'doc', desc: 'open the doc', takesArg: false },

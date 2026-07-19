@@ -91,3 +91,12 @@ and the **live feed** to watch the chat requests + `cchg` frames as you (and the
   names.
 - **The agent** ([`src/agent.ts`](src/agent.ts)) is the same `chatClient` a human uses — the plugin has one
   client surface for browsers and headless agents alike.
+- **Token usage as typed data parts (0.6.0)** — `chatContract({ data: usageDataSchema })` types the agent's
+  durable data parts; the AI SDK's `messageMetadata` rides the finish event as a framing chunk, `mapDataPart`
+  turns it into a `usage` part, and the transcript renders it as a token chip. The `content`/`data` slots
+  accept **any Standard Schema validator** — your zod version doesn't have to match plugin-chat's
+  ([ADR-0013](../../docs/adr/0013-plugin-chat-host-schemas-bridge-through-standard-schema.md)).
+- **Empty turns are one `deleteMessage`** — deleting a still-streaming message settles it first
+  server-side ([ADR-0014](../../docs/adr/0014-a-streamed-message-always-settles-before-it-vanishes.md)),
+  so the old abort-then-delete recipe is gone, and `useChannelBusy` gives the "Ask AI is responding…"
+  signal without a hand-rolled status scan.

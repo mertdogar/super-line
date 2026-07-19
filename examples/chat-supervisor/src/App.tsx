@@ -7,8 +7,16 @@ import { Login } from '@/components/login'
 import { Chat } from '@/components/chat'
 import { app } from '@/contract'
 
-export const { ChatProvider, useChat, useChannels, useMessages, useChannelResources, useResourcePresence } =
-  createChatHooks<typeof app>()
+export const {
+  ChatProvider,
+  useChat,
+  useChannels,
+  useMessages,
+  useMessageParts,
+  useChatHistory,
+  useChannelResources,
+  useResourcePresence,
+} = createChatHooks<typeof app>()
 // The generic super-line hooks carry the CRDT doc surface (useDoc) + the users directory
 // (useCollection) — the chat hooks handle the registry/presence rows above.
 export const { Provider: LineProvider, useDoc, useCollection } = createSuperLineHooks<typeof app, 'user'>()

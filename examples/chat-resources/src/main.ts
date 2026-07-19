@@ -10,9 +10,9 @@ import { webSocketClientTransport, webSocketServerTransport } from '@super-line/
 import { authContract } from '@super-line/plugin-auth'
 import { auth } from '@super-line/plugin-auth/server'
 import { chatContract } from '@super-line/plugin-chat'
-import { chat, provisionChatBot } from '@super-line/plugin-chat/server'
+import { chat } from '@super-line/plugin-chat/server'
 import { chatClient } from '@super-line/plugin-chat/client'
-import { chatAgentTools } from '@super-line/plugin-chat/ai'
+import { chatAgentTools } from '@super-line/plugin-chat/ai-sdk'
 
 // Channel resources (PLAN-chat-resources): the HOST declares its CRDT collections — chat makes them
 // channel-native. Two kinds here: a todo list (owned — minted by chat, dies with its channel) and a
@@ -104,13 +104,20 @@ async function main(): Promise<void> {
   await aliceTodo.ready
   aliceTodo.update({ items: { 'i-1': { text: 'pick a palette', done: false } } })
 
-  // ── The bot: a provisioned member with the /ai toolset ──────────────────────────────────────────
-  const { user: botUser, apiKey } = await provisionChatBot(authKit, chatKit, {
-    name: 'Design Bot',
-    channels: [channel.id],
+  // ── Automation is an ordinary authenticated member; the host owns its lifecycle ───────────────
+  const automationGuest = createSuperLineClient(app, {
+    transport: webSocketClientTransport({ url }),
+    role: 'guest',
   })
-  const botRaw = connect({ apiKey })
-  const tools = chatAgentTools(botRaw, {
+  const { token: automationToken, userId: automationId } = await automationGuest.signUp({
+    email: 'design-automation@example.com',
+    password: 'passpass',
+    displayName: 'Design Automation',
+  })
+  automationGuest.close()
+  await alice.addMember(channel.id, automationId)
+  const automationRaw = connect({ token: automationToken })
+  const tools = chatAgentTools(automationRaw, {
     resourceShapes: {
       todo: '{ items: Record<id, { text: string, done: boolean }> }',
       canvas: '{ name: string, shapes: Record<id, { kind: string, x: number, y: number }> }',
@@ -120,7 +127,7 @@ async function main(): Promise<void> {
   const run = (name: string, input: unknown): Promise<unknown> =>
     (tools[name]!.execute as (i: unknown, o: unknown) => Promise<unknown>)(input, { toolCallId: 't', messages: [] })
 
-  console.log(`[bot] sees:`, await run('list_resources', { channelId: channel.id }))
+  console.log(`[automation] sees:`, await run('list_resources', { channelId: channel.id }))
 
   // the ACKED write path: the bot KNOWS its write landed (or reads the validation error)
   const written = (await run('write_resource', {
@@ -132,7 +139,7 @@ async function main(): Promise<void> {
       { path: ['items', 'i-1', 'done'], set: true },
     ],
   })) as { ok?: boolean }
-  console.log(`[bot] write acked: ${written.ok === true}`)
+  console.log(`[automation] write acked: ${written.ok === true}`)
 
   const rejected = (await run('write_resource', {
     channelId: channel.id,
@@ -140,15 +147,15 @@ async function main(): Promise<void> {
     docId: 'brand-hero',
     ops: [{ path: ['version'], set: 'two' }],
   })) as { error?: string }
-  console.log(`[bot] invalid write honestly rejected: ${rejected.error}`) // VALIDATION
+  console.log(`[automation] invalid write honestly rejected: ${rejected.error}`) // VALIDATION
 
-  // Alice's live handle converged on the bot's writes — same doc, two collaborators
+  // Alice's live handle converged on the automation's writes — same doc, two collaborators
   await until(() => Object.keys((aliceTodo.getSnapshot() as z.infer<typeof todoSchema>).items).length === 2)
   console.log('[alice] todo now:', JSON.stringify(aliceTodo.getSnapshot()))
 
   // ── presence: who has the canvas open ───────────────────────────────────────────────────────────
   await alice.announceResource('canvas', 'brand-hero', 'open')
-  await chatClient(botRaw, { userId: botUser.id }).announceResource('canvas', 'brand-hero', 'open')
+  await chatClient(automationRaw, { userId: automationId }).announceResource('canvas', 'brand-hero', 'open')
   const present = await waitRows(alice.resourcePresence(canvas.collection, 'brand-hero'))
   console.log(`[presence] brand-hero open by ${present.length} member(s)`)
 
@@ -158,7 +165,7 @@ async function main(): Promise<void> {
   console.log('done — the linked canvas doc survives for the next channel that attaches it')
 
   aliceRaw.close()
-  botRaw.close()
+  automationRaw.close()
   server.close()
 }
 

@@ -164,13 +164,17 @@ describe('plugin-chat — streaming messages', () => {
     await parts.ready
     await waitFor(() => {
       const p = sorted(parts.rows(), msg.id)[0]
-      return p !== undefined && p.text.length > 0 && p.offset === p.text.length
+      return p?.type === 'text' && p.text.length > 0 && p.offset === p.text.length
     })
     const seen = sorted(parts.rows(), msg.id)[0]!
+    if (seen.type !== 'text') throw new Error('expected text part')
     expect('partial stream'.startsWith(seen.text)).toBe(true)
 
     // the trailing flush checkpoints the tail even with no further deltas
-    await waitFor(() => sorted(parts.rows(), msg.id)[0]?.text === 'partial stream')
+    await waitFor(() => {
+      const part = sorted(parts.rows(), msg.id)[0]
+      return part?.type === 'text' && part.text === 'partial stream'
+    })
     await ann.c.finalizeMessage({ id: msg.id })
     ann.c.close()
     bob.c.close()
@@ -263,13 +267,13 @@ describe('plugin-chat — streaming messages', () => {
         { type: 'part_start', key: 'root-t', partType: 'text' },
         { type: 'delta', key: 'root-t', text: 'delegating… ' },
         { type: 'part_start', key: 'call-1', partType: 'tool', toolName: 'delegate' },
-        { type: 'part_patch', key: 'call-1', args: { task: 'check weather' } },
+        { type: 'tool_patch', key: 'call-1', args: { task: 'check weather' } },
         // the worker's lane, nested under the delegate call — interleaved with root deltas
         { type: 'part_start', key: 'sub-t', partType: 'text', parent: 'call-1' },
         { type: 'delta', key: 'sub-t', text: 'Ankara: 23°C' },
         { type: 'delta', key: 'root-t', text: 'still supervising' },
         { type: 'part_end', key: 'sub-t' },
-        { type: 'part_patch', key: 'call-1', result: { report: 'mild' } },
+        { type: 'tool_patch', key: 'call-1', result: { report: 'mild' } },
         { type: 'part_end', key: 'root-t' },
       ],
     })
@@ -315,14 +319,20 @@ describe('plugin-chat — streaming messages', () => {
       ann.c.appendMessage({ id: msg.id, events: [{ type: 'delta', key: 'call-9', text: '{"city":' }] }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' })
 
-    await ann.c.appendMessage({ id: msg.id, events: [{ type: 'part_patch', key: 'call-9', args: { city: 'Ankara' } }] })
-    await waitFor(() => sorted(parts.rows(), msg.id)[0]?.state === 'running')
+    await ann.c.appendMessage({ id: msg.id, events: [{ type: 'tool_patch', key: 'call-9', args: { city: 'Ankara' } }] })
+    await waitFor(() => {
+      const part = sorted(parts.rows(), msg.id)[0]
+      return part?.type === 'tool' && part.state === 'running'
+    })
 
     await ann.c.appendMessage({
       id: msg.id,
-      events: [{ type: 'part_patch', key: 'call-9', result: { temp: 23 }, isError: false }],
+      events: [{ type: 'tool_patch', key: 'call-9', result: { temp: 23 }, isError: false }],
     })
-    await waitFor(() => sorted(parts.rows(), msg.id)[0]?.state === 'done')
+    await waitFor(() => {
+      const part = sorted(parts.rows(), msg.id)[0]
+      return part?.type === 'tool' && part.state === 'done'
+    })
     expect(sorted(parts.rows(), msg.id)[0]).toMatchObject({ args: { city: 'Ankara' }, result: { temp: 23 }, isError: false })
 
     await ann.c.finalizeMessage({ id: msg.id })
@@ -468,17 +478,17 @@ describe('plugin-chat — streaming review hardening', () => {
     await ann.c.appendMessage({
       id: msg.id,
       events: [
-        { type: 'part_start', key: 't', partType: 'text', toolName: 'sneaky' },
+        { type: 'part_start', key: 't', partType: 'text', toolName: 'sneaky' } as never,
         { type: 'part_start', key: 'c1', partType: 'tool', toolName: 'weather' },
-        { type: 'part_patch', key: 'c1', result: { ok: true } },
-        { type: 'part_patch', key: 'c1', state: 'running' }, // stale out-of-order patch
+        { type: 'tool_patch', key: 'c1', result: { ok: true } },
+        { type: 'tool_patch', key: 'c1', state: 'running' }, // stale out-of-order patch
       ],
     })
     const parts = ann.c.collection('messageParts').subscribe({})
     await parts.ready
     await waitFor(() => sorted(parts.rows(), msg.id).length === 2)
     const [textPart, toolPart] = sorted(parts.rows(), msg.id)
-    expect(textPart!.toolName).toBeUndefined()
+    expect('toolName' in textPart!).toBe(false)
     expect(toolPart).toMatchObject({ state: 'done', result: { ok: true } })
     await ann.c.finalizeMessage({ id: msg.id })
     ann.c.close()
@@ -597,12 +607,89 @@ describe('plugin-chat — streaming with a structured content schema', () => {
     const { c } = await bootRich({
       project: (parts) => ({
         type: 'text',
-        text: parts.filter((p) => p.type === 'text' && p.parent === null).map((p) => p.text).join(''),
+        text: parts.flatMap((p) => (p.type === 'text' && p.parent === null ? [p.text] : [])).join(''),
       }),
     })
     const msg = await streamOne(c)
     const done = await c.finalizeMessage({ id: msg.id })
     expect(done.content).toEqual({ type: 'text', text: 'rich world' })
     c.close()
+  })
+})
+
+describe('plugin-chat — host-typed data parts', () => {
+  const dataPayload = z.object({ kind: z.literal('progress'), value: z.number(), detail: z.string().optional() })
+  const dataApp = defineContract({
+    roles: {
+      user: { clientToServer: { hello: { input: z.void(), output: z.object({ ok: z.boolean() }) } } },
+    },
+    plugins: [authContract(), chatContract({ data: dataPayload })],
+  })
+
+  async function bootData(streaming?: ChatStreamingOptions) {
+    const backend = memoryCollections()
+    const authKit = auth({ contract: dataApp, collections: backend, defaultRoles: ['user'] })
+    const chatKit = chat({ contract: dataApp, ...(streaming ? { streaming } : {}) })
+    const { srv, url } = await h.server(dataApp, {
+      authenticate: authKit.authenticate,
+      identify: authKit.identify,
+      collections: backend,
+      plugins: [authKit.plugin, chatKit.plugin],
+    })
+    srv.implement({ user: { hello: async () => ({ ok: true }) } } as never)
+    const guest = h.client(dataApp, { url, role: 'guest' })
+    const { token } = await guest.signUp({ email: 'data@x.com', password: 'passpass', displayName: 'Data' })
+    guest.close()
+    return h.client(dataApp, { url, role: 'user', params: { token } })
+  }
+
+  it('validates, patches, and reloads custom data payloads', async () => {
+    const client = await bootData()
+    const channel = await client.createChannel({ name: 'data' })
+    const message = await client.startMessage({ channelId: channel.id })
+    await expect(
+      client.appendMessage({
+        id: message.id,
+        events: [{ type: 'part_start', key: 'p', partType: 'data', data: { kind: 'progress', value: 'bad' } }],
+      } as never),
+    ).rejects.toMatchObject({ code: 'VALIDATION' })
+    await client.appendMessage({
+      id: message.id,
+      events: [
+        { type: 'part_start', key: 'p', partType: 'data', data: { kind: 'progress', value: 10 } },
+        { type: 'data_patch', key: 'p', data: { kind: 'progress', value: 100 } },
+        { type: 'part_end', key: 'p' },
+      ],
+    })
+    await client.finalizeMessage({ id: message.id })
+    const parts = client.collection('messageParts').subscribe({})
+    await parts.ready
+    expect(parts.rows()).toMatchObject([
+      { type: 'data', data: { kind: 'progress', value: 100 }, done: true },
+    ])
+    client.close()
+  })
+
+  it('aborts a stream when a structured payload exceeds the configured byte limit', async () => {
+    const client = await bootData({ maxStructuredBytes: 64 })
+    const channel = await client.createChannel({ name: 'bounded-data' })
+    const message = await client.startMessage({ channelId: channel.id })
+    await expect(
+      client.appendMessage({
+        id: message.id,
+        events: [
+          {
+            type: 'part_start',
+            key: 'p',
+            partType: 'data',
+            data: { kind: 'progress', value: 1, detail: 'x'.repeat(128) },
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+    const messages = client.collection('messages').subscribe({})
+    await messages.ready
+    await waitFor(() => (messages.rows() as ChatMessage[])[0]?.status === 'aborted')
+    client.close()
   })
 })

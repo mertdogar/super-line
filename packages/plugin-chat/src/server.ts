@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { and, eq, isIn, or, SuperLineError, validateSync } from '@super-line/core'
 import type { Contract, Expr, OrderBy, Schema } from '@super-line/core'
 import type { PluginContext, ServerCrdtCollectionHandle, SuperLinePlugin } from '@super-line/server'
-import type { AuthContext, AuthUser } from '@super-line/plugin-auth'
+import type { AuthContext } from '@super-line/plugin-auth'
 import { docKeyOf, memId, partId, presenceId, resourceId } from './index.js'
 import type {
   ChatChannel,
@@ -103,6 +103,10 @@ export interface FinalizeMessageArgs {
   status?: Exclude<MessageStatus, 'streaming'>
   error?: string
 }
+export interface CancelMessageArgs {
+  id: string
+  reason?: string
+}
 /** What `finalizeMessage.after` receives: the settled envelope plus every part, assembled. */
 export type ChatStreamedMessage = ChatMessage & { parts: ChatMessagePart[] }
 
@@ -127,6 +131,8 @@ export interface ChatHooks {
   startMessage?: ChatOpHook<StartMessageArgs, ChatMessage>
   /** The moderation/audit point: fires on every settle — complete, aborted (incl. disconnect), and error. */
   finalizeMessage?: ChatOpHook<FinalizeMessageArgs, ChatStreamedMessage>
+  /** Gates a member's request to cancel an active message. Author-or-owner authorization still applies. */
+  cancelMessage?: ChatOpHook<CancelMessageArgs, ChatMessage>
   createResource?: ChatOpHook<CreateResourceArgs, ChatResource>
   detachResource?: ChatOpHook<DetachResourceArgs, ChatResource>
   /** The content-moderation point for the acked doc-write path (agents route through it). */
@@ -170,8 +176,10 @@ export interface ChatStreamingOptions {
   checkpointMs?: number
   /** Max parts per message (a big supervisor turn-tree ≈ 100). Default 512. */
   maxParts?: number
-  /** Max accumulated text bytes per part. Oversize aborts the stream honestly. Default 256 KiB. */
-  maxPartBytes?: number
+  /** Max accumulated UTF-8 text bytes per text/reasoning part. Default 256 KiB. */
+  maxTextBytes?: number
+  /** Max serialized bytes per tool args/result or host data payload. Default 256 KiB. */
+  maxStructuredBytes?: number
   /** Max events in one append batch. Default 256. */
   maxEventsPerAppend?: number
   /**
@@ -916,12 +924,13 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
   const scfg = {
     checkpointMs: opts.streaming?.checkpointMs ?? 1000,
     maxParts: opts.streaming?.maxParts ?? 512,
-    maxPartBytes: opts.streaming?.maxPartBytes ?? 256 * 1024,
+    maxTextBytes: opts.streaming?.maxTextBytes ?? 256 * 1024,
+    maxStructuredBytes: opts.streaming?.maxStructuredBytes ?? 256 * 1024,
     maxEventsPerAppend: opts.streaming?.maxEventsPerAppend ?? 256,
     project:
       opts.streaming?.project ??
       ((parts: ChatMessagePart[]): unknown => {
-        const texts = parts.filter((p) => p.type === 'text' && p.parent === null).map((p) => p.text)
+        const texts = parts.flatMap((p) => (p.type === 'text' && p.parent === null ? [p.text] : []))
         return texts.length > 0 ? texts.join('\n\n') : undefined
       }),
   }
@@ -946,6 +955,7 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     result?: unknown
     isError?: boolean
     state?: ToolState
+    data?: unknown
   }
   interface OpenStream {
     messageId: string
@@ -979,24 +989,40 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     if (s.flushTimer) clearTimeout(s.flushTimer)
   }
 
-  const partRowOf = (s: OpenStream, p: LivePart, now: number): ChatMessagePart => ({
-    id: partId(s.messageId, p.idx),
-    messageId: s.messageId,
-    channelId: s.channelId,
-    idx: p.idx,
-    type: p.type,
-    parent: p.parent,
-    text: p.text,
-    offset: p.text.length, // a row's offset is ALWAYS its own text length — that's the checkpoint contract
-    done: p.done,
-    lastActivityAt: now,
-    ...(p.toolCallId !== undefined ? { toolCallId: p.toolCallId } : {}),
-    ...(p.toolName !== undefined ? { toolName: p.toolName } : {}),
-    ...(p.args !== undefined ? { args: p.args } : {}),
-    ...(p.result !== undefined ? { result: p.result } : {}),
-    ...(p.isError !== undefined ? { isError: p.isError } : {}),
-    ...(p.state !== undefined ? { state: p.state } : {}),
-  })
+  const partRowOf = (s: OpenStream, p: LivePart, now: number): ChatMessagePart => {
+    const base = {
+      id: partId(s.messageId, p.idx),
+      messageId: s.messageId,
+      channelId: s.channelId,
+      idx: p.idx,
+      parent: p.parent,
+      done: p.done,
+      lastActivityAt: now,
+    }
+    if (p.type === 'text' || p.type === 'reasoning')
+      return { ...base, type: p.type, text: p.text, offset: p.text.length }
+    if (p.type === 'data') return { ...base, type: 'data', data: p.data }
+    return {
+      ...base,
+      type: 'tool',
+      toolCallId: p.toolCallId!,
+      state: p.state ?? 'input-streaming',
+      ...(p.toolName !== undefined ? { toolName: p.toolName } : {}),
+      ...(p.args !== undefined ? { args: p.args } : {}),
+      ...(p.result !== undefined ? { result: p.result } : {}),
+      ...(p.isError !== undefined ? { isError: p.isError } : {}),
+    }
+  }
+
+  const encodedBytes = (value: unknown): number => {
+    const encoded = requireCtx().serializer.encode({ value })
+    return typeof encoded === 'string' ? new TextEncoder().encode(encoded).byteLength : encoded.byteLength
+  }
+
+  const enforceStructuredLimit = async (s: OpenStream, key: string, value: unknown): Promise<void> => {
+    if (encodedBytes(value) > scfg.maxStructuredBytes)
+      return abortForViolation(s, `part '${key}' exceeds maxStructuredBytes (${scfg.maxStructuredBytes})`)
+  }
 
   const flushPart = async (s: OpenStream, p: LivePart): Promise<void> => {
     await col('messageParts').update(partRowOf(s, p, Date.now()))
@@ -1123,8 +1149,11 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
         // key their renderers on, so it is dropped rather than stored.
         ...(e.partType === 'tool'
           ? { toolCallId: e.key, state: 'input-streaming' as ToolState, ...(e.toolName !== undefined ? { toolName: e.toolName } : {}) }
-          : {}),
+          : e.partType === 'data'
+            ? { data: e.data }
+            : {}),
       }
+      if (e.partType === 'data') await enforceStructuredLimit(s, e.key, e.data)
       s.parts.set(e.key, p)
       await col('messageParts').insert(partRowOf(s, p, now))
       return
@@ -1133,10 +1162,10 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     if (!p) throw new SuperLineError('BAD_REQUEST', `no part '${e.key}' — send part_start first`)
     if (p.done) throw new SuperLineError('CONFLICT', `part '${e.key}' already ended`)
     if (e.type === 'delta') {
-      if (p.type === 'tool')
-        throw new SuperLineError('BAD_REQUEST', 'deltas apply to text/reasoning parts; tool args land whole via part_patch')
-      if (p.text.length + e.text.length > scfg.maxPartBytes)
-        return abortForViolation(s, `part '${e.key}' exceeds maxPartBytes (${scfg.maxPartBytes})`)
+      if (p.type !== 'text' && p.type !== 'reasoning')
+        throw new SuperLineError('BAD_REQUEST', 'deltas apply only to text/reasoning parts')
+      if (new TextEncoder().encode(p.text + e.text).byteLength > scfg.maxTextBytes)
+        return abortForViolation(s, `part '${e.key}' exceeds maxTextBytes (${scfg.maxTextBytes})`)
       const offset = p.text.length
       p.text += e.text
       p.dirty = true
@@ -1157,8 +1186,10 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
       }
       return
     }
-    if (e.type === 'part_patch') {
-      if (p.type !== 'tool') throw new SuperLineError('BAD_REQUEST', 'part_patch applies to tool parts')
+    if (e.type === 'tool_patch') {
+      if (p.type !== 'tool') throw new SuperLineError('BAD_REQUEST', 'tool_patch applies to tool parts')
+      if (e.args !== undefined) await enforceStructuredLimit(s, e.key, e.args)
+      if (e.result !== undefined) await enforceStructuredLimit(s, e.key, e.result)
       if (e.args !== undefined) p.args = e.args
       if (e.result !== undefined) p.result = e.result
       if (e.isError !== undefined) p.isError = e.isError
@@ -1171,10 +1202,19 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
       await flushPart(s, p) // lifecycle edges are rare and load-bearing — always persist immediately
       return
     }
+    if (e.type === 'data_patch') {
+      if (p.type !== 'data') throw new SuperLineError('BAD_REQUEST', 'data_patch applies to data parts')
+      await enforceStructuredLimit(s, e.key, e.data)
+      p.data = e.data
+      await flushPart(s, p)
+      return
+    }
     // part_end — optional authoritative full-text replace (a lost delta self-heals here)
     if (e.text !== undefined) {
-      if (e.text.length > scfg.maxPartBytes)
-        return abortForViolation(s, `part '${e.key}' exceeds maxPartBytes (${scfg.maxPartBytes})`)
+      if (p.type !== 'text' && p.type !== 'reasoning')
+        throw new SuperLineError('BAD_REQUEST', 'part_end text applies only to text/reasoning parts')
+      if (new TextEncoder().encode(e.text).byteLength > scfg.maxTextBytes)
+        return abortForViolation(s, `part '${e.key}' exceeds maxTextBytes (${scfg.maxTextBytes})`)
       p.text = e.text
     }
     p.done = true
@@ -1254,6 +1294,23 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     const result = await onLane(s, () => settle(s, input.status ?? 'complete', input.error))
     await hooks.finalizeMessage?.after?.(result, initiator)
     return result
+  }
+
+  const cancelMessageCore = async (args: CancelMessageArgs, initiator: ChatInitiator): Promise<void> => {
+    const input = await runBefore(hooks.cancelMessage, args, initiator)
+    const message = (await col('messages').read(input.id)) as ChatMessage | undefined
+    if (!message) throw new SuperLineError('NOT_FOUND', `no message '${input.id}'`)
+    if (message.status !== 'streaming') throw new SuperLineError('CONFLICT', 'message is not streaming')
+    if (initiator.kind === 'client') {
+      const membership = await membershipOf(message.channelId, initiator.userId)
+      if (!membership) throw new SuperLineError('FORBIDDEN', 'not a member of this channel')
+      if (message.authorId !== initiator.userId && membership.role !== 'owner')
+        throw new SuperLineError('FORBIDDEN', 'only the author or a channel owner can cancel this message')
+    }
+    const reason = input.reason ?? 'cancelled by a channel member'
+    requireCtx().toUser(message.authorId).emit('chat.streamCancelled', { messageId: message.id, reason })
+    const settled = await forceAbort(message.id, reason)
+    await hooks.cancelMessage?.after?.(settled ?? message, initiator)
   }
 
   const makeWriter = (messageId: string): ChatStreamWriter => ({
@@ -1443,6 +1500,10 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
           const { parts: _parts, ...message } = await finalizeMessageCore(input, asUser(connCtx))
           return message
         },
+        cancelMessage: async (input, connCtx) => {
+          await cancelMessageCore(input, asUser(connCtx))
+          return { ok: true }
+        },
         createResource: async (input, connCtx) => {
           const initiator = asUser(connCtx)
           return createResourceCore(
@@ -1579,104 +1640,4 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
   }
 
   return { plugin, channels, members, messages, resources }
-}
-
-// ── bot provisioning (PLAN-chat-mastra) ───────────────────────────────────────────────────────────
-
-/** The slice of plugin-auth's kit `provisionChatBot` drives — structural, so any auth-shaped host fits. */
-export interface ProvisionBotAuthKit {
-  users: {
-    find(opts?: { filter?: Expr; includeDeactivated?: boolean }): Promise<AuthUser[]>
-    create(input: {
-      email: string
-      displayName: string
-      roles?: string[]
-      metadata?: Record<string, unknown>
-    }): Promise<AuthUser>
-    reactivate(id: string): Promise<void>
-  }
-  apiKeys: {
-    create(userId: string, opts: { role: string; label: string }): Promise<{ id: string; key: string }>
-    listFor(userId: string): Promise<{ id: string; label?: string }[]>
-    revoke(id: string): Promise<void>
-  }
-}
-
-export interface ProvisionChatBotOptions {
-  /**
-   * The bot's display name — the find-or-create identity key. (The public users row carries no
-   * email; that lives in the deny-all credentials collection, so the name is the one readable
-   * stable key.) Keep it unique among your bots.
-   */
-  name: string
-  /** The account email, used at first creation only. Default: `<slug(name)>@bots.local`. */
-  email?: string
-  /** The API key's connect role. Default `'user'`. */
-  role?: string
-  /** Same-label keys are revoked and re-minted each call, so restarts don't accumulate live keys. Default `<slug(name)>-bot`. */
-  keyLabel?: string
-  /** User metadata on first creation. `bot: true` is always added — it's the adoption marker. */
-  metadata?: Record<string, unknown>
-  /** Channel ids to join as a member (idempotent — already-a-member is fine). */
-  channels?: string[]
-}
-
-/**
- * Idempotent bot identity: find-or-create the user by display name (reactivating a soft-deleted
- * one), revoke + re-mint its same-label API key, and join the given channels. Passwordless — the
- * bot connects with the returned `apiKey` only. Call it once per process start:
- *
- * ```ts
- * const { user, apiKey } = await provisionChatBot(authKit, chatKit, { name: 'Supervisor' })
- * const client = createSuperLineClient(app, { transport, role: 'user', params: { apiKey } })
- * const bot = chatClient(client, { userId: user.id })
- * ```
- *
- * Revoke-then-mint is not atomic: a rolling multi-instance restart can transiently hold two live
- * keys under one label. Fine for the intended one-process-per-bot shape.
- */
-export async function provisionChatBot(
-  authKit: ProvisionBotAuthKit,
-  chatKit: { members: Pick<ChatMembersApi, 'add'> },
-  opts: ProvisionChatBotOptions,
-): Promise<{ user: AuthUser; apiKey: string }> {
-  const slug = opts.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'bot'
-  const email = (opts.email ?? `${slug}@bots.local`).toLowerCase()
-  const label = opts.keyLabel ?? `${slug}-bot`
-
-  // Adopt ONLY accounts this function created: displayName has no uniqueness anywhere, so a human
-  // who signed up (or squatted) as 'Ask AI' must never be hijacked — the unconditional
-  // `bot: true` marker written at creation is the discriminator.
-  const findExisting = async (): Promise<AuthUser | undefined> =>
-    (await authKit.users.find({ filter: eq('displayName', opts.name), includeDeactivated: true })).find(
-      (u) => u.metadata?.bot === true,
-    )
-  let user = await findExisting()
-  if (!user) {
-    try {
-      user = await authKit.users.create({ email, displayName: opts.name, metadata: { ...opts.metadata, bot: true } })
-    } catch (e) {
-      // a concurrent provision can win the create race — resolve by name once more before giving up
-      // (a genuine email clash with a DIFFERENTLY-named account stays an error: pass an explicit email)
-      if ((e as { code?: string }).code !== 'CONFLICT') throw e
-      user = await findExisting()
-      if (!user) throw e
-    }
-  }
-  if (user.deletedAt !== null && user.deletedAt !== undefined) {
-    await authKit.users.reactivate(user.id)
-    user = { ...user, deletedAt: null }
-  }
-
-  for (const k of await authKit.apiKeys.listFor(user.id)) if (k.label === label) await authKit.apiKeys.revoke(k.id)
-  const { key } = await authKit.apiKeys.create(user.id, { role: opts.role ?? 'user', label })
-
-  for (const channelId of opts.channels ?? []) {
-    try {
-      await chatKit.members.add(channelId, user.id)
-    } catch (e) {
-      if ((e as { code?: string }).code !== 'CONFLICT') throw e
-    }
-  }
-  return { user, apiKey: key }
 }

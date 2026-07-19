@@ -1,15 +1,15 @@
 import { ToolLoopAgent, tool } from 'ai'
+import type { ModelMessage } from 'ai'
 import { z } from 'zod'
 import type { SuperLineClient } from '@super-line/client'
 import { eq } from '@super-line/core'
 import { createSuperLineClient } from '@super-line/client'
 import { webSocketClientTransport } from '@super-line/transport-websocket'
-import { chatClient, onChatMessage } from '@super-line/plugin-chat/client'
+import { chatClient } from '@super-line/plugin-chat/client'
 import type { ChatClient } from '@super-line/plugin-chat/client'
-import type { ChatTurnMessage } from '@super-line/plugin-chat'
-import { chatAgentTools, pipeUIMessageStream } from '@super-line/plugin-chat/ai'
+import { chatAgentTools, pipeUIMessageStream } from '@super-line/plugin-chat/ai-sdk'
 import type { auth } from '@super-line/plugin-auth/server'
-import { provisionChatBot, type chat as chatKitFactory } from '@super-line/plugin-chat/server'
+import type { chat as chatKitFactory } from '@super-line/plugin-chat/server'
 import { chat } from './contract.js'
 
 type AuthKit = ReturnType<typeof auth<typeof chat>>
@@ -19,6 +19,7 @@ type ChatKit = ReturnType<typeof chatKitFactory<typeof chat>>
 export const AGENT_CHANNEL = 'ask-ai'
 const BOT_NAME = 'Ask AI'
 const BOT_EMAIL = 'ask-ai@collections-chat.local'
+const RUNTIME_MARKER = 'collections-chat-agent'
 // A Vercel AI Gateway model string ("provider/model"). The gateway reaches Anthropic/OpenAI/Google
 // behind one API key (AI_GATEWAY_API_KEY), so swapping providers is a one-line change.
 const MODEL = process.env.MODEL ?? process.env.AGENT_MODEL ?? 'anthropic/claude-sonnet-5'
@@ -45,13 +46,26 @@ export async function startAgent(deps: { authKit: AuthKit; chatKit: ChatKit; url
   const { authKit, chatKit, url } = deps
   const channelId = await seedChannels(chatKit)
 
-  // idempotent provisioning, one library call: find-or-create by display name, re-mint the
-  // same-label API key (restarts no longer accumulate live keys), join #ask-ai
-  const { user, apiKey } = await provisionChatBot(authKit, chatKit, {
-    name: BOT_NAME,
-    email: BOT_EMAIL,
-    keyLabel: 'agent-runtime',
-    channels: [channelId],
+  let user = (await authKit.users.find({ filter: eq('displayName', BOT_NAME), includeDeactivated: true })).find(
+    (candidate) => candidate.metadata?.runtime === RUNTIME_MARKER,
+  )
+  if (!user) {
+    user = await authKit.users.create({
+      email: BOT_EMAIL,
+      displayName: BOT_NAME,
+      metadata: { runtime: RUNTIME_MARKER },
+    })
+  }
+  if (user.deletedAt != null) {
+    await authKit.users.reactivate(user.id)
+    user = { ...user, deletedAt: null }
+  }
+  for (const key of await authKit.apiKeys.listFor(user.id)) {
+    if (key.label === RUNTIME_MARKER) await authKit.apiKeys.revoke(key.id)
+  }
+  const { key: apiKey } = await authKit.apiKeys.create(user.id, { role: 'user', label: RUNTIME_MARKER })
+  await chatKit.members.add(channelId, user.id).catch((error) => {
+    if ((error as { code?: string }).code !== 'CONFLICT') throw error
   })
 
   const client = createSuperLineClient(chat, {
@@ -63,22 +77,34 @@ export async function startAgent(deps: { authKit: AuthKit; chatKit: ChatKit; url
   await agent.ready
 
   const respond = makeStreamer(client, agent, channelId)
-  // the bot loop (backlog excluded, own messages skipped, streaming envelopes deferred, history
-  // assembled with honest placeholders, turns serialized per channel) is one library call — this
-  // example's producer is the AI SDK, proving the loop is framework-agnostic
-  onChatMessage(
-    agent,
-    async ({ message, history }) => {
-      const prompt = typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
-      await respond(prompt ?? '', history)
-    },
-    { channels: [channelId] },
-  )
+  const feed = agent.messages(channelId)
+  await feed.ready
+  const handled = new Set(feed.rows().map((message) => message.id))
+  let queue: Promise<void> | undefined
+  feed.subscribe(() => {
+    for (const message of feed.rows()) {
+      if (handled.has(message.id) || message.status === 'streaming') continue
+      handled.add(message.id)
+      if (message.authorId === user.id || typeof message.content !== 'string' || message.metadata?.resource) continue
+      const prompt = message.content
+      queue = (queue ?? Promise.resolve())
+        .then(async () => {
+          const page = await agent.history(channelId, { limit: 20 })
+          const history = page.messages.flatMap((item): ModelMessage[] => {
+            if (typeof item.content !== 'string') return []
+            return [{ role: item.authorId === user.id ? 'assistant' : 'user', content: item.content }]
+          })
+          await respond(prompt, history)
+        })
+        .catch((error) => console.error('Ask AI turn failed', error))
+      void queue
+    }
+  })
 
   console.log(`  🤖 Ask AI agent online in #${AGENT_CHANNEL} (${process.env.AI_GATEWAY_API_KEY ? MODEL : 'offline canned replies'})`)
 }
 
-type Streamer = (prompt: string, history: ChatTurnMessage[]) => Promise<void>
+type Streamer = (prompt: string, history: ModelMessage[]) => Promise<void>
 
 /**
  * Build the reply pipeline: the bot answers as a STREAMED message (PLAN-chat-streaming) — reasoning,
@@ -129,7 +155,7 @@ function makeStreamer(
     providerOptions: { anthropic: { thinking: { type: 'enabled', budgetTokens: 2048 } } },
   })
   return async (_prompt, history) => {
-    const w = await agentChat.stream(channelId)
+    const w = await agentChat.stream(channelId, { metadata: { producer: RUNTIME_MARKER } })
     // the old one-shot path guarded `if (answer.trim())` — the streaming equivalent: a turn that
     // never produced a single part must not leave an empty bubble behind
     let pushed = false
@@ -140,7 +166,7 @@ function makeStreamer(
       },
     }
     try {
-      const result = await agent.stream({ messages: history })
+      const result = await agent.stream({ messages: history, abortSignal: w.signal })
       const { error } = await pipeUIMessageStream(sink, result.toUIMessageStream())
       if (!pushed) {
         await w.abort('empty reply')
@@ -165,10 +191,11 @@ function cannedStreamer(agentChat: ChatClient<typeof chat>, channelId: string): 
     return `Got it: “${prompt.slice(0, 80)}”. I’m in offline demo mode — add AI_GATEWAY_API_KEY to the server to make me actually helpful.`
   }
   return async (prompt) => {
-    const w = await agentChat.stream(channelId)
+    const w = await agentChat.stream(channelId, { metadata: { producer: RUNTIME_MARKER } })
     try {
       w.push({ type: 'part_start', key: 't', partType: 'text' })
       for (const word of answer(prompt).split(/(?<=\s)/)) {
+        if (w.signal.aborted) throw new Error(String(w.signal.reason ?? 'cancelled'))
         w.push({ type: 'delta', key: 't', text: word })
         await new Promise((r) => setTimeout(r, 40)) // typewriter pace, visibly live
       }

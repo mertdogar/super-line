@@ -1,15 +1,34 @@
-import { createContext, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react'
 import type { Contract } from '@super-line/core'
 import { PRESENCE_LIVE_MS } from './index.js'
 import type {
-  AssembledMessageOf,
   ChannelRowOf,
   ChatClient,
   ChatLiveStore,
+  HistoryCursor,
+  MessagePartRowOf,
+  MessageRowOf,
   MembershipRowOf,
   ResourcePresenceRowOf,
   ResourceRowOf,
 } from './client.js'
+
+export interface ChatHistoryResult<Message> {
+  messages: Message[]
+  loadOlder(): Promise<void>
+  hasOlder: boolean
+  loading: boolean
+  error: unknown
+}
 
 export interface ChatBinding<C extends Contract> {
   /** Mount near your root with a {@link ChatClient} instance (rebuild it when the auth client swaps connections). */
@@ -20,11 +39,12 @@ export interface ChatBinding<C extends Contract> {
   useChannels: () => ChannelRowOf<C>[]
   /** Live member list of one channel. */
   useMembers: (channelId: string) => MembershipRowOf<C>[]
-  /** Live chronological message window of one channel — streamed messages arrive assembled (`parts`/`status`). */
-  useMessages: (
-    channelId: string,
-    opts?: { limit?: number; partsLimit?: number; streaming?: boolean },
-  ) => AssembledMessageOf<C>[]
+  /** Live chronological newest-N message envelopes for one channel. */
+  useMessages: (channelId: string, opts?: { limit?: number }) => MessageRowOf<C>[]
+  /** Live durable parts for one message. Mount this only while that message needs detailed rendering. */
+  useMessageParts: (channelId: string, messageId: string) => MessagePartRowOf<C>[]
+  /** A live recent window plus explicit keyset pagination for older message envelopes. */
+  useChatHistory: (channelId: string, opts?: { liveLimit?: number; pageSize?: number }) => ChatHistoryResult<MessageRowOf<C>>
   /** Live resource registry of one channel. Open a row's doc with `@super-line/react`'s own `useDoc(row.collection, row.docId)`. */
   useChannelResources: (channelId: string) => ResourceRowOf<C>[]
   /**
@@ -36,7 +56,7 @@ export interface ChatBinding<C extends Contract> {
 }
 
 /**
- * Build the React binding for the chat client: a provider + `useChannels`/`useMembers`/`useMessages`
+ * Build the React binding for the chat client: a provider + collection hooks
  * over `useSyncExternalStore`. Each hook owns its store's lifecycle (closed on unmount / channel switch);
  * the re-subscribe-on-membership-change mechanic lives in {@link ChatClient}, not here.
  */
@@ -70,23 +90,80 @@ export function createChatHooks<C extends Contract>(): ChatBinding<C> {
     return useStoreRows(() => chat.members(channelId), [chat, channelId])
   }
 
-  function useMessages(
-    channelId: string,
-    opts?: { limit?: number; partsLimit?: number; streaming?: boolean },
-  ): AssembledMessageOf<C>[] {
+  function useMessages(channelId: string, opts?: { limit?: number }): MessageRowOf<C>[] {
     const chat = useChat()
     const limit = opts?.limit
-    const partsLimit = opts?.partsLimit
-    const streaming = opts?.streaming
     return useStoreRows(
-      () =>
-        chat.messages(channelId, {
-          ...(limit !== undefined ? { limit } : {}),
-          ...(partsLimit !== undefined ? { partsLimit } : {}),
-          ...(streaming !== undefined ? { streaming } : {}),
-        }),
-      [chat, channelId, limit, partsLimit, streaming],
+      () => chat.messages(channelId, limit === undefined ? undefined : { limit }),
+      [chat, channelId, limit],
     )
+  }
+
+  function useMessageParts(channelId: string, messageId: string): MessagePartRowOf<C>[] {
+    const chat = useChat()
+    return useStoreRows(() => chat.messageParts(channelId, messageId), [chat, channelId, messageId])
+  }
+
+  function useChatHistory(
+    channelId: string,
+    opts?: { liveLimit?: number; pageSize?: number },
+  ): ChatHistoryResult<MessageRowOf<C>> {
+    const chat = useChat()
+    const liveLimit = opts?.liveLimit
+    const pageSize = opts?.pageSize ?? 50
+    const live = useMessages(channelId, liveLimit === undefined ? undefined : { limit: liveLimit })
+    const [older, setOlder] = useState<MessageRowOf<C>[]>([])
+    const [cursor, setCursor] = useState<HistoryCursor>()
+    const [hasOlder, setHasOlder] = useState(true)
+    const [loading, setLoading] = useState(false)
+    const [error, setError] = useState<unknown>()
+    const position = (message: MessageRowOf<C>): { id: string; createdAt: number } =>
+      message as unknown as { id: string; createdAt: number }
+
+    useEffect(() => {
+      setOlder([])
+      setCursor(undefined)
+      setHasOlder(true)
+      setLoading(false)
+      setError(undefined)
+    }, [chat, channelId, pageSize, liveLimit])
+
+    const oldestLive = live[0] as (MessageRowOf<C> & { createdAt: number; id: string }) | undefined
+    const loadOlder = useCallback(async (): Promise<void> => {
+      if (loading || !hasOlder) return
+      const before = cursor ?? (oldestLive ? { createdAt: oldestLive.createdAt, id: oldestLive.id } : undefined)
+      if (!before) {
+        setHasOlder(false)
+        return
+      }
+      setLoading(true)
+      setError(undefined)
+      try {
+        const page = await chat.history(channelId, { before, limit: pageSize })
+        setOlder((current) => {
+          const byId = new Map([...page.messages, ...current].map((message) => [position(message).id, message]))
+          return [...byId.values()].sort(
+            (a, b) =>
+              position(a).createdAt - position(b).createdAt || position(a).id.localeCompare(position(b).id),
+          )
+        })
+        setCursor(page.nextCursor)
+        setHasOlder(page.nextCursor !== undefined)
+      } catch (cause) {
+        setError(cause)
+      } finally {
+        setLoading(false)
+      }
+    }, [channelId, chat, cursor, hasOlder, loading, oldestLive?.createdAt, oldestLive?.id, pageSize])
+
+    const messages = useMemo(() => {
+      const byId = new Map([...older, ...live].map((message) => [position(message).id, message]))
+      return [...byId.values()].sort(
+        (a, b) => position(a).createdAt - position(b).createdAt || position(a).id.localeCompare(position(b).id),
+      )
+    }, [live, older])
+
+    return { messages, loadOlder, hasOlder: hasOlder && live.length > 0, loading, error }
   }
 
   function useChannelResources(channelId: string): ResourceRowOf<C>[] {
@@ -110,5 +187,15 @@ export function createChatHooks<C extends Contract>(): ChatBinding<C> {
     return rows.filter((p) => (p as { heartbeatAt: number }).heartbeatAt > cutoff)
   }
 
-  return { ChatProvider, useChat, useChannels, useMembers, useMessages, useChannelResources, useResourcePresence }
+  return {
+    ChatProvider,
+    useChat,
+    useChannels,
+    useMembers,
+    useMessages,
+    useMessageParts,
+    useChatHistory,
+    useChannelResources,
+    useResourcePresence,
+  }
 }

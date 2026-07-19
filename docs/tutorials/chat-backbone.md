@@ -206,6 +206,6 @@ You drove the plugin headlessly. The obvious next step: because an agent is just
 - **[Tutorial 5 · Put a live AI agent in the chat](/tutorials/ai-agent-chat)** — provision a bot, run its message loop, and stream its answer into the channel. The natural sequel to this lesson.
 - [Add a chat backbone (how-to)](/how-to/plugin-chat) — the full surface: structured message bodies, the imperative `chatKit` (`channels` / `members` / `messages`), the hooks, and the React bindings (`useChannels` / `useMembers` / `useMessages`).
 - [Stream an agent's turn (how-to)](/how-to/chat-streaming) — the streamed-message model: one message that accumulates typed parts (text · tool calls · subagent trees) live and survives reloads.
-- [Run an AI chat bot (how-to)](/how-to/chat-bots) — `provisionChatBot`, `onChatMessage`, the `chatAgentTools` AI SDK toolset, and the Mastra engine.
+- [Run an automated chat client](/how-to/chat-bots) — standard-user provisioning, host-owned triggers and memory, AI SDK tools, and the Mastra runner.
 - [Add authentication (how-to)](/how-to/plugin-auth) — the browser sign-up / sign-in flow with `authClient()` and `createAuth()`.
 - [`examples/collections-chat`](https://github.com/mertdogar/super-line/tree/main/examples/collections-chat) — a Slack-like app built entirely on this plugin, with membership control, presence/typing garnish, and a live AI agent in an `#ask-ai` channel.

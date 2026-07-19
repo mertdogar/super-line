@@ -21,7 +21,7 @@ import { authClient } from '@super-line/plugin-auth/client'
 import type { TokenStorage } from '@super-line/plugin-auth/client'
 import { chatClient } from '@super-line/plugin-chat/client'
 import { app } from '../contract'
-import type { FeedMessage } from '../contract'
+import type { FeedMessage, MessagePart } from '../contract'
 import type { Config } from './config'
 import { fileStorage } from './storage'
 import { COMMANDS } from './commands'
@@ -103,23 +103,62 @@ export async function runHeadless(config: Config): Promise<void> {
   // ── the current channel + its live feed differ ──────────────────────────────────────────────────
   let current: Channel | null = null
   let feedUnsub: () => void = () => {}
+  let closeParts: () => void = () => {}
   let feedStore: ReturnType<typeof chat.messages> | null = null
 
   const openChannel = async (ch: Channel): Promise<void> => {
     feedUnsub()
+    closeParts()
     feedStore?.close()
     current = ch
     void chat.join(ch.id).catch(() => {}) // idempotent; guarantees read access + the delta room
     const store = chat.messages(ch.id)
     feedStore = store
     const differ = new FeedDiffer({ channel: ch.name, me, names })
+    const partsByMessage = new Map<string, MessagePart[]>()
+    const partStores = new Map<string, { store: ReturnType<typeof chat.messageParts>; unsubscribe: () => void }>()
+    closeParts = (): void => {
+      for (const mounted of partStores.values()) {
+        mounted.unsubscribe()
+        mounted.store.close()
+      }
+      partStores.clear()
+      partsByMessage.clear()
+    }
     let primed = false
-    feedUnsub = store.subscribe(() => {
-      if (primed && feedStore === store) emitter.emitAll(differ.sync(store.rows() as FeedMessage[]))
-    })
+    const emit = (): void => {
+      if (primed && feedStore === store) emitter.emitAll(differ.sync(store.rows() as FeedMessage[], partsByMessage))
+    }
+    const mountParts = async (message: FeedMessage): Promise<void> => {
+      if (partStores.has(message.id)) return
+      const parts = chat.messageParts(ch.id, message.id)
+      const update = (): void => {
+        partsByMessage.set(message.id, parts.rows() as MessagePart[])
+        emit()
+      }
+      const unsubscribe = parts.subscribe(update)
+      partStores.set(message.id, { store: parts, unsubscribe })
+      await parts.ready
+      update()
+    }
+    const reconcile = async (): Promise<void> => {
+      const rows = store.rows() as FeedMessage[]
+      const detailed = new Set(rows.filter((message) => message.status !== undefined).map((message) => message.id))
+      for (const message of rows) if (message.status !== undefined) await mountParts(message)
+      for (const [messageId, mounted] of partStores) {
+        if (detailed.has(messageId)) continue
+        mounted.unsubscribe()
+        mounted.store.close()
+        partStores.delete(messageId)
+        partsByMessage.delete(messageId)
+      }
+      emit()
+    }
+    feedUnsub = store.subscribe(() => void reconcile())
     await store.ready
     if (feedStore !== store) return // switched again while awaiting — the newer open owns the feed
-    differ.prime(store.rows() as FeedMessage[]) // backlog is context, not events
+    await reconcile()
+    differ.prime(store.rows() as FeedMessage[], partsByMessage) // backlog is context, not events
     primed = true
   }
 
@@ -162,6 +201,7 @@ export async function runHeadless(config: Config): Promise<void> {
     clearInterval(connTimer)
     offReconnect()
     feedUnsub()
+    closeParts()
     feedStore?.close()
     channelsStore.close()
     usersLive.close()

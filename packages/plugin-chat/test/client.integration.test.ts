@@ -140,9 +140,30 @@ describe('plugin-chat/client — live stores', () => {
     chat.close()
     ann.c.close()
   })
+
+  it('history() keyset-pages older envelopes without gaps or duplicates', async () => {
+    const { url } = await boot()
+    const ann = await newUser(url, 'ann@x.com', 'Ann')
+    const chat = chatClient(ann.c, { userId: ann.userId })
+    await chat.ready
+    const ch = await chat.createChannel({ name: 'history' })
+    for (let i = 1; i <= 5; i++) await chat.send(ch.id, `msg ${i}`)
+
+    const latest = await chat.history(ch.id, { limit: 2 })
+    expect(latest.messages.map((message) => message.content)).toEqual(['msg 4', 'msg 5'])
+    expect(latest.nextCursor).toBeDefined()
+    const middle = await chat.history(ch.id, { before: latest.nextCursor, limit: 2 })
+    expect(middle.messages.map((message) => message.content)).toEqual(['msg 2', 'msg 3'])
+    const oldest = await chat.history(ch.id, { before: middle.nextCursor, limit: 2 })
+    expect(oldest.messages.map((message) => message.content)).toEqual(['msg 1'])
+    expect(oldest.nextCursor).toBeUndefined()
+
+    chat.close()
+    ann.c.close()
+  })
 })
 
-describe('plugin-chat/client — streaming (assembled feed + writer)', () => {
+describe('plugin-chat/client — streaming envelopes, complete parts, and writer', () => {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
   it('a viewer sees live delta-driven text BEFORE any checkpoint or finalize; plain messages pass through untouched', async () => {
@@ -159,9 +180,11 @@ describe('plugin-chat/client — streaming (assembled feed + writer)', () => {
 
     const feed = bobChat.messages(ch.id)
     await feed.ready
-    await sleep(20) // margin for the fire-and-forget watchChannel to land before deltas fly
 
     const w = await annChat.stream(ch.id)
+    const parts = bobChat.messageParts(ch.id, w.messageId)
+    await parts.ready
+    await sleep(20) // margin for the fire-and-forget watchChannel to land before deltas fly
     w.push(
       { type: 'part_start', key: 't', partType: 'text' },
       { type: 'delta', key: 't', text: 'Hello ' },
@@ -169,23 +192,27 @@ describe('plugin-chat/client — streaming (assembled feed + writer)', () => {
     )
     await w.flush()
 
-    // live text assembled from spliced deltas — the part ROW still holds '' (checkpoint is 60s away)
+    // live text overlays the durable row — its checkpoint is still 60 seconds away
     await waitFor(() => {
-      const m = feed.rows().find((r) => r.id === w.messageId)
-      return m?.parts?.[0]?.text === 'Hello world'
+      const part = parts.rows()[0]
+      return part?.type === 'text' && part.text === 'Hello world'
     })
     const streaming = feed.rows().find((r) => r.id === w.messageId)!
     expect(streaming.status).toBe('streaming')
     expect(streaming.content).toBeUndefined()
 
-    // the plain message is untouched: no parts, no status
+    // the plain message remains a plain envelope; asking for its parts returns an empty complete store
     const plain = feed.rows().find((r) => r.content === 'plain first')!
-    expect(plain.parts).toBeUndefined()
     expect(plain.status).toBeUndefined()
+    const plainParts = bobChat.messageParts(ch.id, plain.id)
+    await plainParts.ready
+    expect(plainParts.rows()).toEqual([])
 
     const done = await w.finalize()
     expect(done).toMatchObject({ status: 'complete', content: 'Hello world' })
     await waitFor(() => feed.rows().find((r) => r.id === w.messageId)?.status === 'complete')
+    plainParts.close()
+    parts.close()
     annChat.close()
     bobChat.close()
     ann.c.close()
@@ -198,16 +225,15 @@ describe('plugin-chat/client — streaming (assembled feed + writer)', () => {
     const annChat = chatClient(ann.c, { userId: ann.userId })
     await annChat.ready
     const ch = await annChat.createChannel({ name: 'ops' })
-    const feed = annChat.messages(ch.id)
-    await feed.ready
-    await sleep(20) // margin for the fire-and-forget watchChannel to land before deltas fly
-
     const w = await annChat.stream(ch.id)
+    const parts = annChat.messageParts(ch.id, w.messageId)
+    await parts.ready
+    await sleep(20) // margin for the fire-and-forget watchChannel to land before deltas fly
     w.push(
       { type: 'part_start', key: 'root', partType: 'text' },
       { type: 'delta', key: 'root', text: 'delegating… ' },
       { type: 'part_start', key: 'call-1', partType: 'tool', toolName: 'delegate' },
-      { type: 'part_patch', key: 'call-1', args: { task: 'weather' } },
+      { type: 'tool_patch', key: 'call-1', args: { task: 'weather' } },
       { type: 'part_start', key: 'sub', partType: 'text', parent: 'call-1' },
       { type: 'delta', key: 'sub', text: 'Ankara 23°C' },
       { type: 'delta', key: 'root', text: 'done' },
@@ -217,19 +243,18 @@ describe('plugin-chat/client — streaming (assembled feed + writer)', () => {
     )
     await w.flush()
 
-    await waitFor(() => {
-      const parts = feed.rows().find((r) => r.id === w.messageId)?.parts
-      return parts?.length === 4 && parts.every((p) => p.type === 'tool' || p.text.length > 0)
-    })
-    const parts = feed.rows().find((r) => r.id === w.messageId)!.parts!
+    await waitFor(
+      () => parts.rows().length === 4 && parts.rows().every((part) => !('text' in part) || part.text.length > 0),
+    )
     // tree order: root text, then the delegate tool immediately followed by its subagent lane, then root2
-    expect(parts.map((p) => [p.type, p.parent ?? null, p.text])).toEqual([
+    expect(parts.rows().map((part) => [part.type, part.parent ?? null, 'text' in part ? part.text : undefined])).toEqual([
       ['text', null, 'delegating… done'],
-      ['tool', null, ''],
+      ['tool', null, undefined],
       ['text', 'call-1', 'Ankara 23°C'],
       ['reasoning', null, 'hmm'],
     ])
     await w.finalize()
+    parts.close()
     annChat.close()
     ann.c.close()
   })
@@ -249,55 +274,52 @@ describe('plugin-chat/client — streaming (assembled feed + writer)', () => {
     await w.flush()
     await sleep(30) // let the checkpoint land
 
-    // bob opens the feed only NOW — everything he sees came from rows
-    const feed = bobChat.messages(ch.id)
-    await feed.ready
-    await waitFor(() => (feed.rows().find((r) => r.id === w.messageId)?.parts?.[0]?.text.length ?? 0) > 0)
+    // bob opens the part store only NOW — everything he sees came from durable rows
+    const parts = bobChat.messageParts(ch.id, w.messageId)
+    await parts.ready
+    await waitFor(() => {
+      const part = parts.rows()[0]
+      return part?.type === 'text' && part.text.length > 0
+    })
 
     // …and the stream continues live into the same store
     w.push({ type: 'delta', key: 't', text: 'stream' })
     await w.flush()
-    await waitFor(() => feed.rows().find((r) => r.id === w.messageId)?.parts?.[0]?.text === 'partial stream')
+    await waitFor(() => {
+      const part = parts.rows()[0]
+      return part?.type === 'text' && part.text === 'partial stream'
+    })
 
     await w.finalize()
+    parts.close()
     annChat.close()
     bobChat.close()
     ann.c.close()
     bob.c.close()
   })
 
-  it('the parts window is recency-bounded: an old turn assembles without parts, its content still renders', async () => {
-    const { url } = await boot()
+  it('messageParts() reloads every durable part without a hidden recency cap', async () => {
+    const { url } = await boot({ streaming: { maxParts: 1_100 } })
     const ann = await newUser(url, 'ann@x.com', 'Ann')
-    // partsLimit 2: only the two most-recently-active parts stay in the window
-    const annChat = chatClient(ann.c, { userId: ann.userId, partsLimit: 2 })
+    const annChat = chatClient(ann.c, { userId: ann.userId })
     await annChat.ready
     const ch = await annChat.createChannel({ name: 'general' })
 
-    const a = await annChat.stream(ch.id)
-    a.push(
-      { type: 'part_start', key: 't', partType: 'text' },
-      { type: 'delta', key: 't', text: 'old turn' },
-      { type: 'part_end', key: 't' },
-    )
-    await a.finalize()
-    const b = await annChat.stream(ch.id)
-    b.push(
-      { type: 'part_start', key: 't', partType: 'text' },
-      { type: 'delta', key: 't', text: 'new turn' },
-      { type: 'part_end', key: 't' },
-      { type: 'part_start', key: 'r', partType: 'reasoning' },
-      { type: 'delta', key: 'r', text: 'thinking' },
-      { type: 'part_end', key: 'r' },
-    )
-    await b.finalize()
+    const writer = await annChat.stream(ch.id)
+    for (let i = 0; i < 1_001; i++) {
+      const key = `p:${i}`
+      writer.push({ type: 'part_start', key, partType: 'reasoning' }, { type: 'part_end', key })
+    }
+    await writer.finalize()
 
-    const feed = annChat.messages(ch.id)
-    await feed.ready
-    await waitFor(() => (feed.rows().find((r) => r.id === b.messageId)?.parts?.length ?? 0) === 2)
-    const oldTurn = feed.rows().find((r) => r.id === a.messageId)!
-    expect(oldTurn.parts).toBeUndefined() // fell out of the window — not an empty array, ABSENT
-    expect(oldTurn).toMatchObject({ status: 'complete', content: 'old turn' }) // content carries the render
+    const again = chatClient(ann.c, { userId: ann.userId })
+    await again.ready
+    const parts = again.messageParts(ch.id, writer.messageId)
+    await parts.ready
+    expect(parts.rows()).toHaveLength(1_001)
+    expect(parts.rows().map((part) => part.idx)).toEqual(Array.from({ length: 1_001 }, (_, idx) => idx))
+    parts.close()
+    again.close()
     annChat.close()
     ann.c.close()
   })
@@ -351,5 +373,39 @@ describe('plugin-chat/client — streaming (assembled feed + writer)', () => {
     await waitFor(() => feed.rows().find((r) => r.id === w.messageId)?.status === 'aborted')
     annChat.close()
     ann.c.close()
+  })
+
+  it('cancellation is authorized, aborts the producer signal, and durably settles the message', async () => {
+    const { url } = await boot()
+    const owner = await newUser(url, 'owner@x.com', 'Owner')
+    const author = await newUser(url, 'author@x.com', 'Author')
+    const member = await newUser(url, 'member@x.com', 'Member')
+    const ownerChat = chatClient(owner.c, { userId: owner.userId })
+    const authorChat = chatClient(author.c, { userId: author.userId })
+    const memberChat = chatClient(member.c, { userId: member.userId })
+    await Promise.all([ownerChat.ready, authorChat.ready, memberChat.ready])
+    const ch = await ownerChat.createChannel({ name: 'cancel' })
+    await ownerChat.addMember(ch.id, author.userId)
+    await ownerChat.addMember(ch.id, member.userId)
+
+    const feed = ownerChat.messages(ch.id)
+    await feed.ready
+    const writer = await authorChat.stream(ch.id)
+    writer.push({ type: 'part_start', key: 't', partType: 'text' }, { type: 'delta', key: 't', text: 'working' })
+    await writer.flush()
+
+    await expect(memberChat.cancelMessage(writer.messageId)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await ownerChat.cancelMessage(writer.messageId, 'stopped by owner')
+    await waitFor(() => writer.signal.aborted)
+    expect(writer.signal.reason).toBe('stopped by owner')
+    await waitFor(() => feed.rows().find((message) => message.id === writer.messageId)?.status === 'aborted')
+
+    feed.close()
+    ownerChat.close()
+    authorChat.close()
+    memberChat.close()
+    owner.c.close()
+    author.c.close()
+    member.c.close()
   })
 })

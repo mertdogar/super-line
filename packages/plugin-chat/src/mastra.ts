@@ -1,6 +1,5 @@
-// The Mastra hookup (PLAN-chat-mastra): plain Mastra Agents in, one streamed chat message out —
-// the whole delegation tree included. Ported from super-harness's engine, scoped to chat:
-// `mastraEngine` owns the registry/edges/depth gates (createHarness), the per-call `delegate`
+// The Mastra hookup: plain Mastra Agents in, typed stream events out — the whole delegation tree
+// included. `createMastraRunner` owns the registry/edges/depth gates, the per-call `delegate`
 // tool (tools.ts — injected via `toolsets`, NEVER baked into the user's Agent, so agents stay
 // pure), the fullStream drive loop (runNode), and the chunk mapper below. NOT ported: approvals,
 // modes, suspension/resume, thread stores — that's the harness's cockpit; channels are the
@@ -13,9 +12,7 @@
 
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
-import type { Contract } from '@super-line/core'
-import type { ChatStreamEvent, ChatTurnMessage, StreamEventSink } from './index.js'
-import type { ChatClient, MessageRowOf } from './client.js'
+import type { ChatStreamEvent, StreamEventSink } from './index.js'
 
 // ── the chunk mapper (a direct port of super-harness's chunk-adapter) ───────────────────────────
 //
@@ -30,7 +27,7 @@ import type { ChatClient, MessageRowOf } from './client.js'
 //   parts have no offsets, so this adapter SEGMENTS instead — a tool call closes the open
 //   text/reasoning part and the next delta opens a fresh one. Same rendered order, simpler model.
 // - `tool-call-delta` (streaming args text) maps to nothing: plugin-chat v1 lands tool args whole
-//   via part_patch. The case stays so the vocabulary keeps parity with the harness mapper.
+//   via tool_patch. The case stays so the vocabulary keeps parity with the harness mapper.
 
 /** Structural view of a fullStream chunk — the real Mastra ChunkType is assignable to this. */
 export interface ChunkLike {
@@ -45,15 +42,29 @@ export interface LaneOptions {
   parent?: string
 }
 
-export interface ChunkAdapter {
-  map(chunk: ChunkLike): ChatStreamEvent[]
+export interface MappedDataPart<Data> {
+  data: Data
+}
+
+export interface ChunkAdapterOptions<Data> extends LaneOptions {
+  suppressTools?: readonly string[]
+  /** Turn an SDK-specific chunk into one complete custom data part. */
+  mapDataPart?: (chunk: ChunkLike) => MappedDataPart<Data> | undefined
+  /** Observe chunks that are neither transcript content nor known framing. */
+  onUnsupported?: (chunk: ChunkLike) => void
+}
+
+export interface ChunkAdapter<Data> {
+  map(chunk: ChunkLike): ChatStreamEvent<Data>[]
   /** Close any still-open text/reasoning segment (call once when the lane's stream ends). */
-  end(): ChatStreamEvent[]
+  end(): ChatStreamEvent<Data>[]
   /** Set when the stream emitted a turn-level `error` chunk. */
   error: string | undefined
 }
 
-export function createChunkAdapter(suppressToolNames: ReadonlySet<string>, lane: LaneOptions): ChunkAdapter {
+export function createChunkAdapter<Data = never>(options: ChunkAdapterOptions<Data>): ChunkAdapter<Data> {
+  const suppressToolNames = new Set(options.suppressTools ?? [])
+  const lane: LaneOptions = options
   const suppressed = new Set<string>()
   const startedTools = new Set<string>()
   const key = (id: string): string => `${lane.prefix}${id}`
@@ -63,22 +74,22 @@ export function createChunkAdapter(suppressToolNames: ReadonlySet<string>, lane:
   let seq = 0
   let openText: string | undefined
   let openReasoning: string | undefined
-  const closeSegments = (): ChatStreamEvent[] => {
-    const out: ChatStreamEvent[] = []
+  const closeSegments = (): ChatStreamEvent<Data>[] => {
+    const out: ChatStreamEvent<Data>[] = []
     if (openText !== undefined) out.push({ type: 'part_end', key: openText })
     if (openReasoning !== undefined) out.push({ type: 'part_end', key: openReasoning })
     openText = openReasoning = undefined
     return out
   }
 
-  const self: ChunkAdapter = { map, end: closeSegments, error: undefined }
+  const self: ChunkAdapter<Data> = { map, end: closeSegments, error: undefined }
 
-  function map(chunk: ChunkLike): ChatStreamEvent[] {
+  function map(chunk: ChunkLike): ChatStreamEvent<Data>[] {
     const p = (chunk.payload ?? {}) as Record<string, any>
     switch (chunk.type) {
       case 'text-delta': {
         if (!p.text) return []
-        const out: ChatStreamEvent[] = []
+        const out: ChatStreamEvent<Data>[] = []
         if (openText === undefined) {
           openText = key(`t${seq++}`)
           out.push({ type: 'part_start', key: openText, partType: 'text', ...parent })
@@ -88,7 +99,7 @@ export function createChunkAdapter(suppressToolNames: ReadonlySet<string>, lane:
       }
       case 'reasoning-delta': {
         if (!p.text) return []
-        const out: ChatStreamEvent[] = []
+        const out: ChatStreamEvent<Data>[] = []
         if (openReasoning === undefined) {
           openReasoning = key(`r${seq++}`)
           out.push({ type: 'part_start', key: openReasoning, partType: 'reasoning', ...parent })
@@ -115,33 +126,48 @@ export function createChunkAdapter(suppressToolNames: ReadonlySet<string>, lane:
           suppressed.add(p.toolCallId)
           return []
         }
-        const start: ChatStreamEvent[] = startedTools.has(p.toolCallId)
+        const start: ChatStreamEvent<Data>[] = startedTools.has(p.toolCallId)
           ? []
           : [
               ...closeSegments(),
               { type: 'part_start', key: key(p.toolCallId), partType: 'tool', toolName: p.toolName, ...parent },
             ]
         startedTools.add(p.toolCallId)
-        return [...start, { type: 'part_patch', key: key(p.toolCallId), args: p.args }]
+        return [...start, { type: 'tool_patch', key: key(p.toolCallId), args: p.args }]
       }
       case 'tool-result':
         if (suppressed.has(p.toolCallId)) return []
         return [
-          { type: 'part_patch', key: key(p.toolCallId), result: p.result, isError: !!p.isError },
+          { type: 'tool_patch', key: key(p.toolCallId), result: p.result, isError: !!p.isError },
           { type: 'part_end', key: key(p.toolCallId) },
         ]
       case 'tool-error':
         // A tool whose execute() threw — without this the call stays "running" in the card forever.
         if (suppressed.has(p.toolCallId)) return []
         return [
-          { type: 'part_patch', key: key(p.toolCallId), result: { error: errorMessage(p) }, isError: true },
+          { type: 'tool_patch', key: key(p.toolCallId), result: { error: errorMessage(p) }, isError: true },
           { type: 'part_end', key: key(p.toolCallId) },
         ]
       case 'error':
         self.error = errorMessage(p)
         return []
-      default:
-        return [] // step-finish/finish (usage bookkeeping is harness domain, not chat parts), framing
+      case 'start':
+      case 'step-start':
+      case 'step-finish':
+      case 'finish':
+        return []
+      default: {
+        const mapped = options.mapDataPart?.(chunk)
+        if (mapped) {
+          const dataKey = key(`d${seq++}`)
+          return [
+            { type: 'part_start', key: dataKey, partType: 'data', data: mapped.data, ...parent },
+            { type: 'part_end', key: dataKey },
+          ]
+        }
+        options.onUnsupported?.(chunk)
+        return []
+      }
     }
   }
 
@@ -157,10 +183,10 @@ function errorMessage(p: Record<string, any>): string {
 
 // ── the drive loop (runNode's fold, minus the harness envelope) ──────────────────────────────────
 
-async function drive(
-  adapter: ChunkAdapter,
+async function drive<Data>(
+  adapter: ChunkAdapter<Data>,
   stream: AsyncIterable<ChunkLike> | ReadableStream<ChunkLike>,
-  sink: StreamEventSink,
+  sink: StreamEventSink<Data>,
   hooks?: { checkpoint?: () => Promise<void>; bail?: () => void },
 ): Promise<{ text: string }> {
   const iterable: AsyncIterable<ChunkLike> =
@@ -214,17 +240,22 @@ async function* readAll<T>(stream: ReadableStream<T>): AsyncGenerator<T> {
 /**
  * Pipe ONE Mastra `fullStream` into a plugin-chat stream writer — the single-lane escape hatch,
  * exact sibling of `pipeUIMessageStream` (custom loops, one agent, no delegation). For the full
- * supervisor/subagent wiring use {@link mastraEngine}.
+ * supervisor/subagent wiring use {@link createMastraRunner}.
  *
  * It never settles the message: the producer owns `finalize`/`abort` (put them in a `finally`).
  * A turn-level `error` chunk is returned, not thrown — pass it to `finalize({ status: 'error' })`.
  */
-export async function pipeMastraStream(
-  sink: StreamEventSink,
+export async function pipeMastraStream<Data = never>(
+  sink: StreamEventSink<Data>,
   stream: AsyncIterable<ChunkLike> | ReadableStream<ChunkLike>,
-  opts?: { lane?: LaneOptions; suppressTools?: string[] },
+  opts?: Omit<ChunkAdapterOptions<Data>, keyof LaneOptions> & { lane?: LaneOptions },
 ): Promise<{ text: string; error?: string }> {
-  const adapter = createChunkAdapter(new Set(opts?.suppressTools ?? []), opts?.lane ?? { prefix: '' })
+  const adapter = createChunkAdapter({
+    ...(opts?.lane ?? { prefix: '' }),
+    ...(opts?.suppressTools ? { suppressTools: opts.suppressTools } : {}),
+    ...(opts?.mapDataPart ? { mapDataPart: opts.mapDataPart } : {}),
+    ...(opts?.onUnsupported ? { onUnsupported: opts.onUnsupported } : {}),
+  })
   const { text } = await drive(adapter, stream, sink)
   return adapter.error !== undefined ? { text, error: adapter.error } : { text }
 }
@@ -238,10 +269,8 @@ export async function pipeMastraStream(
 export interface MastraAgentLike {
   /** Mastra `Agent.id` — the registry key `delegatesTo` edges and the delegate tool reference. */
   id: string
-  stream(input: any, options?: any): Promise<{ fullStream: any }>
+  stream(input: unknown, options?: unknown): Promise<{ fullStream: unknown }>
 }
-
-export type { ChatTurnMessage } from './index.js'
 
 export interface MastraSubagent {
   agent: MastraAgentLike
@@ -249,7 +278,7 @@ export interface MastraSubagent {
   delegatesTo?: string[] | true
 }
 
-export interface MastraEngineOptions {
+export interface MastraRunnerOptions<Data = never> {
   /** The root agent — every `run` drives it; subagents run under `delegate` calls. */
   agent: MastraAgentLike
   subagents?: MastraSubagent[]
@@ -259,6 +288,9 @@ export interface MastraEngineOptions {
   maxDepth?: number
   /** Tool names to hide from the transcript entirely. `'delegate'` is rejected — see header. */
   suppressTools?: string[]
+  /** Optional host mapping for Mastra chunks that should become durable custom data parts. */
+  mapDataPart?: (chunk: ChunkLike) => MappedDataPart<Data> | undefined
+  onUnsupported?: (chunk: ChunkLike) => void
 }
 
 export interface MastraRunOptions {
@@ -272,30 +304,18 @@ export interface MastraRunOptions {
   requestContext?: unknown
 }
 
-export interface MastraEngine {
+export interface MastraRunner<Data = never> {
   /**
    * Stream one full turn — root lane plus every delegation, nested — into `sink`. Never settles
-   * the message (see {@link MastraEngine.respond} for the settle sugar). A turn-level `error`
+   * the message. A turn-level `error`
    * chunk on the ROOT lane is returned, not thrown; a subagent's failure becomes the delegate
    * tool's `isError` result and the root turn continues (the model sees it and may retry).
    */
   run(
-    sink: StreamEventSink,
-    input: string | ChatTurnMessage[],
+    sink: StreamEventSink<Data>,
+    input: unknown,
     opts?: MastraRunOptions,
   ): Promise<{ text: string; error?: string }>
-  /**
-   * One whole answer turn: open a streamed message in `channelId`, `run`, then settle — `complete`
-   * normally, `{ status: 'error' }` on a turn-level error, `abort` + rethrow on a thrown failure.
-   * A turn that never pushed anything (and didn't error) is deleted instead of finalized blank;
-   * returns the settled row, or `undefined` for that deleted-empty case.
-   */
-  respond<C extends Contract>(
-    chat: ChatClient<C>,
-    channelId: string,
-    input: string | ChatTurnMessage[],
-    opts?: MastraRunOptions,
-  ): Promise<MessageRowOf<C> | undefined>
 }
 
 const DELEGATE_TOOL = 'delegate'
@@ -323,8 +343,8 @@ function makeDelegateTool(agentTypes: string[], run: (agentType: string, task: s
  * Wire plain Mastra Agents to plugin-chat streaming — the chat-scoped `createHarness`.
  *
  * ```ts
- * const engine = mastraEngine({ agent: supervisor, subagents: [{ agent: worker }] })
- * onChatMessage(bot, ({ channelId, history }) => engine.respond(bot, channelId, history))
+ * const runner = createMastraRunner({ agent: supervisor, subagents: [{ agent: worker }] })
+ * const result = await runner.run(messageWriter, input, { abortSignal })
  * ```
  *
  * The engine owns everything the chat-supervisor example used to hand-roll: the `delegate` tool
@@ -339,11 +359,11 @@ function makeDelegateTool(agentTypes: string[], run: (agentType: string, task: s
  * `requestContext` the engine forwards, so e.g. only the root agent derives a per-channel
  * `memory: { thread }` and workers stay stateless by construction, not by engine policy.
  */
-export function mastraEngine(cfg: MastraEngineOptions): MastraEngine {
+export function createMastraRunner<Data = never>(cfg: MastraRunnerOptions<Data>): MastraRunner<Data> {
   const subs = cfg.subagents ?? []
   const known = new Set<string>([cfg.agent.id, ...subs.map((s) => s.agent.id)])
   if (known.size !== subs.length + 1)
-    throw new Error('duplicate agent ids — every agent in a mastraEngine needs a distinct `id`')
+    throw new Error('duplicate agent ids — every agent in a Mastra runner needs a distinct `id`')
   const resolveEdges = (d: string[] | true | undefined, fallback: string[], ownId: string): string[] => {
     // `true` = every OTHER agent — a self-edge would let the model recurse into itself to maxDepth
     const edges = d === true ? [...known].filter((id) => id !== ownId) : (d ?? fallback)
@@ -371,8 +391,8 @@ export function mastraEngine(cfg: MastraEngineOptions): MastraEngine {
     })
 
   async function run(
-    sink: StreamEventSink,
-    input: string | ChatTurnMessage[],
+    sink: StreamEventSink<Data>,
+    input: unknown,
     opts?: MastraRunOptions,
   ): Promise<{ text: string; error?: string }> {
     // One turn-scoped controller: the caller's signal chains in, a failed checkpoint fires it, and
@@ -390,7 +410,7 @@ export function mastraEngine(cfg: MastraEngineOptions): MastraEngine {
     const bail = (): void => {
       if (failed !== undefined) throw failed
     }
-    const flushable = sink as StreamEventSink & { flush?: () => Promise<void> }
+    const flushable = sink as StreamEventSink<Data> & { flush?: () => Promise<void> }
     const checkpoint =
       typeof flushable.flush === 'function'
         ? async (): Promise<void> => {
@@ -410,7 +430,12 @@ export function mastraEngine(cfg: MastraEngineOptions): MastraEngine {
       lane: LaneOptions,
       depth: number,
     ): Promise<{ text: string; error?: string }> {
-      const adapter = createChunkAdapter(suppress, lane)
+      const adapter = createChunkAdapter<Data>({
+        ...lane,
+        suppressTools: [...suppress],
+        ...(cfg.mapDataPart ? { mapDataPart: cfg.mapDataPart } : {}),
+        ...(cfg.onUnsupported ? { onUnsupported: cfg.onUnsupported } : {}),
+      })
       // The engine passes ONLY what it owns: the turn abort, the per-turn context conduit, and
       // the delegate toolset. Per-agent config (maxSteps, thinking, memory) is the host's Agent
       // `defaultOptions` — Mastra deep-merges those under these call options.
@@ -463,36 +488,5 @@ export function mastraEngine(cfg: MastraEngineOptions): MastraEngine {
     }
   }
 
-  async function respond<C extends Contract>(
-    chat: ChatClient<C>,
-    channelId: string,
-    input: string | ChatTurnMessage[],
-    opts?: MastraRunOptions,
-  ): Promise<MessageRowOf<C> | undefined> {
-    const w = await chat.stream(channelId)
-    // Whole-tree emptiness: `pushed` flips on the FIRST event from ANY lane — deletion is gated
-    // strictly on it (and on no-error: an error settle must stay visible, however empty).
-    let pushed = false
-    const sink = {
-      push: (...events: ChatStreamEvent[]): void => {
-        pushed = true
-        w.push(...events)
-      },
-      flush: (): Promise<void> => w.flush(),
-    }
-    try {
-      const { error } = await run(sink, input, opts)
-      if (!pushed && error === undefined) {
-        await w.abort('empty reply')
-        await chat.deleteMessage(w.messageId).catch(() => {})
-        return undefined
-      }
-      return await w.finalize(error !== undefined ? { status: 'error', error } : {})
-    } catch (err) {
-      await w.abort(String(err)).catch(() => {})
-      throw err
-    }
-  }
-
-  return { run, respond }
+  return { run }
 }

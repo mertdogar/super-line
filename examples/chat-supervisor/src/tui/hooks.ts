@@ -6,7 +6,15 @@ import { createChatHooks } from '@super-line/plugin-chat/react'
 import { createSuperLineHooks } from '@super-line/react'
 import type { app } from '../contract'
 
-export const { ChatProvider, useChat, useChannels, useMembers, useMessages, useChannelResources, useResourcePresence } =
-  createChatHooks<typeof app>()
+export const {
+  ChatProvider,
+  useChat,
+  useChannels,
+  useMembers,
+  useMessages,
+  useMessageParts,
+  useChannelResources,
+  useResourcePresence,
+} = createChatHooks<typeof app>()
 export const { Provider: LineProvider, useCollection } = createSuperLineHooks<typeof app, 'user'>()
 export { chatClient }

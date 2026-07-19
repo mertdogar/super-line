@@ -503,24 +503,52 @@ export type { StreamEventSink } from './index.js'
  * Mapping: text/reasoning lifecycles → text/reasoning parts (writer keys namespaced `t:`/`r:` so
  * they can never collide with toolCallIds); tool chunks → ONE tool part per `toolCallId`
  * (input-available → args, output-available → result, output-error/denied → structured `isError`
- * result). `tool-input-delta`, step/message framing, `file`/`source-*`/data chunks are dropped —
- * outside the part vocabulary (PLAN-chat-streaming decision 2).
+ * result). Host-defined data, file, source, and approval chunks can be mapped with `mapDataPart`.
  *
  * It never settles the message: the producer owns `finalize`/`abort` (put them in a `finally`).
  * A turn-level `error` chunk is returned, not thrown — pass it to `finalize({ status: 'error' })`.
  */
-export async function pipeUIMessageStream(
-  writer: StreamEventSink,
-  stream: AsyncIterable<UIMessageChunk> | ReadableStream<UIMessageChunk>,
-): Promise<{ error?: string }> {
+export interface MappedUIDataPart<Data> {
+  data: Data
+  key?: string
+}
+
+export interface UIMessageStreamAdapterOptions<Data> {
+  mapDataPart?: (chunk: UIMessageChunk) => MappedUIDataPart<Data> | undefined
+  onUnsupported?: (chunk: UIMessageChunk) => void
+}
+
+export interface UIMessageStreamAdapter<Data> {
+  map(chunk: UIMessageChunk): ChatStreamEvent<Data>[]
+  readonly error: string | undefined
+}
+
+/** Stateful AI SDK chunk interpreter. Use directly when the host owns the stream loop. */
+export function createUIMessageStreamAdapter<Data = never>(
+  options: UIMessageStreamAdapterOptions<Data> = {},
+): UIMessageStreamAdapter<Data> {
   const startedTools = new Set<string>()
   let error: string | undefined
   // text/reasoning chunk ids are only unique WITHIN one generation step — the SDK's own reducer
   // resets its id maps on every step boundary, so a 2-step tool-then-text turn reuses id '0'.
   // Namespace writer keys by a step counter or the second step's part_start CONFLICTs server-side.
   let step = 0
+  let dataSeq = 0
 
-  const map = (chunk: UIMessageChunk): ChatStreamEvent[] => {
+  const startTool = (toolCallId: string, toolName?: string): ChatStreamEvent<Data>[] => {
+    if (startedTools.has(toolCallId)) return []
+    startedTools.add(toolCallId)
+    return [
+      {
+        type: 'part_start',
+        key: toolCallId,
+        partType: 'tool',
+        ...(toolName !== undefined ? { toolName } : {}),
+      },
+    ]
+  }
+
+  const map = (chunk: UIMessageChunk): ChatStreamEvent<Data>[] => {
     switch (chunk.type) {
       case 'start-step':
         step++
@@ -538,62 +566,96 @@ export async function pipeUIMessageStream(
       case 'reasoning-end':
         return [{ type: 'part_end', key: `r:${step}:${chunk.id}` }]
       case 'tool-input-start':
-        startedTools.add(chunk.toolCallId)
-        return [{ type: 'part_start', key: chunk.toolCallId, partType: 'tool', toolName: chunk.toolName }]
+        return startTool(chunk.toolCallId, chunk.toolName)
       case 'tool-input-available': {
-        // input-available may arrive without a preceding input-start (non-streamed args)
-        const start: ChatStreamEvent[] = startedTools.has(chunk.toolCallId)
-          ? []
-          : [{ type: 'part_start', key: chunk.toolCallId, partType: 'tool', toolName: chunk.toolName }]
-        startedTools.add(chunk.toolCallId)
-        return [...start, { type: 'part_patch', key: chunk.toolCallId, args: chunk.input }]
+        return [
+          ...startTool(chunk.toolCallId, chunk.toolName),
+          { type: 'tool_patch', key: chunk.toolCallId, args: chunk.input },
+        ]
       }
       case 'tool-input-error': {
-        const start: ChatStreamEvent[] = startedTools.has(chunk.toolCallId)
-          ? []
-          : [{ type: 'part_start', key: chunk.toolCallId, partType: 'tool', toolName: chunk.toolName }]
-        startedTools.add(chunk.toolCallId)
         return [
-          ...start,
+          ...startTool(chunk.toolCallId, chunk.toolName),
           {
-            type: 'part_patch',
+            type: 'tool_patch',
             key: chunk.toolCallId,
             args: chunk.input,
             result: { error: chunk.errorText },
             isError: true,
             state: 'done',
           },
+          { type: 'part_end', key: chunk.toolCallId },
         ]
       }
       case 'tool-output-available':
         // preliminary results stream WHILE the tool still runs — pinning state keeps the server's
         // monotonic guard from flipping the part to a terminal 'done' on the first progress update
-        return [
-          chunk.preliminary === true
-            ? { type: 'part_patch', key: chunk.toolCallId, result: chunk.output, state: 'running' }
-            : { type: 'part_patch', key: chunk.toolCallId, result: chunk.output },
-        ]
+        return chunk.preliminary === true
+          ? [
+              ...startTool(chunk.toolCallId),
+              { type: 'tool_patch', key: chunk.toolCallId, result: chunk.output, state: 'running' },
+            ]
+          : [
+              ...startTool(chunk.toolCallId),
+              { type: 'tool_patch', key: chunk.toolCallId, result: chunk.output },
+              { type: 'part_end', key: chunk.toolCallId },
+            ]
       case 'tool-output-error':
         return [
-          { type: 'part_patch', key: chunk.toolCallId, result: { error: chunk.errorText }, isError: true, state: 'done' },
+          ...startTool(chunk.toolCallId),
+          { type: 'tool_patch', key: chunk.toolCallId, result: { error: chunk.errorText }, isError: true, state: 'done' },
+          { type: 'part_end', key: chunk.toolCallId },
         ]
       case 'tool-output-denied':
-        return [{ type: 'part_patch', key: chunk.toolCallId, result: { denied: true }, isError: true, state: 'done' }]
+        return [
+          ...startTool(chunk.toolCallId),
+          { type: 'tool_patch', key: chunk.toolCallId, result: { denied: true }, isError: true, state: 'done' },
+          { type: 'part_end', key: chunk.toolCallId },
+        ]
       case 'error':
         error = chunk.errorText
         return []
-      default:
-        return [] // step/message framing, files, sources, data parts — outside the part vocabulary
+      case 'abort':
+        error = chunk.reason ?? 'aborted'
+        return []
+      case 'start':
+      case 'finish':
+      case 'finish-step':
+      case 'message-metadata':
+      case 'tool-input-delta':
+        return []
+      default: {
+        const mapped = options.mapDataPart?.(chunk)
+        if (mapped) {
+          const key = mapped.key ?? `d:${step}:${dataSeq++}`
+          return [
+            { type: 'part_start', key, partType: 'data', data: mapped.data },
+            { type: 'part_end', key },
+          ]
+        }
+        options.onUnsupported?.(chunk)
+        return []
+      }
     }
   }
+
+  return { map, get error() { return error } }
+}
+
+export async function pipeUIMessageStream<Data = never>(
+  writer: StreamEventSink<Data>,
+  stream: AsyncIterable<UIMessageChunk> | ReadableStream<UIMessageChunk>,
+  options?: UIMessageStreamAdapterOptions<Data>,
+): Promise<{ error?: string }> {
+  const adapter = createUIMessageStreamAdapter(options)
 
   const iterable: AsyncIterable<UIMessageChunk> =
     Symbol.asyncIterator in stream ? (stream as AsyncIterable<UIMessageChunk>) : readAll(stream as ReadableStream<UIMessageChunk>)
   for await (const chunk of iterable) {
-    const events = map(chunk)
+    const events = adapter.map(chunk)
     if (events.length > 0) await writer.push(...events)
   }
-  return error !== undefined ? { error } : {}
+  return adapter.error !== undefined ? { error: adapter.error } : {}
 }
 
 async function* readAll<T>(stream: ReadableStream<T>): AsyncGenerator<T> {

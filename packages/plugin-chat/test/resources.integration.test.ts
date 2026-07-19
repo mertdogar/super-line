@@ -8,8 +8,8 @@ import { auth } from '@super-line/plugin-auth/server'
 import { chatContract } from '@super-line/plugin-chat'
 import { chat } from '@super-line/plugin-chat/server'
 import type { ResourceKindDef } from '@super-line/plugin-chat/server'
-import { chatClient, onChatMessage } from '@super-line/plugin-chat/client'
-import { chatAgentTools } from '@super-line/plugin-chat/ai'
+import { chatClient } from '@super-line/plugin-chat/client'
+import { chatAgentTools } from '@super-line/plugin-chat/ai-sdk'
 import type { ToolSet } from 'ai'
 import { createHarness, waitFor } from '../../server/test/harness.js'
 
@@ -360,7 +360,7 @@ describe('plugin-chat — channel resources: cards, kit, boot validation', () =>
     await expect(boot({ hostScenePolicy: true })).rejects.toThrow(/collides with an existing policy/)
   })
 
-  it('resource cards never trigger bot turns and stay out of history; real messages still do', async () => {
+  it('resource cards are ordinary envelopes; hosts decide whether they trigger automation', async () => {
     const { url } = await boot()
     const ann = await newUser(url, 'ann@x.com', 'Ann')
     const bot = await newUser(url, 'bot@x.com', 'Bot')
@@ -368,25 +368,23 @@ describe('plugin-chat — channel resources: cards, kit, boot validation', () =>
     await ann.c.addMember({ channelId: channel.id, userId: bot.userId })
 
     const botChat = chatClient(bot.c, { userId: bot.userId })
-    const turns: { content: string; history: number }[] = []
-    const stop = onChatMessage(
-      botChat,
-      (ctx) => {
-        turns.push({ content: String(ctx.message.content), history: ctx.history.length })
-      },
-      { channels: [channel.id] },
-    )
     await botChat.ready
-    await new Promise((r) => setTimeout(r, 150)) // let the watch settle its backlog
+    const messages = botChat.messages(channel.id)
+    await messages.ready
 
-    await ann.c.createResource({ channelId: channel.id, kind: 'note' }) // card lands in the stream
+    await ann.c.createResource({ channelId: channel.id, kind: 'note' })
     await ann.c.sendMessage({ channelId: channel.id, content: 'hello bot' })
-    await waitFor(() => turns.length === 1)
-    await new Promise((r) => setTimeout(r, 150)) // grace: a card-triggered turn would land here
-    expect(turns).toHaveLength(1)
-    expect(turns[0]!.content).toBe('hello bot')
-    expect(turns[0]!.history).toBe(1) // the card is excluded from history too
-    stop()
+    await waitFor(() => messages.rows().length === 2)
+    expect(messages.rows().find((message) => message.content === 'hello bot')).toBeDefined()
+    const card = messages
+      .rows()
+      .find((message) => (message.metadata?.resource as { action?: string } | undefined)?.action === 'created')
+    expect(card).toBeDefined()
+    expect(card).not.toHaveProperty('content')
+
+    const history = await botChat.history(channel.id)
+    expect(history.messages).toHaveLength(2)
+    messages.close()
     botChat.close()
   })
 

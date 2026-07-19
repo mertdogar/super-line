@@ -1,4 +1,4 @@
-import { eq } from '@super-line/core'
+import { and, eq, lt, or } from '@super-line/core'
 import { docKeyOf } from './index.js'
 import type { CollectionName, CollectionQuery, Contract, RoleOf, RowOf } from '@super-line/core'
 import type { LiveRowSet, SuperLineClient } from '@super-line/client'
@@ -10,7 +10,6 @@ import type {
   ChatMessagePart,
   ChatResource,
   ChatStreamEvent,
-  ChatTurnMessage,
   MemberRole,
   MessageStatus,
   ResourcePresence,
@@ -29,13 +28,49 @@ export type ResourceRowOf<C extends Contract> = Row<C, 'resources', ChatResource
 export type ResourcePresenceRowOf<C extends Contract> = Row<C, 'resourcePresence', ResourcePresence>
 /** The HOST-PARAMETRIZED message body type, extracted from the contract (decision 8). */
 export type ContentOf<C extends Contract> = MessageRowOf<C> extends { content?: infer T } ? NonNullable<T> : unknown
+export type PartDataOf<C extends Contract> = Extract<MessagePartRowOf<C>, { type: 'data' }> extends {
+  data: infer Data
+}
+  ? Data
+  : never
+export type StreamEventOf<C extends Contract> = ChatStreamEvent<PartDataOf<C>>
 
-/**
- * What the assembled feed serves (decision 9): a plain message passes through untouched (`parts`
- * absent); a STREAMED message carries its parts in tree order (parent chains — a delegate tool part
- * is followed by its subagent's parts), with in-flight text already overlaid from live deltas.
- */
-export type AssembledMessageOf<C extends Contract> = MessageRowOf<C> & { parts?: MessagePartRowOf<C>[] }
+export interface HistoryCursor {
+  createdAt: number
+  id: string
+}
+
+export interface HistoryPage<Message> {
+  messages: Message[]
+  nextCursor?: HistoryCursor
+}
+
+export interface PartTreeNode<Part> {
+  part: Part
+  children: PartTreeNode<Part>[]
+}
+
+/** Attach a part's lane beneath the tool part named by `parent`; root parts stay top-level. */
+export function buildPartTree<Part extends { type: string; parent: string | null; toolCallId?: string; idx: number }>(
+  parts: readonly Part[],
+): PartTreeNode<Part>[] {
+  const nodes = [...parts].sort((a, b) => a.idx - b.idx).map((part) => ({ part, children: [] as PartTreeNode<Part>[] }))
+  const tools = new Map(nodes.flatMap((node) => (node.part.type === 'tool' && node.part.toolCallId ? [[node.part.toolCallId, node] as const] : [])))
+  const roots: PartTreeNode<Part>[] = []
+  for (const node of nodes) {
+    const parent = node.part.parent === null ? undefined : tools.get(node.part.parent)
+    if (parent) parent.children.push(node)
+    else roots.push(node)
+  }
+  return roots
+}
+
+export function partsText(parts: readonly { type: string; parent: string | null; text?: string }[], parent: string | null = null): string {
+  return parts
+    .filter((part) => part.type === 'text' && part.parent === parent)
+    .map((part) => part.text ?? '')
+    .join('')
+}
 
 /**
  * A small reactive row store: `useSyncExternalStore`-shaped (`subscribe` takes a plain notifier, `rows()`
@@ -61,12 +96,6 @@ export interface ChatClientOptions {
   userId?: string | null
   /** The live message window per channel store (initial snapshot AND maintained window). Default 200. */
   messageLimit?: number
-  /**
-   * The parts window per channel store, most-recently-active first. Default 1000. Bounds the client's
-   * memory to recent activity instead of total channel history: a settled streamed message whose parts
-   * fell out of this window arrives with `parts` ABSENT — render its `content` projection instead.
-   */
-  partsLimit?: number
 }
 
 /**
@@ -77,8 +106,10 @@ export interface ChatClientOptions {
  */
 export interface ChatStreamHandle<C extends Contract> {
   readonly messageId: string
+  /** Aborts when another authorized channel member cancels this message. */
+  readonly signal: AbortSignal
   /** Queue events (order preserved). No-op once the stream failed or a settle has STARTED. */
-  push(...events: ChatStreamEvent[]): void
+  push(...events: StreamEventOf<C>[]): void
   /** Send everything queued now (sliced into safe batch sizes); rejects with the first wire failure. */
   flush(): Promise<void>
   /** Flush, then settle (default `complete`). Memoized: a second call returns the same settle. */
@@ -92,16 +123,15 @@ export interface ChatClient<C extends Contract> {
   channels(): ChatLiveStore<ChannelRowOf<C>>
   /** Live member list of one channel. */
   members(channelId: string): ChatLiveStore<MembershipRowOf<C>>
-  /**
-   * Live message window of one channel, chronological (oldest→newest), newest-N limited. Streamed
-   * messages arrive ASSEMBLED (see {@link AssembledMessageOf}): the store also subscribes the
-   * channel's parts, watches the delta room, and splices live text by offset — one feed, no
-   * second API. `streaming: false` opts out (plain rows only, no parts subscription, no watch).
-   */
-  messages(
+  /** Live chronological newest-N message envelopes. Detailed parts are a separate, complete store. */
+  messages(channelId: string, opts?: { limit?: number }): ChatLiveStore<MessageRowOf<C>>
+  /** One older page, chronological, keyset-paginated by `{createdAt,id}`. The page is a snapshot. */
+  history(
     channelId: string,
-    opts?: { limit?: number; partsLimit?: number; streaming?: boolean },
-  ): ChatLiveStore<AssembledMessageOf<C>>
+    opts?: { before?: HistoryCursor; limit?: number },
+  ): Promise<HistoryPage<MessageRowOf<C>>>
+  /** Every durable part of one message, tree-ordered and live until closed. */
+  messageParts(channelId: string, messageId: string): ChatLiveStore<MessagePartRowOf<C>>
   /** Open a streamed message in a channel you are a member of and get its producer handle. */
   stream(channelId: string, opts?: { metadata?: Record<string, unknown> }): Promise<ChatStreamHandle<C>>
   /**
@@ -128,6 +158,8 @@ export interface ChatClient<C extends Contract> {
   send(channelId: string, content: ContentOf<C>, metadata?: Record<string, unknown>): Promise<MessageRowOf<C>>
   editMessage(id: string, patch: { content?: ContentOf<C>; metadata?: Record<string, unknown> }): Promise<MessageRowOf<C>>
   deleteMessage(id: string): Promise<void>
+  /** Ask the producer to stop an active streamed message. */
+  cancelMessage(id: string, reason?: string): Promise<void>
   /** Create-or-attach a resource: `id` (linked kinds) attaches/creates under a host doc id; `params` feed the kind's `init`. */
   createResource(
     channelId: string,
@@ -169,6 +201,7 @@ interface Dyn {
   startMessage(i: unknown): Promise<unknown>
   appendMessage(i: unknown): Promise<unknown>
   finalizeMessage(i: unknown): Promise<unknown>
+  cancelMessage(i: unknown): Promise<unknown>
   watchChannel(i: unknown): Promise<unknown>
   unwatchChannel(i: unknown): Promise<unknown>
   createResource(i: unknown): Promise<unknown>
@@ -195,7 +228,6 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
 ): ChatClient<C> {
   const dyn = client as unknown as Dyn
   const defaultLimit = opts?.messageLimit ?? 200
-  const defaultPartsLimit = opts?.partsLimit ?? 1000
 
   interface Handle {
     rekey(): void
@@ -255,14 +287,32 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
     }
   }
 
-  // ── the assembled messages store (PLAN-chat-streaming decision 9) ────────────────────────────────
-  // One feed: the store composes the message window + the channel's parts rows + the ephemeral
-  // delta room, and serves plain rows untouched. Deltas splice by OFFSET on top of the last
-  // checkpointed row text; anything that doesn't line up waits (≤ checkpointMs) for the next
-  // checkpoint — a lost delta degrades smoothness, never correctness.
+  const watchedChannels = new Map<string, number>()
+  const watchChannel = (channelId: string): void => void dyn.watchChannel({ channelId }).catch(() => {})
+  const acquireWatch = (channelId: string): (() => void) => {
+    const count = watchedChannels.get(channelId) ?? 0
+    watchedChannels.set(channelId, count + 1)
+    if (count === 0) watchChannel(channelId)
+    return () => {
+      const next = (watchedChannels.get(channelId) ?? 1) - 1
+      if (next > 0) watchedChannels.set(channelId, next)
+      else {
+        watchedChannels.delete(channelId)
+        void dyn.unwatchChannel({ channelId }).catch(() => {})
+      }
+    }
+  }
+  const offReconnect = dyn.onReconnect?.(() => {
+    for (const channelId of watchedChannels.keys()) watchChannel(channelId)
+  }) ?? (() => {})
 
-  const msgQuery = (channelId: string, limit: number): CollectionQuery => ({
-    filter: eq('channelId', channelId),
+  const msgQuery = (channelId: string, limit: number, before?: HistoryCursor): CollectionQuery => ({
+    filter: before
+      ? and(
+          eq('channelId', channelId),
+          or(lt('createdAt', before.createdAt), and(eq('createdAt', before.createdAt), lt('id', before.id))),
+        )
+      : eq('channelId', channelId),
     orderBy: [
       { field: 'createdAt', dir: 'desc' },
       { field: 'id', dir: 'desc' },
@@ -271,10 +321,10 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
   })
 
   /** Parts in tree order: roots by idx; each tool part immediately followed by its subtree. */
-  function treeOrder(list: ChatMessagePart[]): ChatMessagePart[] {
+  function treeOrder<Part extends ChatMessagePart>(list: Part[]): Part[] {
     const sorted = [...list].sort((a, b) => a.idx - b.idx)
-    const children = new Map<string, ChatMessagePart[]>()
-    const roots: ChatMessagePart[] = []
+    const children = new Map<string, Part[]>()
+    const roots: Part[] = []
     for (const p of sorted) {
       if (p.parent) {
         const l = children.get(p.parent) ?? []
@@ -282,8 +332,8 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
         children.set(p.parent, l)
       } else roots.push(p)
     }
-    const out: ChatMessagePart[] = []
-    const visit = (p: ChatMessagePart): void => {
+    const out: Part[] = []
+    const visit = (p: Part): void => {
       out.push(p)
       if (p.type === 'tool' && p.toolCallId) for (const c of children.get(p.toolCallId) ?? []) visit(c)
     }
@@ -293,33 +343,15 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
     return out
   }
 
-  function makeMessagesStore(
-    channelId: string,
-    o?: { limit?: number; partsLimit?: number; streaming?: boolean },
-  ): ChatLiveStore<AssembledMessageOf<C>> {
-    if (o?.streaming === false)
-      return makeStore(
-        () => dyn.collection('messages').subscribe(msgQuery(channelId, o?.limit ?? defaultLimit)),
-        (rows: AssembledMessageOf<C>[]) => [...rows].reverse(),
-      )
-
-    // The parts window is RECENCY-bounded (lastActivityAt desc), not tied to total channel history —
-    // otherwise opening an old channel would pull every part ever streamed into memory. A settled
-    // message whose parts fell out of the window assembles WITHOUT `parts`; its content projection
-    // carries the rendering.
+  function makeMessagePartsStore(channelId: string, messageId: string): ChatLiveStore<MessagePartRowOf<C>> {
     const partsQuery = (): CollectionQuery => ({
-      filter: eq('channelId', channelId),
-      orderBy: [
-        { field: 'lastActivityAt', dir: 'desc' },
-        { field: 'id', dir: 'desc' },
-      ],
-      limit: o?.partsLimit ?? defaultPartsLimit,
+      filter: and(eq('channelId', channelId), eq('messageId', messageId)),
+      orderBy: [{ field: 'idx', dir: 'asc' }],
     })
 
-    let msgs = dyn.collection('messages').subscribe(msgQuery(channelId, o?.limit ?? defaultLimit))
     let parts = dyn.collection('messageParts').subscribe(partsQuery())
     let closed = false
-    let snapshot: AssembledMessageOf<C>[] = []
+    let snapshot: MessagePartRowOf<C>[] = []
     const listeners = new Set<() => void>()
 
     // Live overlay per part pk: the full text as known live (checkpoint + spliced deltas).
@@ -336,17 +368,24 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
     /** Reconcile one part's overlay with its row, then drain its buffered deltas in offset order. */
     const reconcile = (pk: string, row: ChatMessagePart | undefined): void => {
       let ov = overlays.get(pk)
-      if (row && (row.done || (ov && row.offset >= ov.len))) {
-        overlays.delete(pk)
-        ov = undefined
-      }
       if (row?.done) {
+        overlays.delete(pk)
         pending.delete(pk)
         return
+      }
+      if (row && row.type !== 'text' && row.type !== 'reasoning') {
+        overlays.delete(pk)
+        pending.delete(pk)
+        return
+      }
+      if (row && ov && row.offset >= ov.len) {
+        overlays.delete(pk)
+        ov = undefined
       }
       const buf = pending.get(pk)
       if (!buf || !row) return
       buf.sort((a, b) => a.offset - b.offset)
+      if (row.type !== 'text' && row.type !== 'reasoning') return
       let known = ov ? ov.len : row.offset
       let text = ov ? ov.text : row.text
       while (buf.length > 0) {
@@ -366,35 +405,19 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
     }
 
     const present = (p: ChatMessagePart): ChatMessagePart => {
+      if (p.type !== 'text' && p.type !== 'reasoning') return p
       const ov = overlays.get(p.id)
       return ov && !p.done && ov.len > p.offset ? { ...p, text: ov.text, offset: ov.len } : p
     }
 
-    const assemble = (): AssembledMessageOf<C>[] => {
-      const byMsg = new Map<string, ChatMessagePart[]>()
-      for (const p of parts.rows() as ChatMessagePart[]) {
-        const list = byMsg.get(p.messageId) ?? []
-        list.push(p)
-        byMsg.set(p.messageId, list)
-      }
-      const window = [...(msgs.rows() as (MessageRowOf<C> & { id: string; status?: string })[])].reverse()
-      return window.map((m) => {
-        const raw = byMsg.get(m.id)
-        // parts attach only when the window HAS them: a streamed message whose parts scrolled out of
-        // the recency window (or has none yet) keeps `parts` absent — its content/status still render
-        if (!raw || raw.length === 0) return m as AssembledMessageOf<C>
-        return { ...m, parts: treeOrder(raw).map(present) } as unknown as AssembledMessageOf<C>
-      })
-    }
-
     const rebuild = (): void => {
       if (closed) return
-      snapshot = assemble()
+      snapshot = treeOrder((parts.rows() as ChatMessagePart[]).map(present)) as MessagePartRowOf<C>[]
       for (const l of listeners) l()
     }
 
     const onDelta = (d: { channelId: string; messageId: string; partIdx: number; offset: number; text: string }): void => {
-      if (closed || d.channelId !== channelId) return
+      if (closed || d.channelId !== channelId || d.messageId !== messageId) return
       const pk = `${d.messageId}:${d.partIdx}`
       let buf = pending.get(pk)
       if (!buf) pending.set(pk, (buf = []))
@@ -403,16 +426,11 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
       rebuild()
     }
 
-    let detachMsgs: () => void = () => {}
     let detachParts: () => void = () => {}
     let resolveReady!: () => void
     const ready = new Promise<void>((res) => (resolveReady = res))
     const attach = (): void => {
-      const m = msgs
       const p = parts
-      detachMsgs = m.subscribe(() => {
-        if (msgs === m && !closed) rebuild()
-      })
       detachParts = p.subscribe(() => {
         if (parts !== p || closed) return
         // a row change may unlock buffered deltas (part arrived / checkpoint advanced) or obsolete an overlay
@@ -421,39 +439,29 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
         for (const pk of overlays.keys()) reconcile(pk, idx.get(pk))
         rebuild()
       })
-      void Promise.all([m.ready.catch(() => {}), p.ready.catch(() => {})]).then(() => {
-        if (msgs === m && !closed) rebuild()
+      void p.ready.catch(() => {}).then(() => {
+        if (parts === p && !closed) rebuild()
         resolveReady()
       })
     }
     attach()
     const offDelta = dyn.on('chat.streamDelta', onDelta as never)
-    // the delta room is conn-scoped: (re-)enter on open, on membership rekey, and after a reconnect
-    const watch = (): void => void dyn.watchChannel({ channelId }).catch(() => {})
-    watch()
-    const offReconnect = dyn.onReconnect?.(watch) ?? (() => {})
+    const releaseWatch = acquireWatch(channelId)
 
     const handle: Handle = {
       rekey: () => {
         if (closed) return
-        detachMsgs()
         detachParts()
-        msgs.close()
         parts.close()
-        msgs = dyn.collection('messages').subscribe(msgQuery(channelId, o?.limit ?? defaultLimit))
         parts = dyn.collection('messageParts').subscribe(partsQuery())
         attach()
-        watch()
       },
       close: () => {
         closed = true
-        detachMsgs()
         detachParts()
-        msgs.close()
         parts.close()
         offDelta()
-        offReconnect()
-        void dyn.unwatchChannel({ channelId }).catch(() => {})
+        releaseWatch()
         stores.delete(handle)
       },
     }
@@ -469,10 +477,35 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
     }
   }
 
+  async function history(
+    channelId: string,
+    opts?: { before?: HistoryCursor; limit?: number },
+  ): Promise<HistoryPage<MessageRowOf<C>>> {
+    const limit = Math.max(1, opts?.limit ?? 50)
+    const live = dyn.collection('messages').subscribe(msgQuery(channelId, limit + 1, opts?.before))
+    try {
+      await live.ready
+      const rows = live.rows() as MessageRowOf<C>[]
+      const page = rows.slice(0, limit)
+      const oldest = page.at(-1) as (MessageRowOf<C> & { createdAt: number; id: string }) | undefined
+      return {
+        messages: [...page].reverse(),
+        ...(rows.length > limit && oldest ? { nextCursor: { createdAt: oldest.createdAt, id: oldest.id } } : {}),
+      }
+    } finally {
+      live.close()
+    }
+  }
+
   // ── the producer writer: micro-batched appends in strict order ────────────────────────────────────
 
   const FLUSH_MS = 80
   const FLUSH_MAX = 100 // stay well under the server's default maxEventsPerAppend
+  const openStreams = new Map<string, { cancel(reason: string): void }>()
+  const offCancel = dyn.on(
+    'chat.streamCancelled',
+    ((event: { messageId: string; reason: string }) => openStreams.get(event.messageId)?.cancel(event.reason)) as never,
+  )
 
   async function openStream(
     channelId: string,
@@ -482,7 +515,8 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
       channelId,
       ...(sopts?.metadata !== undefined ? { metadata: sopts.metadata } : {}),
     })) as MessageRowOf<C> & { id: string }
-    let queue: ChatStreamEvent[] = []
+    const controller = new AbortController()
+    let queue: StreamEventOf<C>[] = []
     let timer: ReturnType<typeof setTimeout> | undefined
     let chain: Promise<void> = Promise.resolve()
     let failed: unknown
@@ -525,8 +559,10 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
       }
     }
 
-    return {
+    const cleanup = (): void => void openStreams.delete(started.id)
+    const handle: ChatStreamHandle<C> = {
       messageId: started.id,
+      signal: controller.signal,
       push: (...events) => {
         if (failed !== undefined || closing || events.length === 0) return
         queue.push(...events)
@@ -543,8 +579,9 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
             ...(fo.status !== undefined ? { status: fo.status } : {}),
             ...(fo.error !== undefined ? { error: fo.error } : {}),
           })) as MessageRowOf<C>
-        })()),
+        })().finally(cleanup)),
       abort: async (error) => {
+        if (!controller.signal.aborted) controller.abort(error)
         if (settling !== undefined) {
           await settling.catch(() => {}) // a settle already ran (or is running) — abort is a no-op
           return
@@ -553,11 +590,11 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
         queue = []
         if (timer !== undefined) clearTimeout(timer)
         await chain.catch(() => {})
-        settling = dyn.finalizeMessage({
+        settling = (dyn.finalizeMessage({
           id: started.id,
           status: 'aborted',
           ...(error !== undefined ? { error } : {}),
-        }) as Promise<MessageRowOf<C>>
+        }) as Promise<MessageRowOf<C>>).finally(cleanup)
         try {
           await settling
         } catch (e) {
@@ -566,6 +603,13 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
         }
       },
     }
+    openStreams.set(started.id, {
+      cancel: (reason) => {
+        if (!controller.signal.aborted) controller.abort(reason)
+        void handle.abort(reason).catch(() => {})
+      },
+    })
+    return handle
   }
 
   // ── the membership watcher: ONE stable subscription drives every store's re-subscribe ────────────
@@ -598,7 +642,13 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
   return {
     channels: () => makeStore(() => dyn.collection('channels').subscribe({})),
     members: (channelId) => makeStore(() => dyn.collection('memberships').subscribe({ filter: eq('channelId', channelId) })),
-    messages: (channelId, o) => makeMessagesStore(channelId, o),
+    messages: (channelId, o) =>
+      makeStore(
+        () => dyn.collection('messages').subscribe(msgQuery(channelId, o?.limit ?? defaultLimit)),
+        (rows: MessageRowOf<C>[]) => [...rows].reverse(),
+      ),
+    history,
+    messageParts: makeMessagePartsStore,
     stream: (channelId, sopts) => openStream(channelId, sopts),
     resources: (channelId) => makeStore(() => dyn.collection('resources').subscribe({ filter: eq('channelId', channelId) })),
     resourcePresence: (collection, docId) =>
@@ -619,6 +669,8 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
       dyn.sendMessage({ channelId, content, ...(metadata ? { metadata } : {}) }) as Promise<MessageRowOf<C>>,
     editMessage: (id, patch) => dyn.editMessage({ id, ...patch }) as Promise<MessageRowOf<C>>,
     deleteMessage: async (id) => void (await dyn.deleteMessage({ id })),
+    cancelMessage: async (id, reason) =>
+      void (await dyn.cancelMessage({ id, ...(reason !== undefined ? { reason } : {}) })),
     createResource: (channelId, o) => dyn.createResource({ channelId, ...o }) as Promise<ResourceRowOf<C>>,
     detachResource: (channelId, kind, docId) =>
       dyn.detachResource({ channelId, kind, docId }) as Promise<ResourceRowOf<C>>,
@@ -631,166 +683,11 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
       return selfId
     },
     close: () => {
+      for (const stream of openStreams.values()) stream.cancel('chat client closed')
+      offCancel()
+      offReconnect()
       for (const s of stores) s.close()
       watcher?.close()
     },
-  }
-}
-
-// ── the bot loop (PLAN-chat-mastra) ───────────────────────────────────────────────────────────────
-
-export interface ChatMessageContext<C extends Contract> {
-  channelId: string
-  /** The settled message that triggered this turn (never a still-streaming envelope). */
-  message: AssembledMessageOf<C>
-  /** The channel's recent settled turns, oldest→newest, the trigger included — ready for a model. */
-  history: ChatTurnMessage[]
-}
-
-export interface OnChatMessageOptions {
-  /**
-   * `'all'` (default): every channel the bot can SEE — RLS-scoped, i.e. public channels plus
-   * private ones it's already a member of — auto-joining on appear (a new channel is a new
-   * conversation). Or a fixed id list. Either way joining is idempotent; being kicked silences
-   * the bot in that channel (it never force-rejoins).
-   */
-  channels?: 'all' | string[]
-  /** Settled turns folded into `ctx.history` (default 8). */
-  historyLimit?: number
-}
-
-/**
- * The bot message loop both examples used to hand-roll: watch channels, join on appear, detect new
- * messages (backlog excluded, own messages excluded, streaming envelopes deferred until they
- * settle), assemble history, and call `handler` — SERIALIZED per channel, so a message that
- * arrives mid-answer queues and its turn sees the finished answer in history. Channels stay
- * concurrent with each other. Reconnects self-heal (the stores own that); a failed join is logged
- * and retried on the next directory tick instead of silently blinding the bot. Returns a detach
- * function.
- *
- * Framework-agnostic: pair it with `mastraEngine(...).respond` or any AI-SDK producer.
- */
-export function onChatMessage<C extends Contract>(
-  chat: ChatClient<C>,
-  handler: (ctx: ChatMessageContext<C>) => void | Promise<void>,
-  opts?: OnChatMessageOptions,
-): () => void {
-  const historyLimit = opts?.historyLimit ?? 8
-  const mode = opts?.channels ?? 'all'
-  let stopped = false
-  let selfId: string | null = null
-
-  interface Watched {
-    feed?: ChatLiveStore<AssembledMessageOf<C>>
-    unsub: () => void
-  }
-  const watched = new Map<string, Watched>()
-  const chains = new Map<string, Promise<void>>()
-  let dir: ChatLiveStore<ChannelRowOf<C>> | undefined
-
-  // implementation works on the structural row view (property access on the deferred contract
-  // conditional doesn't resolve inside a generic body — same convention as the stores above)
-  const rowsOf = (feed: ChatLiveStore<AssembledMessageOf<C>>): ChatMessage[] => feed.rows() as unknown as ChatMessage[]
-
-  const isResourceCard = (m: ChatMessage): boolean =>
-    (m.metadata as { resource?: unknown } | undefined)?.resource !== undefined
-
-  const historyOf = (feed: ChatLiveStore<AssembledMessageOf<C>>): ChatTurnMessage[] =>
-    rowsOf(feed)
-      .filter((m) => m.status !== 'streaming' && !isResourceCard(m))
-      .slice(-historyLimit)
-      .map((m): ChatTurnMessage => {
-        const content =
-          m.content === undefined
-            ? `[${m.status ?? 'message'}${m.error !== undefined ? `: ${m.error}` : ''} — no text]`
-            : typeof m.content === 'string'
-              ? m.content
-              : JSON.stringify(m.content)
-        return m.authorId === selfId ? { role: 'assistant', content } : { role: 'user', content }
-      })
-
-  // Decision 3: one turn at a time per channel. History is assembled at DEQUEUE time, so a queued
-  // message's turn already contains the previous answer.
-  const enqueue = (channelId: string, feed: ChatLiveStore<AssembledMessageOf<C>>, m: ChatMessage): void => {
-    const next = (chains.get(channelId) ?? Promise.resolve())
-      .then(async () => {
-        if (stopped) return
-        await handler({ channelId, message: m as unknown as AssembledMessageOf<C>, history: historyOf(feed) })
-      })
-      .catch((err) => console.error(`[plugin-chat] bot turn failed in channel ${channelId}`, err))
-    chains.set(channelId, next)
-    // cleanup only once THIS link settles and the channel is gone — dropping the entry while a
-    // turn is still running would let a quick unwatch/rewatch start a PARALLEL chain
-    void next.then(() => {
-      if (chains.get(channelId) === next && !watched.has(channelId)) chains.delete(channelId)
-    })
-  }
-
-  const watch = (channelId: string): void => {
-    if (stopped || watched.has(channelId)) return
-    const entry: Watched = { unsub: () => {} }
-    watched.set(channelId, entry) // synchronous mark — dedupes concurrent directory ticks
-    void (async () => {
-      try {
-        await chat.join(channelId)
-      } catch (err) {
-        if ((err as { code?: string }).code !== 'CONFLICT') {
-          // veto/rate-limit/transient — unmark so the next directory tick retries instead of
-          // permanently blinding the bot to this channel
-          watched.delete(channelId)
-          console.error(`[plugin-chat] bot could not join channel ${channelId}`, err)
-          return
-        }
-      }
-      if (stopped || watched.get(channelId) !== entry) return
-      const feed = chat.messages(channelId)
-      entry.feed = feed
-      await feed.ready
-      if (stopped) return
-      const seen = new Set(rowsOf(feed).map((m) => m.id)) // the backlog is context, not triggers
-      entry.unsub = feed.subscribe(() => {
-        for (const m of rowsOf(feed)) {
-          if (seen.has(m.id)) continue
-          if (m.status === 'streaming') continue // not seen yet — picked up when it settles
-          seen.add(m.id)
-          if (isResourceCard(m)) continue // resource cards are events, not turns — never trigger a bot
-          if (selfId !== null && m.authorId === selfId) continue
-          enqueue(channelId, feed, m)
-        }
-      })
-    })().catch((err) => console.error(`[plugin-chat] bot failed to watch channel ${channelId}`, err))
-  }
-
-  const drop = (channelId: string, entry: Watched): void => {
-    entry.unsub()
-    entry.feed?.close()
-    watched.delete(channelId)
-    // the chain entry is NOT cleared here — an in-flight turn must keep serializing a rewatch;
-    // enqueue's settle hook deletes it once idle and unwatched
-  }
-
-  void (async () => {
-    await chat.ready
-    if (stopped) return
-    selfId = chat.userId
-    if (mode === 'all') {
-      dir = chat.channels()
-      const sync = (): void => {
-        const visible = new Set((dir!.rows() as unknown as ChatChannel[]).map((c) => c.id))
-        for (const id of visible) watch(id)
-        for (const [id, entry] of watched) if (!visible.has(id)) drop(id, entry) // deleted / no longer visible
-      }
-      dir.subscribe(sync)
-      await dir.ready
-      if (!stopped) sync()
-    } else {
-      for (const id of mode) watch(id)
-    }
-  })().catch((err) => console.error('[plugin-chat] onChatMessage failed to start', err))
-
-  return () => {
-    stopped = true
-    dir?.close()
-    for (const [id, entry] of watched) drop(id, entry)
   }
 }

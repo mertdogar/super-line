@@ -14,7 +14,7 @@ import { chatContract } from '@super-line/plugin-chat'
 import type { ChatStreamEvent } from '@super-line/plugin-chat'
 import { chat } from '@super-line/plugin-chat/server'
 import { chatClient } from '@super-line/plugin-chat/client'
-import { mastraEngine, pipeMastraStream } from '@super-line/plugin-chat/mastra'
+import { createChunkAdapter, createMastraRunner, pipeMastraStream } from '@super-line/plugin-chat/mastra'
 import type { ChunkLike, MastraAgentLike } from '@super-line/plugin-chat/mastra'
 import { createHarness, waitFor } from '../../server/test/harness.js'
 
@@ -80,6 +80,18 @@ const keysOf = (events: ChatStreamEvent[], type: ChatStreamEvent['type']): strin
 // ── pipeMastraStream (the single-lane escape hatch) ─────────────────────────────────────────────
 
 describe('plugin-chat/mastra — pipeMastraStream', () => {
+  it('maps host-selected Mastra chunks into typed data parts', () => {
+    const adapter = createChunkAdapter<{ tokens: number }>({
+      prefix: 's:',
+      mapDataPart: (chunk) =>
+        chunk.type === 'usage' ? { data: { tokens: Number((chunk.payload as { tokens: number }).tokens) } } : undefined,
+    })
+    expect(adapter.map({ type: 'usage', payload: { tokens: 42 } })).toEqual([
+      { type: 'part_start', key: 's:d0', partType: 'data', data: { tokens: 42 } },
+      { type: 'part_end', key: 's:d0' },
+    ])
+  })
+
   it('maps one lane: segmentation at tool boundaries, whole args, tail close, text return', async () => {
     const { events, sink } = recordSink()
     async function* gen(): AsyncGenerator<ChunkLike> {
@@ -100,8 +112,8 @@ describe('plugin-chat/mastra — pipeMastraStream', () => {
       { type: 'part_end', key: 't1' },
       { type: 'part_end', key: 'r0' },
       { type: 'part_start', key: 'tc9', partType: 'tool', toolName: 'thermometer' },
-      { type: 'part_patch', key: 'tc9', args: { city: 'Oslo' } },
-      { type: 'part_patch', key: 'tc9', result: { c: 4 }, isError: false },
+      { type: 'tool_patch', key: 'tc9', args: { city: 'Oslo' } },
+      { type: 'tool_patch', key: 'tc9', result: { c: 4 }, isError: false },
       { type: 'part_end', key: 'tc9' },
       { type: 'part_start', key: 't2', partType: 'text' },
       { type: 'delta', key: 't2', text: '4C' },
@@ -120,9 +132,9 @@ describe('plugin-chat/mastra — pipeMastraStream', () => {
   })
 })
 
-// ── mastraEngine ─────────────────────────────────────────────────────────────────────────────────
+// ── createMastraRunner ───────────────────────────────────────────────────────────────────────────
 
-describe('plugin-chat/mastra — mastraEngine', () => {
+describe('plugin-chat/mastra — createMastraRunner', () => {
   it('streams a full delegation: root lane s:, worker lane w:{tc}: nested under the EMITTED delegate part', async () => {
     const worker = fakeAgent('worker', async function* () {
       yield text('measuring ')
@@ -135,7 +147,7 @@ describe('plugin-chat/mastra — mastraEngine', () => {
       yield* delegateVia(opts, 'tc1', 'worker', 'go measure')
       yield text('Done.')
     })
-    const engine = mastraEngine({ agent: supervisor, subagents: [{ agent: worker }] })
+    const engine = createMastraRunner({ agent: supervisor, subagents: [{ agent: worker }] })
 
     const { events, sink } = recordSink()
     const { text: full, error } = await engine.run(sink, 'hi')
@@ -145,7 +157,7 @@ describe('plugin-chat/mastra — mastraEngine', () => {
     // the delegate part is emitted (never suppressed): it IS the anchor the child lane nests under
     const delegateStart = events.find((e) => e.type === 'part_start' && e.key === 's:tc1')
     expect(delegateStart).toMatchObject({ partType: 'tool', toolName: 'delegate' })
-    expect(events).toContainEqual({ type: 'part_patch', key: 's:tc1', args: { agentType: 'worker', task: 'go measure' } })
+    expect(events).toContainEqual({ type: 'tool_patch', key: 's:tc1', args: { agentType: 'worker', task: 'go measure' } })
 
     // every worker part carries the delegate part's key as parent
     const workerStarts = events.filter((e) => e.type === 'part_start' && e.key.startsWith('w:tc1:'))
@@ -154,7 +166,7 @@ describe('plugin-chat/mastra — mastraEngine', () => {
 
     // the worker's report lands as the delegate result
     expect(events).toContainEqual({
-      type: 'part_patch',
+      type: 'tool_patch',
       key: 's:tc1',
       result: { content: 'measuring 21C', isError: false },
       isError: false,
@@ -164,7 +176,7 @@ describe('plugin-chat/mastra — mastraEngine', () => {
     const idx = (pred: (e: ChatStreamEvent) => boolean): number => events.findIndex(pred)
     const dStart = idx((e) => e.type === 'part_start' && e.key === 's:tc1')
     const wFirst = idx((e) => e.type === 'part_start' && e.key.startsWith('w:tc1:'))
-    const dResult = idx((e) => e.type === 'part_patch' && e.key === 's:tc1' && 'result' in e)
+    const dResult = idx((e) => e.type === 'tool_patch' && e.key === 's:tc1' && 'result' in e)
     expect(dStart).toBeLessThan(wFirst)
     expect(wFirst).toBeLessThan(dResult)
 
@@ -185,7 +197,7 @@ describe('plugin-chat/mastra — mastraEngine', () => {
       yield* delegateVia(opts, 'tcA', 'nobody', 'x') // not an edge
       yield* delegateVia(opts, 'tcB', 'worker', 'y') // fine — but the worker's own hop trips the depth gate
     })
-    const engine = mastraEngine({
+    const engine = createMastraRunner({
       agent: supervisor,
       subagents: [{ agent: worker, delegatesTo: ['supervisor'] }],
       maxDepth: 1,
@@ -193,7 +205,7 @@ describe('plugin-chat/mastra — mastraEngine', () => {
     const { events, sink } = recordSink()
     await engine.run(sink, 'hi')
 
-    const results = events.filter((e) => e.type === 'part_patch' && 'result' in e)
+    const results = events.filter((e) => e.type === 'tool_patch' && 'result' in e)
     expect(results).toContainEqual(
       expect.objectContaining({
         key: 's:tcA',
@@ -207,11 +219,14 @@ describe('plugin-chat/mastra — mastraEngine', () => {
       }),
     )
 
-    expect(() => mastraEngine({ agent: supervisor, delegatesTo: ['ghost'] })).toThrow(/unregistered agent 'ghost'/)
-    expect(() => mastraEngine({ agent: supervisor, suppressTools: ['delegate'] })).toThrow(/anchor/)
+    expect(() => createMastraRunner({ agent: supervisor, delegatesTo: ['ghost'] })).toThrow(/unregistered agent 'ghost'/)
+    expect(() => createMastraRunner({ agent: supervisor, suppressTools: ['delegate'] })).toThrow(/anchor/)
     // duplicate ids would silently clobber each other in the registry — fail fast instead
     expect(() =>
-      mastraEngine({ agent: supervisor, subagents: [{ agent: worker }, { agent: fakeAgent('worker', async function* () {}) }] }),
+      createMastraRunner({
+        agent: supervisor,
+        subagents: [{ agent: worker }, { agent: fakeAgent('worker', async function* () {}) }],
+      }),
     ).toThrow(/duplicate agent ids/)
   })
 
@@ -223,7 +238,7 @@ describe('plugin-chat/mastra — mastraEngine', () => {
       yield* delegateVia(opts, 'tcSelf', 'supervisor', 'recurse!')
       yield* delegateVia(opts, 'tcOk', 'worker', 'fine')
     })
-    const engine = mastraEngine({ agent: supervisor, subagents: [{ agent: worker }], delegatesTo: true })
+    const engine = createMastraRunner({ agent: supervisor, subagents: [{ agent: worker }], delegatesTo: true })
     const { events, sink } = recordSink()
     await engine.run(sink, 'hi')
     expect(events).toContainEqual(
@@ -249,7 +264,7 @@ describe('plugin-chat/mastra — mastraEngine', () => {
       yield text('recovered')
       yield errChunk('root exploded')
     })
-    const engine = mastraEngine({
+    const engine = createMastraRunner({
       agent: supervisor,
       subagents: [{ agent: worker }],
       suppressTools: ['secret_scratchpad'],
@@ -274,7 +289,7 @@ describe('plugin-chat/mastra — mastraEngine', () => {
       yield* delegateVia(opts, 'tc1', 'worker', 'try')
       yield text('noted the failure')
     })
-    const engine = mastraEngine({ agent: supervisor, subagents: [{ agent: worker }] })
+    const engine = createMastraRunner({ agent: supervisor, subagents: [{ agent: worker }] })
     const { events, sink } = recordSink()
     const { error } = await engine.run(sink, 'hi')
 
@@ -299,7 +314,7 @@ describe('plugin-chat/mastra — mastraEngine', () => {
       yield text('delegating ')
       yield* delegateVia(opts, 'tc1', 'worker', 'run forever')
     })
-    const engine = mastraEngine({ agent: supervisor, subagents: [{ agent: worker }] })
+    const engine = createMastraRunner({ agent: supervisor, subagents: [{ agent: worker }] })
 
     let flushes = 0
     const sink = {
@@ -330,7 +345,7 @@ describe('plugin-chat/mastra — mastraEngine', () => {
       sawChainedAbort = opts.abortSignal?.aborted === true
       yield text('winding down')
     })
-    const engine = mastraEngine({ agent: supervisor, subagents: [{ agent: worker }] })
+    const engine = createMastraRunner({ agent: supervisor, subagents: [{ agent: worker }] })
     const { sink } = recordSink()
     const rc = { tier: 'smart' }
     await engine.run(sink, 'hi', { abortSignal: outer.signal, requestContext: rc })
@@ -340,7 +355,7 @@ describe('plugin-chat/mastra — mastraEngine', () => {
   })
 })
 
-// ── respond() against a real server (loopback) ──────────────────────────────────────────────────
+// ── sink-only runner against a real server (loopback) ───────────────────────────────────────────
 
 const app = defineContract({
   roles: { user: { clientToServer: { hello: { input: z.void(), output: z.object({ ok: z.boolean() }) } } } },
@@ -374,7 +389,7 @@ async function newUser(url: string, email: string, name: string) {
   return { c, userId }
 }
 
-describe('plugin-chat/mastra — respond() end to end', () => {
+describe('plugin-chat/mastra — host-owned turn lifecycle', () => {
   it('settles a delegation turn: parts rows land with the parent chain, projection from root text, tree survives reload', async () => {
     const { url } = await boot()
     const bot = await newUser(url, 'bot@x.com', 'Bot')
@@ -390,22 +405,28 @@ describe('plugin-chat/mastra — respond() end to end', () => {
       yield* delegateVia(opts, 'tc1', 'worker', 'oslo weather')
       yield text('It is 21C.')
     })
-    const engine = mastraEngine({ agent: supervisor, subagents: [{ agent: worker }] })
-
-    const row = await engine.respond(botChat, ch.id, 'weather in oslo?')
+    const runner = createMastraRunner({ agent: supervisor, subagents: [{ agent: worker }] })
+    const writer = await botChat.stream(ch.id)
+    const result = await runner.run(writer, 'weather in oslo?', { abortSignal: writer.signal })
+    const row = await writer.finalize(result.error ? { status: 'error', error: result.error } : {})
     expect(row).toMatchObject({ status: 'complete', content: 'Checking. \n\nIt is 21C.' })
 
-    // a FRESH client (the reload) reassembles the whole tree from rows alone
+    // a FRESH client (the reload) loads the envelope and complete parts independently
     const again = chatClient(bot.c, { userId: bot.userId })
     await again.ready
     const feed = again.messages(ch.id)
     await feed.ready
-    await waitFor(() => (feed.rows()[0]?.parts?.length ?? 0) >= 4)
-    const parts = feed.rows()[0]!.parts!
-    const delegatePart = parts.find((p) => p.toolCallId === 's:tc1')
+    await waitFor(() => feed.rows().some((message) => message.id === row.id))
+    const partStore = again.messageParts(ch.id, row.id)
+    await partStore.ready
+    await waitFor(() => partStore.rows().length >= 4)
+    const parts = partStore.rows()
+    const delegatePart = parts.find((part) => part.type === 'tool' && part.toolCallId === 's:tc1')
     expect(delegatePart).toMatchObject({ type: 'tool', toolName: 'delegate', parent: null })
     const workerText = parts.find((p) => p.parent === 's:tc1')
     expect(workerText).toMatchObject({ type: 'text', text: '21C in Oslo' })
+    partStore.close()
+    feed.close()
     again.close()
     botChat.close()
     bot.c.close()
@@ -421,13 +442,29 @@ describe('plugin-chat/mastra — respond() end to end', () => {
     await feed.ready
 
     const silent = fakeAgent('supervisor', async function* () {})
-    expect(await mastraEngine({ agent: silent }).respond(botChat, ch.id, 'hi')).toBeUndefined()
+    const emptyWriter = await botChat.stream(ch.id)
+    let pushed = false
+    const emptySink = {
+      push: (...events: ChatStreamEvent<never>[]): void => {
+        pushed = pushed || events.length > 0
+        emptyWriter.push(...events)
+      },
+      flush: (): Promise<void> => emptyWriter.flush(),
+    }
+    await createMastraRunner({ agent: silent }).run(emptySink, 'hi', { abortSignal: emptyWriter.signal })
+    expect(pushed).toBe(false)
+    await emptyWriter.abort('empty reply')
+    await botChat.deleteMessage(emptyWriter.messageId)
 
     const failing = fakeAgent('supervisor', async function* (): AsyncGenerator<ChunkLike> {
       yield text('partial ')
       yield errChunk('rate limited')
     })
-    const row = await mastraEngine({ agent: failing }).respond(botChat, ch.id, 'hi')
+    const errorWriter = await botChat.stream(ch.id)
+    const failed = await createMastraRunner({ agent: failing }).run(errorWriter, 'hi', {
+      abortSignal: errorWriter.signal,
+    })
+    const row = await errorWriter.finalize({ status: 'error', error: failed.error })
     expect(row).toMatchObject({ status: 'error', error: 'rate limited' })
 
     await waitFor(() => feed.rows().length === 1) // the empty turn's row is gone, the errored one stays

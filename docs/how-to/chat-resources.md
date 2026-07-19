@@ -144,8 +144,8 @@ function MessageRow({ m }: { m: FeedMessage }) {
 }
 ```
 
-`onChatMessage` skips cards automatically, so they never trigger a bot turn — the agent won't try
-to "answer" its own resource creation.
+Resource cards are ordinary message envelopes. A host-owned automation loop can skip them by checking
+`metadata.resource`, so the agent won't try to "answer" its own resource creation.
 
 ## 4 · Agent writes: the acked path
 

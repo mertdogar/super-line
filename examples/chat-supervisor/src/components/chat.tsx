@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Bot, Menu, PanelRight, Send, User as UserIcon, Wrench } from 'lucide-react'
-import { useChannels, useChat, useMessages } from '@/App'
+import { useChannels, useChat, useMessageParts, useMessages } from '@/App'
 import { Sidebar } from '@/components/sidebar'
 import { ResourcePane } from '@/components/resources'
 import type { FeedMessage, MessagePart } from '@/contract'
@@ -143,7 +143,8 @@ function PlainBody({ m }: { m: FeedMessage }): React.JSX.Element {
 
 // ── the streamed turn: root-lane parts inline, each delegation as a CARD ─────────────────────────
 
-type Group = { kind: 'part'; part: MessagePart } | { kind: 'card'; anchor: MessagePart; children: MessagePart[] }
+type ToolPart = Extract<MessagePart, { type: 'tool' }>
+type Group = { kind: 'part'; part: MessagePart } | { kind: 'card'; anchor: ToolPart; children: MessagePart[] }
 
 /** Parts arrive tree-ordered (anchor, then its subtree) — fold each delegate subtree into a card. */
 function groupTurn(parts: MessagePart[]): Group[] {
@@ -169,9 +170,9 @@ function groupTurn(parts: MessagePart[]): Group[] {
 }
 
 function Turn({ m }: { m: FeedMessage }): React.JSX.Element {
-  const parts = m.parts ?? []
+  const parts = useMessageParts(m.channelId, m.id)
   const streaming = m.status === 'streaming'
-  if (parts.length === 0) return <PlainBody m={m} /> // old turn whose parts left the window — content carries it
+  if (parts.length === 0) return <PlainBody m={m} />
   return (
     <div className="space-y-2">
       {groupTurn(parts).map((g) =>
@@ -195,7 +196,15 @@ function Turn({ m }: { m: FeedMessage }): React.JSX.Element {
  * and carries a live status badge; the body is the subagent's OWN lane — reasoning, tool calls,
  * text — streaming inside the card, and still there after a reload.
  */
-function DelegationCard({ anchor, parts, streaming }: { anchor: MessagePart; parts: MessagePart[]; streaming: boolean }): React.JSX.Element {
+function DelegationCard({
+  anchor,
+  parts,
+  streaming,
+}: {
+  anchor: ToolPart
+  parts: MessagePart[]
+  streaming: boolean
+}): React.JSX.Element {
   const args = anchor.args as { agentType?: string; task?: string } | undefined
   const running = !anchor.done
   return (
@@ -253,6 +262,7 @@ function PartView({ p, live }: { p: MessagePart; live: boolean }): React.JSX.Ele
         </div>
       </details>
     )
+  if (p.type === 'data') return <Json label="data" value={p.data} />
   const badge = p.isError ? 'error' : p.state === 'done' ? 'completed' : p.state === 'running' ? 'running' : 'input…'
   return (
     <details className="rounded-md border bg-background/70 px-2 py-1 text-sm">

@@ -16,7 +16,17 @@ import { ResourcePane } from './resources'
 import { COMMANDS } from './commands'
 import { config } from './config'
 import { useAuth } from './auth'
-import { ChatProvider, LineProvider, chatClient, useChannels, useChat, useCollection, useMembers, useMessages } from './hooks'
+import {
+  ChatProvider,
+  LineProvider,
+  chatClient,
+  useChannels,
+  useChat,
+  useCollection,
+  useMembers,
+  useMessageParts,
+  useMessages,
+} from './hooks'
 import type { app, FeedMessage } from '../contract'
 
 type Modal = { kind: 'channels' } | { kind: 'session' }
@@ -224,7 +234,7 @@ function Cockpit({
         <scrollbox scrollY stickyScroll stickyStart="bottom" flexGrow={1} paddingLeft={1} paddingRight={1}>
           {!active ? <text fg={COLORS.dim}>{'no channel yet — /new <name> to create one'}</text> : null}
           {messages.map((m) => (
-            <MessageView key={m.id} m={m as FeedMessage} me={me} names={names} />
+            <LiveMessageView key={m.id} m={m as FeedMessage} me={me} names={names} />
           ))}
           {notices.map((n) => (
             <box key={n.id} paddingTop={1}>
@@ -302,6 +312,16 @@ function Cockpit({
       ) : null}
     </box>
   )
+}
+
+function LiveMessageView({ m, me, names }: { m: FeedMessage; me: string; names: Map<string, string> }) {
+  if (m.status === undefined) return <MessageView m={m} me={me} names={names} />
+  return <StreamedMessageView m={m} me={me} names={names} />
+}
+
+function StreamedMessageView({ m, me, names }: { m: FeedMessage; me: string; names: Map<string, string> }) {
+  const parts = useMessageParts(m.channelId, m.id)
+  return <MessageView m={m} me={me} names={names} parts={parts} />
 }
 
 function errText(e: unknown): string {

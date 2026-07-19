@@ -1,5 +1,4 @@
-// The feed differ: one per open channel. plugin-chat's `messages(channelId)` store serves an
-// ASSEMBLED feed (FeedMessage[] — plain rows + live-spliced streamed parts). This diffs successive
+// The feed differ combines message envelopes with the host-mounted part stores and turns successive
 // snapshots into the curated event stream (headless-emit.ts):
 //
 //  • a plain message appearing        → `message`
@@ -7,8 +6,7 @@
 //  • a resource card (metadata.resource) → `resource`
 //
 // Turn markers are derived from FeedMessage.status transitions (streaming → complete/aborted/error).
-// The delta stream is re-derived by suffix-diffing each part's text — the feed already coalesced the
-// wire deltas onto `part.text` at each checkpoint, so a per-snapshot suffix IS the coalesced delta.
+// The delta stream is re-derived by suffix-diffing each part's text.
 
 import type { HeadlessEvent } from './headless-emit'
 import type { FeedMessage, MessagePart } from '../contract'
@@ -54,16 +52,13 @@ export class FeedDiffer {
 
   // A streamed turn's visible answer lives in its ROOT text parts — the server's `content` projection
   // can settle empty (the example sets no `project`), so parts are authoritative, content the fallback.
-  private visible(m: FeedMessage, isBot: boolean): string {
+  private visible(m: FeedMessage, isBot: boolean, parts: MessagePart[]): string {
     if (!isBot) return contentText(m)
-    const rootText = (m.parts ?? [])
-      .filter((p) => p.type === 'text' && p.parent === null)
-      .map((p) => p.text)
-      .join('')
+    const rootText = parts.flatMap((part) => (part.type === 'text' && part.parent === null ? [part.text] : [])).join('')
     return rootText !== '' ? rootText : contentText(m)
   }
 
-  private messageEvent(m: FeedMessage, isBot: boolean): HeadlessEvent {
+  private messageEvent(m: FeedMessage, isBot: boolean, parts: MessagePart[]): HeadlessEvent {
     return {
       type: 'message',
       channel: this.channel,
@@ -71,30 +66,32 @@ export class FeedDiffer {
       authorId: m.authorId,
       author: this.display(m.authorId),
       role: isBot ? 'assistant' : 'user',
-      content: this.visible(m, isBot),
+      content: this.visible(m, isBot, parts),
       ...(m.status !== undefined ? { status: m.status } : {}),
       createdAt: m.createdAt,
     }
   }
 
   /** Record the current backlog as already-seen WITHOUT emitting — history is context, not events. */
-  prime(rows: FeedMessage[]): void {
+  prime(rows: FeedMessage[], partsByMessage: ReadonlyMap<string, MessagePart[]> = new Map()): void {
     for (const m of rows) {
       this.messages.set(m.id, { isBot: m.status !== undefined, settled: true })
-      for (const p of m.parts ?? []) {
-        this.partLen.set(p.id, p.text.length)
+      for (const p of partsByMessage.get(m.id) ?? []) {
+        if ('text' in p) this.partLen.set(p.id, p.text.length)
         this.partSig.set(p.id, this.sig(p))
       }
     }
   }
 
   private sig(p: MessagePart): string {
-    return `${p.state ?? ''}|${p.done}|${p.isError ?? ''}|${p.result !== undefined}`
+    return p.type === 'tool'
+      ? `${p.state}|${p.done}|${p.isError ?? ''}|${p.result !== undefined}`
+      : `${p.type}|${p.done}`
   }
 
-  private diffParts(m: FeedMessage): HeadlessEvent[] {
+  private diffParts(m: FeedMessage, parts: MessagePart[]): HeadlessEvent[] {
     const out: HeadlessEvent[] = []
-    for (const p of m.parts ?? []) {
+    for (const p of parts) {
       // progressive text: the growth suffix since we last saw this part (text + reasoning accumulate)
       if (p.type === 'text' || p.type === 'reasoning') {
         const prev = this.partLen.get(p.id) ?? 0
@@ -115,6 +112,7 @@ export class FeedDiffer {
       const sig = this.sig(p)
       if (this.partSig.get(p.id) !== sig) {
         this.partSig.set(p.id, sig)
+        const tool = p.type === 'tool' ? p : undefined
         out.push({
           type: 'part',
           channel: this.channel,
@@ -122,13 +120,13 @@ export class FeedDiffer {
           partId: p.id,
           partIdx: p.idx,
           partType: p.type,
-          ...(p.toolName !== undefined ? { toolName: p.toolName } : {}),
+          ...(tool?.toolName !== undefined ? { toolName: tool.toolName } : {}),
           parent: p.parent,
-          ...(p.state !== undefined ? { state: p.state } : {}),
-          ...(p.isError !== undefined ? { isError: p.isError } : {}),
+          ...(tool ? { state: tool.state } : {}),
+          ...(tool?.isError !== undefined ? { isError: tool.isError } : {}),
           done: p.done,
-          ...(p.args !== undefined ? { args: p.args } : {}),
-          ...(p.result !== undefined ? { result: p.result } : {}),
+          ...(tool?.args !== undefined ? { args: tool.args } : {}),
+          ...(tool?.result !== undefined ? { result: tool.result } : {}),
         })
       }
     }
@@ -136,7 +134,7 @@ export class FeedDiffer {
   }
 
   /** Diff a fresh snapshot into curated events. */
-  sync(rows: FeedMessage[]): HeadlessEvent[] {
+  sync(rows: FeedMessage[], partsByMessage: ReadonlyMap<string, MessagePart[]> = new Map()): HeadlessEvent[] {
     const out: HeadlessEvent[] = []
     for (const m of rows) {
       const isBot = m.status !== undefined
@@ -161,17 +159,18 @@ export class FeedDiffer {
         }
         if (!isBot) {
           st.settled = true
-          out.push(this.messageEvent(m, false))
+          out.push(this.messageEvent(m, false, []))
           continue
         }
         out.push({ type: 'status', kind: 'turn_start', channel: this.channel, msg: m.id })
       }
 
       if (isBot && !st.settled) {
-        out.push(...this.diffParts(m))
+        const parts = partsByMessage.get(m.id) ?? []
+        out.push(...this.diffParts(m, parts))
         if (m.status !== undefined && m.status !== 'streaming') {
           st.settled = true
-          out.push(this.messageEvent(m, true))
+          out.push(this.messageEvent(m, true, parts))
           if (m.status === 'error') {
             out.push({ type: 'error', message: m.error ?? 'failed', channel: this.channel, messageId: m.id })
           }

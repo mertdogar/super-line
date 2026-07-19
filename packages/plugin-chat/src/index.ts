@@ -13,8 +13,8 @@ export type MemberRole = (typeof MEMBER_ROLES)[number]
 export const MESSAGE_STATUSES = ['streaming', 'complete', 'aborted', 'error'] as const
 export type MessageStatus = (typeof MESSAGE_STATUSES)[number]
 
-/** Part kinds a streamed message accumulates (PLAN-chat-streaming decision 2). */
-export const PART_TYPES = ['text', 'reasoning', 'tool'] as const
+/** Part kinds a streamed message accumulates. Hosts parameterize the payload of `data` parts. */
+export const PART_TYPES = ['text', 'reasoning', 'tool', 'data'] as const
 export type PartType = (typeof PART_TYPES)[number]
 
 /** A tool part's lifecycle: args streaming in → executing → settled (result/isError present). */
@@ -24,7 +24,7 @@ export type ToolState = (typeof TOOL_STATES)[number]
 /**
  * The host's opaque extension slot, present on all three collections (validate its shape in `before` hooks).
  * On MESSAGES one key is reserved: `metadata.resource` carries the plugin's resource cards
- * (created/attached/detached announcements, PLAN-chat-resources) — treat it like `metadata.bot` on users.
+ * (created/attached/detached announcements, PLAN-chat-resources).
  */
 const metadata = z.record(z.string(), z.unknown()).optional()
 
@@ -91,26 +91,57 @@ export const messageSchema = <S extends z.ZodTypeAny>(content: S) =>
  * decision 10); null = root lane. `offset` = the checkpointed length of `text` — live deltas splice
  * on top of it. `lastActivityAt` is stamped at every checkpoint so staleness is visible.
  */
-export const messagePartSchema = z.object({
+const messagePartBaseSchema = z.object({
   id: z.string(),
   messageId: z.string(),
   channelId: z.string(), // denormalized: the parts RLS filter keys on it
   idx: z.number(),
-  type: z.enum(PART_TYPES),
   parent: z.string().nullable(),
-  text: z.string(),
-  offset: z.number(),
   done: z.boolean(),
   lastActivityAt: z.number(),
-  // tool parts only:
-  toolCallId: z.string().optional(),
-  toolName: z.string().optional(),
-  args: z.unknown().optional(),
-  result: z.unknown().optional(),
-  isError: z.boolean().optional(),
-  state: z.enum(TOOL_STATES).optional(),
 })
-export type ChatMessagePart = z.infer<typeof messagePartSchema>
+
+/** The durable part-row schema, parameterized by the host's custom data-part payload. */
+export const messagePartSchema = <D extends z.ZodTypeAny>(data: D) =>
+  z.discriminatedUnion('type', [
+    messagePartBaseSchema.extend({ type: z.literal('text'), text: z.string(), offset: z.number() }),
+    messagePartBaseSchema.extend({ type: z.literal('reasoning'), text: z.string(), offset: z.number() }),
+    messagePartBaseSchema.extend({
+      type: z.literal('tool'),
+      toolCallId: z.string(),
+      toolName: z.string().optional(),
+      args: z.unknown().optional(),
+      result: z.unknown().optional(),
+      isError: z.boolean().optional(),
+      state: z.enum(TOOL_STATES),
+    }),
+    messagePartBaseSchema.extend({ type: z.literal('data'), data }),
+  ])
+
+interface MessagePartBase {
+  id: string
+  messageId: string
+  channelId: string
+  idx: number
+  parent: string | null
+  done: boolean
+  lastActivityAt: number
+}
+
+export type ChatMessagePart<Data = unknown> = MessagePartBase &
+  (
+    | { type: 'text' | 'reasoning'; text: string; offset: number }
+    | {
+        type: 'tool'
+        toolCallId: string
+        toolName?: string
+        args?: unknown
+        result?: unknown
+        isError?: boolean
+        state: ToolState
+      }
+    | { type: 'data'; data: Data }
+  )
 
 /** The parts pk — mirrors {@link memId}'s role for memberships. */
 export const partId = (messageId: string, idx: number): string => `${messageId}:${idx}`
@@ -181,43 +212,66 @@ export type ResourceWriteOp = { path: string[]; delete: true } | { path: string[
  * The append vocabulary — a PLUGIN-OWNED union, deliberately not AI SDK `UIMessageChunk`
  * (decision 4: adapters absorb SDK drift at the edge). `key` is the producer's handle for a part —
  * for tool parts it MUST be the `toolCallId`; the server maps key→idx. `delta` applies to
- * text/reasoning parts only (tool args land whole via `part_patch`).
+ * text/reasoning parts only. Structured tool/data payloads are replaced atomically.
  */
-export const streamEventSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('part_start'),
-    key: z.string(),
-    partType: z.enum(PART_TYPES),
-    toolName: z.string().optional(),
-    parent: z.string().optional(),
-  }),
-  z.object({ type: z.literal('delta'), key: z.string(), text: z.string() }),
-  z.object({
-    type: z.literal('part_patch'),
-    key: z.string(),
-    args: z.unknown().optional(),
-    result: z.unknown().optional(),
-    isError: z.boolean().optional(),
-    state: z.enum(['running', 'done']).optional(),
-  }),
-  z.object({ type: z.literal('part_end'), key: z.string(), text: z.string().optional() }),
-])
-export type ChatStreamEvent = z.infer<typeof streamEventSchema>
+export const streamEventSchema = <D extends z.ZodTypeAny>(data: D) =>
+  z.union([
+    z.object({
+      type: z.literal('part_start'),
+      key: z.string(),
+      partType: z.enum(['text', 'reasoning']),
+      parent: z.string().optional(),
+    }),
+    z.object({
+      type: z.literal('part_start'),
+      key: z.string(),
+      partType: z.literal('tool'),
+      toolName: z.string().optional(),
+      parent: z.string().optional(),
+    }),
+    z.object({
+      type: z.literal('part_start'),
+      key: z.string(),
+      partType: z.literal('data'),
+      data,
+      parent: z.string().optional(),
+    }),
+    z.object({ type: z.literal('delta'), key: z.string(), text: z.string() }),
+    z.object({
+      type: z.literal('tool_patch'),
+      key: z.string(),
+      args: z.unknown().optional(),
+      result: z.unknown().optional(),
+      isError: z.boolean().optional(),
+      state: z.enum(['running', 'done']).optional(),
+    }),
+    z.object({ type: z.literal('data_patch'), key: z.string(), data }),
+    z.object({ type: z.literal('part_end'), key: z.string(), text: z.string().optional() }),
+  ])
+
+export type ChatStreamEvent<Data = unknown> =
+  | { type: 'part_start'; key: string; partType: 'text' | 'reasoning'; parent?: string }
+  | { type: 'part_start'; key: string; partType: 'tool'; toolName?: string; parent?: string }
+  | { type: 'part_start'; key: string; partType: 'data'; data: Data; parent?: string }
+  | { type: 'delta'; key: string; text: string }
+  | {
+      type: 'tool_patch'
+      key: string
+      args?: unknown
+      result?: unknown
+      isError?: boolean
+      state?: 'running' | 'done'
+    }
+  | { type: 'data_patch'; key: string; data: Data }
+  | { type: 'part_end'; key: string; text?: string }
 
 /**
  * The writer shape the stream bridges drive (`pipeUIMessageStream`, `pipeMastraStream`,
- * `mastraEngine`) — both `chatClient`'s handle and `chatKit`'s writer fit.
+ * `createMastraRunner`) — both `chatClient`'s handle and `chatKit`'s writer fit.
  */
-export interface StreamEventSink {
-  push(...events: ChatStreamEvent[]): void | Promise<void>
+export interface StreamEventSink<Data = unknown> {
+  push(...events: ChatStreamEvent<Data>[]): void | Promise<void>
 }
-
-/**
- * One settled chat turn folded into model input — the discriminated shape Mastra's and the AI
- * SDK's message arrays both accept. `onChatMessage` assembles these; `mastraEngine.run` consumes
- * them.
- */
-export type ChatTurnMessage = { role: 'user'; content: string } | { role: 'assistant'; content: string }
 
 export type ChatChannel = z.infer<typeof channelSchema>
 export type ChatMembership = z.infer<typeof membershipSchema>
@@ -243,7 +297,7 @@ export const memId = (channelId: string, userId: string): string => `${channelId
 
 // ── request defs (built per content schema — shared by the fragment AND the server plugin surface) ─
 
-const requestDefs = <S extends z.ZodTypeAny>(content: S) => {
+const requestDefs = <S extends z.ZodTypeAny, D extends z.ZodTypeAny>(content: S, data: D) => {
   const message = messageSchema(content)
   return {
     // channel + owner membership in one server-authoritative op (a pure row-write can't: you can't
@@ -277,7 +331,7 @@ const requestDefs = <S extends z.ZodTypeAny>(content: S) => {
     // ── streaming (PLAN-chat-streaming decision 4): open → append batches → settle ────────────────
     startMessage: { input: z.object({ channelId: z.string(), metadata }), output: message },
     appendMessage: {
-      input: z.object({ id: z.string(), events: z.array(streamEventSchema).min(1) }),
+      input: z.object({ id: z.string(), events: z.array(streamEventSchema(data)).min(1) }),
       output: z.object({ ok: z.boolean() }),
     },
     finalizeMessage: {
@@ -287,6 +341,10 @@ const requestDefs = <S extends z.ZodTypeAny>(content: S) => {
         error: z.string().optional(),
       }),
       output: message,
+    },
+    cancelMessage: {
+      input: z.object({ id: z.string(), reason: z.string().optional() }),
+      output: z.object({ ok: z.boolean() }),
     },
     // enter/leave the per-channel delta room — the ONLY way the plugin learns a client is viewing
     // a channel (topics can't scope per-channel; decision 5)
@@ -344,6 +402,9 @@ const chatEvents = {
       text: z.string(),
     }),
   },
+  'chat.streamCancelled': {
+    payload: z.object({ messageId: z.string(), reason: z.string() }),
+  },
 }
 
 /**
@@ -351,7 +412,10 @@ const chatEvents = {
  * inspects content, so its handlers/subtraction key on this static shape while the CONTRACT carries the
  * host's real schema. `clientToServer` keys here are subtracted from the host's `implement()` obligation.
  */
-export const chatSurface = defineSurface({ clientToServer: requestDefs(z.unknown()), serverToClient: chatEvents })
+export const chatSurface = defineSurface({
+  clientToServer: requestDefs(z.unknown(), z.unknown()),
+  serverToClient: chatEvents,
+})
 export type ChatSurface = typeof chatSurface
 
 /**
@@ -363,8 +427,12 @@ export type ChatSurface = typeof chatSurface
  * see `chat()` in `/server`) and is generic over the message body: `chatContract({ content:
  * myBodySchema })`, default `z.string()`.
  */
-export function chatContract<S extends z.ZodTypeAny = z.ZodString>(opts?: { content?: S }) {
+export function chatContract<S extends z.ZodTypeAny = z.ZodString, D extends z.ZodTypeAny = z.ZodNever>(opts?: {
+  content?: S
+  data?: D
+}) {
   const content = (opts?.content ?? z.string()) as S
+  const data = (opts?.data ?? z.never()) as D
   return defineContractPlugin('chat', {
     collections: {
       channels: { schema: channelSchema, key: 'id' },
@@ -379,7 +447,7 @@ export function chatContract<S extends z.ZodTypeAny = z.ZodString>(opts?: { cont
         references: { authorId: 'users', channelId: 'channels' },
       },
       messageParts: {
-        schema: messagePartSchema,
+        schema: messagePartSchema(data),
         key: 'id',
         references: { messageId: 'messages', channelId: 'channels' },
       },
@@ -394,6 +462,6 @@ export function chatContract<S extends z.ZodTypeAny = z.ZodString>(opts?: { cont
         references: { userId: 'users' },
       },
     },
-    shared: { clientToServer: requestDefs(content), serverToClient: chatEvents },
+    shared: { clientToServer: requestDefs(content, data), serverToClient: chatEvents },
   })
 }

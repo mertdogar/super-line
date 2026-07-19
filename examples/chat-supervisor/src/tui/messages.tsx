@@ -40,7 +40,8 @@ function contentText(m: FeedMessage): string {
 
 // ── grouping: fold each delegate subtree into a card (web chat.tsx groupTurn) ──────────────────────
 
-type Group = { kind: 'part'; part: MessagePart } | { kind: 'card'; anchor: MessagePart; children: MessagePart[] }
+type ToolPart = Extract<MessagePart, { type: 'tool' }>
+type Group = { kind: 'part'; part: MessagePart } | { kind: 'card'; anchor: ToolPart; children: MessagePart[] }
 
 function groupTurn(parts: MessagePart[]): Group[] {
   const groups: Group[] = []
@@ -64,7 +65,7 @@ function groupTurn(parts: MessagePart[]): Group[] {
   return groups
 }
 
-function ToolRow({ part }: { part: MessagePart }) {
+function ToolRow({ part }: { part: ToolPart }) {
   return (
     <box flexDirection="column">
       <box flexDirection="row" gap={1}>
@@ -81,7 +82,7 @@ function ToolRow({ part }: { part: MessagePart }) {
   )
 }
 
-function DelegationCard({ anchor, parts, streaming }: { anchor: MessagePart; parts: MessagePart[]; streaming: boolean }) {
+function DelegationCard({ anchor, parts, streaming }: { anchor: ToolPart; parts: MessagePart[]; streaming: boolean }) {
   const args = anchor.args as { agentType?: string; task?: string } | undefined
   const agentType = args?.agentType ?? 'subagent'
   const task = args?.task ? `: ${args.task}` : ''
@@ -108,6 +109,7 @@ function PartView({ part, live }: { part: MessagePart; live: boolean }) {
     )
   }
   if (part.type === 'tool') return <ToolRow part={part} />
+  if (part.type === 'data') return <text fg={COLORS.dim}>{short(part.data)}</text>
   return <text fg={COLORS.text}>{`${part.text}${live ? '▌' : ''}`}</text>
 }
 
@@ -121,8 +123,7 @@ function ResourceCardLine({ card, m }: { card: ResourceCard; m: FeedMessage }) {
   )
 }
 
-function Turn({ m }: { m: FeedMessage }) {
-  const parts = m.parts ?? []
+function Turn({ m, parts }: { m: FeedMessage; parts: MessagePart[] }) {
   const streaming = m.status === 'streaming'
   if (parts.length === 0) {
     // an old turn whose parts left the recency window — its content projection carries it
@@ -143,7 +144,17 @@ function Turn({ m }: { m: FeedMessage }) {
   )
 }
 
-export function MessageView({ m, me, names }: { m: FeedMessage; me: string; names: Map<string, string> }) {
+export function MessageView({
+  m,
+  me,
+  names,
+  parts = [],
+}: {
+  m: FeedMessage
+  me: string
+  names: Map<string, string>
+  parts?: MessagePart[]
+}) {
   const card = resourceOf(m)
   if (card) return <ResourceCardLine card={card} m={m} />
 
@@ -159,7 +170,7 @@ export function MessageView({ m, me, names }: { m: FeedMessage; me: string; name
           <text fg={COLORS.dim}>{time(m.createdAt)}</text>
         </box>
         <box paddingLeft={2} flexDirection="column">
-          <Turn m={m} />
+          <Turn m={m} parts={parts} />
         </box>
       </box>
     )

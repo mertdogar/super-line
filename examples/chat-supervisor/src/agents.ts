@@ -1,7 +1,7 @@
 // The Mastra agents. The worker is completely vanilla; the supervisor and editor are built by a
 // factory because they carry plugin-chat's resource tools (AI SDK `tool()` objects — Mastra's
-// `tools:` accepts them directly), which need the bot's live connection. No delegate tool anywhere
-// here — the engine (@super-line/plugin-chat/mastra) injects it per stream call via toolsets.
+// `tools:` accepts them directly), which need the automation user's live connection. No delegate
+// tool lives here — the sink-only runner injects it per stream call via toolsets.
 
 import { Agent } from '@mastra/core/agent'
 import { createTool } from '@mastra/core/tools'

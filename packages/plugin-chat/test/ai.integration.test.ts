@@ -7,7 +7,7 @@ import { auth } from '@super-line/plugin-auth/server'
 import { chatContract } from '@super-line/plugin-chat'
 import { chat } from '@super-line/plugin-chat/server'
 import { chatClient } from '@super-line/plugin-chat/client'
-import { chatAgentTools, pipeUIMessageStream } from '@super-line/plugin-chat/ai'
+import { chatAgentTools, createUIMessageStreamAdapter, pipeUIMessageStream } from '@super-line/plugin-chat/ai-sdk'
 import type { ToolSet, UIMessageChunk } from 'ai'
 import { createHarness, waitFor } from '../../server/test/harness.js'
 
@@ -51,6 +51,25 @@ async function boot() {
 }
 
 describe('plugin-chat/ai — agent toolset', () => {
+  it('maps host-selected SDK chunks into typed data parts and reports unsupported chunks', () => {
+    const unsupported: UIMessageChunk[] = []
+    const adapter = createUIMessageStreamAdapter<{ progress: number }>({
+      mapDataPart: (chunk) =>
+        chunk.type === 'data-progress'
+          ? { key: 'progress', data: { progress: Number((chunk as { data: unknown }).data) } }
+          : undefined,
+      onUnsupported: (chunk) => unsupported.push(chunk),
+    })
+    const dataChunk = { type: 'data-progress', data: 50 } as UIMessageChunk
+    expect(adapter.map(dataChunk)).toEqual([
+      { type: 'part_start', key: 'progress', partType: 'data', data: { progress: 50 } },
+      { type: 'part_end', key: 'progress' },
+    ])
+    const source = { type: 'source-url', sourceId: 's', url: 'https://example.com' } as UIMessageChunk
+    expect(adapter.map(source)).toEqual([])
+    expect(unsupported).toEqual([source])
+  })
+
   it('gates the management group behind the flag', async () => {
     const { botClient } = await boot()
     const core = chatAgentTools(botClient)
@@ -222,19 +241,21 @@ describe('plugin-chat/ai — agent toolset', () => {
     const done = await w.finalize()
     expect(done.content).toBe('checking… \n\n23°C in Ankara') // both root text parts project, in order
 
-    const feed = ann.messages(ch.id)
-    await feed.ready
-    await waitFor(() => (feed.rows().find((m) => m.id === w.messageId)?.parts?.length ?? 0) === 5)
-    const parts = feed.rows().find((m) => m.id === w.messageId)!.parts!
-    expect(parts.map((p) => [p.type, p.toolName ?? p.text])).toEqual([
+    const parts = ann.messageParts(ch.id, w.messageId)
+    await parts.ready
+    await waitFor(() => parts.rows().length === 5)
+    expect(
+      parts.rows().map((part) => [part.type, part.type === 'tool' ? part.toolName : 'text' in part ? part.text : undefined]),
+    ).toEqual([
       ['reasoning', 'pondering'],
       ['text', 'checking… '],
       ['tool', 'weather'],
       ['tool', 'send_report'],
       ['text', '23°C in Ankara'], // step-2 id '0' did NOT collide with step-1 id '0'
     ])
-    expect(parts[2]).toMatchObject({ state: 'done', args: { city: 'Ankara' }, result: { temp: 23 } })
-    expect(parts[3]).toMatchObject({ state: 'done', isError: true, result: { error: 'smtp down' } })
+    expect(parts.rows()[2]).toMatchObject({ state: 'done', args: { city: 'Ankara' }, result: { temp: 23 } })
+    expect(parts.rows()[3]).toMatchObject({ state: 'done', isError: true, result: { error: 'smtp down' } })
+    parts.close()
     ann.close()
     bot.close()
     annClient.close()

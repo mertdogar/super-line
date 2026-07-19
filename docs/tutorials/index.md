@@ -42,7 +42,7 @@ Merge two **plugins** into one contract — [`@super-line/plugin-auth`](/how-to/
 
 Add a third participant to that channel — an **AI agent**. Because super-line has no bot type, the agent is a regular API-key user on the same wire, and three library calls turn it into a live participant whose whole answer **streams** into the channel as one message. Runs fully offline, then swaps in a real LLM in one block.
 
-*You'll touch:* [`provisionChatBot` + `onChatMessage`](/how-to/chat-bots), [streamed messages](/how-to/chat-streaming), the `chatAgentTools` AI SDK toolset.
+*You'll touch:* [standard-user automation](/how-to/chat-bots), [streamed messages](/how-to/chat-streaming), and the `chatAgentTools` AI SDK toolset.
 
 ### 6 · [A human and an agent co-edit a canvas](/tutorials/collaborative-canvas-with-agent)
 

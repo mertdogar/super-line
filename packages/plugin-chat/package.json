@@ -29,7 +29,7 @@
       "import": { "types": "./dist/react.d.ts", "default": "./dist/react.js" },
       "require": { "types": "./dist/react.d.cts", "default": "./dist/react.cjs" }
     },
-    "./ai": {
+    "./ai-sdk": {
       "import": { "types": "./dist/ai.d.ts", "default": "./dist/ai.js" },
       "require": { "types": "./dist/ai.d.cts", "default": "./dist/ai.cjs" }
     },

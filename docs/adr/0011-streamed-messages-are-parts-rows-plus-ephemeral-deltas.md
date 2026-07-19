@@ -1,6 +1,6 @@
 # ADR-0011: Streamed messages are parts-rows plus ephemeral deltas
 
-**Status:** accepted (2026-07-16) · **Design:** PLAN-chat-streaming.md · **Builds on:** ADR-0010
+**Status:** accepted (2026-07-16), amended (2026-07-19) · **Builds on:** ADR-0010
 
 ## Context
 
@@ -21,16 +21,16 @@ Two physics facts shape everything:
 ## Decision
 
 **Storage: parts-as-rows.** A `chat.messageParts` collection, keyed `${messageId}:${idx}`, one row
-per block (`text` · `reasoning` · `tool`); the message row is a thin envelope (`status`, `error?`,
+per block (`text` · `reasoning` · `tool` · host-typed `data`); the message row is a thin envelope (`status`, `error?`,
 final `content` projection — `content` became optional and stays absent until finalize). Rewrite
 cost is bounded by part size; settled parts are free, natural checkpoints. Subagent trees need only
 `parent?: string` (the delegating tool part's `toolCallId`) — one message = one whole turn-tree.
 
 **Wire: three requests + a plugin-owned event union.** `startMessage` / `appendMessage` (batched
-`part_start`/`delta`/`part_patch`/`part_end`, producer part-keys, server-assigned idx) /
-`finalizeMessage` — requests-first per ADR-0010, hookable at start/finalize only (hooks gate
+`part_start`/`delta`/`tool_patch`/`data_patch`/`part_end`, producer part-keys, server-assigned idx) /
+`finalizeMessage` plus an explicit `cancelMessage` request — requests-first per ADR-0010, hookable at start/finalize only (hooks gate
 INTENT; forced aborts — disconnect, kill-switch, cap violations, shutdown drain — are unvetoable).
-The union is deliberately NOT AI SDK `UIMessageChunk`: adapters (`pipeUIMessageStream` in `/ai`)
+The union is deliberately NOT AI SDK `UIMessageChunk`: adapters (`pipeUIMessageStream` in `/ai-sdk`)
 absorb SDK drift at the edge, the wire schema stays ours.
 
 **Deltas: per-channel rooms, checkpoints as the floor.** Token deltas broadcast ephemerally to a
@@ -46,16 +46,18 @@ lifetime; disconnect settles it `aborted` with partials preserved. Staleness is 
 whether another node's stream is live. Graceful `server.close()` drains open streams via an awaited
 plugin dispose.
 
-**Read side: one assembled feed.** `chatClient.messages()` composes the message window, a
-recency-bounded parts subscription, and the delta room invisibly; streamed messages gain
-`parts`/`status`, plain messages pass through untouched.
+**Read side: envelopes, history, and complete per-message parts.** `chatClient.messages()` is a
+bounded live newest-N envelope window. `history()` is one-shot keyset pagination for older
+envelopes. `messageParts(channelId, messageId)` is complete for one selected message, tree-ordered,
+and owns its delta-room overlay. This avoids loading channel-wide parts without silently truncating
+the detailed transcript of an old or very large turn.
 
 ## Consequences
 
 - Every viewer path (live, late-join, reload, reconnect, crash) converges on the same rows; the
   ephemeral layer is pure smoothness.
-- The parts vocabulary is fixed (v1: text/reasoning/tool). New part kinds are additive schema, not
-  wire redesigns; `data` parts are deferred until a producer exists.
+- The plugin owns the structural vocabulary while hosts parameterize `data` payloads with a contract
+  schema. SDK-specific file/source/usage chunks are interpreted by optional adapter mappings.
 - Hosts with a structured `content` schema must supply `streaming.project` to derive the envelope
   projection (the default text-join fails loudly with guidance).
 - Cross-node: appends must reach the ingress node that owns the stream state (they do — same

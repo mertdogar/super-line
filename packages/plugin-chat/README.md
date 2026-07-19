@@ -1,248 +1,202 @@
 # @super-line/plugin-chat
 
-A reusable **chat backbone** for [**super-line**](https://super-line.dogar.biz/), as a paired plugin:
-**channels** (public + private), owner/member **membership control**, and **messages** (send · edit ·
-delete), all backed by typed [collections](https://super-line.dogar.biz/collections/). Every mutation is a
-**server-authoritative, hookable request**, so ids and timestamps are trustworthy and a host can wrap any
-operation. It ships an imperative server API and a ready-made AI-SDK toolset, so back-office code and LLM
-agents drive the exact same model as browser clients.
+A server-authoritative chat backbone for super-line: channels, memberships, message envelopes,
+durable streamed parts, resources, and presence. It requires `@super-line/plugin-auth`.
 
-Requires [`@super-line/plugin-auth`](https://www.npmjs.com/package/@super-line/plugin-auth) — identity and
-principals come from it, and chat rows reference its `users` directory.
+The plugin has no concept of a bot. Humans, services, and agents are ordinary authenticated users
+with ordinary channel memberships. A host application owns identity provisioning, trigger policy,
+model memory, and response loops.
 
 ```bash
 pnpm add @super-line/plugin-chat @super-line/plugin-auth
 ```
 
-## Wire it in
+## Contract and server
 
 ```ts
-// 1 · contract — merge both fragments. chatContract() adds the channels/memberships/messages/
-//     messageParts/resources/resourcePresence collections and the 20 mutation + streaming
-//     requests; the message body defaults to plain text.
-import { defineContract } from '@super-line/core'
-import { authContract } from '@super-line/plugin-auth'
-import { chatContract } from '@super-line/plugin-chat'
+import { z } from "zod";
+import { defineContract } from "@super-line/core";
+import { authContract } from "@super-line/plugin-auth";
+import { chatContract } from "@super-line/plugin-chat";
 
-export const app = defineContract({ roles: { user: {} }, plugins: [authContract(), chatContract()] })
+const app = defineContract({
+  roles: { user: {} },
+  plugins: [
+    authContract(),
+    chatContract({
+      content: z.string(),
+      data: z.object({ kind: z.literal("progress"), value: z.number() }),
+    }),
+  ],
+});
 ```
 
+`content` parameterizes message bodies. `data` parameterizes custom durable stream parts. Both
+schemas flow through collection rows, requests, client writers, and React hooks.
+
 ```ts
-// 2 · server — register the kit's plugin (row policies + the 20 handlers) alongside auth's.
-//     Wrap any operation with a domain hook — it fires for client requests AND server calls.
-import { chat } from '@super-line/plugin-chat/server'
+import { chat } from "@super-line/plugin-chat/server";
 
 const chatKit = chat({
   contract: app,
-  hooks: {
-    sendMessage: {
-      before: (input, initiator) => {           // transform (return) or veto (throw)
-        if (initiator.kind === 'client' && isSpam(input.content)) throw new Error('no spam')
-        return input
-      },
-      after: (message) => void audit(message),
-    },
+  streaming: {
+    checkpointMs: 1_000,
+    maxParts: 512,
+    maxTextBytes: 256 * 1024,
+    maxStructuredBytes: 256 * 1024,
+    maxEventsPerAppend: 256,
   },
-})
+});
 
 createSuperLineServer(app, {
   collections: backend,
   authenticate: authKit.authenticate,
-  identify: authKit.identify,                   // principal := userId — drives the chat read policies
+  identify: authKit.identify,
   plugins: [authKit.plugin, chatKit.plugin],
-})
+});
 ```
+
+Every mutation is a request. Collections are client-read-only, and membership policies scope
+channels, messages, and message parts to the connected user. Hooks wrap the same domain operations
+used by client requests and `chatKit` server calls.
+
+## Client reads
 
 ```ts
-// 3 · client — typed request methods + live stores. No React/TanStack dependency; agents use it too.
-import { chatClient } from '@super-line/plugin-chat/client'
+import { chatClient } from "@super-line/plugin-chat/client";
 
-const chatCli = chatClient(client, { userId })
-const ch = await chatCli.createChannel({ name: 'general', visibility: 'public' })
-await chatCli.send(ch.id, 'hello')
+const chat = chatClient(client, { userId });
+await chat.ready;
 
-const feed = chatCli.messages(ch.id)            // live, chronological, newest-N window
-feed.subscribe(() => render(feed.rows()))       // re-subscribes itself when your membership changes
+const recent = chat.messages(channelId, { limit: 200 }); // live message envelopes only
+const page = await chat.history(channelId, { before: cursor, limit: 50 });
+const parts = chat.messageParts(channelId, messageId); // complete, tree-ordered, live
 ```
 
-React bindings come from `@super-line/plugin-chat/react`:
+The read APIs are deliberately separate:
+
+- `messages()` is a bounded live newest-N envelope window.
+- `history()` returns one keyset-paginated envelope snapshot using `{ createdAt, id }`.
+- `messageParts()` returns every durable part for one message and overlays live text deltas. Mount
+  it only for messages whose detailed transcript is being rendered.
+
+There is no channel-wide parts window and no silent parts truncation. A reload can reconstruct the
+entire supervisor and subagent tree for any message.
+
+React bindings expose the same split:
 
 ```tsx
-const { ChatProvider, useChat, useChannels, useMembers, useMessages } = createChatHooks<typeof app>()
+const { ChatProvider, useMessages, useChatHistory, useMessageParts } =
+  createChatHooks<typeof app>();
 ```
 
-## Requests-first, read-only collections
-
-Unlike raw collections (direct, optimistic row-writes), this plugin makes **every mutation a request**: the
-collections are declared **client-read-only** (membership-scoped `read` policies, `write` denied), and each
-write flows through a server-authoritative handler. Underneath every operation sits one **domain core** the
-request handler and the imperative kit both call, wrapped by your before/after **hooks** — one extension
-seam that can't be bypassed. The trade-off (server authority + hookability, at the cost of optimism) is
-recorded in [ADR-0010](https://github.com/mertdogar/super-line/blob/main/docs/adr/0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md).
-
-## The membership model
-
-- **Channels** are `public` (anyone discovers + self-joins) or `private` (invisible to non-members; you are
-  added by an owner, you can't join). Messages are membership-scoped in both cases.
-- **Members** carry a role: `owner` or `member`. The creator is the first owner; owners manage membership,
-  rename, and delete the channel; members chat and can always self-leave.
-- **Last-owner protection**: leaving, being removed, or self-demoting throws `CONFLICT` if it would leave a
-  channel with members but no owner.
-
-## `chatKit` — the server API
-
-`chat({ contract, hooks? })` returns the kit you register on the server and drive from back-office code and
-agents. Every method runs through the same hooked domain core as the matching client request, with
-`initiator.kind === 'server'`:
+## Producing a streamed message
 
 ```ts
-interface ChatServer {
-  plugin: SuperLinePlugin // → server `plugins: [...]` — read-RLS/write-deny policies + the 20 handlers
-
-  channels: {
-    create(input: { name, visibility?, owner?, metadata? }): Promise<ChatChannel> // owner → owner-membership written too
-    get(id): Promise<ChatChannel | undefined>
-    find(opts?: { filter?, limit?, offset? }): Promise<ChatChannel[]>
-    update(id, patch: { name?, metadata? }): Promise<ChatChannel>
-    delete(id): Promise<void>   // cascades memberships + messages + parts + resources (owned docs deleted)
-  }
-
-  members: {
-    add(channelId, userId, opts?: { role?, metadata? }): Promise<ChatMembership>
-    remove(channelId, userId): Promise<void>
-    setRole(channelId, userId, role): Promise<ChatMembership>
-    of(channelId): Promise<ChatMembership[]>
-    channelsOf(userId): Promise<ChatMembership[]>
-  }
-
-  messages: {
-    send(input: { channelId, authorId, content, metadata? }): Promise<ChatMessage>
-    edit(id, patch: { content?, metadata? }): Promise<ChatMessage>  // stamps editedAt
-    delete(id): Promise<void>   // hard-delete
-    find(opts?: { filter?, orderBy?, limit?, offset? }): Promise<ChatMessage[]>
-  }
-}
-```
-
-```ts
-const ops = await chatKit.channels.create({ name: 'ops', visibility: 'private', owner: adminId })
-await chatKit.members.add(ops.id, someUserId)
-await chatKit.messages.send({ channelId: ops.id, authorId: botId, content: 'deploy done' })
-```
-
-**Client-side** `chatClient(client, { userId })` mirrors the mutations as typed requests —
-`createChannel` · `updateChannel` · `deleteChannel` · `join` · `leave` · `addMember` · `removeMember` ·
-`setMemberRole` · `send` · `editMessage` · `deleteMessage` — plus live stores `channels()` /
-`members(channelId)` / `messages(channelId, { limit? })`, each `{ rows(), subscribe(cb), ready, close() }`.
-
-## AI agents
-
-**AI agents are regular users** — provision one with [plugin-auth](https://www.npmjs.com/package/@super-line/plugin-auth)
-(`authKit.users.create` + `authKit.apiKeys.create`), add it to a channel, and let it connect with the same
-`chatClient`. To let an LLM *drive* chat, the `/ai` subpath ships a [Vercel AI SDK](https://ai-sdk.dev)
-toolset over the agent's **own** connection — so the server authorization-checks every call and the model
-can never exceed its bot's permissions:
-
-```ts
-import { ToolLoopAgent } from 'ai'
-import { chatAgentTools } from '@super-line/plugin-chat/ai'
-
-const agent = new ToolLoopAgent({ model, tools: chatAgentTools(client) })
-// core: list_channels · list_members · read_messages · send_message · join_channel · leave_channel
-//       + the resource tools: list/read/create/detach/write_resource (see Channel resources below)
-// { management: true } adds channel lifecycle, membership control, edit/delete, and list_users
-```
-
-## Channel resources
-
-Channels can carry **shared objects** — canvases, todo lists, briefs — declared by YOUR contract as
-[CRDT document collections](https://super-line.dogar.biz/collections/crdt) and made channel-native by
-the plugin (design: `PLAN-chat-resources.md`). Register kinds on `chat()` and the plugin owns the
-rest: a per-channel link registry (`resources` rows), server-authoritative **create-or-attach**
-(`createResource`, host `init` seeds the doc), **membership-gated read/write policies contributed
-automatically** for those collections, a delete cascade (`owned` kinds die with their channel;
-`linked` kinds are shareable and never chat-deleted), resource **cards** in the message stream,
-coarse who's-open **presence** (`resourcePresence` rows + `useResourcePresence`), and an **acked
-write path** (`writeResource`) that agents use to get honest `VALIDATION` errors instead of silent
-optimistic resyncs.
-
-```ts
-const chatKit = chat({
-  contract: app,
-  resources: { kinds: {
-    todo:   { collection: 'todos', init: () => ({ items: {} }) },                  // owned
-    canvas: { collection: 'canvases', lifecycle: 'linked', init: (c) => seed(c.params) },
-  } },
-})
-```
-
-Guide: <https://super-line.dogar.biz/how-to/chat-resources> · runnable:
-[`examples/chat-resources`](https://github.com/mertdogar/super-line/tree/main/examples/chat-resources).
-
-## Streaming messages
-
-A message can be **streamed** — opened, appended to live, settled — and it stores the **entire agent
-turn** as typed parts: text, reasoning, and tool calls (with args/result/state), including subagent
-trees nested under their delegate call. Viewers get token-smooth streaming over a durable ~1s
-checkpoint floor, so late joiners, reloads, and crashes always see the turn so far; the same
-`chat.messages(channelId)` feed serves streamed messages assembled (`msg.parts` + `msg.status`),
-plain ones untouched.
-
-```ts
-const w = await chat.stream(channelId)               // or chatKit.messages.stream(...)
+const writer = await chat.stream(channelId);
 try {
-  const result = await agent.stream({ messages })    // any AI SDK v6 producer
-  const { error } = await pipeUIMessageStream(w, result.toUIMessageStream())
-  await w.finalize(error ? { status: 'error', error } : {})
-} finally {
-  await w.abort().catch(() => {})                    // no-op if already settled
+  writer.push(
+    { type: "part_start", key: "answer", partType: "text" },
+    { type: "delta", key: "answer", text: "Hello" },
+    { type: "part_end", key: "answer" },
+  );
+  await writer.finalize();
+} catch (error) {
+  await writer.abort(String(error)).catch(() => {});
+  throw error;
 }
 ```
 
-Design record: [ADR-0011](https://github.com/mertdogar/super-line/blob/main/docs/adr/0011-streamed-messages-are-parts-rows-plus-ephemeral-deltas.md).
+The event vocabulary is plugin-owned:
 
-## Mastra agents + the bot loop
+- `part_start` opens `text`, `reasoning`, `tool`, or host-typed `data` parts.
+- `delta` appends text or reasoning.
+- `tool_patch` atomically replaces tool args/result/error/state.
+- `data_patch` atomically replaces a custom data payload.
+- `part_end` closes a part.
 
-Plain [Mastra](https://mastra.ai) `Agent`s hook up the way super-harness does it — hand them over,
-the engine owns the delegate tool (injected per call via `toolsets`, never baked into your Agent),
-the lanes/nesting, the chunk mapping, and abort. Nothing else crosses the seam: per-agent config —
-`maxSteps`, thinking, memory — stays on your `Agent` via Mastra's `defaultOptions` (a function of
-the forwarded `requestContext` when it needs per-turn values, e.g. root-only per-channel memory).
-Provisioning and the channel loop are one call each:
+Text deltas are ephemeral for smooth rendering and checkpointed into part rows for durability.
+Tool and data lifecycle changes persist immediately. `parent` nests a part under a tool call, so a
+single message can hold a complete supervisor/subagent tree.
+
+The author or a channel owner can request cancellation:
 
 ```ts
-import { provisionChatBot } from '@super-line/plugin-chat/server'
-import { chatClient, onChatMessage } from '@super-line/plugin-chat/client'
-import { mastraEngine } from '@super-line/plugin-chat/mastra'
-
-const { user, apiKey } = await provisionChatBot(authKit, chatKit, { name: 'Supervisor' }) // restart-idempotent
-const bot = chatClient(client, { userId: user.id })   // client connected with { apiKey }
-await bot.ready
-
-const engine = mastraEngine({ agent: supervisor, subagents: [{ agent: worker }] })
-onChatMessage(bot, ({ channelId, history }) => engine.respond(bot, channelId, history))
-// the loop: joins channels on appear, skips backlog + own messages, model-ready history,
-// turns serialized per channel; works with any producer (AI SDK included), not just Mastra
+await chat.cancelMessage(messageId, "stopped by owner");
+writer.signal.addEventListener("abort", stopModel);
 ```
+
+Cancellation authorization is server-side. It settles the envelope as `aborted` and notifies the
+producer signal; it is not represented as a synthetic chat message.
+
+## AI SDK and Mastra adapters
+
+Adapters interpret provider streams but never own chat lifecycle or model history.
+
+```ts
+import { pipeUIMessageStream } from "@super-line/plugin-chat/ai-sdk";
+
+const writer = await chat.stream(channelId);
+const result = await agent.stream({ messages: modelInput });
+const mapped = await pipeUIMessageStream(writer, result.toUIMessageStream(), {
+  mapDataPart: (chunk) => (chunk.type === "data-progress" ? { data: chunk.data } : undefined),
+});
+await writer.finalize(mapped.error ? { status: "error", error: mapped.error } : {});
+```
+
+`createUIMessageStreamAdapter()` exposes the stateful interpreter when the host owns the loop.
+`chatAgentTools(client)` provides stateless, permission-checked AI SDK tools over that client's own
+connection.
+
+```ts
+import { createMastraRunner } from "@super-line/plugin-chat/mastra";
+
+const runner = createMastraRunner({
+  agent: supervisor,
+  subagents: [{ agent: worker }],
+});
+
+const writer = await chat.stream(channelId);
+const result = await runner.run(writer, modelInput, {
+  abortSignal: writer.signal,
+  requestContext,
+});
+await writer.finalize(result.error ? { status: "error", error: result.error } : {});
+```
+
+The runner owns Mastra delegation topology, the injected `delegate` tool, lane keys, nesting, and
+chunk interpretation. The host still owns the client, channel, input/history, model memory, message
+open/finalize/abort policy, and trigger loop. `pipeMastraStream()` and `createChunkAdapter()` are the
+single-lane and low-level alternatives.
+
+## Automation is host policy
+
+Provisioning an automation user uses plugin-auth directly:
+
+```ts
+const user = await authKit.users.create({
+  email: "assistant@example.internal",
+  displayName: "Assistant",
+  metadata: { runtime: "support-assistant" },
+});
+const { key } = await authKit.apiKeys.create(user.id, { role: "user", label: "support-runtime" });
+```
+
+Connect it with `{ apiKey: key }` and wrap it in the same `chatClient` used by a human. The host then
+assigns memberships in server policy—for example, a `createChannel.after` hook can add the user to
+every new channel. The connected runtime does not manage its own access. The host also decides which
+envelopes trigger work, how turns are serialized, what counts as backlog, and whether model history
+comes from Mastra memory, another store, or a projection of chat envelopes.
+
+See `examples/chat-supervisor` for this complete pattern and durable reload rendering.
 
 ## Subpaths
 
-`.` (contract fragment + schemas/types) · `/server` (`chat()` → `chatKit` · `provisionChatBot`) ·
-`/client` (`chatClient` · `onChatMessage`) · `/react` (`createChatHooks`) · `/ai`
-(`chatAgentTools` · `pipeUIMessageStream`; `ai` is an optional peer dependency) · `/mastra`
-(`mastraEngine` · `pipeMastraStream`; `@mastra/core` is an optional peer dependency).
-
-The message body is host-parametrized: `chatContract({ content })` slots your Zod schema into the `messages`
-collection and the send/edit requests, so the server validates every body and types flow end-to-end
-(default: plain text).
-
-## Learn more
-
-- **Guide:** <https://super-line.dogar.biz/how-to/plugin-chat>
-- **Tutorial:** <https://super-line.dogar.biz/tutorials/chat-backbone>
-- **Example:** [`examples/collections-chat`](https://github.com/mertdogar/super-line/tree/main/examples/collections-chat)
-  — a Slack-like app built entirely on this plugin, with a live LLM agent in an `#ask-ai` channel.
-- **Example:** [`examples/chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor)
-  — Mastra supervisor + worker streaming a nested delegation tree into a channel via `mastraEngine`.
+- `@super-line/plugin-chat` — contract, schemas, rows, stream event types.
+- `@super-line/plugin-chat/server` — `chat()` and the imperative `chatKit`.
+- `@super-line/plugin-chat/client` — `chatClient`, history/part helpers, part-tree utilities.
+- `@super-line/plugin-chat/react` — React bindings.
+- `@super-line/plugin-chat/ai-sdk` — AI SDK tools and stream adapters.
+- `@super-line/plugin-chat/mastra` — Mastra stream adapter and delegation runner.
 
 MIT © super-line

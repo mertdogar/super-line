@@ -21,7 +21,7 @@ export const alias = {
   '@super-line/plugin-chat/server': src('packages/plugin-chat/src/server.ts'),
   '@super-line/plugin-chat/client': src('packages/plugin-chat/src/client.ts'),
   '@super-line/plugin-chat/react': src('packages/plugin-chat/src/react.tsx'),
-  '@super-line/plugin-chat/ai': src('packages/plugin-chat/src/ai.ts'),
+  '@super-line/plugin-chat/ai-sdk': src('packages/plugin-chat/src/ai.ts'),
   '@super-line/plugin-chat/mastra': src('packages/plugin-chat/src/mastra.ts'),
   '@super-line/plugin-chat': src('packages/plugin-chat/src/index.ts'),
   '@super-line/collections-memory': src('packages/collections-memory/src/index.ts'),

@@ -19,6 +19,7 @@
       "@super-line/plugin-chat/server": ["../../packages/plugin-chat/src/server.ts"],
       "@super-line/plugin-chat/client": ["../../packages/plugin-chat/src/client.ts"],
       "@super-line/plugin-chat/react": ["../../packages/plugin-chat/src/react.tsx"],
+      "@super-line/plugin-chat/ai-sdk": ["../../packages/plugin-chat/src/ai.ts"],
       "@super-line/plugin-chat/mastra": ["../../packages/plugin-chat/src/mastra.ts"],
       "@super-line/plugin-chat": ["../../packages/plugin-chat/src/index.ts"]
     }

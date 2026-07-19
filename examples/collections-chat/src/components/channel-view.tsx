@@ -5,12 +5,12 @@ import { MembersPanel } from '@/components/members-panel'
 import { Button } from '@/components/ui/button'
 import { ChatInput } from '@/components/ui/chat/chat-input'
 import { ChatMessageList } from '@/components/ui/chat/chat-message-list'
-import type { Channel, FeedMessage } from '@/contract'
-import { useChat, useMessages, useUsers } from '@/lib/chat'
+import type { Channel, FeedMessage, MessagePart } from '@/contract'
+import { useChat, useMessageParts, useMessages, useUsers } from '@/lib/chat'
 import { useRequest } from '@/lib/superline'
 import { cn } from '@/lib/utils'
 
-type FeedPart = NonNullable<FeedMessage['parts']>[number]
+type FeedPart = MessagePart
 
 const GROUP_WINDOW = 5 * 60 * 1000 // group consecutive messages from the same author within 5 min
 
@@ -289,10 +289,9 @@ function MessageRow({
  * A STREAMED message (the agent's turn): parts render in tree order — reasoning collapsible, tool
  * calls as expandable chips with a state badge, text as prose — with subagent lanes indented under
  * their delegate call, a live cursor while streaming, and an honest tail for aborted/errored turns.
- * A settled turn whose parts left the recency window falls back to its `content` projection.
  */
 function StreamedBody({ m }: { m: FeedMessage }): React.JSX.Element {
-  const parts = m.parts ?? []
+  const parts = useMessageParts(m.channelId, m.id)
   const streaming = m.status === 'streaming'
   if (parts.length === 0) {
     const text = typeof m.content === 'string' ? m.content : m.content === undefined ? '' : JSON.stringify(m.content)
@@ -347,6 +346,7 @@ function PartView({ p, live, nested }: { p: FeedPart; live: boolean; nested: boo
         </div>
       </details>
     )
+  if (p.type === 'data') return <Json label="data" value={p.data} />
   const badge = p.isError ? 'error' : p.state === 'done' ? 'done' : p.state === 'running' ? 'running' : 'input…'
   return (
     <details className={cn('rounded-md border bg-muted/40 px-2 py-1 text-sm', indent)}>

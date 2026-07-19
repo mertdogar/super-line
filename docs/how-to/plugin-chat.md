@@ -16,8 +16,10 @@ wrap any operation with a hook. That trade-off is recorded in
 [ADR-0010](https://github.com/mertdogar/super-line/blob/main/docs/adr/0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md).
 
 This page is the **core model** — wire it in, its membership rules, and the imperative server surface.
-Two companion guides go deeper:
+Companion guides go deeper:
 
+- **[Migrate from 0.4 to 0.5](/how-to/plugin-chat-0-5-migration)** — update assembled feeds, bot
+  helpers, stream events, AI SDK imports, and Mastra integration.
 - **[Stream an agent's turn](/how-to/chat-streaming)** — streamed messages: one message that opens
   empty, accumulates typed parts (text · reasoning · tool calls · subagent trees) live, and settles.
 - **[Run an AI chat bot](/how-to/chat-bots)** — provision a bot user, run its message loop, and give

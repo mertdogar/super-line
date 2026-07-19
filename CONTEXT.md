@@ -165,6 +165,12 @@ never sees it). Surfaced in the Control Center (`ConnView` + an `env.set` feed e
 values hidden unless a key is host-allow-listed (`revealEnvKeys`) — because `env` always holds creds. Distinct
 from [[Store]] (persisted, ACL'd) and from a [[Collection policy]] (authorization, not delivery).
 
+### Settle (streamed message)
+Resolved 2026-07-19 (ADR-0014). The transition of a streamed message from `streaming` to a **terminal status** (`complete` · `aborted` · `error`), exactly once. Carries the invariant **a streamed message always settles before it vanishes**: deleting a still-streaming message (or its channel) settles it first, so a consumer may treat any non-`streaming` status as a reliable turn boundary, and the settle signal always releases the producer's stream handle — whoever deleted, from whichever node. Cancellation, deletion, disconnect, kill-switch, caps, and shutdown drain are all expressions of the same settle; the producer never finalizes after one lands (a settle is server-authoritative and happens once).
+
+### Framing chunk
+Resolved 2026-07-19. An adapter-recognized stream chunk carrying **no transcript content** — run/step boundaries and message metadata. Known framing is dropped from the durable transcript, but the host's `mapDataPart` gets **first refusal** before the drop, because host-relevant payloads (token usage above all) ride framing; unmapped framing drops silently and is never reported "unsupported". Distinct from dropped *content* chunks (streaming tool args), which stay adapter-owned and are never offered.
+
 ## Resolved (Store design, 2026-06-23)
 The Store-grilling session resolved the load-bearing architecture; each is a glossary term above. In short: [[Store]] is the foundational primitive (CRDT is one impl); [[Change]] is an opaque `{id,update,origin}` relayed symmetrically; a Store is a [[Store pair (server half / client half)]]; [[Principal (the ACL identity)]] = `identify ?? conn.id`; [[Replica origin]] is a distinct per-writer id; the [[Store surface (off-contract, generic)]] is untyped (ADR-0003); [[Access control (accessRules)]] is server-authoritative, deny-by-default; [[Clustering mode (relay | self)]] is Store-declared; [[Named store]]s are independently-configured pairs; the client uses a [[Resource handle]]; [[Store inspector events]] give Control Center visibility; [[Packaging]] keeps Yjs in super-store. CRDT binding = Yjs via [[super-store]] (ADR-0002, supersedes ADR-0001).
 

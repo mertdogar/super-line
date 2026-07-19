@@ -1,5 +1,36 @@
 import { z } from 'zod'
 import { defineContractPlugin, defineSurface } from '@super-line/core'
+import type { InferOut, Schema } from '@super-line/core'
+
+/**
+ * Bridge a host-supplied Standard Schema into plugin-chat's own zod tree. A schema from THIS
+ * package's zod instance passes through untouched (keeps zod error detail and typed-table column
+ * planning); anything else — a different zod copy, zod 4, Valibot, ArkType — is validated through
+ * its `~standard` interface, so hosts never have to resolve the exact zod instance this package
+ * does. Sync validators only: the surrounding zod tree parses synchronously, so an async
+ * `~standard.validate` throws a descriptive error instead of silently mis-validating.
+ */
+export const hostSchema = <S extends Schema>(schema: S): z.ZodType<InferOut<S>> => {
+  if (schema instanceof z.ZodType) return schema as z.ZodType<InferOut<S>>
+  return z.unknown().transform((value, ctx): InferOut<S> => {
+    const result = schema['~standard'].validate(value)
+    if (result instanceof Promise) {
+      throw new TypeError(
+        'plugin-chat: async Standard Schema validators are not supported for content/data schemas (validation runs synchronously inside the row/request schema)',
+      )
+    }
+    if (result.issues) {
+      for (const issue of result.issues) {
+        const path = (issue.path ?? [])
+          .map((seg) => (typeof seg === 'object' && seg !== null ? seg.key : seg))
+          .filter((seg): seg is string | number => typeof seg !== 'symbol')
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: issue.message, path })
+      }
+      return z.NEVER
+    }
+    return result.value as InferOut<S>
+  }) as unknown as z.ZodType<InferOut<S>>
+}
 
 /** Channel visibility: `public` = discoverable + self-service join; `private` = membership-RLS'd, added by an owner. */
 export const CHANNEL_VISIBILITIES = ['public', 'private'] as const
@@ -68,14 +99,14 @@ export const membershipSchema = z.object({
  * `chatContract({ content })` slots the host's schema in here AND into the send/edit request inputs,
  * so the server validates every message body and types flow end-to-end. Default body: plain text.
  */
-export const messageSchema = <S extends z.ZodTypeAny>(content: S) =>
+export const messageSchema = <S extends Schema>(content: S) =>
   z.object({
     id: z.string(),
     channelId: z.string(),
     authorId: z.string(),
     // OPTIONAL because a STREAMED message's envelope stays quiet until finalize derives the
     // projection (PLAN-chat-streaming decision 9); plain sends always carry it
-    content: content.optional(),
+    content: hostSchema(content).optional(),
     createdAt: z.number(),
     editedAt: z.number().nullable(),
     // streaming lifecycle — absent on plain sends
@@ -102,7 +133,7 @@ const messagePartBaseSchema = z.object({
 })
 
 /** The durable part-row schema, parameterized by the host's custom data-part payload. */
-export const messagePartSchema = <D extends z.ZodTypeAny>(data: D) =>
+export const messagePartSchema = <D extends Schema>(data: D) =>
   z.discriminatedUnion('type', [
     messagePartBaseSchema.extend({ type: z.literal('text'), text: z.string(), offset: z.number() }),
     messagePartBaseSchema.extend({ type: z.literal('reasoning'), text: z.string(), offset: z.number() }),
@@ -115,7 +146,7 @@ export const messagePartSchema = <D extends z.ZodTypeAny>(data: D) =>
       isError: z.boolean().optional(),
       state: z.enum(TOOL_STATES),
     }),
-    messagePartBaseSchema.extend({ type: z.literal('data'), data }),
+    messagePartBaseSchema.extend({ type: z.literal('data'), data: hostSchema(data) }),
   ])
 
 interface MessagePartBase {
@@ -214,8 +245,9 @@ export type ResourceWriteOp = { path: string[]; delete: true } | { path: string[
  * for tool parts it MUST be the `toolCallId`; the server maps key→idx. `delta` applies to
  * text/reasoning parts only. Structured tool/data payloads are replaced atomically.
  */
-export const streamEventSchema = <D extends z.ZodTypeAny>(data: D) =>
-  z.union([
+export const streamEventSchema = <D extends Schema>(data: D) => {
+  const dataZ = hostSchema(data)
+  return z.union([
     z.object({
       type: z.literal('part_start'),
       key: z.string(),
@@ -233,7 +265,7 @@ export const streamEventSchema = <D extends z.ZodTypeAny>(data: D) =>
       type: z.literal('part_start'),
       key: z.string(),
       partType: z.literal('data'),
-      data,
+      data: dataZ,
       parent: z.string().optional(),
     }),
     z.object({ type: z.literal('delta'), key: z.string(), text: z.string() }),
@@ -245,9 +277,10 @@ export const streamEventSchema = <D extends z.ZodTypeAny>(data: D) =>
       isError: z.boolean().optional(),
       state: z.enum(['running', 'done']).optional(),
     }),
-    z.object({ type: z.literal('data_patch'), key: z.string(), data }),
+    z.object({ type: z.literal('data_patch'), key: z.string(), data: dataZ }),
     z.object({ type: z.literal('part_end'), key: z.string(), text: z.string().optional() }),
   ])
+}
 
 export type ChatStreamEvent<Data = unknown> =
   | { type: 'part_start'; key: string; partType: 'text' | 'reasoning'; parent?: string }
@@ -297,8 +330,9 @@ export const memId = (channelId: string, userId: string): string => `${channelId
 
 // ── request defs (built per content schema — shared by the fragment AND the server plugin surface) ─
 
-const requestDefs = <S extends z.ZodTypeAny, D extends z.ZodTypeAny>(content: S, data: D) => {
+const requestDefs = <S extends Schema, D extends Schema>(content: S, data: D) => {
   const message = messageSchema(content)
+  const contentZ = hostSchema(content)
   return {
     // channel + owner membership in one server-authoritative op (a pure row-write can't: you can't
     // pass an owner-membership policy for a channel that doesn't exist yet)
@@ -325,8 +359,8 @@ const requestDefs = <S extends z.ZodTypeAny, D extends z.ZodTypeAny>(content: S,
       input: z.object({ channelId: z.string(), userId: z.string(), role: z.enum(MEMBER_ROLES) }),
       output: membershipSchema,
     },
-    sendMessage: { input: z.object({ channelId: z.string(), content, metadata }), output: message },
-    editMessage: { input: z.object({ id: z.string(), content: content.optional(), metadata }), output: message },
+    sendMessage: { input: z.object({ channelId: z.string(), content: contentZ, metadata }), output: message },
+    editMessage: { input: z.object({ id: z.string(), content: contentZ.optional(), metadata }), output: message },
     deleteMessage: { input: z.object({ id: z.string() }), output: z.object({ ok: z.boolean() }) },
     // ── streaming (PLAN-chat-streaming decision 4): open → append batches → settle ────────────────
     startMessage: { input: z.object({ channelId: z.string(), metadata }), output: message },
@@ -427,7 +461,7 @@ export type ChatSurface = typeof chatSurface
  * see `chat()` in `/server`) and is generic over the message body: `chatContract({ content:
  * myBodySchema })`, default `z.string()`.
  */
-export function chatContract<S extends z.ZodTypeAny = z.ZodString, D extends z.ZodTypeAny = z.ZodNever>(opts?: {
+export function chatContract<S extends Schema = z.ZodString, D extends Schema = z.ZodNever>(opts?: {
   content?: S
   data?: D
 }) {

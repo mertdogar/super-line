@@ -5,14 +5,17 @@ import { and, eq, gt, ilike, isIn, not, SuperLineError } from '@super-line/core'
 import type { CollectionQuery, Contract, RoleOf } from '@super-line/core'
 import type { LiveRowSet, SuperLineClient } from '@super-line/client'
 import type { AuthUser } from '@super-line/plugin-auth'
-import { CHANNEL_VISIBILITIES, MEMBER_ROLES, resourceWriteOpSchema } from './index.js'
+import { CHANNEL_VISIBILITIES, hostSchema, MEMBER_ROLES, resourceWriteOpSchema } from './index.js'
 import type { ChatChannel, ChatMembership, ChatMessage, ChatResource, ChatStreamEvent, StreamEventSink } from './index.js'
+import type { Schema } from '@super-line/core'
 
-export interface ChatAgentToolsOptions<S extends z.ZodTypeAny = z.ZodString> {
+export interface ChatAgentToolsOptions<S extends Schema = z.ZodString> {
   /**
    * The message-body schema, mirroring `chatContract({ content })` — it becomes `send_message`'s (and
    * `edit_message`'s) input schema, so the model fills structured bodies and the server still validates
-   * them. Default: plain text. Add `.describe()`s: the model sees them.
+   * them. Default: plain text. Add `.describe()`s: the model sees them. Any Standard Schema validator
+   * works, but a schema from plugin-chat's own zod gives the model the richest JSON-schema guidance
+   * (a foreign validator renders as an opaque slot — the server still validates every send).
    */
   content?: S
   /**
@@ -75,12 +78,12 @@ const iso = (ms: number): string => new Date(ms).toISOString()
  * const agent = new ToolLoopAgent({ model, tools: chatAgentTools(client) })
  * ```
  */
-export function chatAgentTools<C extends Contract, R extends RoleOf<C>, S extends z.ZodTypeAny = z.ZodString>(
+export function chatAgentTools<C extends Contract, R extends RoleOf<C>, S extends Schema = z.ZodString>(
   client: SuperLineClient<C, R>,
   opts?: ChatAgentToolsOptions<S>,
 ): ToolSet {
   const dyn = client as unknown as Dyn
-  const content = (opts?.content ?? z.string().describe('The message text')) as z.ZodTypeAny
+  const content: z.ZodTypeAny = opts?.content ? hostSchema(opts.content) : z.string().describe('The message text')
 
   // one-shot read: fresh subscription → snapshot → close (server re-evaluates RLS on every subscribe,
   // so a read after joining a channel sees its backlog without any store lifecycle)
@@ -535,6 +538,16 @@ export function createUIMessageStreamAdapter<Data = never>(
   let step = 0
   let dataSeq = 0
 
+  const mapData = (c: UIMessageChunk): ChatStreamEvent<Data>[] | undefined => {
+    const mapped = options.mapDataPart?.(c)
+    if (!mapped) return undefined
+    const key = mapped.key ?? `d:${step}:${dataSeq++}`
+    return [
+      { type: 'part_start', key, partType: 'data', data: mapped.data },
+      { type: 'part_end', key },
+    ]
+  }
+
   const startTool = (toolCallId: string, toolName?: string): ChatStreamEvent<Data>[] => {
     if (startedTools.has(toolCallId)) return []
     startedTools.add(toolCallId)
@@ -622,17 +635,16 @@ export function createUIMessageStreamAdapter<Data = never>(
       case 'finish':
       case 'finish-step':
       case 'message-metadata':
+        // known framing — but host-relevant payloads ride these (usage/metadata on finish and
+        // message-metadata), so mapDataPart gets first refusal; unmapped framing drops WITHOUT
+        // hitting onUnsupported
+        return mapData(chunk) ?? []
       case 'tool-input-delta':
+        // dropped CONTENT (args don't stream in plugin-chat v1) — adapter-owned, never offered
         return []
       default: {
-        const mapped = options.mapDataPart?.(chunk)
-        if (mapped) {
-          const key = mapped.key ?? `d:${step}:${dataSeq++}`
-          return [
-            { type: 'part_start', key, partType: 'data', data: mapped.data },
-            { type: 'part_end', key },
-          ]
-        }
+        const mapped = mapData(chunk)
+        if (mapped) return mapped
         options.onUnsupported?.(chunk)
         return []
       }

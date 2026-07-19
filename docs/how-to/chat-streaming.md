@@ -22,9 +22,11 @@ try {
 }
 ```
 
-Client writers queue and micro-batch events. `flush()` exposes any wire or server error early.
-Server writers from `chatKit.messages.stream({ channelId, authorId })` use the same vocabulary but
-apply events immediately.
+Client writers queue events and micro-batch them onto the wire on an ~80 ms cadence — a plain
+run → finalize loop streams smoothly with no manual flushing, and queued appends always land
+before a settle (strict per-message order). `flush()` forces the queue out early and surfaces any
+wire or server error. Server writers from `chatKit.messages.stream({ channelId, authorId })` use
+the same vocabulary but apply events immediately.
 
 | Event | Meaning |
 | --- | --- |
@@ -109,7 +111,10 @@ import { pipeMastraStream } from '@super-line/plugin-chat/mastra'
 Both map provider chunks into plugin events and never open or settle messages. Use
 `createUIMessageStreamAdapter()` or `createChunkAdapter()` when the host owns the iteration loop.
 `mapDataPart` converts provider-specific file/source/data/usage chunks into the contract's typed data
-payload; `onUnsupported` lets the host observe anything intentionally not persisted.
+payload; `onUnsupported` lets the host observe anything intentionally not persisted. Framing chunks
+the adapters would otherwise drop (`finish`, `step-finish`, `message-metadata`, …) are offered to
+`mapDataPart` first — map a finish chunk's usage into a data part to persist per-run (and, in
+subagent lanes, per-agent) token usage. Unmapped framing drops silently without `onUnsupported`.
 
 ## Cancellation
 
@@ -120,6 +125,16 @@ writer.signal.addEventListener('abort', () => modelAbort.abort())
 
 Only the author or a channel owner may cancel. The server settles the message `aborted`, preserves
 partial parts, and signals the producer. Cancellation is control flow, not a fake transcript message.
+
+The settle is server-side: once a cancel lands, the row is already `aborted` — the producer must NOT
+call `finalize()` afterwards (at best a CONFLICT no-op). Stop pushing and let `writer.signal` unwind
+the model call.
+
+Deletion follows the same invariant: **a streamed message always settles before it vanishes.**
+Deleting a still-streaming message settles it `aborted` (reason `deleted`) first, then removes the
+rows — consumers always observe a terminal status before the row disappears, and the producer's
+stream handle is released automatically, whoever deleted it and from whichever node. Deleting a
+channel mid-stream releases producer handles the same way (reason `channel deleted`).
 
 ## Limits
 

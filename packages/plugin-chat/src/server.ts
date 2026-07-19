@@ -482,11 +482,16 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
       const members = await membersOf(target.id)
       await Promise.all(members.map((m) => col('memberships').delete(m.id)))
       const msgs = (await col('messages').snapshot({ filter: eq('channelId', target.id) })) as ChatMessage[]
+      // still-streaming messages: signal every producer (cluster-wide) BEFORE their rows vanish, so
+      // stream handles release and model runs abort instead of pushing into NOT_FOUND (0.6.0, ADR)
+      const doomed = msgs.filter((m) => m.status === 'streaming')
+      for (const m of doomed)
+        requireCtx().toUser(m.authorId).emit('chat.streamCancelled', { messageId: m.id, reason: 'channel deleted' })
       await Promise.all(msgs.map((m) => col('messages').delete(m.id)))
-      // local open streams die with the channel — each drop rides its stream's LANE so in-flight
-      // append batches complete before the parts snapshot below, and get swept with the rest
-      const doomed = [...streams.values()].filter((s) => s.channelId === target.id)
-      await Promise.all(doomed.map((s) => onLane(s, async () => dropStream(s))))
+      // local open streams settle via forceAbort — it rides each stream's LANE so in-flight append
+      // batches complete before the parts snapshot below and get swept with the rest; the row is
+      // already gone, so settle takes its deleted-row path (no writes) but audit still fires
+      await Promise.all(doomed.map((m) => forceAbort(m.id, 'channel deleted')))
       const parts = (await col('messageParts').snapshot({ filter: eq('channelId', target.id) })) as ChatMessagePart[]
       await Promise.all(parts.map((p) => col('messageParts').delete(p.id)))
       // resources: rows FIRST (a registry row must never point at nothing), then owned docs — a crash
@@ -903,11 +908,19 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     const message = (await col('messages').read(input.id)) as ChatMessage | undefined
     if (!message) throw new SuperLineError('NOT_FOUND', `no message '${input.id}'`)
     await requireAuthor(initiator, message, 'delete')
-    // a still-open local stream dies with its message (no settle writes — the rows go away). The
-    // drop rides the stream's LANE so an in-flight append batch completes first — its parts land
-    // before the cascade snapshot below and are cleaned up with the rest, never orphaned.
-    const open = streams.get(message.id)
-    if (open) await onLane(open, async () => dropStream(open))
+    // 0.6.0 invariant (ADR): a streamed message always SETTLES before it vanishes. Consumers see a
+    // terminal status ahead of the delete (a fold gating on non-'streaming' never wedges), and the
+    // cancel signal releases the producer's stream handle no matter who deleted, on any node.
+    // forceAbort rides the stream's LANE, so an in-flight append batch completes first — its parts
+    // land before the cascade snapshot below and are cleaned up with the rest, never orphaned.
+    if (message.status === 'streaming') {
+      const reason = 'deleted'
+      requireCtx().toUser(message.authorId).emit('chat.streamCancelled', { messageId: message.id, reason })
+      const settled = await forceAbort(message.id, reason)
+      // stream open on ANOTHER node: write the terminal status directly — that node's own settle,
+      // arriving after our delete, no-ops via settle's deleted-row guard
+      if (!settled) await col('messages').update({ ...message, status: 'aborted', error: reason })
+    }
     await col('messages').delete(message.id) // hard delete (decision 7) — archive in a before hook if needed
     const parts = (await col('messageParts').snapshot({ filter: eq('messageId', message.id) })) as ChatMessagePart[]
     await Promise.all(parts.map((p) => col('messageParts').delete(p.id)))

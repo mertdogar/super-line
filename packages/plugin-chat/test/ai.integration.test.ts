@@ -70,6 +70,37 @@ describe('plugin-chat/ai — agent toolset', () => {
     expect(unsupported).toEqual([source])
   })
 
+  it('framing chunks reach mapDataPart before being dropped (metadata/usage ride finish)', () => {
+    const unsupported: UIMessageChunk[] = []
+    const adapter = createUIMessageStreamAdapter<{ usage: number }>({
+      mapDataPart: (chunk) =>
+        chunk.type === 'message-metadata'
+          ? { key: 'usage', data: { usage: (chunk.messageMetadata as { tokens: number }).tokens } }
+          : undefined,
+      onUnsupported: (chunk) => unsupported.push(chunk),
+    })
+    // unmapped framing drops silently — known framing is NOT an unsupported chunk
+    expect(adapter.map({ type: 'start' } as UIMessageChunk)).toEqual([])
+    expect(adapter.map({ type: 'finish' } as UIMessageChunk)).toEqual([])
+    expect(adapter.map({ type: 'message-metadata', messageMetadata: { tokens: 9 } } as UIMessageChunk)).toEqual([
+      { type: 'part_start', key: 'usage', partType: 'data', data: { usage: 9 } },
+      { type: 'part_end', key: 'usage' },
+    ])
+    expect(unsupported).toEqual([])
+  })
+
+  it('dropped CONTENT chunks stay adapter-owned — tool-input-delta never reaches mapDataPart', () => {
+    const seen: string[] = []
+    const adapter = createUIMessageStreamAdapter<{ x: number }>({
+      mapDataPart: (chunk) => {
+        seen.push(chunk.type)
+        return undefined
+      },
+    })
+    expect(adapter.map({ type: 'tool-input-delta', toolCallId: 'tc1', inputTextDelta: '{' } as UIMessageChunk)).toEqual([])
+    expect(seen).toEqual([])
+  })
+
   it('gates the management group behind the flag', async () => {
     const { botClient } = await boot()
     const core = chatAgentTools(botClient)

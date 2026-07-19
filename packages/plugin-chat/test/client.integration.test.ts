@@ -375,6 +375,75 @@ describe('plugin-chat/client — streaming envelopes, complete parts, and writer
     ann.c.close()
   })
 
+  it('deleting a streaming message settles it FIRST: terminal status before the row vanishes, producer signal aborted', async () => {
+    const { url } = await boot()
+    const owner = await newUser(url, 'del-owner@x.com', 'Owner')
+    const author = await newUser(url, 'del-author@x.com', 'Author')
+    const ownerChat = chatClient(owner.c, { userId: owner.userId })
+    const authorChat = chatClient(author.c, { userId: author.userId })
+    await Promise.all([ownerChat.ready, authorChat.ready])
+    const ch = await ownerChat.createChannel({ name: 'delete-mid-stream' })
+    await ownerChat.addMember(ch.id, author.userId)
+
+    const feed = ownerChat.messages(ch.id)
+    await feed.ready
+    const writer = await authorChat.stream(ch.id)
+    writer.push({ type: 'part_start', key: 't', partType: 'text' }, { type: 'delta', key: 't', text: 'doomed' })
+    await writer.flush()
+    await waitFor(() => feed.rows().some((m) => m.id === writer.messageId))
+
+    // record every status transition the CONSUMER observes for this row
+    const seen: string[] = []
+    const unsub = feed.subscribe(() => {
+      const row = feed.rows().find((m) => m.id === writer.messageId)
+      const state = row ? (row.status ?? 'none') : 'gone'
+      if (seen[seen.length - 1] !== state) seen.push(state)
+    })
+
+    // the author deletes its own still-streaming row (OMMA's delete-empty-turn flow) — no abort first
+    await authorChat.deleteMessage(writer.messageId)
+    await waitFor(() => seen.includes('gone'))
+    unsub()
+    // the invariant: a streamed message always settles before it vanishes
+    const aborted = seen.indexOf('aborted')
+    expect(aborted).toBeGreaterThanOrEqual(0)
+    expect(aborted).toBeLessThan(seen.indexOf('gone'))
+    // finding 3: the producer's stream handle is released by the server signal — no leaked entry,
+    // no manual delete-then-abort recipe needed
+    await waitFor(() => writer.signal.aborted)
+    expect(writer.signal.reason).toBe('deleted')
+
+    feed.close()
+    ownerChat.close()
+    authorChat.close()
+    owner.c.close()
+    author.c.close()
+  })
+
+  it('deleting a channel mid-stream releases the producer stream handle', async () => {
+    const { url } = await boot()
+    const owner = await newUser(url, 'chdel-owner@x.com', 'Owner')
+    const author = await newUser(url, 'chdel-author@x.com', 'Author')
+    const ownerChat = chatClient(owner.c, { userId: owner.userId })
+    const authorChat = chatClient(author.c, { userId: author.userId })
+    await Promise.all([ownerChat.ready, authorChat.ready])
+    const ch = await ownerChat.createChannel({ name: 'doomed-channel' })
+    await ownerChat.addMember(ch.id, author.userId)
+
+    const writer = await authorChat.stream(ch.id)
+    writer.push({ type: 'part_start', key: 't', partType: 'text' }, { type: 'delta', key: 't', text: 'mid-flight' })
+    await writer.flush()
+
+    await ownerChat.deleteChannel(ch.id)
+    await waitFor(() => writer.signal.aborted)
+    expect(writer.signal.reason).toBe('channel deleted')
+
+    ownerChat.close()
+    authorChat.close()
+    owner.c.close()
+    author.c.close()
+  })
+
   it('cancellation is authorized, aborts the producer signal, and durably settles the message', async () => {
     const { url } = await boot()
     const owner = await newUser(url, 'owner@x.com', 'Owner')

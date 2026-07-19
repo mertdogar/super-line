@@ -363,6 +363,13 @@ loop. Use `mapDataPart` for provider-specific data, source, file, or usage
 chunks that belong in the durable transcript. Use `onUnsupported` to observe
 chunks that you intentionally don't persist.
 
+Since 0.6.0 both adapters (AI SDK and Mastra) offer otherwise-dropped framing
+chunks (`finish`, `step-finish` / `finish-step`, `message-metadata`, …) to
+`mapDataPart` before discarding them — usage riding a finish chunk is mappable
+into a durable data part with no host-side smuggling, per lane. Unmapped
+framing still drops silently, never hitting `onUnsupported`. Note for existing
+hosts: a catch-all `mapDataPart` now sees framing chunks it previously didn't.
+
 ### 9. Migrate Mastra supervisors and subagents
 
 Replace `mastraEngine()` with `createMastraRunner()`. The runner owns Mastra
@@ -417,6 +424,14 @@ const result = await runner.run(writer, modelInput, {
 Cancellation preserves partial durable parts, settles the envelope as
 `aborted`, and signals the producer. Don't represent cancellation as a
 synthetic chat message.
+
+The settle happens server-side when the cancel lands: the producer must NOT
+call `finalize()` after a cancel — the row is already settled and the call is
+at best a CONFLICT no-op. Stop pushing and let `writer.signal` unwind the
+model run. The same invariant covers deletion (0.6.0): a streamed message
+always settles before it vanishes — deleting it (or its channel) mid-stream
+settles `aborted` first and releases the producer's stream handle
+automatically.
 
 ## Best practices after migration
 

@@ -92,6 +92,38 @@ describe('plugin-chat/mastra — pipeMastraStream', () => {
     ])
   })
 
+  it('framing chunks reach mapDataPart before being dropped (usage rides finish)', () => {
+    const unsupported: ChunkLike[] = []
+    const adapter = createChunkAdapter<{ tokens: number }>({
+      prefix: 's:',
+      mapDataPart: (chunk) =>
+        chunk.type === 'finish'
+          ? { data: { tokens: (chunk.payload as { totalUsage: { totalTokens: number } }).totalUsage.totalTokens } }
+          : undefined,
+      onUnsupported: (chunk) => unsupported.push(chunk),
+    })
+    // unmapped framing drops silently — known framing is NOT an unsupported chunk
+    expect(adapter.map(stepFinish)).toEqual([])
+    expect(adapter.map({ type: 'finish', payload: { totalUsage: { totalTokens: 7 } } })).toEqual([
+      { type: 'part_start', key: 's:d0', partType: 'data', data: { tokens: 7 } },
+      { type: 'part_end', key: 's:d0' },
+    ])
+    expect(unsupported).toEqual([])
+  })
+
+  it('dropped CONTENT chunks stay adapter-owned — tool-call-delta never reaches mapDataPart', () => {
+    const seen: string[] = []
+    const adapter = createChunkAdapter<{ x: number }>({
+      prefix: 's:',
+      mapDataPart: (chunk) => {
+        seen.push(chunk.type)
+        return undefined
+      },
+    })
+    expect(adapter.map({ type: 'tool-call-delta', payload: { toolCallId: 'tc1' } })).toEqual([])
+    expect(seen).toEqual([])
+  })
+
   it('maps one lane: segmentation at tool boundaries, whole args, tail close, text return', async () => {
     const { events, sink } = recordSink()
     async function* gen(): AsyncGenerator<ChunkLike> {

@@ -82,6 +82,16 @@ export function createChunkAdapter<Data = never>(options: ChunkAdapterOptions<Da
     return out
   }
 
+  const mapData = (c: ChunkLike): ChatStreamEvent<Data>[] | undefined => {
+    const mapped = options.mapDataPart?.(c)
+    if (!mapped) return undefined
+    const dataKey = key(`d${seq++}`)
+    return [
+      { type: 'part_start', key: dataKey, partType: 'data', data: mapped.data, ...parent },
+      { type: 'part_end', key: dataKey },
+    ]
+  }
+
   const self: ChunkAdapter<Data> = { map, end: closeSegments, error: undefined }
 
   function map(chunk: ChunkLike): ChatStreamEvent<Data>[] {
@@ -155,16 +165,12 @@ export function createChunkAdapter<Data = never>(options: ChunkAdapterOptions<Da
       case 'step-start':
       case 'step-finish':
       case 'finish':
-        return []
+        // known framing — but host-relevant payloads ride these (usage on finish/step-finish), so
+        // mapDataPart gets first refusal; unmapped framing drops WITHOUT hitting onUnsupported
+        return mapData(chunk) ?? []
       default: {
-        const mapped = options.mapDataPart?.(chunk)
-        if (mapped) {
-          const dataKey = key(`d${seq++}`)
-          return [
-            { type: 'part_start', key: dataKey, partType: 'data', data: mapped.data, ...parent },
-            { type: 'part_end', key: dataKey },
-          ]
-        }
+        const mapped = mapData(chunk)
+        if (mapped) return mapped
         options.onUnsupported?.(chunk)
         return []
       }

@@ -39,10 +39,20 @@ export interface ChatBinding<C extends Contract> {
   useChannels: () => ChannelRowOf<C>[]
   /** Live member list of one channel. */
   useMembers: (channelId: string) => MembershipRowOf<C>[]
-  /** Live chronological newest-N message envelopes for one channel. */
-  useMessages: (channelId: string, opts?: { limit?: number }) => MessageRowOf<C>[]
-  /** Live durable parts for one message. Mount this only while that message needs detailed rendering. */
-  useMessageParts: (channelId: string, messageId: string) => MessagePartRowOf<C>[]
+  /** Live chronological newest-N message envelopes for one channel. `null`/`undefined` channel = the idle state: `[]`, no subscription. */
+  useMessages: (channelId: string | null | undefined, opts?: { limit?: number }) => MessageRowOf<C>[]
+  /**
+   * Live durable parts for one message. Mount this only while that message needs detailed
+   * rendering. `null`/`undefined` for either id = the idle state: `[]`, no subscription.
+   */
+  useMessageParts: (channelId: string | null | undefined, messageId: string | null | undefined) => MessagePartRowOf<C>[]
+  /** The signed-in user: `userId` (null for guests / until resolved) and whether the client's `ready` handshake has landed. */
+  useMe: () => { userId: string | null; ready: boolean }
+  /**
+   * The turn-in-flight signal: true while ANY message in the channel is still `streaming`.
+   * Null-tolerant. Derive a custom variant (e.g. bot turns only) from `useMessages` directly.
+   */
+  useChannelBusy: (channelId: string | null | undefined) => boolean
   /** A live recent window plus explicit keyset pagination for older message envelopes. */
   useChatHistory: (channelId: string, opts?: { liveLimit?: number; pageSize?: number }) => ChatHistoryResult<MessageRowOf<C>>
   /** Live resource registry of one channel. Open a row's doc with `@super-line/react`'s own `useDoc(row.collection, row.docId)`. */
@@ -73,11 +83,32 @@ export function createChatHooks<C extends Contract>(): ChatBinding<C> {
     return chat
   }
 
-  function useStoreRows<RowT>(make: () => ChatLiveStore<RowT>, deps: readonly unknown[]): RowT[] {
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    const store = useMemo(make, deps)
-    useEffect(() => () => store.close(), [store])
-    return useSyncExternalStore(store.subscribe, store.rows, store.rows)
+  const NO_ROWS: never[] = []
+
+  /**
+   * Store lifecycle lives in a COMMITTED effect, never in render: a store minted during render is
+   * orphaned when React discards that render (StrictMode double-invoke, concurrent interruptions),
+   * and a render-memoized store closed by a StrictMode remount leaves the hook subscribed to a dead
+   * store. `make: null` = the null-tolerant idle state (no store, stable empty rows).
+   */
+  function useStoreRows<RowT>(make: (() => ChatLiveStore<RowT>) | null, deps: readonly unknown[]): RowT[] {
+    const [store, setStore] = useState<ChatLiveStore<RowT> | null>(null)
+    useEffect(() => {
+      if (!make) {
+        setStore(null)
+        return
+      }
+      const next = make()
+      setStore(next)
+      return () => {
+        next.close()
+        setStore((current) => (current === next ? null : current))
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, deps)
+    const subscribe = useCallback((cb: () => void) => (store ? store.subscribe(cb) : () => {}), [store])
+    const rows = useCallback(() => (store ? store.rows() : (NO_ROWS as RowT[])), [store])
+    return useSyncExternalStore(subscribe, rows, rows)
   }
 
   function useChannels(): ChannelRowOf<C>[] {
@@ -90,18 +121,49 @@ export function createChatHooks<C extends Contract>(): ChatBinding<C> {
     return useStoreRows(() => chat.members(channelId), [chat, channelId])
   }
 
-  function useMessages(channelId: string, opts?: { limit?: number }): MessageRowOf<C>[] {
+  function useMessages(channelId: string | null | undefined, opts?: { limit?: number }): MessageRowOf<C>[] {
     const chat = useChat()
     const limit = opts?.limit
     return useStoreRows(
-      () => chat.messages(channelId, limit === undefined ? undefined : { limit }),
+      channelId == null ? null : () => chat.messages(channelId, limit === undefined ? undefined : { limit }),
       [chat, channelId, limit],
     )
   }
 
-  function useMessageParts(channelId: string, messageId: string): MessagePartRowOf<C>[] {
+  function useMessageParts(
+    channelId: string | null | undefined,
+    messageId: string | null | undefined,
+  ): MessagePartRowOf<C>[] {
     const chat = useChat()
-    return useStoreRows(() => chat.messageParts(channelId, messageId), [chat, channelId, messageId])
+    return useStoreRows(
+      channelId == null || messageId == null ? null : () => chat.messageParts(channelId, messageId),
+      [chat, channelId, messageId],
+    )
+  }
+
+  function useMe(): { userId: string | null; ready: boolean } {
+    const chat = useChat()
+    const [me, setMe] = useState<{ userId: string | null; ready: boolean }>(() => ({
+      userId: chat.userId,
+      ready: false,
+    }))
+    useEffect(() => {
+      let live = true
+      setMe({ userId: chat.userId, ready: false })
+      chat.ready.then(
+        () => live && setMe({ userId: chat.userId, ready: true }),
+        () => {},
+      )
+      return () => {
+        live = false
+      }
+    }, [chat])
+    return me
+  }
+
+  function useChannelBusy(channelId: string | null | undefined): boolean {
+    const messages = useMessages(channelId)
+    return messages.some((message) => (message as { status?: string }).status === 'streaming')
   }
 
   function useChatHistory(
@@ -194,6 +256,8 @@ export function createChatHooks<C extends Contract>(): ChatBinding<C> {
     useMembers,
     useMessages,
     useMessageParts,
+    useMe,
+    useChannelBusy,
     useChatHistory,
     useChannelResources,
     useResourcePresence,

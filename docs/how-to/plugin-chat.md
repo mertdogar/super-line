@@ -51,7 +51,9 @@ export const app = defineContract({
 ```
 
 The message **body is yours to shape**. `chatContract()` defaults to plain text (`z.string()`); pass a
-schema to make messages structured — the server validates every body and the type flows end-to-end:
+schema to make messages structured — the server validates every body and the type flows end-to-end.
+Any [Standard Schema](https://standardschema.dev) validator works (your own zod copy — v3 or v4 —
+Valibot, ArkType…); you never have to match the zod version plugin-chat resolves internally:
 
 ```ts
 const content = z.discriminatedUnion('type', [
@@ -128,8 +130,13 @@ const { ChatProvider, useChat, useChannels, useMembers, useMessages } = createCh
 const messages = useMessages(channelId)
 ```
 
-Each hook owns its store's lifecycle (closed on unmount / channel switch); the re-subscribe-on-membership
-dance lives in the client, not the hook. Rebuild the `chatClient` (and remount `ChatProvider`) whenever
+`useMessages`/`useMessageParts` are null-tolerant — pass `null`/`undefined` while no channel or
+message is selected and they idle at `[]` with no subscription. `useMe()` returns the signed-in
+`{ userId, ready }`; `useChannelBusy(channelId)` is the turn-in-flight signal (true while any
+message in the channel is still `streaming` — derive custom variants from `useMessages` directly).
+
+Each hook owns its store's lifecycle (created in a committed effect, closed on unmount / channel
+switch); the re-subscribe-on-membership dance lives in the client, not the hook. Rebuild the `chatClient` (and remount `ChatProvider`) whenever
 the auth client swaps connections — one `chatClient` wraps exactly one connected client.
 
 ## The membership model

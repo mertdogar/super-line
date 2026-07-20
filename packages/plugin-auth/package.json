@@ -30,13 +30,13 @@
       "require": { "types": "./dist/react.d.cts", "default": "./dist/react.cjs" }
     }
   },
-  "files": ["dist"],
+  "files": ["dist", "CHANGELOG.md"],
   "sideEffects": false,
   "engines": { "node": ">=18" },
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
   },
   "dependencies": {
     "jose": "^5.9.6",

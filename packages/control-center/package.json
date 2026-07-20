@@ -28,12 +28,12 @@
   },
   "files": [
     "dist",
-    "bin"
-  ],
+    "bin", "CHANGELOG.md"],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
+    "prepublishOnly": "node ../../scripts/check-changelog.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",

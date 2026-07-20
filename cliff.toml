@@ -1,0 +1,76 @@
+# Changelog generation. Driven entirely by the conventional commits already in the log —
+# no changeset files to author. Run it through `pnpm changelog`, never by hand, so the
+# per-package tag_pattern and path scoping stay consistent.
+#
+#   pnpm changelog                       # regenerate every package + the root aggregate
+#   pnpm changelog react 0.9.1           # one package, treating unreleased work as 0.9.1
+#
+# Release boundaries come from lightweight `<pkg>-v<version>` tags placed on the
+# `chore(release)` commit that introduced each version.
+
+[changelog]
+header = """
+# Changelog
+
+Generated from conventional commits by [git-cliff](https://git-cliff.org) —
+run `pnpm changelog` rather than editing by hand.
+
+"""
+# The heading keeps the full `<pkg>-v<version>` tag rather than a bare version: it is what the
+# git tag and the GitHub Release are called, so it is directly linkable.
+#
+# `pnpm changelog` rewrites this one HEADING line for the root aggregate, where several packages
+# share a release commit and a single tag would misrepresent the whole set — see scripts/
+# changelog.mjs `rootConfig()`. Keep the marker comment below intact.
+body = """
+{% if version %}\
+
+## [{{ version }}] — {{ timestamp | date(format="%Y-%m-%d") }}{# ROOT-HEADING #}
+{% else %}\
+
+## Unreleased
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}
+- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}\
+{{ commit.message | upper_first }} ([{{ commit.id | truncate(length=7, end="") }}])\
+{% endfor %}
+{% endfor %}\n
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+protect_breaking_commits = true
+# Only tags for THIS package are release boundaries; `pnpm changelog` passes the
+# per-package pattern via --tag-pattern, this is the repo-wide fallback.
+tag_pattern = "^[a-z0-9-]+-v[0-9]"
+topo_order = false
+sort_commits = "newest"
+
+# Grouped by type, everything included — this changelog doubles as a development log.
+# Order here is display order. `<!-- N -->` prefixes sort the groups; they are stripped
+# by `striptags` in the body template above.
+commit_parsers = [
+  # The release commits are the boundary markers themselves — they only touch
+  # package.json version fields, so as entries they are pure noise in every package.
+  { message = "^chore\\(release\\)", skip = true },
+  # Two typo'd types in the history: `chrome` (x3) and `chrore` (x2). Fold into chore
+  # so they don't form junk groups of their own.
+  { message = "^chro(me|re)", group = "<!-- 6 -->Chores" },
+
+  { body = ".*security", group = "<!-- 0 -->Security" },
+  { message = "^feat", group = "<!-- 1 -->Features" },
+  { message = "^fix", group = "<!-- 2 -->Bug Fixes" },
+  { message = "^perf", group = "<!-- 3 -->Performance" },
+  { message = "^refactor", group = "<!-- 4 -->Refactor" },
+  { message = "^test", group = "<!-- 5 -->Testing" },
+  { message = "^chore", group = "<!-- 6 -->Chores" },
+  { message = "^build", group = "<!-- 7 -->Build" },
+  { message = "^ci", group = "<!-- 8 -->CI" },
+  { message = "^docs", group = "<!-- 9 -->Documentation" },
+  { message = ".*", group = "<!-- 10 -->Other" },
+]

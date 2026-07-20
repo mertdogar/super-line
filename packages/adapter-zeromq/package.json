@@ -17,13 +17,13 @@
       "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
     }
   },
-  "files": ["dist"],
+  "files": ["dist", "CHANGELOG.md"],
   "sideEffects": false,
   "engines": { "node": ">=18" },
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
   },
   "dependencies": {
     "@super-line/core": "workspace:^",

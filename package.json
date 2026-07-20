@@ -30,12 +30,14 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "oxlint packages examples",
+    "changelog": "node scripts/changelog.mjs",
     "docs:packages": "pnpm --filter @super-line/core --filter @super-line/client --filter @super-line/server --filter @super-line/transport-loopback --filter @super-line/collections-memory --filter @super-line/plugin-auth --filter @super-line/plugin-chat build",
     "docs:dev": "pnpm --filter @super-line/docs dev",
     "docs:build": "pnpm docs:packages && pnpm --filter @super-line/docs build"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "git-cliff": "2.13.1",
     "oxlint": "^0.15.0",
     "testcontainers": "^10.28.0",
     "tsup": "^8.3.5",

@@ -18,13 +18,13 @@
       "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
     }
   },
-  "files": ["dist"],
+  "files": ["dist", "CHANGELOG.md"],
   "sideEffects": false,
   "engines": { "node": ">=18" },
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
   },
   "dependencies": {
     "@super-line/core": "workspace:^"

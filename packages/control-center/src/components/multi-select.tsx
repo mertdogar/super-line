@@ -65,7 +65,7 @@ export function MultiSelect<T extends string = string>({
 
   return (
     <div ref={ref} className="relative">
-      <button
+      <button type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
           'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors',
@@ -88,7 +88,7 @@ export function MultiSelect<T extends string = string>({
             return (
               <div key={g.label} className="mb-1 last:mb-0">
                 {grouped ? (
-                  <button
+                  <button type="button"
                     onClick={() => toggleGroup(g)}
                     className="flex w-full items-center justify-between px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground"
                   >
@@ -118,7 +118,7 @@ function OptionRow({
   onClick: () => void
 }): React.JSX.Element {
   return (
-    <button
+    <button type="button"
       onClick={onClick}
       className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent/40"
     >
@@ -208,7 +208,7 @@ function AsyncOptions<T extends string>({
           <p className="px-2 py-1.5 text-xs text-muted-foreground">No users.</p>
         ) : null}
         {more ? (
-          <button
+          <button type="button"
             onClick={loadMore}
             disabled={loading}
             className="w-full rounded px-2 py-1 text-center text-[11px] text-muted-foreground hover:bg-accent/40 disabled:opacity-50"

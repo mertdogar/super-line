@@ -34,7 +34,7 @@ export function MembersPanel({
     <aside className="fixed inset-y-0 right-0 z-40 flex w-72 shrink-0 flex-col border-l bg-background shadow-lg md:static md:z-auto md:shadow-none">
       <header className="flex items-center justify-between border-b px-4 py-3">
         <span className="font-semibold">Members — {members.length}</span>
-        <button
+        <button type="button"
           onClick={onClose}
           aria-label="Close members"
           className="grid h-7 w-7 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -125,7 +125,7 @@ function AddMember({
           ) : (
             candidates.map((u) => (
               <li key={u.id}>
-                <button
+                <button type="button"
                   onClick={() => {
                     onAdd(u.id)
                     setQuery('')
@@ -154,7 +154,7 @@ function IconBtn({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <button
+    <button type="button"
       title={title}
       aria-label={title}
       onClick={onClick}

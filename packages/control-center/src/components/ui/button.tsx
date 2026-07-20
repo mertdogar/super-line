@@ -28,5 +28,5 @@ export interface ButtonProps
     VariantProps<typeof buttonVariants> {}
 
 export function Button({ className, variant, size, ...props }: ButtonProps): React.JSX.Element {
-  return <button className={cn(buttonVariants({ variant, size, className }))} {...props} />
+  return <button type="button" className={cn(buttonVariants({ variant, size, className }))} {...props} />
 }

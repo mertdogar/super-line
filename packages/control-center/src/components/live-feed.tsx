@@ -125,7 +125,7 @@ function ExportMenu({
   }, [open])
   return (
     <div ref={ref} className="relative ml-auto">
-      <button
+      <button type="button"
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
         className={cn(
@@ -139,7 +139,7 @@ function ExportMenu({
       {open ? (
         <div className="absolute right-0 z-20 mt-1 w-28 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
           {EXPORT_FORMATS.map((f) => (
-            <button
+            <button type="button"
               key={f}
               onClick={() => {
                 setOpen(false)
@@ -437,7 +437,7 @@ export function LiveFeed({
         ) : null}
         <div className="inline-flex overflow-hidden rounded-md border text-xs">
           {TIME_WINDOWS.map((w) => (
-            <button
+            <button type="button"
               key={w.label}
               onClick={() => patch({ windowMs: w.ms })}
               className={cn(
@@ -464,7 +464,7 @@ export function LiveFeed({
           </span>
         </div>
         {filtersActive(filters) ? (
-          <button
+          <button type="button"
             onClick={() => setFilters(emptyFilters())}
             className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-accent/40"
           >
@@ -473,7 +473,7 @@ export function LiveFeed({
           </button>
         ) : null}
         <ExportMenu disabled={rows.length === 0} onExport={onExport} />
-        <button
+        <button type="button"
           onClick={togglePause}
           className={cn(
             'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors',

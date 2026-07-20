@@ -49,8 +49,8 @@ export function ConnDetail({
 
   return (
     <div className="absolute inset-0 z-10 flex">
-      <button className="flex-1 bg-black/40" onClick={onClose} aria-label="Close detail" />
-      <div className="w-[26rem] overflow-auto border-l bg-card p-4">
+      <button type="button" className="flex-1 bg-black/40" onClick={onClose} aria-label="Close detail" />
+      <div className="w-104 overflow-auto border-l bg-card p-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold">Connection {connId.slice(0, 8)}</h3>
           <Button size="sm" variant="ghost" onClick={onClose}>

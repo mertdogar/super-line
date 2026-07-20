@@ -92,9 +92,11 @@ function Board({ me }: { me: string }) {
     try {
       const res = await agentEdit({ prompt: p })
       const lines = res.actions.map((a) => `· ${a.tool} ${a.detail}`)
-      setLog((prev) => [{ id: ++logId.current, prompt: p, lines: lines.length ? lines : [res.summary], kind: 'agent' as const }, ...prev].slice(0, 30))
+      const id = ++logId.current
+      setLog((prev) => [{ id, prompt: p, lines: lines.length ? lines : [res.summary], kind: 'agent' as const }, ...prev].slice(0, 30))
     } catch (err) {
-      setLog((prev) => [{ id: ++logId.current, prompt: p, lines: [(err as Error).message], kind: 'error' as const }, ...prev].slice(0, 30))
+      const id = ++logId.current
+      setLog((prev) => [{ id, prompt: p, lines: [(err as Error).message], kind: 'error' as const }, ...prev].slice(0, 30))
     }
   }
 
@@ -108,7 +110,7 @@ function Board({ me }: { me: string }) {
           you are <b>{me}</b> · {shapes.length} shapes
         </span>
         <div className="actions">
-          <button onClick={onAdd}>Add shape</button>
+          <button type="button" onClick={onAdd}>Add shape</button>
         </div>
       </header>
 
@@ -122,7 +124,7 @@ function Board({ me }: { me: string }) {
           }}
           disabled={isLoading}
         />
-        <button onClick={() => void runAgent()} disabled={isLoading || !prompt.trim()}>
+        <button type="button" onClick={() => void runAgent()} disabled={isLoading || !prompt.trim()}>
           {isLoading ? 'thinking…' : 'Send'}
         </button>
       </div>

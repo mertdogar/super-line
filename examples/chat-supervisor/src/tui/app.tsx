@@ -162,7 +162,10 @@ function Cockpit({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channels, activeId])
 
-  const notice = (text: string) => setNotices((prev) => [...prev, { id: noticeSeq++, text }].slice(-40))
+  const notice = (text: string) => {
+    const id = noticeSeq++
+    setNotices((prev) => [...prev, { id, text }].slice(-40))
+  }
 
   const dispatch = (line: string) => {
     const [cmd, ...rest] = line.slice(1).split(' ')

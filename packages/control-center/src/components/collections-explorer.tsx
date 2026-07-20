@@ -156,7 +156,7 @@ function FilterRow({ cond, fields, schemaLess, onChange, onRemove }: { cond: Con
       ) : (
         <input value={cond.value} onChange={(e) => onChange({ ...cond, value: e.target.value })} placeholder="value" className={cn(inputCls, 'w-40')} />
       )}
-      <button onClick={onRemove} className="rounded p-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground" title="Remove condition">
+      <button type="button" onClick={onRemove} className="rounded p-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground" title="Remove condition">
         <X className="h-3.5 w-3.5" />
       </button>
     </div>
@@ -176,7 +176,9 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
   const [selected, setSelected] = React.useState<Row | null>(null)
 
   const rowsRef = React.useRef<Row[]>([])
-  rowsRef.current = rows
+  React.useEffect(() => {
+    rowsRef.current = rows
+  })
   const condId = React.useRef(0)
   const selectedCollection = collections.find((c) => c.name === name) ?? null
   const isCrdt = selectedCollection?.crdt ?? false
@@ -237,7 +239,8 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
   const addCondition = (): void => {
     const f = schemaFields[0] // default to the first schema field (created/updated are opt-in via the dropdown)
     const op = opsFor(f?.type ?? '')[0]!
-    setConditions((cs) => [...cs, { id: ++condId.current, field: f?.name ?? '', op, value: op === 'is' ? 'true' : '', unit: 'h' }])
+    const id = ++condId.current
+    setConditions((cs) => [...cs, { id, field: f?.name ?? '', op, value: op === 'is' ? 'true' : '', unit: 'h' }])
   }
   const setCondition = (c: Condition): void => setConditions((cs) => cs.map((x) => (x.id === c.id ? c : x)))
   const removeCondition = (id: number): void => setConditions((cs) => cs.filter((x) => x.id !== id))
@@ -251,7 +254,7 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
     sort.field !== field ? null : sort.dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
   const SortTh = ({ field, label }: { field: string; label: string }): React.JSX.Element => (
     <th className="px-3 py-2 font-medium">
-      <button onClick={() => toggleSort(field)} className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-foreground">
+      <button type="button" onClick={() => toggleSort(field)} className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-foreground">
         {label}
         {sortArrow(field)}
       </button>
@@ -264,7 +267,7 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
         <div className="border-b px-3 py-2 text-xs font-semibold text-muted-foreground">Collections</div>
         <div className="flex flex-col gap-0.5 overflow-auto p-1">
           {collections.map((c) => (
-            <button
+            <button type="button"
               key={c.name}
               onClick={() => pick(c.name)}
               className={cn(
@@ -320,7 +323,7 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
                 <div key={field} className="flex items-center gap-1 text-[11px] text-muted-foreground">
                   <span className="font-mono text-foreground">{field}</span>
                   <ArrowRight className="h-3 w-3" />
-                  <button onClick={() => pick(refCollection)} className="font-mono text-sky-300 underline-offset-2 hover:underline">
+                  <button type="button" onClick={() => pick(refCollection)} className="font-mono text-sky-300 underline-offset-2 hover:underline">
                     {refCollection}
                   </button>
                 </div>
@@ -343,7 +346,7 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
               )}
               <div className="flex flex-wrap items-center gap-1.5">
                 {!isCrdt ? (
-                  <button onClick={addCondition} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-accent/40">
+                  <button type="button" onClick={addCondition} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-accent/40">
                     <Plus className="h-3 w-3" />
                     Add filter
                   </button>
@@ -354,7 +357,7 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
                   placeholder="Quick find (loaded rows)…"
                   className="w-48 rounded-md border bg-transparent px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
                 />
-                <button onClick={() => load(true)} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-accent/40">
+                <button type="button" onClick={() => load(true)} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-accent/40">
                   <RefreshCw className={cn('h-3 w-3', loading && 'animate-spin')} />
                   Refresh
                 </button>
@@ -403,7 +406,7 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
                 </tbody>
               </table>
               {more ? (
-                <button
+                <button type="button"
                   onClick={() => load(false)}
                   disabled={loading}
                   className="w-full border-t px-3 py-1.5 text-center text-xs text-muted-foreground hover:bg-accent/40 disabled:opacity-50"

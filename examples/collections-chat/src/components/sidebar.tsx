@@ -32,7 +32,7 @@ export function Sidebar({
           <MessageSquare className="h-5 w-5" />
           super-line
         </span>
-        <button
+        <button type="button"
           onClick={onSignOut}
           title="Sign out"
           aria-label="Sign out"
@@ -95,7 +95,7 @@ function ChannelRow({
   const Icon = channel.visibility === 'private' ? Lock : Hash
 
   return (
-    <button
+    <button type="button"
       onClick={() => onSelect(channel.id)}
       title={joined ? undefined : `Join #${channel.name} to see the conversation`}
       className={cn(

@@ -49,7 +49,7 @@ export function Sidebar({
       <div className="flex-1 overflow-y-auto py-3">
         <div className="mb-1 flex items-center justify-between px-3">
           <span className="text-xs font-semibold uppercase tracking-wide text-sidebar-muted">Conversations</span>
-          <button
+          <button type="button"
             onClick={() => setCreating((c) => !c)}
             aria-label="New channel"
             className="grid h-6 w-6 place-items-center rounded text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-foreground"
@@ -72,7 +72,7 @@ export function Sidebar({
         )}
         <nav className="space-y-0.5 px-2">
           {channels.map((c) => (
-            <button
+            <button type="button"
               key={c.id}
               onClick={() => onSelect(c.id)}
               className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
@@ -90,7 +90,7 @@ export function Sidebar({
 
       <footer className="flex items-center justify-between border-t border-sidebar-border px-4 py-3 text-sm">
         <span className="truncate font-medium">{myName}</span>
-        <button
+        <button type="button"
           onClick={onSignOut}
           title="Sign out"
           aria-label="Sign out"

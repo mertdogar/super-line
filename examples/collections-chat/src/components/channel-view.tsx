@@ -49,7 +49,7 @@ export function ChannelView({ myUserId, channel, isMember, typingUsers, onOpenNa
     <section className="flex min-w-0 flex-1 flex-col bg-background">
       <header className="flex items-center gap-2 border-b px-4 py-3 shadow-sm">
         {onOpenNav && (
-          <button
+          <button type="button"
             onClick={onOpenNav}
             aria-label="Open channel list"
             className="-ml-1 grid h-8 w-8 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
@@ -268,7 +268,7 @@ function MessageRow({
       {mine && !editing && (
         <div className="hidden shrink-0 items-start gap-1 group-hover:flex">
           {m.status === undefined && (
-            <button
+            <button type="button"
               onClick={startEdit}
               aria-label="Edit message"
               className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -276,7 +276,7 @@ function MessageRow({
               <Pencil className="h-3.5 w-3.5" />
             </button>
           )}
-          <button
+          <button type="button"
             onClick={() => onDelete(m.id)}
             aria-label="Delete message"
             className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"

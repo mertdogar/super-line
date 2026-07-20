@@ -33,7 +33,7 @@ function Message({ message }: { message: InspectedMessage }): React.JSX.Element 
 
   return (
     <div className="rounded-md border">
-      <button
+      <button type="button"
         onClick={() => hasSchema && setOpen((o) => !o)}
         disabled={!hasSchema}
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left"

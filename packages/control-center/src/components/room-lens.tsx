@@ -55,7 +55,7 @@ export function RoomLens({
           <Empty />
         ) : (
           transports.map(({ family, count }) => (
-            <button
+            <button type="button"
               key={family}
               onClick={() => toggle({ kind: 'transport', value: family })}
               className={cn(
@@ -78,7 +78,7 @@ export function RoomLens({
           <Empty />
         ) : (
           rooms.map((room) => (
-            <button
+            <button type="button"
               key={room}
               onClick={() => toggle({ kind: 'room', value: room })}
               className={cn(

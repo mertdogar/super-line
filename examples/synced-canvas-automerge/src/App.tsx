@@ -134,10 +134,10 @@ function Board({ me }: { me: string }) {
           you are <b>{me}</b> · {shapes.length} shapes{ready ? '' : ' · connecting…'}
         </span>
         <div className="actions">
-          <button disabled={!ready} onClick={() => apply(addShape(docRef.current))}>
+          <button type="button" disabled={!ready} onClick={() => apply(addShape(docRef.current))}>
             Add shape
           </button>
-          <button disabled={!ready} onClick={() => void serverNudge({ docId: DOC_ID }).catch(() => {})}>
+          <button type="button" disabled={!ready} onClick={() => void serverNudge({ docId: DOC_ID }).catch(() => {})}>
             Server nudge
           </button>
         </div>

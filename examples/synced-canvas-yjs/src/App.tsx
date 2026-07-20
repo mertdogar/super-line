@@ -105,8 +105,8 @@ function Board({ doc, me }: { doc: Y.Doc; me: string }) {
           you are <b>{me}</b> · {shapes.length} shapes
         </span>
         <div className="actions">
-          <button onClick={() => addShape(doc)}>Add shape</button>
-          <button onClick={() => void serverNudge({ docId: DOC_ID }).catch(() => {})}>Server nudge</button>
+          <button type="button" onClick={() => addShape(doc)}>Add shape</button>
+          <button type="button" onClick={() => void serverNudge({ docId: DOC_ID }).catch(() => {})}>Server nudge</button>
         </div>
       </header>
       <div className="main">

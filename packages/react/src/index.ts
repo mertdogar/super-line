@@ -73,7 +73,9 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
   ): void {
     const client = useClient()
     const ref = useRef(handler)
-    ref.current = handler
+    useEffect(() => {
+      ref.current = handler
+    })
     useEffect(() => client.on(event, (data) => ref.current(data)), [client, event])
   }
 

@@ -26,7 +26,7 @@ export function ResourcePane({ channelId, me }: { channelId: string; me: string 
     <aside className="flex h-full w-full flex-col border-l bg-background">
       <header className="flex items-center gap-1 border-b px-2 py-2">
         {sorted.map((r) => (
-          <button
+          <button type="button"
             key={r.id}
             onClick={() => setActiveKind(r.kind)}
             className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium ${
@@ -145,7 +145,7 @@ function CanvasBoard({ docId }: { docId: string }): React.JSX.Element {
               className="group absolute w-44 cursor-grab touch-none rounded-md shadow-md active:cursor-grabbing"
               style={{ left: it.x, top: it.y, background: it.color }}
             >
-              <button
+              <button type="button"
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => del(['items', id])}
                 aria-label="Delete note"
@@ -167,7 +167,7 @@ function CanvasBoard({ docId }: { docId: string }): React.JSX.Element {
       </div>
       <footer className="flex items-center gap-2 border-t px-3 py-2">
         {PALETTE.map((c) => (
-          <button
+          <button type="button"
             key={c}
             onClick={() => setColor(c)}
             aria-label={`New notes in ${c}`}
@@ -227,7 +227,7 @@ function DocEditor({ docId }: { docId: string }): React.JSX.Element {
             </div>
           </div>
         ))}
-        <button
+        <button type="button"
           onClick={addBlock}
           className="mt-1 flex items-center gap-1.5 self-start rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
         >
@@ -250,7 +250,7 @@ function IconBtn({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <button
+    <button type="button"
       onClick={onClick}
       disabled={disabled}
       aria-label={label}

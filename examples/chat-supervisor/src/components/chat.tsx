@@ -50,7 +50,7 @@ export function Chat({ me, myName, onSignOut }: { me: string; myName: string; on
 
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b px-4 py-3 shadow-sm">
-          <button
+          <button type="button"
             onClick={() => setNavOpen(true)}
             aria-label="Open channel list"
             className="-ml-1 grid h-8 w-8 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
@@ -61,7 +61,7 @@ export function Chat({ me, myName, onSignOut }: { me: string; myName: string; on
           <span className="hidden truncate text-sm text-muted-foreground sm:inline">
             — a supervisor that delegates; subagents stream in cards
           </span>
-          <button
+          <button type="button"
             onClick={() => setPaneOpen(true)}
             aria-label="Open resources"
             className="ml-auto grid h-8 w-8 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
@@ -185,7 +185,7 @@ function Turn({ m }: { m: FeedMessage }): React.JSX.Element {
       )}
       {streaming && parts.every((p) => p.done) && <Cursor />}
       {streaming && (
-        <button
+        <button type="button"
           onClick={() => void chat.cancelMessage(m.id, 'stopped from the web UI').catch(() => {})}
           className="rounded border px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
         >
@@ -346,7 +346,7 @@ function Composer({ onSend }: { onSend: (text: string) => void }): React.JSX.Ele
           rows={1}
           className="max-h-40 min-h-[40px] w-full resize-none bg-transparent px-2 py-2 text-sm focus:outline-none"
         />
-        <button
+        <button type="button"
           onClick={submit}
           disabled={!text.trim()}
           aria-label="Send"

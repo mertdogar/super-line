@@ -1,0 +1,15 @@
+# Build the Control Center SPA from workspace source, then serve it with the
+# package's dependency-free launcher.
+FROM node:22-slim AS build
+RUN corepack enable
+WORKDIR /app
+COPY . .
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @super-line/control-center build
+
+FROM node:22-slim
+WORKDIR /app
+COPY --from=build /app/packages/control-center/dist ./dist
+COPY --from=build /app/packages/control-center/bin ./bin
+EXPOSE 8091
+CMD ["node", "bin/control-center.js", "--url", "ws://localhost:8801", "--port", "8091", "--no-open"]

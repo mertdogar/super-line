@@ -43,14 +43,20 @@ seed that others point at.
 await createLibp2pAdapter({ discovery: 'mdns' })
 await createLibp2pAdapter({ discovery: { mdns: { interval: 5_000 } } }) // @libp2p/mdns options pass through
 
-// 2. bootstrap — a fixed list of seed multiaddrs. Persist identity so seed peer IDs stay stable.
+// 2. DNS — every A/AAAA record is a peer; ideal for a Kubernetes headless Service.
+await createLibp2pAdapter({
+  listen: ['/ip4/0.0.0.0/tcp/9001'],
+  discovery: { dns: { hostname: 'super-line-p2p.default.svc.cluster.local', port: 9001 } },
+})
+
+// 3. bootstrap — a fixed list of seed multiaddrs. Persist identity so seed peer IDs stay stable.
 await createLibp2pAdapter({
   listen: ['/ip4/0.0.0.0/tcp/9001'],
   identity: { path: '/var/lib/app/p2p' },
   discovery: { bootstrap: ['/dns4/seed-1/tcp/9001/p2p/12D3Koo…'] },
 })
 
-// 3. relay — for nodes behind NAT that can't reach each other directly. Point at a public
+// 4. relay — for nodes behind NAT that can't reach each other directly. Point at a public
 //    circuit-relay-v2 node (run one with createRelayNode). Adds the WebSocket + circuit
 //    transports, a /p2p-circuit listen address, pubsub peer-discovery, and DCUtR.
 await createLibp2pAdapter({ discovery: { relay: '/dns4/relay.example.com/tcp/9000/ws/p2p/12D3Koo…' } })
@@ -84,10 +90,10 @@ topic and brokers first contact, then servers mesh over their own direct (DCUtR-
 | Option | Meaning |
 | --- | --- |
 | `node` | Bring your own started libp2p node (must expose a gossipsub `pubsub` service). The adapter won't stop a node it didn't create, and `discovery`/`listen`/… don't apply — you own its topology. |
-| `discovery` | How the built-in node finds peers: `'mdns'`, `{ mdns }`, `{ bootstrap }`, `{ relay }`, or an array of these. Omit for no discovery (single node / seed). |
-| `listen` | Listen multiaddrs for the built-in node (default `/ip4/0.0.0.0/tcp/0`). Seeds need a FIXED port. |
+| `discovery` | How the built-in node finds peers: `'mdns'`, `{ mdns }`, `{ dns: { hostname, port, intervalMs? } }`, `{ bootstrap }`, `{ relay }`, or an array of these. Omit for no discovery (single node / seed). |
+| `listen` | Listen multiaddrs for the built-in node (default `/ip4/0.0.0.0/tcp/0`). DNS peers and seeds need a fixed port. |
 | `transport` | `'tcp'` (default) or `'ws'`. |
-| `identity` | A raw `PrivateKey`, `{ path }` to load-or-create a persistent Ed25519 key, or omit for an ephemeral key (warns unless discovery is mDNS/relay-only). |
+| `identity` | A raw `PrivateKey`, `{ path }` to load-or-create a persistent Ed25519 key, or omit for an ephemeral key (warns unless discovery is mDNS/DNS/relay-only). |
 | `presence` | `false` to disable, or `{ snapshotIntervalMs, livenessTtlMs }` to tune. |
 | `topic` | The shared gossipsub topic (default `'super-line/v1'`). |
 

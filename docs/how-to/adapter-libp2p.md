@@ -37,6 +37,12 @@ Discovered peers are dialed automatically — the mesh forms with no extra wirin
 await createLibp2pAdapter({ discovery: 'mdns' })
 await createLibp2pAdapter({ discovery: { mdns: { interval: 5_000 } } }) // @libp2p/mdns options pass through
 
+// DNS — repeatedly dial every A/AAAA record; ideal for a Kubernetes headless Service.
+await createLibp2pAdapter({
+  listen: ['/ip4/0.0.0.0/tcp/9001'],
+  discovery: { dns: { hostname: 'super-line-p2p.default.svc.cluster.local', port: 9001 } },
+})
+
 // bootstrap — a fixed list of seed multiaddrs. Persist identity so seed peer IDs stay stable.
 await createLibp2pAdapter({
   listen: ['/ip4/0.0.0.0/tcp/9001'],
@@ -63,7 +69,7 @@ The relay coordinates discovery and first contact; it is **not** a data relay �
 - It fans out rooms, topics, and the [cluster event bus](/how-to/cluster-event-bus) the same way; a gossip-replicated directory backs `srv.cluster.*` / `srv.isOnline`.
 - **Trade-off vs. Redis:** broker-less and decentralized, at the cost of **eventually-consistent presence** and **best-effort delivery** (no central store).
 - **ESM-only** (libp2p is ESM-only).
-- For `bootstrap`, run **≥2 stable seed nodes** and **persist their identity** (`identity.path`) so bootstrap lists stay valid across restarts. mDNS and relay re-discover peers after a restart, so an ephemeral identity is fine there.
+- For `bootstrap`, run **≥2 stable seed nodes** and **persist their identity** (`identity.path`) so bootstrap lists stay valid across restarts. mDNS, DNS, and relay re-discover peers after a restart, so an ephemeral identity is fine there.
 
 Run it: the [`scaling-libp2p`](https://github.com/mertdogar/super-line/tree/main/examples/scaling-libp2p) and [`react-chat-cluster-libp2p`](https://github.com/mertdogar/super-line/tree/main/examples/react-chat-cluster-libp2p) examples are the Redis clusters with the broker **deleted** — the nodes peer over libp2p instead.
 

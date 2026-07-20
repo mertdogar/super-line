@@ -1058,6 +1058,9 @@ importers:
       '@super-line/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@super-line/plugin-inspector':
+        specifier: workspace:*
+        version: link:../../packages/plugin-inspector
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server

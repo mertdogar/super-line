@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { generateKeyPair } from '@libp2p/crypto/keys'
 import type { Libp2p } from '@libp2p/interface'
 import { createLibp2pAdapter, createRelayNode } from '@super-line/adapter-libp2p'
 import { waitForSubscribers } from './libp2p-cluster.js'
 import { waitFor } from './harness.js'
 
 // Exercises the BUILT-IN node builder end to end for each discovery strategy — the peers actually
-// find each other (bootstrap dial / real multicast / relay-brokered circuit) over loopback, no Docker.
+// find each other (bootstrap / DNS / real multicast / relay-brokered circuit) over loopback, no Docker.
 type Pair = [string, string | Uint8Array]
 type Built = Awaited<ReturnType<typeof createLibp2pAdapter>>
 
@@ -68,6 +69,37 @@ describe('libp2p adapter — discovery strategies (built node)', () => {
     expect(bGot[0]).toEqual(['r:x', 'over-mcast'])
   }, 45_000)
 
+  it('dns: resolves an endpoint without a peer ID and forms the gossipsub mesh', async () => {
+    const topic = uniqueTopic()
+    const a = track(
+      await createLibp2pAdapter({
+        topic,
+        presence: false,
+        listen: ['/ip4/127.0.0.1/tcp/0'],
+        identity: await generateKeyPair('Ed25519'),
+      }),
+    )
+    const address = a.node.getMultiaddrs().map(String).find((m) => m.includes('/ip4/127.0.0.1/tcp/'))!
+    const port = Number(address.match(/\/tcp\/(\d+)/)?.[1])
+    const b = track(
+      await createLibp2pAdapter({
+        topic,
+        presence: false,
+        listen: ['/ip4/127.0.0.1/tcp/0'],
+        discovery: { dns: { hostname: 'localhost', port, intervalMs: 100 } },
+      }),
+    )
+
+    await waitForSubscribers([a.node, b.node], 1, topic, 15_000)
+    const bGot = collect(b)
+    b.subscribe('r:x')
+    await waitFor(async () => {
+      await a.publish('r:x', 'over-dns')
+      return bGot.length > 0
+    }, 15_000)
+    expect(bGot[0]).toEqual(['r:x', 'over-dns'])
+  }, 30_000)
+
   it('relay: two nodes discover each other via a circuit-relay and fan out', async () => {
     const topic = uniqueTopic()
     const relay = await createRelayNode({ listen: ['/ip4/127.0.0.1/tcp/0/ws'], topic })
@@ -109,6 +141,18 @@ describe('libp2p adapter — ephemeral-identity warning', () => {
   it('stays silent with mdns-only discovery (peers re-find each other after restart)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     track(await createLibp2pAdapter({ topic: uniqueTopic(), presence: false, discovery: 'mdns' }))
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('stays silent with dns-only discovery (endpoints are resolved again after restart)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    track(
+      await createLibp2pAdapter({
+        topic: uniqueTopic(),
+        presence: false,
+        discovery: { dns: { hostname: 'localhost', port: 9001 } },
+      }),
+    )
     expect(warn).not.toHaveBeenCalled()
   })
 })

@@ -83,5 +83,5 @@ transport differs (here central Postgres + the Electric op-log, no adapter).
   id = 'board'` gives the live board without folding, and the op-log stays bounded. Tune via `compact: { everyNUpdates,
   debounceMs }` (or `compact: false` for a pure append-only log) on `crdtPgliteCollections`.
 - Peer discovery is **mDNS** (multicast on the shared network), driven by the adapter's `discovery: 'mdns'`. Docker's
-  compose bridge passes multicast; many cloud/k8s networks don't — there, swap `discovery: 'mdns'` for
-  `discovery: { bootstrap: [...] }` (one pinned seed; see `examples/libp2p-nat`), still without hardcoding the cluster size.
+  compose bridge passes multicast; many cloud/k8s networks don't — there, use a headless Service and swap it for
+  `discovery: { dns: { hostname: 'ai-canvas-p2p.default.svc.cluster.local', port: 9001 } }`.

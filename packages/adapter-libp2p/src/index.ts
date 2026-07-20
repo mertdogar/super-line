@@ -15,12 +15,13 @@ import { FsDatastore } from 'datastore-fs'
 import { gossipsub, type GossipSub, type Message } from '@libp2p/gossipsub'
 import type { Libp2p, PrivateKey } from '@libp2p/interface'
 import type { Adapter } from '@super-line/core'
+import { startDnsDiscovery, type DnsDiscoveryInit } from './dns.js'
 import { GossipPresence, type PresenceMsg } from './presence.js'
 
 /** A libp2p node whose services expose a gossipsub `pubsub`. */
 export type PubSubLibp2p = Libp2p<{ pubsub: GossipSub }>
 
-export type { MulticastDNSInit, CircuitRelayServerInit }
+export type { MulticastDNSInit, CircuitRelayServerInit, DnsDiscoveryInit }
 
 /**
  * How the built-in node finds its peers. Strategies compose — pass an array to
@@ -32,6 +33,9 @@ export type { MulticastDNSInit, CircuitRelayServerInit }
  *   options through.
  * - `{ bootstrap: [...] }` — static seed multiaddrs (incl. `/p2p/<peerId>`) dialed
  *   on startup. The classic fixed-seed topology.
+ * - `{ dns: { hostname, port } }` — repeatedly resolves every A/AAAA record and
+ *   dials each endpoint. Designed for Kubernetes headless Services and other
+ *   dynamic DNS membership; no stable peer identity is needed.
  * - `{ relay: addr }` — multiaddr(s) of a circuit-relay-v2 node (run one with
  *   {@link createRelayNode}) for nodes that cannot reach each other directly
  *   (NAT). Adds WebSocket + circuit-relay transports, a `/p2p-circuit` listen
@@ -42,6 +46,7 @@ export type Discovery =
   | 'mdns'
   | { mdns: MulticastDNSInit }
   | { bootstrap: string[] }
+  | { dns: DnsDiscoveryInit }
   | { relay: string | string[] }
 
 /** Options for {@link createLibp2pAdapter}. */
@@ -72,7 +77,7 @@ export interface Libp2pAdapterOptions {
   /**
    * Peer identity for the built-in node: a raw `PrivateKey`, or `{ path }` to load-or-create
    * a persistent Ed25519 key on disk (stable peer ID across restarts). Omit for an ephemeral
-   * key — with purely dynamic discovery (mdns/relay) that's fine, since nothing references
+   * key — with purely dynamic discovery (mdns/dns/relay) that's fine, since nothing references
    * your peer ID; otherwise a startup warning fires because bootstrap lists break on restart.
    */
   identity?: PrivateKey | { path: string }
@@ -139,10 +144,11 @@ async function resolveIdentity(identity: Libp2pAdapterOptions['identity'], quiet
 async function buildNode(opts: Libp2pAdapterOptions, strategies: Discovery[], topic: string): Promise<PubSubLibp2p> {
   const ws = opts.transport === 'ws'
   const hasRelay = strategies.some((s) => relayAddrsOf(s).length > 0)
-  // Dynamic discovery (mdns/relay) re-finds peers after a restart, so an ephemeral peer ID
+  // Dynamic discovery (mdns/dns/relay) re-finds peers after a restart, so an ephemeral peer ID
   // is fine and the stable-identity warning would be noise. With bootstrap in play (or no
   // discovery at all — likely a seed others point at), peer IDs live in static lists: warn.
-  const dynamicOnly = strategies.length > 0 && strategies.every((s) => s === 'mdns' || 'mdns' in s || 'relay' in s)
+  const dynamicOnly =
+    strategies.length > 0 && strategies.every((s) => s === 'mdns' || 'mdns' in s || 'dns' in s || 'relay' in s)
   const privateKey = await resolveIdentity(opts.identity, dynamicOnly)
 
   const peerDiscovery: NonNullable<Libp2pOptions['peerDiscovery']> = []
@@ -222,6 +228,12 @@ async function dialRelays(node: PubSubLibp2p, relays: string[]): Promise<void> {
  * // fixed-seed topology
  * const adapter = await createLibp2pAdapter({ discovery: { bootstrap: ['/ip4/10.0.0.1/tcp/9001/p2p/12D3Koo…'] } })
  *
+ * // Kubernetes headless Service — every replica is an ephemeral peer
+ * const adapter = await createLibp2pAdapter({
+ *   listen: ['/ip4/0.0.0.0/tcp/9001'],
+ *   discovery: { dns: { hostname: 'super-line-p2p.default.svc.cluster.local', port: 9001 } },
+ * })
+ *
  * // NAT'd nodes meshing through a public relay (see createRelayNode)
  * const adapter = await createLibp2pAdapter({ discovery: { relay: '/dns4/relay.example.com/tcp/9000/ws/p2p/12D3Koo…' } })
  * ```
@@ -282,6 +294,11 @@ export async function createLibp2pAdapter(
   }
   pubsub.addEventListener('message', onMessage)
   pubsub.subscribe(topic)
+  const stopDnsDiscovery = ownsNode
+    ? strategies
+        .filter((s): s is { dns: DnsDiscoveryInit } => typeof s === 'object' && 'dns' in s)
+        .map((s) => startDnsDiscovery(node, s.dns))
+    : []
 
   return {
     node, // exposed so callers can read peerId / multiaddrs (e.g. to build bootstrap lists)
@@ -300,6 +317,7 @@ export async function createLibp2pAdapter(
       if (closed) return
       closed = true
       presence?.stop()
+      for (const stop of stopDnsDiscovery) stop()
       pubsub.removeEventListener('message', onMessage)
       if (ownsNode) await node.stop()
     },

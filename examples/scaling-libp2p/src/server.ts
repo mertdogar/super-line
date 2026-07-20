@@ -4,6 +4,7 @@ import { peerIdFromPrivateKey } from '@libp2p/peer-id'
 import { createSuperLineServer } from '@super-line/server'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createLibp2pAdapter } from '@super-line/adapter-libp2p'
+import { inspector } from '@super-line/plugin-inspector'
 import { sync } from './contract.js'
 
 // One cluster node. compose boots three of these (node-1/2/3) from the same image,
@@ -13,6 +14,7 @@ const PORT = Number(process.env.PORT ?? 8801)
 const NODE = process.env.NODE_NAME ?? 'node-1'
 const P2P_PORT = Number(process.env.P2P_PORT ?? 9001)
 const NODES = ['node-1', 'node-2', 'node-3']
+const dnsHostname = process.env.P2P_DNS
 
 // DEMO ONLY: derive a deterministic Ed25519 key from each node name, so every node can
 // compute the others' peer IDs and build the bootstrap list with no registry. A real
@@ -24,12 +26,33 @@ function seedFor(name: string): Uint8Array {
 }
 const keyFor = (name: string) => generateKeyPairFromSeed('Ed25519', seedFor(name))
 
-const myKey = await keyFor(NODE)
-const bootstrap = await Promise.all(
-  NODES.filter((n) => n !== NODE).map(
-    async (n) => `/dns4/${n}/tcp/${P2P_PORT}/p2p/${peerIdFromPrivateKey(await keyFor(n)).toString()}`,
-  ),
-)
+const myKey = dnsHostname ? undefined : await keyFor(NODE)
+const bootstrap = dnsHostname
+  ? []
+  : await Promise.all(
+      NODES.filter((n) => n !== NODE).map(
+        async (n) => `/dns4/${n}/tcp/${P2P_PORT}/p2p/${peerIdFromPrivateKey(await keyFor(n)).toString()}`,
+      ),
+    )
+const adapter = await createLibp2pAdapter({
+  identity: myKey,
+  listen: [`/ip4/0.0.0.0/tcp/${P2P_PORT}`],
+  discovery: dnsHostname ? { dns: { hostname: dnsHostname, port: P2P_PORT } } : { bootstrap },
+})
+const peerIds = () =>
+  [...new Set(adapter.node.getConnections().map((connection) => connection.remotePeer.toString()))].sort()
+const logPeers = () => {
+  const peers = peerIds()
+  console.log(`[${NODE}] libp2p peers (${peers.length}): ${peers.join(', ') || '(none)'}`)
+}
+adapter.node.addEventListener('peer:connect', (event) => {
+  console.log(`[${NODE}] libp2p connected: ${event.detail}`)
+  logPeers()
+})
+adapter.node.addEventListener('peer:disconnect', (event) => {
+  console.log(`[${NODE}] libp2p disconnected: ${event.detail}`)
+  logPeers()
+})
 
 const server = http.createServer()
 let conns = 0
@@ -38,11 +61,9 @@ const srv = createSuperLineServer(sync, {
   transports: [webSocketServerTransport({ server })],
   authenticate: () => ({ role: 'user' as const, ctx: {} }),
   // no broker: every node joins one shared gossipsub mesh
-  adapter: await createLibp2pAdapter({
-    identity: myKey,
-    listen: [`/ip4/0.0.0.0/tcp/${P2P_PORT}`],
-    discovery: { bootstrap },
-  }),
+  adapter,
+  nodeName: NODE,
+  plugins: [inspector()],
   onConnection: (conn) => {
     srv.room('global').add(conn) // auto-join: every client lands in one shared room
     srv.publish('stats', { node: NODE, conns: ++conns }) // flow 3: gossip our count over the bus
@@ -70,11 +91,16 @@ srv.implement({
   },
 })
 
-server.listen(PORT, () => console.log(`[${NODE}] up on :${PORT} (p2p :${P2P_PORT}, ${bootstrap.length} peers)`))
+server.listen(PORT, () => {
+  console.log(
+    `[${NODE}] up on :${PORT} (p2p :${P2P_PORT}, peer ${adapter.node.peerId}, ${dnsHostname ? `dns ${dnsHostname}` : `${bootstrap.length} peers`})`,
+  )
+  logPeers()
+})
 
 // flow 2: ONE node publishes a topic on a timer; every client receives it, no matter
 // which node holds its socket — the cross-node server→client delivery proof.
-if (NODE === 'node-1') {
+if (NODE === 'node-1' || process.env.PUBLISH_ANNOUNCEMENTS === 'true') {
   let n = 0
   setInterval(() => srv.forRole('user').publish('announce', { from: NODE, text: `announce #${++n}` }), 5000)
 }

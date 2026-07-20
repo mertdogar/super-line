@@ -39,7 +39,7 @@ import { MiniBar } from '@/components/mini-bar'
 import { MultiSelect, type MultiSelectGroup } from '@/components/multi-select'
 import { Slider } from '@/components/ui/slider'
 import { Json } from '@/components/json-view'
-import { cn } from '@/lib/utils'
+import { clickable, cn } from '@/lib/utils'
 
 const CATEGORIES: { id: FeedCategory; label: string }[] = [
   { id: 'lifecycle', label: 'Lifecycle' },
@@ -181,7 +181,7 @@ function FeedRow({
   return (
     <>
       <tr
-        onClick={() => hasPayload && setOpen((v) => !v)}
+        {...clickable(() => hasPayload && setOpen((v) => !v))}
         className={cn('border-b last:border-0', hasPayload && 'cursor-pointer hover:bg-accent/40')}
       >
         <td className="px-3 py-1.5">
@@ -256,7 +256,7 @@ function SortTh({
   const active = sort?.col === col
   return (
     <th
-      onClick={() => onSort(col)}
+      {...clickable(() => onSort(col))}
       className={cn(
         'cursor-pointer select-none px-3 py-2 font-medium hover:text-foreground',
         align === 'right' && 'text-right',

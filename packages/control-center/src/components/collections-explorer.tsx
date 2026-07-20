@@ -6,7 +6,7 @@ import type { InspectorClient } from '@/lib/inspector-client'
 import { Badge } from '@/components/ui/badge'
 import { Json } from '@/components/json-view'
 import { formatDuration, formatTime } from '@/lib/events'
-import { cn } from '@/lib/utils'
+import { clickable, cn } from '@/lib/utils'
 
 const PAGE = 100
 type Row = Record<string, unknown>
@@ -90,6 +90,7 @@ function FilterRow({ cond, fields, schemaLess, onChange, onRemove }: { cond: Con
     <div className="flex items-center gap-1.5">
       {!schemaLess ? (
         <select
+          aria-label="Filter field"
           value={cond.field}
           onChange={(e) => {
             const t = fields.find((f) => f.name === e.target.value)?.type ?? ''
@@ -107,6 +108,7 @@ function FilterRow({ cond, fields, schemaLess, onChange, onRemove }: { cond: Con
       ) : (
         <>
           <input
+            aria-label="Filter field"
             value={cond.field}
             list={listId}
             onChange={(e) => {
@@ -124,6 +126,7 @@ function FilterRow({ cond, fields, schemaLess, onChange, onRemove }: { cond: Con
         </>
       )}
       <select
+        aria-label="Filter operator"
         value={cond.op}
         onChange={(e) => {
           const op = e.target.value as Op
@@ -138,21 +141,21 @@ function FilterRow({ cond, fields, schemaLess, onChange, onRemove }: { cond: Con
         ))}
       </select>
       {type === 'boolean' || cond.op === 'is' ? (
-        <select value={cond.value || 'true'} onChange={(e) => onChange({ ...cond, value: e.target.value })} className={inputCls}>
+        <select aria-label="Filter value" value={cond.value || 'true'} onChange={(e) => onChange({ ...cond, value: e.target.value })} className={inputCls}>
           <option value="true">true</option>
           <option value="false">false</option>
         </select>
       ) : type === 'datetime' && cond.op === 'within' ? (
         <>
           <input type="number" min="1" value={cond.value} onChange={(e) => onChange({ ...cond, value: e.target.value })} placeholder="N" className={cn(inputCls, 'w-16')} />
-          <select value={cond.unit ?? 'h'} onChange={(e) => onChange({ ...cond, unit: e.target.value as TimeUnit })} className={inputCls}>
+          <select aria-label="Filter time unit" value={cond.unit ?? 'h'} onChange={(e) => onChange({ ...cond, unit: e.target.value as TimeUnit })} className={inputCls}>
             <option value="m">minutes</option>
             <option value="h">hours</option>
             <option value="d">days</option>
           </select>
         </>
       ) : type === 'datetime' ? (
-        <input type="datetime-local" value={cond.value} onChange={(e) => onChange({ ...cond, value: e.target.value })} className={cn(inputCls, 'w-52')} />
+        <input aria-label="Filter value" type="datetime-local" value={cond.value} onChange={(e) => onChange({ ...cond, value: e.target.value })} className={cn(inputCls, 'w-52')} />
       ) : (
         <input value={cond.value} onChange={(e) => onChange({ ...cond, value: e.target.value })} placeholder="value" className={cn(inputCls, 'w-40')} />
       )}
@@ -379,7 +382,7 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
                   {shown.map((r) => (
                     <tr
                       key={idOf(r)}
-                      onClick={() => setSelected(r)}
+                      {...clickable(() => setSelected(r))}
                       className={cn('cursor-pointer border-b last:border-0 hover:bg-accent/40', selected != null && idOf(selected) === idOf(r) && 'bg-accent/60')}
                     >
                       <td className="px-3 py-1.5 font-mono text-xs">

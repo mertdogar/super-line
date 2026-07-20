@@ -3,7 +3,7 @@ import type { ConnDescriptor } from '@super-line/core'
 import { formatDuration, formatTime } from '@/lib/events'
 import { roleColor } from '@/lib/topology'
 import { transportColor, transportLabel } from '@/lib/transport'
-import { cn } from '@/lib/utils'
+import { clickable, cn } from '@/lib/utils'
 
 export function ConnectionsTable({
   connections,
@@ -35,7 +35,7 @@ export function ConnectionsTable({
           {connections.map((c) => (
             <tr
               key={c.id}
-              onClick={() => onSelect(c.id)}
+              {...clickable(() => onSelect(c.id))}
               className={cn(
                 'cursor-pointer border-b last:border-0 hover:bg-accent/40',
                 selectedId === c.id && 'bg-accent/60',

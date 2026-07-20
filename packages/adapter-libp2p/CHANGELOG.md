@@ -3,6 +3,13 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [adapter-libp2p-v0.7.0] — 2026-07-20
+
+### Features
+
+- **adapter-libp2p:** Add Kubernetes DNS discovery ([4ea1b83])
+- **release:** Generate per-package changelogs from the commit history ([82a2232])
+
 ## [adapter-libp2p-v0.6.1] — 2026-07-16
 
 ### Features

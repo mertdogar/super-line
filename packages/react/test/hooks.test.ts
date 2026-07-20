@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { createElement, type ReactNode } from 'react'
+import { createElement, StrictMode, type ReactNode } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { z } from 'zod'
@@ -22,6 +22,10 @@ const contract = defineContract({
         add: {
           input: z.object({ a: z.number(), b: z.number() }),
           output: z.object({ sum: z.number() }),
+        },
+        echo: {
+          input: z.object({ tag: z.string(), delayMs: z.number() }),
+          output: z.object({ tag: z.string() }),
         },
       },
     },
@@ -45,7 +49,15 @@ async function boot(): Promise<{ client: SuperLineClient<typeof contract, 'user'
     collections: memoryCollections(),
     policies: { messages: { read: () => undefined, write: () => true } },
   })
-  srv.implement({ user: { add: async ({ a, b }) => ({ sum: a + b }) } })
+  srv.implement({
+    user: {
+      add: async ({ a, b }) => ({ sum: a + b }),
+      echo: async ({ tag, delayMs }) => {
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
+        return { tag }
+      },
+    },
+  })
   await new Promise<void>((resolve) => server.listen(0, resolve))
   const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`
   const client = createSuperLineClient(contract, {
@@ -79,6 +91,21 @@ describe('react hooks', () => {
     expect(result.current.isLoading).toBe(false)
   })
 
+  it('useRequest keeps the newest call, not the last one to resolve', async () => {
+    const { client } = await boot()
+    const { result } = renderHook(() => useRequest('echo'), { wrapper: wrapper(client) })
+
+    // "slow" is fired first but lands last — its stale result must not clobber "fast".
+    await act(async () => {
+      const slow = result.current.call({ tag: 'slow', delayMs: 120 }).catch(() => undefined)
+      const fast = result.current.call({ tag: 'fast', delayMs: 0 })
+      await Promise.all([slow, fast])
+    })
+
+    expect(result.current.data).toEqual({ tag: 'fast' })
+    expect(result.current.isLoading).toBe(false)
+  })
+
   it('useCollection reflects a filtered snapshot, live server pushes, and client write-through', async () => {
     const { client, srv } = await boot()
     await srv.collection('messages').insert({ id: 'm1', channelId: 'general', text: 'seed' })
@@ -101,5 +128,21 @@ describe('react hooks', () => {
       await result.current.insert({ id: 'm4', channelId: 'general', text: 'mine' })
     })
     await waitFor(() => expect(result.current.rows.map((r) => r.id).sort()).toEqual(['m1', 'm3', 'm4']))
+  })
+
+  it('useCollection survives StrictMode double-mounting (subscribe/close is re-entrant)', async () => {
+    const { client, srv } = await boot()
+    await srv.collection('messages').insert({ id: 's1', channelId: 'general', text: 'seed' })
+
+    const { result } = renderHook(() => useCollection('messages', { filter: eq('channelId', 'general') }), {
+      wrapper: ({ children }) =>
+        createElement(StrictMode, null, createElement(Provider, { client, children })),
+    })
+    // The discarded first subscription must not have closed the surviving one's channel.
+    await waitFor(() => expect(result.current.rows.map((r) => r.id)).toEqual(['s1']))
+    await act(async () => {
+      await srv.collection('messages').insert({ id: 's2', channelId: 'general', text: 'live' })
+    })
+    await waitFor(() => expect(result.current.rows.map((r) => r.id).sort()).toEqual(['s1', 's2']))
   })
 })

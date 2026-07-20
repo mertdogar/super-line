@@ -27,6 +27,9 @@ import type {
 } from '@super-line/core'
 import type { SuperLineClient, CollectionHandle, DocHandle, CrdtCollectionHandle } from '@super-line/client'
 
+/** Identity-stable empty snapshot — a fresh `[]` per read would spin `useSyncExternalStore`. */
+const EMPTY: never[] = []
+
 /** State returned by `useRequest`. */
 export interface RequestState<T> {
   /** The last successful result, if any. */
@@ -102,18 +105,23 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     const [state, setState] = useState<RequestState<Output<Requests<C, R>[M]>>>({
       isLoading: false,
     })
+    // Only the newest call owns the shared state: without this, two in-flight calls resolving out of
+    // order would leave the *older* response in `data` (the classic search-as-you-type bug). Every
+    // caller still gets its own result back from `call` — only the rendered state is last-call-wins.
+    const latest = useRef(0)
     const call = useCallback(
       async (input: ClientInput<Requests<C, R>[M]>) => {
+        const seq = ++latest.current
         setState({ isLoading: true })
         try {
           const fn = client[method] as (
             i: ClientInput<Requests<C, R>[M]>,
           ) => Promise<Output<Requests<C, R>[M]>>
           const data = await fn(input)
-          setState({ data, isLoading: false })
+          if (seq === latest.current) setState({ data, isLoading: false })
           return data
         } catch (error) {
-          setState({ error, isLoading: false })
+          if (seq === latest.current) setState({ error, isLoading: false })
           throw error
         }
       },
@@ -139,24 +147,33 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
   } {
     type Doc = DocOf<C, N>
     const client = useClient()
-    const [data, setData] = useState<Doc>()
-    const [deleted, setDeleted] = useState(false)
     const handleRef = useRef<DocHandle<Doc> | undefined>(undefined)
-    useEffect(() => {
-      const handle = (client.collection(name) as CrdtCollectionHandle<Doc>).open(id)
-      handleRef.current = handle
-      setData(handle.getSnapshot())
-      setDeleted(handle.deleted)
-      const unsub = handle.subscribe(() => {
-        setData(handle.getSnapshot())
-        setDeleted(handle.deleted)
-      })
-      return () => {
-        unsub()
-        handle.close()
-        handleRef.current = undefined
-      }
-    }, [client, name, id])
+    // `handle.getSnapshot()` is already identity-stable between merges (the CRDT store caches it), but
+    // this hook exposes two fields, so the pair is memoised too — a fresh object per read would spin
+    // useSyncExternalStore forever.
+    const pairRef = useRef<{ data: Doc | undefined; deleted: boolean }>({ data: undefined, deleted: false })
+    const subscribe = useCallback(
+      (onChange: () => void) => {
+        const handle = (client.collection(name) as CrdtCollectionHandle<Doc>).open(id)
+        handleRef.current = handle
+        onChange()
+        const unsub = handle.subscribe(onChange)
+        return () => {
+          unsub()
+          handle.close()
+          handleRef.current = undefined
+        }
+      },
+      [client, name, id],
+    )
+    const getPair = useCallback(() => {
+      const handle = handleRef.current
+      const next = { data: handle?.getSnapshot(), deleted: handle?.deleted ?? false }
+      const prev = pairRef.current
+      if (prev.data === next.data && prev.deleted === next.deleted) return prev
+      return (pairRef.current = next)
+    }, [])
+    const { data, deleted } = useSyncExternalStore(subscribe, getPair, getPair)
     const set = useCallback((value: Doc) => handleRef.current?.set(value), [])
     const update = useCallback((partial: Partial<Doc>) => handleRef.current?.update(partial), [])
     const del = useCallback((path: (string | number)[]) => handleRef.current?.delete(path), [])
@@ -181,25 +198,34 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
   } {
     const client = useClient()
     const queryKey = JSON.stringify(query ?? {}) // stabilize an inline-literal query across renders
-    const [rows, setRows] = useState<RowOf<C, N>[]>([])
     const [error, setError] = useState<unknown>()
     const handleRef = useRef<CollectionHandle<RowOf<C, N>> | undefined>(undefined)
-    useEffect(() => {
-      const q = JSON.parse(queryKey) as CollectionQuery
-      const handle = client.collection(name) as CollectionHandle<RowOf<C, N>> // useCollection is the LWW row surface
-      handleRef.current = handle
-      setError(undefined)
-      const sub = handle.subscribe(q)
-      const sync = (): void => setRows(sub.rows() as RowOf<C, N>[])
-      sync() // reset to the fresh subscription's rows on name/query change
-      const off = sub.subscribe(sync)
-      void sub.ready.then(sync).catch(setError)
-      return () => {
-        off()
-        sub.close()
-        handleRef.current = undefined
-      }
-    }, [client, name, queryKey])
+    const subRef = useRef<ReturnType<CollectionHandle<RowOf<C, N>>['subscribe']> | undefined>(undefined)
+    // `sub.rows()` returns the client's `view` array, which keeps a stable identity between changes —
+    // exactly the getSnapshot contract, so the rows are read straight from the store instead of being
+    // mirrored into component state. React calls `subscribe` in a passive effect, so opening the
+    // subscription here has the same timing as the effect it replaces.
+    const subscribe = useCallback(
+      (onChange: () => void) => {
+        const handle = client.collection(name) as CollectionHandle<RowOf<C, N>> // useCollection is the LWW row surface
+        handleRef.current = handle
+        setError(undefined)
+        const sub = handle.subscribe(JSON.parse(queryKey) as CollectionQuery)
+        subRef.current = sub
+        onChange() // pick up the fresh subscription's rows on name/query change
+        const off = sub.subscribe(onChange)
+        void sub.ready.then(onChange).catch(setError)
+        return () => {
+          off()
+          sub.close()
+          subRef.current = undefined
+          handleRef.current = undefined
+        }
+      },
+      [client, name, queryKey],
+    )
+    const getRows = useCallback(() => (subRef.current?.rows() as RowOf<C, N>[] | undefined) ?? EMPTY, [])
+    const rows = useSyncExternalStore(subscribe, getRows, () => EMPTY as RowOf<C, N>[])
     const insert = useCallback((row: RowOf<C, N>) => handleRef.current?.insert(row) ?? Promise.resolve(), [])
     const update = useCallback((row: RowOf<C, N>) => handleRef.current?.update(row) ?? Promise.resolve(), [])
     const del = useCallback((id: string) => handleRef.current?.delete(id) ?? Promise.resolve(), [])
@@ -213,11 +239,11 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
    */
   function useEnv(): EnvOf<C, R> | null {
     const client = useClient()
-    return useSyncExternalStore(
-      (onChange) => client.env.subscribe(() => onChange()),
-      () => client.env.current,
-      () => client.env.current,
-    )
+    // Both callbacks must be identity-stable: React resubscribes whenever `subscribe` changes,
+    // so an inline arrow here would tear down and re-add the env listener on every render.
+    const subscribe = useCallback((onChange: () => void) => client.env.subscribe(() => onChange()), [client])
+    const snapshot = useCallback(() => client.env.current, [client])
+    return useSyncExternalStore(subscribe, snapshot, snapshot)
   }
 
   return { Provider, useClient, useEvent, useSubscription, useRequest, useDoc, useCollection, useEnv }

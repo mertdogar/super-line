@@ -479,3 +479,127 @@ describe('plugin-chat — channel resources: cards, kit, boot validation', () =>
     expect((await runTool(tools, 'list_resources', { channelId: channel.id })) as unknown[]).toEqual([])
   })
 })
+
+describe('plugin-chat — channel resources: the access-resolver surface', () => {
+  /** The kind guard's real verdict, driven through a client `open()` — not by calling the policy. */
+  const canOpen = async (c: Awaited<ReturnType<typeof newUser>>['c'], collection: 'notes' | 'scenes', id: string) => {
+    const doc = c.collection(collection).open(id)
+    try {
+      await doc.ready
+      return true
+    } catch {
+      return false
+    } finally {
+      doc.close()
+    }
+  }
+
+  it('channelsOfDoc lists every granting channel; an unattached doc grants none', async () => {
+    const { url, srv, chatKit } = await boot()
+    const ann = await newUser(url, 'ann@x.com', 'Ann')
+    const chA = await ann.c.createChannel({ name: 'a' })
+    const chB = await ann.c.createChannel({ name: 'b' })
+    await ann.c.createResource({ channelId: chA.id, kind: 'scene', id: 'S1' })
+    await ann.c.createResource({ channelId: chB.id, kind: 'scene', id: 'S1' })
+
+    expect((await chatKit.resources.channelsOfDoc('scenes', 'S1')).sort()).toEqual([chA.id, chB.id].sort())
+
+    await srv.collection('scenes').create('loose', { name: 'no registry row', elements: {} })
+    expect(await chatKit.resources.channelsOfDoc('scenes', 'loose')).toEqual([])
+  })
+
+  it('canAccessDoc: membership in ANY granting channel is enough; non-members are denied', async () => {
+    const { url, chatKit } = await boot()
+    const ann = await newUser(url, 'ann@x.com', 'Ann')
+    const bob = await newUser(url, 'bob@x.com', 'Bob')
+    const eve = await newUser(url, 'eve@x.com', 'Eve')
+    const chA = await ann.c.createChannel({ name: 'a', visibility: 'private' })
+    const chB = await ann.c.createChannel({ name: 'b' })
+    await ann.c.createResource({ channelId: chA.id, kind: 'scene', id: 'S1' })
+    await ann.c.createResource({ channelId: chB.id, kind: 'scene', id: 'S1' })
+    await bob.c.joinChannel({ channelId: chB.id }) // member of B only
+
+    expect(await chatKit.resources.canAccessDoc('scenes', 'S1', ann.userId)).toBe(true)
+    expect(await chatKit.resources.canAccessDoc('scenes', 'S1', bob.userId)).toBe(true)
+    expect(await chatKit.resources.canAccessDoc('scenes', 'S1', eve.userId)).toBe(false)
+  })
+
+  // THE invariant server.ts asserts in prose but nothing enforced: the kit resolver, the bulk id
+  // read, and the auto-contributed CRDT kind guard must never disagree about one (doc, principal).
+  it('docIdsOf, canAccessDoc and the kind guard agree across the access matrix', async () => {
+    const { url, srv, chatKit } = await boot()
+    const ann = await newUser(url, 'ann@x.com', 'Ann')
+    const bob = await newUser(url, 'bob@x.com', 'Bob')
+    const eve = await newUser(url, 'eve@x.com', 'Eve')
+    const chA = await ann.c.createChannel({ name: 'a', visibility: 'private' })
+    const chB = await ann.c.createChannel({ name: 'b', visibility: 'private' })
+    await chatKit.members.add(chB.id, bob.userId) // private: added by the kit, not self-joined
+
+    await ann.c.createResource({ channelId: chA.id, kind: 'scene', id: 'shared' }) // A + B
+    await ann.c.createResource({ channelId: chB.id, kind: 'scene', id: 'shared' })
+    await ann.c.createResource({ channelId: chA.id, kind: 'scene', id: 'aOnly' }) // A only
+    await ann.c.createResource({ channelId: chA.id, kind: 'scene', id: 'detached' })
+    await ann.c.detachResource({ channelId: chA.id, kind: 'scene', docId: 'detached' }) // linked: doc survives, row gone
+    await srv.collection('scenes').create('loose', { name: 'never attached', elements: {} })
+
+    const users = [ann, bob, eve]
+    for (const u of users) {
+      const ids = await chatKit.resources.docIdsOf('scenes', u.userId)
+      for (const docId of ['shared', 'aOnly', 'detached', 'loose']) {
+        const viaIds = ids.includes(docId)
+        const viaResolver = await chatKit.resources.canAccessDoc('scenes', docId, u.userId)
+        const viaGuard = await canOpen(u.c, 'scenes', docId)
+        expect({ docId, viaIds, viaResolver, viaGuard }).toEqual({
+          docId,
+          viaIds: viaGuard,
+          viaResolver: viaGuard,
+          viaGuard,
+        })
+      }
+    }
+
+    // and the matrix is non-trivial — otherwise the agreement above is vacuous
+    expect((await chatKit.resources.docIdsOf('scenes', ann.userId)).sort()).toEqual(['aOnly', 'shared'])
+    expect(await chatKit.resources.docIdsOf('scenes', bob.userId)).toEqual(['shared'])
+    expect(await chatKit.resources.docIdsOf('scenes', eve.userId)).toEqual([])
+  })
+
+  it('docIdsOf is scoped by collection: the same docId in another collection never bleeds through', async () => {
+    const { url, chatKit } = await boot()
+    const ann = await newUser(url, 'ann@x.com', 'Ann')
+    const channel = await ann.c.createChannel({ name: 'general' })
+    await ann.c.createResource({ channelId: channel.id, kind: 'scene', id: 'X' })
+
+    expect(await chatKit.resources.docIdsOf('scenes', ann.userId)).toEqual(['X'])
+    expect(await chatKit.resources.docIdsOf('notes', ann.userId)).toEqual([])
+    expect(await chatKit.resources.canAccessDoc('notes', 'X', ann.userId)).toBe(false)
+    expect(await chatKit.resources.channelsOfDoc('notes', 'X')).toEqual([])
+  })
+
+  it('the doc resolvers throw on a collection no registered kind points at', async () => {
+    const { url, chatKit } = await boot()
+    const ann = await newUser(url, 'ann@x.com', 'Ann')
+    await expect(chatKit.resources.channelsOfDoc('typo', 'X')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(chatKit.resources.canAccessDoc('typo', 'X', ann.userId)).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(chatKit.resources.docIdsOf('typo', ann.userId)).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it('resources.find reads across channels; members.get point-reads a membership with its role', async () => {
+    const { url, chatKit } = await boot()
+    const ann = await newUser(url, 'ann@x.com', 'Ann')
+    const bob = await newUser(url, 'bob@x.com', 'Bob')
+    const chA = await ann.c.createChannel({ name: 'a' })
+    const chB = await ann.c.createChannel({ name: 'b' })
+    await ann.c.createResource({ channelId: chA.id, kind: 'note' })
+    await ann.c.createResource({ channelId: chB.id, kind: 'scene', id: 'S1' })
+    await bob.c.joinChannel({ channelId: chB.id })
+
+    expect(await chatKit.resources.find()).toHaveLength(2)
+    expect(await chatKit.resources.find({ filter: eq('collection', 'scenes') })).toMatchObject([{ docId: 'S1' }])
+    expect(await chatKit.resources.find({ limit: 1 })).toHaveLength(1)
+
+    expect(await chatKit.members.get(chA.id, ann.userId)).toMatchObject({ userId: ann.userId, role: 'owner' })
+    expect(await chatKit.members.get(chB.id, bob.userId)).toMatchObject({ userId: bob.userId, role: 'member' })
+    expect(await chatKit.members.get(chA.id, bob.userId)).toBeUndefined()
+  })
+})

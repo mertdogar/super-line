@@ -228,6 +228,8 @@ export interface ChatMembersApi {
   add(channelId: string, userId: string, opts?: { role?: MemberRole; metadata?: Record<string, unknown> }): Promise<ChatMembership>
   remove(channelId: string, userId: string): Promise<void>
   setRole(channelId: string, userId: string, role: MemberRole): Promise<ChatMembership>
+  /** Point-read one membership — `undefined` = not a member. Returns the row, so the role comes free. */
+  get(channelId: string, userId: string): Promise<ChatMembership | undefined>
   of(channelId: string): Promise<ChatMembership[]>
   channelsOf(userId: string): Promise<ChatMembership[]>
 }
@@ -260,6 +262,19 @@ export interface ChatResourcesApi {
   detach(channelId: string, kind: string, docId: string): Promise<ChatResource>
   /** The channel's registry rows. */
   of(channelId: string): Promise<ChatResource[]>
+  /** Registry rows across channels — the bulk read `of` can't express (RLS policies, audits). */
+  find(opts?: { filter?: Expr; limit?: number; offset?: number }): Promise<ChatResource[]>
+  /**
+   * THE access resolvers for resource docs, shared verbatim with the auto-contributed kind guards so
+   * a host's policies can never drift from the plugin's. All three are scope-first, principal-last,
+   * and throw `NOT_FOUND` for a collection no registered kind points at — a typo must not read as a
+   * denial. Same subscribe-time staleness as every row policy: they answer for *now*.
+   */
+  channelsOfDoc(collection: string, docId: string): Promise<string[]>
+  /** True iff `userId` is a member of any channel granting access to the doc. */
+  canAccessDoc(collection: string, docId: string, userId: string): Promise<boolean>
+  /** Every doc id in `collection` the user can reach — the one-hop input for a host RLS filter. */
+  docIdsOf(collection: string, userId: string): Promise<string[]>
   /**
    * Host-invoked presence reaper (the `sweepStale` pattern — the plugin runs no timers): deletes
    * presence rows whose `heartbeatAt` is older than `olderThanMs`. Readers already filter by
@@ -330,6 +345,13 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
       )
   }
   const lifecycleOf = (kind: string): ResourceLifecycle => kinds[kind]?.lifecycle ?? 'owned'
+  // ONE set, shared by the auto-contributed CRDT guards and the public resolvers — so "which
+  // collections does chat gate?" cannot be answered two ways
+  const kindCollections = new Set(Object.values(kinds).map((k) => k.collection))
+  const assertKindCollection = (collection: string): void => {
+    if (!kindCollections.has(collection))
+      throw new SuperLineError('NOT_FOUND', `'${collection}' is not a registered resource-kind collection`)
+  }
 
   // captured at plugin setup; every read/write below goes through the co-writer so changes fan out live
   let pluginCtx: PluginContext | undefined
@@ -1418,7 +1440,7 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
       // registry lookup is the gate — doc ids are host-suppliable, so nothing is encoded in them (R4).
       // Read re-runs on every open (incl. reconnect re-opens); write on every cdwr (G12).
       ...Object.fromEntries(
-        [...new Set(Object.values(kinds).map((k) => k.collection))].map((collection) => [
+        [...kindCollections].map((collection) => [
           collection,
           {
             read: async (_principal: string, id: string, _snapshot: unknown, ctx: unknown) => {
@@ -1573,6 +1595,7 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     add: (channelId, userId, opts = {}) => addMemberCore({ channelId, userId, ...opts }, SERVER),
     remove: async (channelId, userId) => void (await removeMemberCore({ channelId, userId }, SERVER)),
     setRole: (channelId, userId, role) => setMemberRoleCore({ channelId, userId, role }, SERVER),
+    get: (channelId, userId) => membershipOf(channelId, userId),
     of: (channelId) => membersOf(channelId),
     channelsOf: async (userId) =>
       (await col('memberships').snapshot({ filter: eq('userId', userId) })) as ChatMembership[],
@@ -1643,6 +1666,30 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     detach: (channelId, kind, docId) => detachResourceCore({ channelId, kind, docId }, SERVER),
     of: async (channelId) =>
       (await col('resources').snapshot({ filter: eq('channelId', channelId) })) as ChatResource[],
+    find: async (opts = {}) =>
+      (await col('resources').snapshot({
+        ...(opts.filter !== undefined ? { filter: opts.filter } : {}),
+        ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
+        ...(opts.offset !== undefined ? { offset: opts.offset } : {}),
+      })) as ChatResource[],
+    // async, not a sync throw: every other kit method reports failure by rejecting
+    channelsOfDoc: async (collection, docId) => {
+      assertKindCollection(collection)
+      return channelsOfDoc(collection, docId)
+    },
+    canAccessDoc: async (collection, docId, userId) => {
+      assertKindCollection(collection)
+      return canAccessDoc(collection, docId, userId)
+    },
+    docIdsOf: async (collection, userId) => {
+      assertKindCollection(collection)
+      const mine = await channelIdsOf(userId)
+      if (mine.length === 0) return []
+      const rows = (await col('resources').snapshot({
+        filter: and(eq('collection', collection), isIn('channelId', mine)),
+      })) as ChatResource[]
+      return [...new Set(rows.map((r) => r.docId))]
+    },
     sweepPresence: async ({ olderThanMs }) => {
       const cutoff = Date.now() - olderThanMs
       const rows = (await col('resourcePresence').snapshot({})) as ResourcePresence[]

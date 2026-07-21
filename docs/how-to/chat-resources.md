@@ -88,7 +88,41 @@ lands in the message feed:
 chatKit.resources.create({ channelId, kind, title?, id?, params? }) // create-or-attach → ChatResource
 chatKit.resources.detach(channelId, kind, docId)                    // → ChatResource; owned kinds delete the doc too
 chatKit.resources.of(channelId)                                     // → ChatResource[] — the channel's registry rows
+chatKit.resources.find({ filter?, limit?, offset? })                // → ChatResource[] — the bulk read, across channels
 ```
+
+### The access resolvers
+
+Registration *is* the policy: the guards that gate a resource doc are auto-contributed from the kinds
+you register (see [Access](#_4-·-access-registration-is-the-policy)). The same three resolvers that
+back those guards are public, so a host writing its **own** row policies over its **own** collections
+answers "who can see this doc?" with the plugin's logic instead of re-deriving it:
+
+```ts
+chatKit.resources.channelsOfDoc(collection, docId)   // → string[] — channels granting access; [] = unattached
+chatKit.resources.canAccessDoc(collection, docId, userId) // → boolean — member of ANY granting channel?
+chatKit.resources.docIdsOf(collection, userId)       // → string[] — every doc in `collection` the user can reach
+chatKit.members.get(channelId, userId)               // → ChatMembership | undefined (the role comes with it)
+```
+
+All three are scope-first, principal-last, and **throw `NOT_FOUND`** for a collection no registered
+kind points at — a typo must not read as a denial. Use `docIdsOf` as the one-hop input to a policy
+over a collection of your own that references a resource doc:
+
+```ts
+policies: {
+  sceneNotes: {
+    read: async (_p, ctx) => {
+      const uid = (ctx as AuthContext).userId
+      return uid ? isIn('sceneId', await chatKit.resources.docIdsOf('scenes', uid)) : isIn('id', [])
+    },
+  },
+}
+```
+
+The usual [row-policy staleness](/collections/policies) applies: the filter is captured when the
+client subscribes, so a doc attached to a *new* channel afterwards stays invisible to that
+subscription until it resubscribes.
 
 [`examples/chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor)
 uses `of` + `create` to auto-seed every channel with a canvas and a doc the moment it appears, so no

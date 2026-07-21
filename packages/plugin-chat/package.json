@@ -1,6 +1,6 @@
 {
   "name": "@super-line/plugin-chat",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "type": "module",
   "description": "Chat backbone for super-line — channels, membership control, and messages backed by typed collections, with hookable server-authoritative requests. A paired plugin (contract · server). Requires @super-line/plugin-auth.",
   "license": "MIT",

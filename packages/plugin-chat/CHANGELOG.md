@@ -3,6 +3,13 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [plugin-chat-v0.6.3] — 2026-07-21
+
+### Features
+
+- **plugin-chat:** Publish the resource access resolvers on chatKit ([466812e])
+- **release:** Generate per-package changelogs from the commit history ([82a2232])
+
 ## [plugin-chat-v0.6.2] — 2026-07-20
 
 ### Bug Fixes

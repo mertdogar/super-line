@@ -3,6 +3,13 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [core-v0.14.0] — 2026-07-22
+
+### Features
+
+- **auth:** Add connection sessions and member presence ([1dcad5f])
+- **release:** Generate per-package changelogs from the commit history ([82a2232])
+
 ## [core-v0.13.1] — 2026-07-17
 
 ### Features

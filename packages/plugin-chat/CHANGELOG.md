@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [plugin-chat-v0.7.0] — 2026-07-22
+
+### Features
+
+- **auth:** Add connection sessions and member presence ([1dcad5f])
+
 ## [plugin-chat-v0.6.3] — 2026-07-21
 
 ### Features

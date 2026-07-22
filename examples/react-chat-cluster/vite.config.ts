@@ -12,6 +12,7 @@ export default defineConfig({
       '@super-line/core': r('../../packages/core/src/index.ts'),
       '@super-line/client': r('../../packages/client/src/index.ts'),
       '@super-line/react': r('../../packages/react/src/index.ts'),
+      '@super-line/transport-websocket': r('../../packages/transport-websocket/src/index.ts'),
     },
   },
 })

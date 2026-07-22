@@ -105,10 +105,11 @@ const chatKit = chatKitFactory({
 })
 
 createSuperLineServer(chat, {
+  nodeKey: 'chat-replica-1',
   transports: [webSocketServerTransport({ server })],
   collections: backend,
   plugins: [authKit.plugin, chatKit.plugin],        // both halves of the model live here
-  authenticate: authKit.authenticate,               // sessions / API keys / JWT — all handled
+  authenticate: authKit.authenticate,               // access tokens / API keys / JWT — all handled
   identify: authKit.identify,                        // principal := userId → drives chat's read policies
 })
 
@@ -123,8 +124,8 @@ Append this to `src/chat-backbone.ts`, below the `listen` call:
 
 ```ts [src/chat-backbone.ts]
 // Provision Ada and Bob as real users + API keys (server-authoritative; no passwords needed here).
-const ada = await authKit.users.create({ email: 'ada@my.line', displayName: 'Ada' })
-const bob = await authKit.users.create({ email: 'bob@my.line', displayName: 'Bob' })
+const ada = await authKit.users.create({ displayName: 'Ada' })
+const bob = await authKit.users.create({ displayName: 'Bob' })
 const adaKey = (await authKit.apiKeys.create(ada.id, { role: 'user', label: 'tracer' })).key
 const bobKey = (await authKit.apiKeys.create(bob.id, { role: 'user', label: 'tracer' })).key
 

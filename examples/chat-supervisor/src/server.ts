@@ -56,6 +56,7 @@ chatKit = chat({
 
 const server = http.createServer();
 const srv = createSuperLineServer(app, {
+  nodeKey: 'chat-supervisor',
   transports: [webSocketServerTransport({ server })],
   collections: backend,
   crdtCollections: docsBackend,

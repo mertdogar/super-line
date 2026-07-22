@@ -31,6 +31,7 @@ async function boot(opts?: { hooks?: ChatHooks; streaming?: ChatStreamingOptions
     ...(opts?.streaming ? { streaming: opts.streaming } : {}),
   })
   const { srv, url } = await h.server(app, {
+    nodeKey: 'chat-streaming-test',
     authenticate: authKit.authenticate,
     identify: authKit.identify,
     collections: backend,
@@ -562,6 +563,7 @@ describe('plugin-chat — streaming with a structured content schema', () => {
     const authKit = auth({ contract: richApp, collections: backend, defaultRoles: ['user'] })
     const chatKit = chat({ contract: richApp, ...(streaming ? { streaming } : {}) })
     const { srv, url } = await h.server(richApp, {
+      nodeKey: 'chat-streaming-rich-test',
       authenticate: authKit.authenticate,
       identify: authKit.identify,
       collections: backend,
@@ -631,6 +633,7 @@ describe('plugin-chat — host-typed data parts', () => {
     const authKit = auth({ contract: dataApp, collections: backend, defaultRoles: ['user'] })
     const chatKit = chat({ contract: dataApp, ...(streaming ? { streaming } : {}) })
     const { srv, url } = await h.server(dataApp, {
+      nodeKey: 'chat-streaming-data-test',
       authenticate: authKit.authenticate,
       identify: authKit.identify,
       collections: backend,

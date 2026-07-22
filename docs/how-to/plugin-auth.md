@@ -1,6 +1,6 @@
 # Authentication — `@super-line/plugin-auth`
 
-Proper authentication as a **paired plugin**: email/password sign-up + login, server-issued **sessions**,
+Proper authentication as a **paired plugin**: email/password sign-up + login, reusable **access tokens**, connection **sessions**,
 data-driven **roles**, **API keys**, and **JWT** — with all identity held in typed [collections](/collections/).
 It builds on super-line's connect-time [`authenticate`](/how-to/roles-auth) model; you wire it in three places
 and the plugin owns the rest.
@@ -14,7 +14,7 @@ pnpm add @super-line/plugin-auth
 ### 1 · Contract
 
 `authContract()` is the contract-time half — merged into your contract, it adds the `guest` role, the
-`users`/`credentials`/`sessions`/`apiKeys` collections, and the `signIn`/`signUp`/`signOut`/`whoami` surface. Because
+auth collections, and the `signIn`/`signUp`/`signOut`/`whoami` surface. Because
 it merges into the one contract, `RowOf`, `client.collection`, and per-role `Requests` all keep working end-to-end.
 
 ```ts
@@ -45,8 +45,9 @@ const backend = sqliteCollections({ file: 'app.db', collections: app.collections
 const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
 
 createSuperLineServer(app, {
+  nodeKey: 'app-replica-1', // stable for this replica across restarts
   collections: backend,
-  authenticate: authKit.authenticate, // verifies the session token → { role, ctx: { userId, roles, sessionId } }
+  authenticate: authKit.authenticate, // verifies a credential and creates a connection session
   identify: authKit.identify, // principal := userId, so every row policy keys on the logged-in user
   plugins: [authKit.plugin], // handlers + open/deny-all row policies
 })
@@ -82,7 +83,7 @@ Not using React? `authClient()` from `@super-line/plugin-auth/client` is the sam
 ## How login works over the bus
 
 super-line freezes a connection's role at connect, so there's no "log in and upgrade this socket." The client half
-hides the dance: `signIn()` connects as `guest`, mints a session, then transparently **reconnects** as your
+hides the dance: `signIn()` connects as `guest`, mints an access token, then transparently **reconnects** as your
 `authedRole` carrying the token — and persists it across reloads.
 
 ## Roles are data
@@ -97,7 +98,8 @@ await srv.collection('users').update({ ...user, roles: ['user', 'admin'] })
 ## Row security
 
 The plugin ships policies for its own collections — `users` is a public directory (readable), while
-`credentials`/`sessions`/`apiKeys` are server-only (deny-all). Your collections key their policies on the
+`credentials`/`accessTokens`/`sessions`/`apiKeys` are server-only (deny-all). `userPresence` follows the
+`usersReadable` policy. Your collections key their policies on the
 `principal`, which is now the logged-in `userId`:
 
 ```ts
@@ -114,7 +116,7 @@ Long-lived credentials with one fixed role, for services and CI:
 
 ```ts
 const { key } = await client.createApiKey({ label: 'ci', role: 'user' }) // the raw key is returned ONCE
-// a service connects with it — no session, no login:
+// a service connects with it and receives a normal connection session:
 createSuperLineClient(app, { role: 'user', params: { apiKey: key } })
 ```
 
@@ -127,14 +129,14 @@ verify statelessly, or to connect super-line without a DB round-trip via `params
 
 ## Revocation
 
-`authKit.revoke(userId)` deletes a user's sessions **and** disconnects their live connections cluster-wide — an admin
-ban or "sign out of all devices". (A signed-out session simply can't reconnect.)
+`authKit.revoke(userId)` revokes a user's access tokens, ends their active sessions, and disconnects their live
+connections cluster-wide. This supports an admin ban or "sign out of all devices."
 
 ## Password reset
 
 Provide a `sendPasswordReset({ user, token })` callback (email/SMS is yours to deliver). `requestPasswordReset` returns
 a constant response — it never reveals whether an email exists — and `confirmPasswordReset` resets the password and
-flushes existing sessions.
+revokes existing access tokens and ends their active sessions.
 
 ## Server-side management (`authKit`)
 
@@ -146,12 +148,14 @@ running server (the co-writer binds at plugin setup):
 // authKit.users — the directory, back-office edits, and provisioning
 authKit.users.get(id)                                         // → AuthUser | undefined
 authKit.users.find({ filter?, limit?, offset?, includeDeactivated? }) // → AuthUser[] (active-only by default)
-authKit.users.create({ email, password?, displayName, roles?, metadata? }) // omit password → invite flow
+authKit.users.create({ displayName, roles?, metadata? })
 authKit.users.update(id, { displayName?, metadata? })
 authKit.users.setRoles(id, roles)                             // validated against contract roles (connect-time)
 authKit.users.deactivate(id)   // soft-delete: stamp deletedAt, flush sessions/keys/resets, kick connections
 authKit.users.reactivate(id)   // lift the deactivation
-authKit.users.setPassword(id, newPassword)                   // admin rotation; flushes sessions + reset tokens
+// authKit.credentials — attach email/password authentication only when needed
+authKit.credentials.create(userId, { email, password? })     // omit password → invite flow
+authKit.credentials.setPassword(userId, newPassword)         // rotation; revokes access + reset tokens
 
 // authKit.apiKeys — provision agents & services
 authKit.apiKeys.create(userId, { role, label, expiresInMs? }) // → { …info, key } — raw slp_… returned ONCE

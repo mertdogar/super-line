@@ -108,6 +108,7 @@ describe('plugin-chat — Standard Schema bridge', () => {
     const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
     const chatKit = chat({ contract: app })
     const { url } = await h.server(app, {
+      nodeKey: 'chat-standard-schema-test',
       authenticate: authKit.authenticate,
       identify: authKit.identify,
       collections: backend,

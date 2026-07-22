@@ -402,6 +402,7 @@ async function boot() {
   const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
   const chatKit = chat({ contract: app })
   const { url } = await h.server(app, {
+    nodeKey: 'chat-mastra-test',
     authenticate: authKit.authenticate,
     identify: authKit.identify,
     collections: backend,

@@ -18,6 +18,10 @@ type Awaitable<T> = T | Promise<T>
 /** The three row mutations a write policy guards. */
 export type WriteOp = 'insert' | 'update' | 'delete'
 
+export type ServerCollectionOp =
+  | { op: 'insert' | 'update'; collection: string; row: unknown }
+  | { op: 'delete'; collection: string; id: string }
+
 /**
  * Everything the Collection runtime needs from a connection — the whole of it. The server's `Conn` class
  * satisfies this structurally, so nothing adapts at the call site; stating it as its own interface is what

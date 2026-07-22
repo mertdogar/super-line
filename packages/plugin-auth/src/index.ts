@@ -3,6 +3,8 @@ import { defineContractPlugin, defineSurface } from '@super-line/core'
 
 /** The unauthenticated role the auth plugin adds to the contract. The only role name the plugin hardcodes. */
 export const GUEST_ROLE = 'guest'
+/** A session is publicly online while its last confirmed heartbeat is newer than this threshold. */
+export const USER_PRESENCE_LIVE_MS = 90_000
 
 // ── auth collection row schemas ──────────────────────────────────────────────────────────────────
 
@@ -25,12 +27,32 @@ export const credentialSchema = z.object({
   userId: z.string(),
   passwordHash: z.string(),
 })
-/** Secret: a live session. pk = sha256(token). Server-only (deny-all). Identity only — the role is chosen per connect. */
-export const sessionSchema = z.object({
+/** Secret: a reusable password-login bearer token. pk = sha256(token). Server-only (deny-all). */
+export const accessTokenSchema = z.object({
   id: z.string(),
   userId: z.string(),
   createdAt: z.number(),
   expiresAt: z.number(),
+})
+/** Secret: one accepted authenticated realtime connection. Server-only (deny-all). */
+export const sessionSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  nodeId: z.string(),
+  nodeKey: z.string(),
+  role: z.string(),
+  transport: z.string(),
+  authMethod: z.string(),
+  authId: z.string().nullable(),
+  connectedAt: z.number(),
+  lastSeenAt: z.number(),
+  endedAt: z.number().nullable(),
+})
+/** Safe public aggregate of a user's authenticated connection sessions. */
+export const userPresenceSchema = z.object({
+  userId: z.string(),
+  connectedAt: z.number().nullable(),
+  lastSeenAt: z.number().nullable(),
 })
 /** Secret: a long-lived API key. pk = sha256(key). Server-only (deny-all). Carries ONE fixed role. */
 export const apiKeySchema = z.object({
@@ -51,7 +73,9 @@ export const passwordResetSchema = z.object({
 
 export type AuthUser = z.infer<typeof userSchema>
 export type AuthCredential = z.infer<typeof credentialSchema>
+export type AuthAccessToken = z.infer<typeof accessTokenSchema>
 export type AuthSession = z.infer<typeof sessionSchema>
+export type AuthUserPresence = z.infer<typeof userPresenceSchema>
 export type AuthApiKey = z.infer<typeof apiKeySchema>
 export type AuthPasswordReset = z.infer<typeof passwordResetSchema>
 
@@ -60,6 +84,8 @@ export interface AuthContext {
   userId: string | null
   roles: string[]
   sessionId: string | null
+  authMethod: string | null
+  authId: string | null
 }
 
 // ── request defs (shared by the contract fragment AND the server plugin's paired surface) ─────────
@@ -130,7 +156,9 @@ export function authContract() {
     collections: {
       users: { schema: userSchema, key: 'id' },
       credentials: { schema: credentialSchema, key: 'email' },
+      accessTokens: { schema: accessTokenSchema, key: 'id' },
       sessions: { schema: sessionSchema, key: 'id' },
+      userPresence: { schema: userPresenceSchema, key: 'userId' },
       apiKeys: { schema: apiKeySchema, key: 'id' },
       passwordResets: { schema: passwordResetSchema, key: 'id' },
     },

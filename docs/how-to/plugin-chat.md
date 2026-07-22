@@ -93,6 +93,7 @@ const chatKit = chat({
 })
 
 createSuperLineServer(app, {
+  nodeKey: 'chat-replica-1',
   collections: backend,
   authenticate: authKit.authenticate,
   identify: authKit.identify, // principal := userId — drives the chat read policies
@@ -115,6 +116,7 @@ const channel = await chat.createChannel({ name: 'general', visibility: 'public'
 await chat.send(channel.id, 'hello')
 
 const feed = chat.messages(channel.id, { limit: 200 }) // live, chronological, newest-N window
+const members = chat.members(channel.id) // membership + displayName + connection presence
 feed.subscribe(() => render(feed.rows()))
 ```
 
@@ -128,7 +130,14 @@ React bindings come from `@super-line/plugin-chat/react`:
 const { ChatProvider, useChat, useChannels, useMembers, useMessages } = createChatHooks<typeof app>()
 // <ChatProvider chat={chatClient(client, { userId })}> … </ChatProvider>
 const messages = useMessages(channelId)
+const members = useMembers(channelId)
 ```
+
+`members()` and `useMembers()` return each membership with `displayName`, `online`, `connectedAt`,
+and `lastSeenAt`. `online` expires locally 90 seconds after the last confirmed heartbeat, even when
+no new collection event arrives. Configure another window with
+`chatClient(client, { presenceTimeoutMs })`; keep it above the server heartbeat interval. With
+heartbeats disabled, a connection cannot keep its presence fresh.
 
 `useMessages`/`useMessageParts` are null-tolerant — pass `null`/`undefined` while no channel or
 message is selected and they idle at `[]` with no subscription. `useMe()` returns the signed-in

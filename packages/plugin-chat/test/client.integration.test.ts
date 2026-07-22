@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { defineContract } from '@super-line/core'
 import { memoryCollections } from '@super-line/collections-memory'
@@ -25,6 +25,7 @@ async function boot(opts?: { streaming?: ChatStreamingOptions }) {
   const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
   const chatKit = chat({ contract: app, ...(opts?.streaming ? { streaming: opts.streaming } : {}) })
   const { srv, url } = await h.server(app, {
+    nodeKey: 'chat-client-test',
     authenticate: authKit.authenticate,
     identify: authKit.identify,
     collections: backend,
@@ -43,6 +44,47 @@ async function newUser(url: string, email: string, name: string) {
 }
 
 describe('plugin-chat/client — live stores', () => {
+  it('expires stale presence on its own timer and cleans the timer up on close', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    const rows = {
+      memberships: [{ id: 'channel:user', channelId: 'channel', userId: 'user', role: 'member', joinedAt: 1 }],
+      users: [{ id: 'user', displayName: 'User', roles: ['user'], createdAt: 1 }],
+      userPresence: [{ userId: 'user', connectedAt: 1_000_000, lastSeenAt: 1_000_000 }],
+    }
+    const live = (name: keyof typeof rows) => ({
+      ready: Promise.resolve(),
+      rows: () => rows[name],
+      subscribe: () => () => {},
+      close: () => {},
+    })
+    const client = {
+      collection: (name: keyof typeof rows) => ({ subscribe: () => live(name) }),
+      on: () => () => {},
+      onReconnect: () => () => {},
+    }
+    const chat = chatClient(client as never, { userId: 'user', presenceTimeoutMs: 100 })
+    try {
+      await chat.ready
+      const members = chat.members('channel')
+      await members.ready
+      expect(members.rows()[0]).toMatchObject({ online: true, connectedAt: 1_000_000 })
+
+      let changes = 0
+      members.subscribe(() => changes++)
+      await vi.advanceTimersByTimeAsync(101)
+      expect(members.rows()[0]).toMatchObject({ online: false, connectedAt: 1_000_000, lastSeenAt: 1_000_000 })
+      expect(changes).toBe(1)
+
+      members.close()
+      await vi.advanceTimersByTimeAsync(101)
+      expect(changes).toBe(1)
+    } finally {
+      chat.close()
+      vi.useRealTimers()
+    }
+  })
+
   it('stores deliver the snapshot and stream live changes; request wrappers round-trip', async () => {
     const { url } = await boot()
     const ann = await newUser(url, 'ann@x.com', 'Ann')
@@ -59,7 +101,16 @@ describe('plugin-chat/client — live stores', () => {
     const feed = chat.messages(ch.id)
     const members = chat.members(ch.id)
     await Promise.all([feed.ready, members.ready])
-    expect(members.rows()).toMatchObject([{ userId: ann.userId, role: 'owner' }])
+    expect(members.rows()).toMatchObject([
+      {
+        userId: ann.userId,
+        role: 'owner',
+        displayName: 'Ann',
+        online: true,
+        connectedAt: expect.any(Number),
+        lastSeenAt: expect.any(Number),
+      },
+    ])
 
     const sent = await chat.send(ch.id, 'hello world')
     expect(sent.content).toBe('hello world')
@@ -99,6 +150,43 @@ describe('plugin-chat/client — live stores', () => {
     annChat.close()
     bobChat.close()
     ann.c.close()
+    bob.c.close()
+  })
+
+  it('members joins live profile and connection presence updates', async () => {
+    const { srv, url, authKit } = await boot()
+    const ann = await newUser(url, 'presence-ann@x.com', 'Ann')
+    const bob = await newUser(url, 'presence-bob@x.com', 'Bob')
+    const annChat = chatClient(ann.c, { userId: ann.userId })
+    const bobChat = chatClient(bob.c, { userId: bob.userId })
+    await Promise.all([annChat.ready, bobChat.ready])
+    const channel = await annChat.createChannel({ name: 'presence' })
+    await annChat.addMember(channel.id, bob.userId)
+    const members = bobChat.members(channel.id)
+    await members.ready
+    await waitFor(() => members.rows().length === 2)
+    expect(members.rows().find((member) => member.userId === ann.userId)).toMatchObject({
+      displayName: 'Ann',
+      online: true,
+    })
+
+    await authKit.users.update(ann.userId, { displayName: 'Ann Updated' })
+    await waitFor(() => members.rows().some((member) => member.displayName === 'Ann Updated'))
+    const annProfile = await srv.collection('users').read(ann.userId)
+    await srv.collection('users').delete(ann.userId)
+    await waitFor(() => !members.rows().some((member) => member.userId === ann.userId))
+    await srv.collection('users').insert(annProfile!)
+    await waitFor(() => members.rows().some((member) => member.userId === ann.userId))
+    ann.c.close()
+    await waitFor(() => members.rows().find((member) => member.userId === ann.userId)?.online === false)
+    expect(members.rows().find((member) => member.userId === ann.userId)).toMatchObject({
+      connectedAt: null,
+      lastSeenAt: expect.any(Number),
+    })
+
+    members.close()
+    annChat.close()
+    bobChat.close()
     bob.c.close()
   })
 

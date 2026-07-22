@@ -45,7 +45,7 @@ proof, running against a live server in CI (`src/tui/smoke.tsx`).
   [super-harness TUI](https://github.com/mertdogar/super-harness)): the prompt owns keys; **Tab on
   an empty prompt** hands them to the pane; a dialog takes them while open. `/` opens the command
   popover; `↑` recalls history; `Shift+Enter` inserts a newline.
-- **Login is real** plugin-auth email/password (register on first run), with the session token
+- **Login is real** plugin-auth email/password (register on first run), with the access token
   cached to `~/.chat-supervisor-tui.json` — restarts reconnect silently, and the
   [headless shell](/how-to/chat-headless) reuses the same file.
 

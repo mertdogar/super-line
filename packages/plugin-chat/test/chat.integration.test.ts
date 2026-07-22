@@ -25,6 +25,7 @@ function _chatTypeCheck(): void {
   const authKit = auth({ contract: app, collections: backend })
   const chatKit = chat({ contract: app })
   const srv = createSuperLineServer(app, {
+    nodeKey: 'chat-typecheck',
     transports: [],
     collections: backend,
     authenticate: authKit.authenticate,
@@ -56,6 +57,7 @@ async function boot(hooks?: ChatHooks) {
   const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
   const chatKit = chat({ contract: app, ...(hooks ? { hooks } : {}) })
   const { srv, url } = await h.server(app, {
+    nodeKey: 'chat-test',
     authenticate: authKit.authenticate,
     identify: authKit.identify,
     collections: backend,
@@ -328,7 +330,7 @@ describe('plugin-chat — imperative kit + agents', () => {
     const ch = await ann.c.createChannel({ name: 'ask-ai' })
 
     // provision the agent exactly as PLAN decision 13 prescribes
-    const bot = await authKit.users.create({ email: 'bot@x.com', displayName: 'Helper Bot' })
+    const bot = await authKit.users.create({ displayName: 'Helper Bot' })
     const key = await authKit.apiKeys.create(bot.id, { role: 'user', label: 'helper' })
     await chatKit.members.add(ch.id, bot.id)
 
@@ -361,6 +363,7 @@ describe('plugin-chat — host-parametrized content', () => {
     const authKit = auth({ contract: richApp, collections: backend, defaultRoles: ['user'] })
     const chatKit = chat({ contract: richApp })
     const { srv, url } = await h.server(richApp, {
+      nodeKey: 'chat-rich-test',
       authenticate: authKit.authenticate,
       identify: authKit.identify,
       collections: backend,

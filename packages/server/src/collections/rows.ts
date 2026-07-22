@@ -20,6 +20,7 @@ import type {
   CollectionRuntimeConfig,
   CollectionPolicy,
   ServerCollectionHandle,
+  ServerCollectionOp,
   WriteOp,
 } from './types.js'
 
@@ -46,6 +47,7 @@ export interface RowCollections {
   onRelay(payload: string | Uint8Array): void
   detach(conn: CollectionConn): void
   handle(name: string): ServerCollectionHandle
+  batch(ops: ServerCollectionOp[]): Promise<void>
   /** True when this node must subscribe to {@link COLL_CHANNEL} (a relay backend fans batches over the Adapter). */
   readonly isRelay: boolean
 }
@@ -218,6 +220,24 @@ export function createRowCollections(config: CollectionRuntimeConfig, host: Coll
     if (relay && isRelay) host.cluster.broadcast(COLL_CHANNEL, { ops, origin } satisfies CollRelay)
   }
 
+  async function serverBatch(ops: ServerCollectionOp[]): Promise<void> {
+    const resolved: ResolvedRowOp[] = []
+    for (const op of ops) {
+      const def = defs[op.collection]
+      if (!def || isCrdtCollection(def)) throw new SuperLineError('NOT_FOUND', `Collection not declared: ${op.collection}`)
+      if (op.op === 'delete') {
+        resolved.push({ op: 'delete', n: op.collection, id: op.id })
+        continue
+      }
+      const row = await validate(def.schema, op.row)
+      const id = (row as Record<string, unknown>)[def.key]
+      if (typeof id !== 'string')
+        throw new SuperLineError('VALIDATION', `Collection ${op.collection} row is missing string key '${def.key}'`)
+      resolved.push({ op: op.op, n: op.collection, id, row })
+    }
+    await commit(resolved, SERVER_ORIGIN, true)
+  }
+
   async function onBatch(conn: CollectionConn, frame: CBatchFrame): Promise<void> {
     if (!store) {
       conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: 'No collection backend configured' })
@@ -319,5 +339,5 @@ export function createRowCollections(config: CollectionRuntimeConfig, host: Coll
 
   if (store) store.onChange(route) // one subscription drives all local delivery
 
-  return { onSub, onUnsub, onBatch, onRelay, detach, handle, isRelay }
+  return { onSub, onUnsub, onBatch, onRelay, detach, handle, batch: serverBatch, isRelay }
 }

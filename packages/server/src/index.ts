@@ -52,7 +52,13 @@ import { Conn, resolvePrincipal } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
 import { createCluster } from './cluster.js'
 import { createCollectionRuntime, CDOC, COLL_CHANNEL } from './collections/index.js'
-import type { CollectionPolicy, ServerCollectionHandle, CrdtCollectionPolicy, ServerCrdtCollectionHandle } from './collections/index.js'
+import type {
+  CollectionPolicy,
+  ServerCollectionHandle,
+  ServerCollectionOp,
+  CrdtCollectionPolicy,
+  ServerCrdtCollectionHandle,
+} from './collections/index.js'
 
 export { Conn, resolvePrincipal } from './conn.js'
 export { MemoryBus, createInMemoryAdapter } from './memory-adapter.js'
@@ -66,6 +72,7 @@ export type {
   CollectionRuntime,
   CollectionRuntimeConfig,
   ServerCollectionHandle,
+  ServerCollectionOp,
   WriteOp,
   CrdtCollectionPolicy,
   ServerCrdtCollectionHandle,
@@ -83,7 +90,7 @@ type Awaitable<T> = T | Promise<T>
  * handler surface and `ctx` together.
  */
 export type AuthResult<C extends Contract> = {
-  [R in RoleOf<C>]: { role: R; ctx: unknown; env?: EnvOf<C, R> }
+  [R in RoleOf<C>]: { role: R; ctx: unknown; env?: EnvOf<C, R>; connectionId?: string }
 }[RoleOf<C>]
 type CtxFor<A, R> = A extends { role: R; ctx: infer X } ? X : never
 type CtxUnion<A> = A extends { ctx: infer X } ? X : never
@@ -141,9 +148,9 @@ export type Handlers<C extends Contract, A> = ([keyof SharedRequests<C>] extends
 export interface MiddlewareInfo {
   /**
    * The operation kind. Middleware only ever sees `'request'`/`'subscribe'`; `'event'` marks a bus
-   * event delivery, and `'connect'`/`'disconnect'` mark a lifecycle-hook throw routed to `onError`.
+   * event delivery, and lifecycle kinds mark a lifecycle-hook throw routed to `onError`.
    */
-  kind: 'request' | 'subscribe' | 'event' | 'connect' | 'disconnect'
+  kind: 'request' | 'subscribe' | 'event' | 'connect' | 'disconnect' | 'heartbeat'
   /** The request/topic/event name (the hook name for lifecycle errors). */
   name: string
   /** The connection the operation is on, if any (`conn.role` available). Absent for bus events. */
@@ -304,7 +311,9 @@ export interface SuperLinePlugin<S extends Directional = {}> {
   /** Called once per accepted connection (multiplexed after the host's `onConnection`). */
   onConnection?: (conn: Conn, ctx: unknown) => void
   /** Called when a connection closes (multiplexed after the host's `onDisconnect`). */
-  onDisconnect?: (conn: Conn, ctx: unknown, code: number) => void
+  onDisconnect?: (conn: Conn, ctx: unknown, code: number) => Awaitable<void>
+  /** Called after a connection confirms a heartbeat ping with a pong. */
+  onHeartbeat?: (conn: Conn, ctx: unknown, at: number) => Awaitable<void>
   /** Receives any error thrown in middleware/handlers/hooks (multiplexed with the host's `onError`). */
   onError?: (error: unknown, info: MiddlewareInfo) => void
   /**
@@ -379,6 +388,8 @@ export interface PluginContext {
   readonly nodeId: string
   /** This node's friendly name (equals `srv.nodeName`). */
   readonly nodeName: string
+  /** Stable replica identity supplied by the host, if configured. */
+  readonly nodeKey?: string
   /** Alias of {@link PluginContext.nodeId} — the per-process instance id used to tag cluster fan-out. */
   readonly instanceId: string
   /** The wire serializer configured on the server. */
@@ -411,6 +422,8 @@ export interface PluginContext {
   }
   /** Server-authoritative handle for a contract collection (loosely typed here as the LWW row handle — the surface plugins/inspector use); throws if none is configured. */
   collection(name: string): ServerCollectionHandle
+  /** Apply one atomic, schema-validated server batch across row collections. */
+  batch(ops: ServerCollectionOp[]): Promise<void>
   /** Declared collections (name + key + advisory references) for the schema graph. */
   collectionInfos(): { name: string; key: string; references: Record<string, string> }[]
   /** Full cluster descriptor for a local connection (identity + rooms + `describeConn` extras). */
@@ -440,6 +453,8 @@ export interface SuperLineServerOptions<
    * Control Center topology. Defaults to `SUPER_LINE_NODE_NAME` or a short slice of `nodeId`.
    */
   nodeName?: string
+  /** Stable replica identity across restarts, for plugins that persist node-owned state. */
+  nodeKey?: string
   /** Authenticate a connection from its normalized {@link Handshake}. Return { role, ctx }, or throw to reject. */
   authenticate: (handshake: Handshake) => Awaitable<A>
   /** Stable user key for a connection (powers `cluster.byUser`, `isOnline`, and `toUser`). */
@@ -500,6 +515,8 @@ export interface SuperLineServer<C extends Contract, A extends AuthResult<C>, HK
   readonly nodeId: string
   /** This node's friendly name (from `nodeName`/`SUPER_LINE_NODE_NAME`, else a short `nodeId` slice). */
   readonly nodeName: string
+  /** Stable replica identity supplied by the host, if configured. */
+  readonly nodeKey?: string
   /** Synchronous, node-local introspection (connections, rooms, topics on this process). */
   readonly local: LocalView
   /** Asynchronous, cluster-wide introspection backed by the adapter's presence directory. */
@@ -530,7 +547,7 @@ export interface SuperLineServer<C extends Contract, A extends AuthResult<C>, HK
   forRole<R extends RoleOf<C>>(role: R): RoleLens<C, R>
   /**
    * Server-authoritative handle for a contract collection, typed by the contract: an LWW row collection gives
-   * `ServerCollectionHandle` (`insert`/`update`/`batch`), a CRDT document collection gives
+   * `ServerCollectionHandle` (`insert`/`update`/`delete`), a CRDT document collection gives
    * `ServerCrdtCollectionHandle` (`create`/`open`). Throws `NOT_FOUND` if no matching backend is configured
    * or the name isn't declared.
    */
@@ -640,15 +657,31 @@ export function createSuperLineServer<
     }
   }
 
-  const disconnectHooks: Array<(conn: Conn, ctx: unknown, code: number) => void> = []
-  if (opts.onDisconnect) disconnectHooks.push(opts.onDisconnect as (conn: Conn, ctx: unknown, code: number) => void)
+  const disconnectHooks: Array<(conn: Conn, ctx: unknown, code: number) => Awaitable<void>> = []
+  if (opts.onDisconnect) disconnectHooks.push(opts.onDisconnect as (conn: Conn, ctx: unknown, code: number) => Awaitable<void>)
   for (const p of plugins) if (p.onDisconnect) disconnectHooks.push(p.onDisconnect)
   function fireDisconnect(conn: Conn, ctx: unknown, code: number): void {
     for (const handler of disconnectHooks) {
       try {
-        handler(conn, ctx, code)
+        void Promise.resolve(handler(conn, ctx, code)).catch((err: unknown) => {
+          fireError(err, { kind: 'disconnect', name: 'onDisconnect', conn })
+        })
       } catch (err) {
         fireError(err, { kind: 'disconnect', name: 'onDisconnect', conn })
+      }
+    }
+  }
+
+  const heartbeatHooks: Array<(conn: Conn, ctx: unknown, at: number) => Awaitable<void>> = []
+  for (const p of plugins) if (p.onHeartbeat) heartbeatHooks.push(p.onHeartbeat)
+  function fireHeartbeat(conn: Conn, ctx: unknown, at: number): void {
+    for (const handler of heartbeatHooks) {
+      try {
+        void Promise.resolve(handler(conn, ctx, at)).catch((err: unknown) => {
+          fireError(err, { kind: 'heartbeat', name: 'onHeartbeat', conn })
+        })
+      } catch (err) {
+        fireError(err, { kind: 'heartbeat', name: 'onHeartbeat', conn })
       }
     }
   }
@@ -673,6 +706,7 @@ export function createSuperLineServer<
   const cluster = createCluster(adapter, serializer, instanceId)
   const envNodeName = typeof process !== 'undefined' ? process.env.SUPER_LINE_NODE_NAME : undefined
   const nodeName = opts.nodeName ?? envNodeName ?? instanceId.slice(0, 8)
+  const nodeKey = opts.nodeKey
   const replyChannel = REPLY + instanceId
   let impl: Impl = {}
   let closing = false // close() is idempotent
@@ -978,7 +1012,7 @@ export function createSuperLineServer<
   // Core owns the auth decision; each transport calls this at its native moment and rejects natively on throw.
   const authHook = async (handshake: Handshake): Promise<AuthOutcome> => {
     const auth = await opts.authenticate(handshake)
-    return { role: auth.role, ctx: auth.ctx, env: auth.env, transport: handshake.transport }
+    return { role: auth.role, ctx: auth.ctx, env: auth.env, transport: handshake.transport, connectionId: auth.connectionId }
   }
 
   // A transport accepted (and authenticated) a connection — wire it up. Reserved conns (a role the server
@@ -987,7 +1021,11 @@ export function createSuperLineServer<
     const role = auth.role
     const ctx = auth.ctx
     const isReserved = reservedRoles.has(role) // a plugin-declared reserved role (e.g. the inspector's)
-    const connId = randomUUID()
+    const connId = auth.connectionId ?? randomUUID()
+    if ([...conns, ...reservedConns].some((conn) => conn.id === connId)) {
+      raw.close(1008, 'duplicate connection id')
+      return
+    }
     const conn = new Conn(
       raw,
       connId,
@@ -1079,8 +1117,10 @@ export function createSuperLineServer<
     } else if (frame.t === 'serr') {
       await handleClientReply(conn, frame.i, { ok: false, code: frame.code, m: frame.m, d: frame.d })
     } else if (frame.t === 'pong') {
-      conn.lastPongAt = Date.now()
+      const now = Date.now()
+      conn.lastPongAt = now
       conn.missedPongs = 0
+      fireHeartbeat(conn, conn.ctx, now)
     }
   }
 
@@ -1393,6 +1433,7 @@ export function createSuperLineServer<
   const api: SuperLineServer<C, A, HandledKeys<P>> = {
     nodeId: instanceId,
     nodeName,
+    nodeKey,
     get local(): LocalView {
       return {
         connections: [...conns],
@@ -1523,6 +1564,7 @@ export function createSuperLineServer<
     return {
       nodeId: instanceId,
       nodeName,
+      nodeKey,
       instanceId,
       serializer,
       contract: c,
@@ -1559,6 +1601,7 @@ export function createSuperLineServer<
         }
       },
       collection: (name) => api.collection(name as CollectionName<C>) as ServerCollectionHandle,
+      batch: collections.batch,
       collectionInfos: () => collections.infos(),
       describe: (conn) => buildDescriptor(conn),
       connectionById: (id) => Promise.resolve(presenceOrThrow().get(id)),

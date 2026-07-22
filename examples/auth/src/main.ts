@@ -35,9 +35,10 @@ async function main(): Promise<void> {
   const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
 
   const srv = createSuperLineServer(app, {
+    nodeKey: 'auth-example',
     transports: [webSocketServerTransport({ server })],
     collections: backend,
-    authenticate: authKit.authenticate, // verifies the session token → { role, ctx }; wired top-level for clean ctx inference
+    authenticate: authKit.authenticate, // verifies an access token and records the connection session
     identify: authKit.identify, // principal := userId, so row policies key on the logged-in user
     // The plugin locks credentials/sessions and opens the users directory; the app adds only its notes policy.
     policies: {
@@ -88,12 +89,12 @@ async function main(): Promise<void> {
   await dir.ready
   console.log('  directory  →', dir.rows().map((r) => r.displayName).sort()) // ['Alice', 'Bob']
 
-  // ── Roles are just data. Grant Alice `admin` by co-writing her user row; her session token then opens an
+  // ── Roles are just data. Grant Alice `admin` by co-writing her user row; her access token then opens an
   //    admin connection (authenticate validates the requested role against her granted roles). ──
   console.log('\n— Alice is promoted to admin —')
   await srv.collection('users').update({ id: aliceId, displayName: 'Alice', roles: ['user', 'admin'], createdAt: Date.now() })
   const guest = createSuperLineClient(app, { transport: transport(), role: 'guest' })
-  const { token } = await guest.signIn({ email: 'alice@example.com', password: 'correct-horse' }) // fresh session token
+  const { token } = await guest.signIn({ email: 'alice@example.com', password: 'correct-horse' }) // fresh access token
   guest.close()
   const adminAlice = createSuperLineClient(app, { transport: transport(), role: 'admin', params: { token } })
   console.log('  admin stats →', await adminAlice.stats()) // { users: 2 } — the same token now authorizes 'admin'

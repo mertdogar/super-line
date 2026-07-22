@@ -38,7 +38,7 @@ export const chat = defineContract({
       },
     },
   },
-  // plugin-auth: guest role + users/credentials/sessions collections + signIn/signUp/signOut/whoami.
+  // plugin-auth: guest role + identity, credential, access-token, session, and presence collections.
   // plugin-chat: channels/memberships/messages collections + the chat mutation requests (default text body).
   // `data` types the agent's durable data parts: per-turn token usage (0.6.0 mapDataPart on framing
   // chunks). Any Standard Schema validator works here — your zod version doesn't have to match the

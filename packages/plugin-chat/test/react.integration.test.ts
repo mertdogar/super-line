@@ -31,6 +31,7 @@ async function boot() {
   const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
   const chatKit = chat({ contract: app })
   const { url } = await h.server(app, {
+    nodeKey: 'chat-react-test',
     authenticate: authKit.authenticate,
     identify: authKit.identify,
     collections: backend,
@@ -107,6 +108,12 @@ describe('plugin-chat/react — null-tolerant hooks under StrictMode', () => {
 
     view.rerender({ id: ch.id })
     await waitFor(() => expect(view.result.current.members).toHaveLength(1))
+    expect(view.result.current.members[0]).toMatchObject({
+      displayName: 'members@x.com',
+      online: true,
+      connectedAt: expect.any(Number),
+      lastSeenAt: expect.any(Number),
+    })
     ann.chat.close()
   })
 

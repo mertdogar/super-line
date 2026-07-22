@@ -21,7 +21,7 @@ function hasFlag(argv: string[], flag: string): boolean {
 
 export interface Config {
   url: string
-  /** Where the session token is cached so restarts reconnect without a login. */
+  /** Where the access token is cached so restarts reconnect without a login. */
   cachePath: string
   /** Headless stdin/stdout shell instead of the OpenTUI cockpit. `--headless` OR a non-TTY stdout. */
   headless: boolean

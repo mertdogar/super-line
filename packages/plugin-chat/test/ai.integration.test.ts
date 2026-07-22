@@ -30,6 +30,7 @@ async function boot() {
   const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
   const chatKit = chat({ contract: app })
   const { srv, url } = await h.server(app, {
+    nodeKey: 'chat-ai-test',
     authenticate: authKit.authenticate,
     identify: authKit.identify,
     collections: backend,
@@ -43,7 +44,7 @@ async function boot() {
   g.close()
   const annClient = h.client(app, { url, role: 'user', params: { token: human.token } })
 
-  const bot = await authKit.users.create({ email: 'bot@x.com', displayName: 'Helper Bot' })
+  const bot = await authKit.users.create({ displayName: 'Helper Bot' })
   const key = await authKit.apiKeys.create(bot.id, { role: 'user', label: 'agent' })
   const botClient = h.client(app, { url, role: 'user', params: { apiKey: key.key } })
 
@@ -218,10 +219,10 @@ describe('plugin-chat/ai — agent toolset', () => {
     const { authKit, botClient } = await boot()
     // two deactivated "Bob"s land first (insertion order), then the active one
     for (const n of [1, 2]) {
-      const u = await authKit.users.create({ email: `bob${n}@x.com`, displayName: `Bob ${n}` })
+      const u = await authKit.users.create({ displayName: `Bob ${n}` })
       await authKit.users.deactivate(u.id)
     }
-    const real = await authKit.users.create({ email: 'bob3@x.com', displayName: 'Bob 3' })
+    const real = await authKit.users.create({ displayName: 'Bob 3' })
 
     const tools = chatAgentTools(botClient, { management: true })
     // with limit 2, a post-fetch filter would return [] (the window fills with deactivated Bobs);
@@ -308,6 +309,7 @@ describe('plugin-chat/ai — agent toolset', () => {
     const authKit = auth({ contract: richApp, collections: backend, defaultRoles: ['user'] })
     const chatKit = chat({ contract: richApp })
     const { srv, url } = await h.server(richApp, {
+      nodeKey: 'chat-ai-rich-test',
       authenticate: authKit.authenticate,
       identify: authKit.identify,
       collections: backend,
@@ -315,7 +317,7 @@ describe('plugin-chat/ai — agent toolset', () => {
     })
     srv.implement({ user: { hello: async () => ({ ok: true }) } } as never)
 
-    const bot = await authKit.users.create({ email: 'bot@x.com', displayName: 'Bot' })
+    const bot = await authKit.users.create({ displayName: 'Bot' })
     const key = await authKit.apiKeys.create(bot.id, { role: 'user', label: 'agent' })
     const botClient = h.client(richApp, { url, role: 'user', params: { apiKey: key.key } })
 

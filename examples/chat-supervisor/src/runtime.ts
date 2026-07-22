@@ -25,7 +25,6 @@ async function provisionRuntimeUser(authKit: AuthKit) {
   ).find((candidate) => candidate.metadata?.runtime === RUNTIME_MARKER);
   if (!user) {
     user = await authKit.users.create({
-      email: "supervisor@chat-supervisor.local",
       displayName: "Supervisor",
       metadata: { runtime: RUNTIME_MARKER },
     });

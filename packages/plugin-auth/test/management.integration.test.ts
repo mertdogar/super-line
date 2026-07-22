@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { defineContract, like } from '@super-line/core'
 import { memoryCollections } from '@super-line/collections-memory'
 import { authContract } from '@super-line/plugin-auth'
-import { auth } from '@super-line/plugin-auth/server'
+import { auth, type AuthServer } from '@super-line/plugin-auth/server'
 import { createHarness, waitFor } from '../../server/test/harness.js'
 
 // Same tiny app as auth.integration.test.ts: the imperative management surface (Phase 0 of
@@ -23,6 +23,7 @@ async function boot(jwt?: { secret: string }, sendPasswordReset?: (args: { user:
   const backend = memoryCollections()
   const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'], jwt, sendPasswordReset })
   const { srv, url } = await h.server(app, {
+    nodeKey: 'auth-management-test',
     authenticate: authKit.authenticate,
     identify: authKit.identify,
     collections: backend,
@@ -35,10 +36,26 @@ async function boot(jwt?: { secret: string }, sendPasswordReset?: (args: { user:
   return { srv, url, authKit }
 }
 
+async function createUser(
+  authKit: AuthServer<typeof app>,
+  input: {
+    email: string
+    password?: string
+    displayName: string
+    roles?: string[]
+    metadata?: Record<string, unknown>
+  },
+) {
+  const { email, password, ...profile } = input
+  const user = await authKit.users.create(profile)
+  await authKit.credentials.create(user.id, { email, ...(password === undefined ? {} : { password }) })
+  return user
+}
+
 describe('plugin-auth — imperative users management', () => {
   it('creates a user (with password) who can sign in; roles + metadata land on the row', async () => {
     const { url, authKit } = await boot()
-    const created = await authKit.users.create({
+    const created = await createUser(authKit, {
       email: 'IV@x.com',
       password: 'passpass',
       displayName: 'Iv',
@@ -59,10 +76,10 @@ describe('plugin-auth — imperative users management', () => {
     user.close()
   })
 
-  it('creates a passwordless user (invite): sign-in refused until claimed via password reset', async () => {
+  it('creates a profile and passwordless credential: sign-in is refused until reset claim', async () => {
     let captured: string | undefined
     const { url, authKit } = await boot(undefined, ({ token }) => void (captured = token))
-    await authKit.users.create({ email: 'inv@x.com', displayName: 'Invitee' })
+    await createUser(authKit, { email: 'inv@x.com', displayName: 'Invitee' })
 
     const g = h.client(app, { url, role: 'guest' })
     await expect(g.signIn({ email: 'inv@x.com', password: 'anything' })).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
@@ -77,19 +94,19 @@ describe('plugin-auth — imperative users management', () => {
 
   it('rejects a duplicate email (CONFLICT) and an unknown role (BAD_REQUEST) at create', async () => {
     const { authKit } = await boot()
-    await authKit.users.create({ email: 'dup@x.com', displayName: 'A' })
-    await expect(authKit.users.create({ email: 'DUP@x.com', displayName: 'B' })).rejects.toMatchObject({
+    await createUser(authKit, { email: 'dup@x.com', displayName: 'A' })
+    await expect(createUser(authKit, { email: 'DUP@x.com', displayName: 'B' })).rejects.toMatchObject({
       code: 'CONFLICT',
     })
     await expect(
-      authKit.users.create({ email: 'ok@x.com', displayName: 'C', roles: ['ghost'] }),
+      createUser(authKit, { email: 'ok@x.com', displayName: 'C', roles: ['ghost'] }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' })
   })
 
   it('gets and finds users: IR filter passthrough, deactivated excluded unless asked', async () => {
     const { authKit } = await boot()
-    const ann = await authKit.users.create({ email: 'ann@x.com', displayName: 'Ann' })
-    const bob = await authKit.users.create({ email: 'bob@x.com', displayName: 'Bob' })
+    const ann = await createUser(authKit, { email: 'ann@x.com', displayName: 'Ann' })
+    const bob = await createUser(authKit, { email: 'bob@x.com', displayName: 'Bob' })
 
     expect((await authKit.users.get(ann.id))?.displayName).toBe('Ann')
     expect(await authKit.users.get('nope')).toBeUndefined()
@@ -104,7 +121,7 @@ describe('plugin-auth — imperative users management', () => {
 
   it('update co-writes displayName/metadata: a live directory subscription sees the change', async () => {
     const { url, authKit } = await boot()
-    const u = await authKit.users.create({ email: 'up@x.com', password: 'passpass', displayName: 'Old' })
+    const u = await createUser(authKit, { email: 'up@x.com', password: 'passpass', displayName: 'Old' })
 
     const g = h.client(app, { url, role: 'guest' })
     const { token } = await g.signIn({ email: 'up@x.com', password: 'passpass' })
@@ -124,7 +141,7 @@ describe('plugin-auth — imperative users management', () => {
 
   it('setRoles grants a contract role at connect time and rejects unknown roles', async () => {
     const { url, authKit } = await boot()
-    const u = await authKit.users.create({ email: 'ro@x.com', password: 'passpass', displayName: 'Ro' })
+    const u = await createUser(authKit, { email: 'ro@x.com', password: 'passpass', displayName: 'Ro' })
     const g = h.client(app, { url, role: 'guest' })
     const { token } = await g.signIn({ email: 'ro@x.com', password: 'passpass' })
     g.close()
@@ -146,9 +163,9 @@ describe('plugin-auth — imperative users management', () => {
     await expect(authKit.users.setRoles(u.id, ['ghost'])).rejects.toMatchObject({ code: 'BAD_REQUEST' })
   })
 
-  it('deactivate blocks sign-in, kills sessions + API keys, kicks live connections; reactivate restores', async () => {
+  it('deactivate blocks sign-in, revokes credentials, ends sessions, and kicks live connections', async () => {
     const { srv, url, authKit } = await boot()
-    const u = await authKit.users.create({ email: 'de@x.com', password: 'passpass', displayName: 'De' })
+    const u = await createUser(authKit, { email: 'de@x.com', password: 'passpass', displayName: 'De' })
     const g = h.client(app, { url, role: 'guest' })
     const { token } = await g.signIn({ email: 'de@x.com', password: 'passpass' })
     g.close()
@@ -161,7 +178,7 @@ describe('plugin-auth — imperative users management', () => {
     await waitFor(() => srv.local.connections.length === 0) // kicked
     live.close()
 
-    // session token, api key, and password are all dead
+    // access token, API key, and password are all dead
     const stale = h.client(app, { url, role: 'user', params: { token } })
     expect(await stale.whoami()).toBeNull()
     stale.close()
@@ -183,7 +200,7 @@ describe('plugin-auth — imperative users management', () => {
 
   it('a deactivated user’s still-valid JWT no longer authenticates', async () => {
     const { url, authKit } = await boot({ secret: 'shhhh-a-very-secret-signing-key' })
-    const u = await authKit.users.create({ email: 'jd@x.com', password: 'passpass', displayName: 'Jd' })
+    const u = await createUser(authKit, { email: 'jd@x.com', password: 'passpass', displayName: 'Jd' })
     const g = h.client(app, { url, role: 'guest' })
     const { token } = await g.signIn({ email: 'jd@x.com', password: 'passpass' })
     g.close()
@@ -199,11 +216,11 @@ describe('plugin-auth — imperative users management', () => {
 
   it('setPassword rotates the credential and flushes existing sessions', async () => {
     const { url, authKit } = await boot()
-    const u = await authKit.users.create({ email: 'sp@x.com', password: 'oldpassword', displayName: 'Sp' })
+    const u = await createUser(authKit, { email: 'sp@x.com', password: 'oldpassword', displayName: 'Sp' })
     const g = h.client(app, { url, role: 'guest' })
     const { token } = await g.signIn({ email: 'sp@x.com', password: 'oldpassword' })
 
-    await authKit.users.setPassword(u.id, 'newpassword')
+    await authKit.credentials.setPassword(u.id, 'newpassword')
     await expect(g.signIn({ email: 'sp@x.com', password: 'oldpassword' })).rejects.toMatchObject({
       code: 'UNAUTHORIZED',
     })
@@ -218,7 +235,7 @@ describe('plugin-auth — imperative users management', () => {
   it('imperative APIs throw honestly before the server exists', async () => {
     const backend = memoryCollections()
     const authKit = auth({ contract: app, collections: backend })
-    await expect(authKit.users.create({ email: 'x@x.com', displayName: 'X' })).rejects.toThrow(
+    await expect(createUser(authKit, { email: 'x@x.com', displayName: 'X' })).rejects.toThrow(
       /createSuperLineServer/,
     )
   })
@@ -228,13 +245,13 @@ describe('plugin-auth — review hardening (reset purging, RMW lock, expiry guar
   it('setPassword revokes pending password-reset tokens (a pre-rotation token cannot undo the rotation)', async () => {
     let captured: string | undefined
     const { url, authKit } = await boot(undefined, ({ token }) => void (captured = token))
-    const u = await authKit.users.create({ email: 'rt@x.com', password: 'oldpassword', displayName: 'Rt' })
+    const u = await createUser(authKit, { email: 'rt@x.com', password: 'oldpassword', displayName: 'Rt' })
 
     const g = h.client(app, { url, role: 'guest' })
     await g.requestPasswordReset({ email: 'rt@x.com' })
     expect(captured).toBeDefined()
 
-    await authKit.users.setPassword(u.id, 'rotated-by-admin')
+    await authKit.credentials.setPassword(u.id, 'rotated-by-admin')
     await expect(g.confirmPasswordReset({ token: captured!, newPassword: 'attacker' })).rejects.toMatchObject({
       code: 'UNAUTHORIZED',
     })
@@ -245,7 +262,7 @@ describe('plugin-auth — review hardening (reset purging, RMW lock, expiry guar
   it('deactivate revokes pending reset tokens AND confirmPasswordReset rejects a deactivated account', async () => {
     let captured: string | undefined
     const { url, authKit } = await boot(undefined, ({ token }) => void (captured = token))
-    const u = await authKit.users.create({ email: 'dr@x.com', password: 'passpass', displayName: 'Dr' })
+    const u = await createUser(authKit, { email: 'dr@x.com', password: 'passpass', displayName: 'Dr' })
 
     const g = h.client(app, { url, role: 'guest' })
     await g.requestPasswordReset({ email: 'dr@x.com' })
@@ -262,16 +279,16 @@ describe('plugin-auth — review hardening (reset purging, RMW lock, expiry guar
     g.close()
   })
 
-  it('reactivate purges leftovers: a session that slipped past deactivate never revives', async () => {
+  it('reactivate purges access tokens that slipped past deactivate', async () => {
     const { srv, url, authKit } = await boot()
-    const u = await authKit.users.create({ email: 'lv@x.com', password: 'passpass', displayName: 'Lv' })
+    const u = await createUser(authKit, { email: 'lv@x.com', password: 'passpass', displayName: 'Lv' })
     await authKit.users.deactivate(u.id)
 
-    // simulate a raced leftover: a session row landing while the account is deactivated
+    // simulate a raced leftover: an access-token row landing while the account is deactivated
     const { tokenHash } = await import('../src/crypto.js')
     const slipped = 'slipped-session-token'
     await srv
-      .collection('sessions')
+      .collection('accessTokens')
       .insert({ id: tokenHash(slipped), userId: u.id, createdAt: Date.now(), expiresAt: Date.now() + 86_400_000 })
 
     await authKit.users.reactivate(u.id)
@@ -283,7 +300,7 @@ describe('plugin-auth — review hardening (reset purging, RMW lock, expiry guar
   it('update racing deactivate never un-bans the user (per-user serialization)', async () => {
     const { authKit } = await boot()
     for (let i = 0; i < 5; i++) {
-      const u = await authKit.users.create({ email: `race${i}@x.com`, displayName: 'R' })
+      const u = await createUser(authKit, { email: `race${i}@x.com`, displayName: 'R' })
       await Promise.all([
         authKit.users.update(u.id, { displayName: 'renamed' }),
         authKit.users.deactivate(u.id),
@@ -296,7 +313,7 @@ describe('plugin-auth — review hardening (reset purging, RMW lock, expiry guar
 
   it('apiKeys.create rejects a non-positive expiresInMs instead of minting an immortal key', async () => {
     const { authKit } = await boot()
-    const u = await authKit.users.create({ email: 'ex@x.com', displayName: 'Ex' })
+    const u = await createUser(authKit, { email: 'ex@x.com', displayName: 'Ex' })
     await expect(authKit.apiKeys.create(u.id, { role: 'user', label: 'k', expiresInMs: 0 })).rejects.toMatchObject({
       code: 'BAD_REQUEST',
     })
@@ -309,9 +326,9 @@ describe('plugin-auth — review hardening (reset purging, RMW lock, expiry guar
 })
 
 describe('plugin-auth — imperative API keys (agent provisioning)', () => {
-  it('provisions an agent: passwordless user + server-minted key connects; listFor/revoke round-trip', async () => {
+  it('provisions an agent profile without a credential; server-minted key connects and revokes', async () => {
     const { url, authKit } = await boot()
-    const agent = await authKit.users.create({ email: 'bot@x.com', displayName: 'Deploy Bot' })
+    const agent = await authKit.users.create({ displayName: 'Deploy Bot' })
     const k = await authKit.apiKeys.create(agent.id, { role: 'user', label: 'agent' })
     expect(k.key).toMatch(/^slp_/) // raw key, returned once
 
@@ -331,7 +348,7 @@ describe('plugin-auth — imperative API keys (agent provisioning)', () => {
 
   it('rejects an unknown contract role, an unknown user, and a deactivated user', async () => {
     const { authKit } = await boot()
-    const u = await authKit.users.create({ email: 'kx@x.com', displayName: 'Kx' })
+    const u = await createUser(authKit, { email: 'kx@x.com', displayName: 'Kx' })
     await expect(authKit.apiKeys.create(u.id, { role: 'ghost', label: 'x' })).rejects.toMatchObject({
       code: 'BAD_REQUEST',
     })

@@ -458,7 +458,7 @@ const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user
 const srv = createSuperLineServer(app, {
   transports: [webSocketServerTransport({ server })],
   collections: backend,                 // SAME instance passed to auth()
-  authenticate: authKit.authenticate,   // resolves guest / session token / API key / JWT
+  authenticate: authKit.authenticate,   // resolves guest / access token / API key / JWT
   identify: authKit.identify,           // principal = userId
   plugins: [authKit.plugin],            // the runtime half: auth handlers + identity-collection policies
 })
@@ -491,7 +491,7 @@ function Gate() {
 ```
 
 - Pass the **same `CollectionStore`** to `auth({ collections })` and `createSuperLineServer({ collections })` — `authenticate` reads sessions/users off it directly.
-- `jwt` is opt-in: without it `getToken()` throws and only session tokens / API keys connect. An API key (`slp_…`) carries one fixed role and is revocable; a JWT is stateless and unrevocable until it expires.
+- `jwt` is opt-in: without it `getToken()` throws and only access tokens / API keys connect. An API key (`slp_…`) carries one fixed role and is revocable; a JWT is stateless and unrevocable until it expires. Every accepted authenticated connection still creates a durable session row.
 - `sendPasswordReset` is a host callback; without it `requestPasswordReset` is a silent no-op (never leaks whether an email exists). Runnable: `examples/auth` (CLI) · `examples/collections-chat` (real login).
 
 ## Chat (`@super-line/plugin-chat`)

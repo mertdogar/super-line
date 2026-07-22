@@ -49,6 +49,7 @@ const chatKit = chat({
 });
 
 createSuperLineServer(app, {
+  nodeKey: "chat-replica-1",
   collections: backend,
   authenticate: authKit.authenticate,
   identify: authKit.identify,
@@ -69,9 +70,12 @@ const chat = chatClient(client, { userId });
 await chat.ready;
 
 const recent = chat.messages(channelId, { limit: 200 }); // live message envelopes only
+const members = chat.members(channelId); // profile + derived connection presence
 const page = await chat.history(channelId, { before: cursor, limit: 50 });
 const parts = chat.messageParts(channelId, messageId); // complete, tree-ordered, live
 ```
+
+Member presence expires after 90 seconds by default. Set `presenceTimeoutMs` on `chatClient` when needed, and keep it above the server heartbeat interval. With heartbeats disabled, a connection cannot keep its presence fresh.
 
 The read APIs are deliberately separate:
 
@@ -79,6 +83,7 @@ The read APIs are deliberately separate:
 - `history()` returns one keyset-paginated envelope snapshot using `{ createdAt, id }`.
 - `messageParts()` returns every durable part for one message and overlays live text deltas. Mount
   it only for messages whose detailed transcript is being rendered.
+- `members()` joins membership rows with `displayName`, `online`, `connectedAt`, and `lastSeenAt`.
 
 There is no channel-wide parts window and no silent parts truncation. A reload can reconstruct the
 entire supervisor and subagent tree for any message.

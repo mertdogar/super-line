@@ -2,6 +2,8 @@ import { and, eq, lt, or } from '@super-line/core'
 import { docKeyOf } from './index.js'
 import type { CollectionName, CollectionQuery, Contract, RoleOf, RowOf } from '@super-line/core'
 import type { LiveRowSet, SuperLineClient } from '@super-line/client'
+import { USER_PRESENCE_LIVE_MS } from '@super-line/plugin-auth'
+import type { AuthUser, AuthUserPresence } from '@super-line/plugin-auth'
 import type {
   ChannelVisibility,
   ChatChannel,
@@ -22,6 +24,12 @@ type Row<C extends Contract, N extends string, Fallback> = N extends CollectionN
   : Fallback
 export type ChannelRowOf<C extends Contract> = Row<C, 'channels', ChatChannel>
 export type MembershipRowOf<C extends Contract> = Row<C, 'memberships', ChatMembership>
+export type ChatMember<C extends Contract> = MembershipRowOf<C> & {
+  displayName: string
+  online: boolean
+  connectedAt: number | null
+  lastSeenAt: number | null
+}
 export type MessageRowOf<C extends Contract> = Row<C, 'messages', ChatMessage>
 export type MessagePartRowOf<C extends Contract> = Row<C, 'messageParts', ChatMessagePart>
 export type ResourceRowOf<C extends Contract> = Row<C, 'resources', ChatResource>
@@ -96,6 +104,8 @@ export interface ChatClientOptions {
   userId?: string | null
   /** The live message window per channel store (initial snapshot AND maintained window). Default 200. */
   messageLimit?: number
+  /** Presence freshness window in milliseconds. Default 90 seconds; keep it above the server heartbeat interval. */
+  presenceTimeoutMs?: number
 }
 
 /**
@@ -122,7 +132,7 @@ export interface ChatClient<C extends Contract> {
   /** Live directory of every channel you can see (public + your private ones). */
   channels(): ChatLiveStore<ChannelRowOf<C>>
   /** Live member list of one channel. */
-  members(channelId: string): ChatLiveStore<MembershipRowOf<C>>
+  members(channelId: string): ChatLiveStore<ChatMember<C>>
   /** Live chronological newest-N message envelopes. Detailed parts are a separate, complete store. */
   messages(channelId: string, opts?: { limit?: number }): ChatLiveStore<MessageRowOf<C>>
   /** One older page, chronological, keyset-paginated by `{createdAt,id}`. The page is a snapshot. */
@@ -228,6 +238,8 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
 ): ChatClient<C> {
   const dyn = client as unknown as Dyn
   const defaultLimit = opts?.messageLimit ?? 200
+  const presenceTimeoutMs = opts?.presenceTimeoutMs ?? USER_PRESENCE_LIVE_MS
+  if (!Number.isFinite(presenceTimeoutMs) || presenceTimeoutMs <= 0) throw new Error('presenceTimeoutMs must be positive')
 
   interface Handle {
     rekey(): void
@@ -281,6 +293,91 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
       subscribe: (cb) => {
         listeners.add(cb)
         return () => void listeners.delete(cb)
+      },
+      ready,
+      close: handle.close,
+    }
+  }
+
+  function makeMembersStore(channelId: string): ChatLiveStore<ChatMember<C>> {
+    const open = () => ({
+      memberships: dyn.collection('memberships').subscribe({ filter: eq('channelId', channelId) }),
+      users: dyn.collection('users').subscribe({}),
+      presence: dyn.collection('userPresence').subscribe({}),
+    })
+    let live = open()
+    let snapshot: ChatMember<C>[] = []
+    let closed = false
+    let expiryTimer: ReturnType<typeof setTimeout> | undefined
+    let detach: Array<() => void> = []
+    const listeners = new Set<() => void>()
+    let resolveReady!: () => void
+    const ready = new Promise<void>((resolve) => (resolveReady = resolve))
+
+    const refresh = (): void => {
+      if (expiryTimer) clearTimeout(expiryTimer)
+      expiryTimer = undefined
+      const users = new Map((live.users.rows() as AuthUser[]).map((user) => [user.id, user]))
+      const presence = new Map((live.presence.rows() as AuthUserPresence[]).map((row) => [row.userId, row]))
+      const now = Date.now()
+      snapshot = (live.memberships.rows() as ChatMembership[]).flatMap((membership) => {
+        const user = users.get(membership.userId)
+        if (!user) return []
+        const row = presence.get(membership.userId)
+        const lastSeenAt = row?.lastSeenAt ?? null
+        const online = row?.connectedAt != null && lastSeenAt !== null && lastSeenAt > now - presenceTimeoutMs
+        return [{
+          ...membership,
+          displayName: user.displayName,
+          online,
+          connectedAt: row?.connectedAt ?? null,
+          lastSeenAt,
+        } as unknown as ChatMember<C>]
+      })
+      const nextExpiry = snapshot
+        .filter((member) => member.online && member.lastSeenAt !== null)
+        .reduce((soonest, member) => Math.min(soonest, member.lastSeenAt! + presenceTimeoutMs), Infinity)
+      if (nextExpiry !== Infinity) expiryTimer = setTimeout(refresh, Math.max(1, nextExpiry - now + 1))
+      for (const listener of listeners) listener()
+    }
+
+    const attach = (): void => {
+      const mine = live
+      const sets = [mine.memberships, mine.users, mine.presence]
+      detach = sets.map((set) => set.subscribe(() => live === mine && !closed && refresh()))
+      void Promise.allSettled(sets.map((set) => set.ready)).then(() => {
+        if (live === mine && !closed) refresh()
+        resolveReady()
+      })
+    }
+    attach()
+    const handle: Handle = {
+      rekey: () => {
+        if (closed) return
+        for (const off of detach) off()
+        live.memberships.close()
+        live.users.close()
+        live.presence.close()
+        live = open()
+        attach()
+      },
+      close: () => {
+        closed = true
+        if (expiryTimer) clearTimeout(expiryTimer)
+        expiryTimer = undefined
+        for (const off of detach) off()
+        live.memberships.close()
+        live.users.close()
+        live.presence.close()
+        stores.delete(handle)
+      },
+    }
+    stores.add(handle)
+    return {
+      rows: () => snapshot,
+      subscribe: (listener) => {
+        listeners.add(listener)
+        return () => void listeners.delete(listener)
       },
       ready,
       close: handle.close,
@@ -641,7 +738,7 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
 
   return {
     channels: () => makeStore(() => dyn.collection('channels').subscribe({})),
-    members: (channelId) => makeStore(() => dyn.collection('memberships').subscribe({ filter: eq('channelId', channelId) })),
+    members: makeMembersStore,
     messages: (channelId, o) =>
       makeStore(
         () => dyn.collection('messages').subscribe(msgQuery(channelId, o?.limit ?? defaultLimit)),

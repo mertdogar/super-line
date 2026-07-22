@@ -1,7 +1,7 @@
 # @super-line/plugin-auth
 
 First-party **authentication** for [**super-line**](https://super-line.dogar.biz/), as a paired plugin:
-email/password sign-up + login, server-issued **sessions**, data-driven **roles**, **API keys**, and
+email/password sign-up + login, reusable **access tokens**, connection **sessions**, data-driven **roles**, **API keys**, and
 **JWT** — with all identity held in typed [collections](https://super-line.dogar.biz/collections/). It
 builds on super-line's connect-time [`authenticate`](https://super-line.dogar.biz/how-to/roles-auth)
 model; you wire it in three places and the plugin owns the rest.
@@ -13,7 +13,7 @@ pnpm add @super-line/plugin-auth
 ## Wire it in — three touch-points
 
 ```ts
-// 1 · contract — authContract() adds the `guest` role, the users/credentials/sessions/apiKeys
+// 1 · contract — authContract() adds the `guest` role and the auth collections
 //     collections, and the signIn/signUp/signOut/whoami (+ API-key, JWT, reset) requests.
 import { defineContract } from '@super-line/core'
 import { authContract } from '@super-line/plugin-auth'
@@ -33,8 +33,9 @@ const backend = sqliteCollections({ file: 'app.db', collections: app.collections
 const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
 
 createSuperLineServer(app, {
+  nodeKey: 'app-replica-1',        // stable for this replica across restarts
   collections: backend,
-  authenticate: authKit.authenticate, // verifies the session token → { role, ctx: { userId, roles, sessionId } }
+  authenticate: authKit.authenticate, // verifies a credential and creates a connection session
   identify: authKit.identify,         // principal := userId, so every row policy keys on the logged-in user
   plugins: [authKit.plugin],          // signIn/up/out/whoami handlers + open/deny-all row policies
 })
@@ -60,15 +61,16 @@ Not using React? `authClient()` from `@super-line/plugin-auth/client` is the sam
 ## Login is a reconnect, not an upgrade
 
 super-line freezes a connection's role at connect, so there is no "log in and upgrade this socket." The
-client half hides the dance: `signIn()` connects as `guest`, mints a session, then transparently
+client half hides the dance: `signIn()` connects as `guest`, mints an access token, then transparently
 **reconnects** as your `authedRole` carrying the token — and persists it across reloads.
 
 ## What you get
 
-- **Email + password** — scrypt-hashed credentials; sign-up/login return an identity + session token.
-- **Sessions** — a 256-bit server-issued token, stored sha256-at-rest; `authenticate` verifies it on every
-  connect. `authKit.revoke(userId)` deletes all of a user's sessions **and** disconnects their live
-  connections cluster-wide (an admin ban / "sign out of all devices").
+- **Email + password** — scrypt-hashed credentials; sign-up/login return an identity + access token.
+- **Access tokens** — reusable 256-bit bearer grants, stored sha256-at-rest, that browsers can persist
+  across reconnects.
+- **Sessions** — append-only rows for accepted authenticated connections, including API-key and JWT
+  connections. They record node ownership, authentication provenance, heartbeat freshness, and `endedAt`.
 - **Roles are data** — a user's `roles[]` live on their row; only `guest` is hardcoded. Grant one by
   writing the row (`srv.collection('users').update(...)`) or `authKit.users.setRoles(id, roles)`.
 - **API keys** — long-lived `slp_…` credentials with one fixed role, for services, CI, and agents. From a
@@ -76,9 +78,9 @@ client half hides the dance: `signIn()` connects as `guest`, mints a session, th
 - **JWT** — enable `jwt: { secret }`; `getToken()` issues a short-lived HS256 JWT (via `jose`) for another
   backend to verify statelessly, or to connect super-line without a DB round-trip (`params: { jwt }`).
 - **Password reset** — provide a `sendPasswordReset({ user, token })` callback (delivery is yours);
-  `requestPasswordReset` never reveals whether an email exists, and `confirmPasswordReset` flushes sessions.
-- **Identity is all collections** — `users` is a public directory (readable); `credentials` / `sessions` /
-  `apiKeys` / `passwordResets` are deny-all. Reference the directory from your own rows with
+  `requestPasswordReset` never reveals whether an email exists, and `confirmPasswordReset` revokes access tokens.
+- **Identity is all collections** — `users` and `userPresence` are public by default; `credentials` /
+  `accessTokens` / `sessions` / `apiKeys` / `passwordResets` are deny-all. Reference the directory from your own rows with
   `references: { authorId: 'users' }`, and key your policies on the `principal` (now the `userId`).
 
 ## `authKit` — the server API
@@ -92,18 +94,22 @@ interface AuthServer {
   authenticate(handshake): Promise<{ role, ctx: AuthContext }> // → server `authenticate:`
   identify(conn): string | undefined                           // → server `identify:` (principal := userId)
   plugin: SuperLinePlugin                                       // → server `plugins: [...]`
-  revoke(userId: string): Promise<void>  // delete all sessions + disconnect live connections cluster-wide
+  revoke(userId: string): Promise<void>  // revoke access tokens, end sessions, and disconnect live connections
 
   // ── users: provisioning + back-office (requires the running server) ───────────────
   users: {
     get(id): Promise<AuthUser | undefined>
     find(opts?: { filter?, limit?, offset?, includeDeactivated? }): Promise<AuthUser[]>
-    create(input: { email, password?, displayName, roles?, metadata? }): Promise<AuthUser> // omit password → invite flow
+    create(input: { displayName, roles?, metadata? }): Promise<AuthUser>
     update(id, patch: { displayName?, metadata? }): Promise<AuthUser>
     setRoles(id, roles: string[]): Promise<void>       // validated against contract roles (connect-time)
     deactivate(id): Promise<void>   // soft-delete: stamp deletedAt, flush sessions/keys/resets, kick connections
     reactivate(id): Promise<void>   // lift the deactivation
-    setPassword(id, newPassword): Promise<void>        // admin rotation; flushes sessions + reset tokens
+  }
+
+  credentials: {
+    create(userId, input: { email, password? }): Promise<AuthCredential> // omit password → invitation
+    setPassword(userId, newPassword): Promise<void> // revokes access + reset tokens
   }
 
   // ── apiKeys: agent + service provisioning (requires the running server) ───────────
@@ -118,7 +124,7 @@ interface AuthServer {
 Provision an AI-agent (or any headless service) as a real user:
 
 ```ts
-const bot = await authKit.users.create({ email: 'bot@app.dev', displayName: 'Ask AI' }) // passwordless
+const bot = await authKit.users.create({ displayName: 'Ask AI' })
 const { key } = await authKit.apiKeys.create(bot.id, { role: 'user', label: 'agent' })
 // createSuperLineClient(app, { …, params: { apiKey: key } }) → the bot is a real user on the bus
 ```

@@ -48,7 +48,7 @@ export async function runHeadless(config: Config): Promise<void> {
   // ── auth: token from --token/env or the cached session file; never interactive ──────────────────
   const token = config.token ?? fileStorage(config.cachePath).get()
   if (!token) {
-    die('no session found — run the cockpit once (pnpm tui) to sign in, or pass --token / CHAT_SUPERVISOR_TOKEN')
+    die('no access token found — run the cockpit once (pnpm tui) to sign in, or pass --token / CHAT_SUPERVISOR_TOKEN')
   }
   const tokenStorage: TokenStorage = { get: () => token, set: () => {} }
   const auth = authClient<typeof app, 'user'>({

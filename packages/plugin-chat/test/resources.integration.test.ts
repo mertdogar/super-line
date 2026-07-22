@@ -55,6 +55,7 @@ async function boot(opts?: { hostScenePolicy?: boolean }) {
   const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
   const chatKit = chat({ contract: app, resources: { kinds } })
   const { srv, url } = await h.server(app, {
+    nodeKey: 'chat-resources-test',
     authenticate: authKit.authenticate,
     identify: authKit.identify,
     collections: backend,

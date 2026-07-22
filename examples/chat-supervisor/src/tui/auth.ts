@@ -1,5 +1,5 @@
 // The TUI's auth wiring: mirrors examples/chat-supervisor/src/lib/auth.ts but the URL comes from
-// config (no location.hostname) and the session token persists to a file (no localStorage). A
+// config (no location.hostname) and the access token persists to a file (no localStorage). A
 // factory so the smoke test can point it at an isolated cache path.
 
 import { createSuperLineClient } from '@super-line/client'

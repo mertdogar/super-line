@@ -1,5 +1,5 @@
 // A file-backed TokenStorage for plugin-auth: the browser default persists to localStorage, which
-// the terminal has no equivalent of, so the session token lands in a 0600 JSON file and restarts
+// the terminal has no equivalent of, so the access token lands in a 0600 JSON file and restarts
 // reconnect silently.
 
 import { readFileSync, rmSync, writeFileSync } from 'node:fs'

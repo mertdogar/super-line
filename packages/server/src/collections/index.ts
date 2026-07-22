@@ -1,7 +1,7 @@
 import { isCrdtCollection, SuperLineError, type CBatchFrame, type CDCloseFrame, type CDOpenFrame, type CDWriteFrame, type CSubFrame, type CUnsubFrame } from '@super-line/core'
 import { createCrdtCollections, CDOC } from './crdt.js'
 import { createRowCollections, COLL_CHANNEL, SERVER_ORIGIN } from './rows.js'
-import type { CollectionConn, CollectionHost, CollectionRuntimeConfig } from './types.js'
+import type { CollectionConn, CollectionHost, CollectionRuntimeConfig, ServerCollectionOp } from './types.js'
 
 export { CDOC } from './crdt.js'
 export { COLL_CHANNEL, SERVER_ORIGIN } from './rows.js'
@@ -12,6 +12,7 @@ export type {
   CollectionRuntimeConfig,
   CrdtCollectionPolicy,
   ServerCollectionHandle,
+  ServerCollectionOp,
   ServerCrdtCollectionHandle,
   WriteOp,
 } from './types.js'
@@ -53,6 +54,8 @@ export interface CollectionRuntime {
   detach(conn: CollectionConn): void
   /** The handle behind `srv.collection(n)` — row or CRDT, chosen by the contract. Throws if undeclared. */
   handle(name: string): unknown
+  /** Apply one schema-validated, policy-free server batch atomically across row collections. */
+  batch(ops: ServerCollectionOp[]): Promise<void>
   /** Every declared collection's shape, for the inspector. */
   infos(): CollectionInfoLite[]
   /** True when a relay row backend needs this node subscribed to {@link COLL_CHANNEL}. */
@@ -79,6 +82,7 @@ export function createCollectionRuntime(config: CollectionRuntimeConfig, host: C
     onCrdtClose: crdt.onClose,
     onCrdtRelay: crdt.onRelay,
     relaysRows: rows.isRelay,
+    batch: rows.batch,
 
     handle(name) {
       const def = config.defs[name]

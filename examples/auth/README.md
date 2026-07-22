@@ -18,7 +18,7 @@ pnpm --filter @super-line/example-auth start
   and transparently rebuilds the client as `user`.
 - **Row security via the logged-in user:** a private `notes` collection keyed on `principal` (= userId) — Alice
   and Bob each see only their own; the `users` directory is public.
-- **Roles are just data:** granting Alice `admin` (a co-write to her user row) lets her existing session token
+- **Roles are just data:** granting Alice `admin` (a co-write to her user row) lets her existing access token
   open an `admin` connection.
 - **Sign-out revokes** the session and drops the client back to `guest`.
 

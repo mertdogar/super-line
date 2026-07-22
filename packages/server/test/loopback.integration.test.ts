@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { defineContract } from '@super-line/core'
-import { createSuperLineServer } from '@super-line/server'
+import { createSuperLineServer, type SuperLinePlugin } from '@super-line/server'
 import { createSuperLineClient } from '@super-line/client'
 import { createLoopbackTransport } from '@super-line/transport-loopback'
 
@@ -66,6 +66,52 @@ describe('super-line over the loopback transport', () => {
     expect(seenName).toBe('alice')
   })
 
+  it('uses an authenticator-provided connection id', async () => {
+    const loopback = createLoopbackTransport()
+    const srv = createSuperLineServer(contract, {
+      transports: [loopback.server],
+      authenticate: () => ({ role: 'user' as const, ctx: {}, connectionId: 'session-1' }),
+    })
+    const client = createSuperLineClient(contract, { transport: loopback.client(), role: 'user' })
+    cleanups.unshift(() => client.close())
+    cleanups.push(() => srv.close())
+    srv.implement({ user: { echo: async ({ text }) => ({ text }) } })
+
+    await client.echo({ text: 'connect' })
+
+    expect(srv.local.connections[0]?.id).toBe('session-1')
+  })
+
+  it('rejects a duplicate authenticator-provided connection id without replacing the live connection', async () => {
+    const loopback = createLoopbackTransport()
+    const srv = createSuperLineServer(contract, {
+      transports: [loopback.server],
+      authenticate: () => ({ role: 'user' as const, ctx: {}, connectionId: 'session-1' }),
+    })
+    const first = createSuperLineClient(contract, { transport: loopback.client(), role: 'user' })
+    cleanups.unshift(() => first.close())
+    cleanups.push(() => srv.close())
+    srv.implement({ user: { echo: async ({ text }) => ({ text }) } })
+    await first.echo({ text: 'first' })
+
+    const closeCodes: number[] = []
+    const duplicate = loopback.client().connect(
+      {},
+      {
+        onOpen: () => {},
+        onMessage: () => {},
+        onClose: (code) => closeCodes.push(code),
+        onDrain: () => {},
+      },
+    )
+    cleanups.unshift(() => duplicate.close())
+    await waitFor(() => closeCodes.length > 0)
+
+    expect(closeCodes).toEqual([1008])
+    expect(srv.local.connections.map((conn) => conn.id)).toEqual(['session-1'])
+    await expect(first.echo({ text: 'still live' })).resolves.toEqual({ text: 'still live' })
+  })
+
   it('pushes a server event to the connection', async () => {
     const { srv, client } = boot()
     srv.implement({ user: { echo: async ({ text }) => ({ text }) } })
@@ -107,6 +153,27 @@ describe('super-line over the loopback transport', () => {
     }
   })
 
+  it('exposes a configured stable node key', () => {
+    const loopback = createLoopbackTransport()
+    let pluginNodeKey: string | undefined
+    const plugin: SuperLinePlugin = {
+      name: 'node-key',
+      setup: (ctx) => {
+        pluginNodeKey = ctx.nodeKey
+      },
+    }
+    const srv = createSuperLineServer(contract, {
+      transports: [loopback.server],
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      nodeKey: 'chat-replica-1',
+      plugins: [plugin],
+    })
+    cleanups.push(() => srv.close())
+
+    expect(srv.nodeKey).toBe('chat-replica-1')
+    expect(pluginNodeKey).toBe('chat-replica-1')
+  })
+
   it('answers heartbeat pings so the server records liveness', async () => {
     const loopback = createLoopbackTransport()
     const srv = createSuperLineServer(contract, {
@@ -122,6 +189,61 @@ describe('super-line over the loopback transport', () => {
     const conn = srv.local.connections[0]!
     await waitFor(() => conn.lastPongAt !== undefined)
     expect(conn.lastPongAt).toBeGreaterThanOrEqual(conn.connectedAt)
+  })
+
+  it('notifies plugins after a confirmed heartbeat pong', async () => {
+    const loopback = createLoopbackTransport()
+    const seen: number[] = []
+    const plugin: SuperLinePlugin = {
+      name: 'heartbeat',
+      onHeartbeat: (_conn, _ctx, at) => {
+        seen.push(at)
+      },
+    }
+    const srv = createSuperLineServer(contract, {
+      transports: [loopback.server],
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      heartbeat: { interval: 15 },
+      plugins: [plugin],
+    })
+    const client = createSuperLineClient(contract, { transport: loopback.client(), role: 'user' })
+    cleanups.unshift(() => client.close())
+    cleanups.push(() => srv.close())
+    srv.implement({ user: { echo: async ({ text }) => ({ text }) } })
+
+    await client.echo({ text: 'x' })
+    await waitFor(() => seen.length > 0)
+
+    expect(seen[0]).toBeGreaterThanOrEqual(srv.local.connections[0]!.connectedAt)
+  })
+
+  it('routes heartbeat hook failures to onError without breaking the connection', async () => {
+    const loopback = createLoopbackTransport()
+    const errors: Array<{ message: string; kind: string; name: string }> = []
+    const plugin: SuperLinePlugin = {
+      name: 'failing-heartbeat',
+      onHeartbeat: async () => {
+        throw new Error('heartbeat write failed')
+      },
+      onError: (error, info) => {
+        errors.push({ message: (error as Error).message, kind: info.kind, name: info.name })
+      },
+    }
+    const srv = createSuperLineServer(contract, {
+      transports: [loopback.server],
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      heartbeat: { interval: 15 },
+      plugins: [plugin],
+    })
+    const client = createSuperLineClient(contract, { transport: loopback.client(), role: 'user' })
+    cleanups.unshift(() => client.close())
+    cleanups.push(() => srv.close())
+    srv.implement({ user: { echo: async ({ text }) => ({ text }) } })
+
+    await client.echo({ text: 'before heartbeat' })
+    await waitFor(() => errors.length > 0)
+    expect(errors[0]).toEqual({ message: 'heartbeat write failed', kind: 'heartbeat', name: 'onHeartbeat' })
+    await expect(client.echo({ text: 'after heartbeat' })).resolves.toEqual({ text: 'after heartbeat' })
   })
 })
 

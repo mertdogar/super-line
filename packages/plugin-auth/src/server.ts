@@ -3,14 +3,16 @@ import { andFilters, eq, gt, not, SuperLineError } from '@super-line/core'
 import type { Contract, RoleOf, Handshake, CollectionStore, Expr, AnyEnv } from '@super-line/core'
 import type { PluginContext, SuperLinePlugin } from '@super-line/server'
 import { GUEST_ROLE } from './index.js'
-import type { AuthApiKey, AuthContext, AuthCredential, AuthPasswordReset, AuthSession, AuthSurface, AuthUser } from './index.js'
+import type { AuthAccessToken, AuthApiKey, AuthContext, AuthCredential, AuthPasswordReset, AuthSession, AuthSurface, AuthUser } from './index.js'
 import { apiKeyToken, hashPassword, newId, randomToken, tokenHash, verifyPassword } from './crypto.js'
 
 /**
  * The discriminated auth result — a member per contract role, all sharing the uniform {@link AuthContext}. Assignable
  * to the server's `AuthResult<C>` (whose per-role ctx is `unknown`), so `authenticate:` infers `A` on the proven path.
  */
-type AuthResultOf<C extends Contract> = { [R in RoleOf<C>]: { role: R; ctx: AuthContext } }[RoleOf<C>]
+type AuthResultOf<C extends Contract> = {
+  [R in RoleOf<C>]: { role: R; ctx: AuthContext; env?: AnyEnv<C>; connectionId?: string }
+}[RoleOf<C>]
 
 export interface AuthServerOptions<C extends Contract> {
   /** The app contract — types the resolved role and validates a requested role against the contract's roles. */
@@ -19,8 +21,8 @@ export interface AuthServerOptions<C extends Contract> {
   collections: CollectionStore
   /** Roles granted to a newly signed-up user (must be contract roles). Default `['user']`. */
   defaultRoles?: string[]
-  /** Session lifetime in ms. Default 30 days. */
-  sessionTtlMs?: number
+  /** Reusable password access-token lifetime in ms. Default 30 days. */
+  accessTokenTtlMs?: number
   /** Whether the `users` directory is client-readable (open read policy). Default `true`. */
   usersReadable?: boolean
   /** Enable JWT: `getToken` issuance + stateless JWT connect (HS256). Omit to disable both. `ttlMs` default 15 min. */
@@ -57,13 +59,9 @@ export interface AuthUsersApi {
   /** Snapshot the directory with a raw IR filter. Deactivated users are excluded unless `includeDeactivated`. */
   find(opts?: { filter?: Expr; limit?: number; offset?: number; includeDeactivated?: boolean }): Promise<AuthUser[]>
   /**
-   * Provision a user (email lowercased; roles default to the kit's `defaultRoles`, validated against the
-   * contract). Omit `password` for the invite flow: the account exists but can't sign in until claimed via
-   * the password-reset flow.
+   * Provision a public user profile. Add an email/password credential separately when needed.
    */
   create(input: {
-    email: string
-    password?: string
     displayName: string
     roles?: string[]
     metadata?: Record<string, unknown>
@@ -72,12 +70,16 @@ export interface AuthUsersApi {
   update(id: string, patch: { displayName?: string; metadata?: Record<string, unknown> }): Promise<AuthUser>
   /** Replace the user's roles (validated against contract roles). Connect-time — live connections keep their role. */
   setRoles(id: string, roles: string[]): Promise<void>
-  /** Soft-delete: stamp `deletedAt`, flush sessions + API keys + pending reset tokens, kick live connections cluster-wide. */
+  /** Soft-delete: stamp `deletedAt`, revoke credentials, end sessions, and kick live connections cluster-wide. */
   deactivate(id: string): Promise<void>
   /** Lift a deactivation (`deletedAt` → null), re-purging sessions/keys/resets first so nothing stale revives. */
   reactivate(id: string): Promise<void>
-  /** Admin password rotation: replaces the credential hash, flushes every session AND pending reset token. */
-  setPassword(id: string, newPassword: string): Promise<void>
+}
+
+export interface AuthCredentialsApi {
+  create(userId: string, input: { email: string; password?: string }): Promise<AuthCredential>
+  /** Rotate a password, revoke access tokens and reset tokens, and close their active sessions. */
+  setPassword(userId: string, newPassword: string): Promise<void>
 }
 
 /** Imperative API-key management — the server-side counterpart of the client requests; provisions agents. */
@@ -96,7 +98,7 @@ export interface AuthServer<C extends Contract> {
   /** Register in the server's `plugins: [...]` — the signIn/up/out/whoami handlers + open/deny-all row policies. */
   plugin: SuperLinePlugin<AuthSurface>
   /**
-   * Log a user out everywhere: delete all their sessions (relay-safe) AND disconnect their live connections
+   * Log a user out everywhere: revoke access tokens, end active sessions, and disconnect live connections
    * cluster-wide. Use for an admin ban / "sign out of all devices". (API keys are separate — revoke those per-key.)
    */
   revoke: (userId: string) => Promise<void>
@@ -109,6 +111,8 @@ export interface AuthServer<C extends Contract> {
   users: AuthUsersApi
   /** Imperative API-key management (agent provisioning). Requires the running server. */
   apiKeys: AuthApiKeysApi
+  /** Imperative email/password credential management. Requires the running server. */
+  credentials: AuthCredentialsApi
 }
 
 const DAY_MS = 86_400_000
@@ -126,6 +130,7 @@ const activeOnly = (): Expr => not(gt('deletedAt', 0))
  * ```ts
  * const authKit = auth({ contract: app, collections: backend })
  * createSuperLineServer(app, {
+ *   nodeKey: 'app-replica-1',
  *   collections: backend,
  *   authenticate: authKit.authenticate,
  *   identify: authKit.identify,
@@ -134,28 +139,33 @@ const activeOnly = (): Expr => not(gt('deletedAt', 0))
  * ```
  */
 export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer<C> {
-  const { contract, collections, defaultRoles = ['user'], sessionTtlMs = 30 * DAY_MS, usersReadable = true } = opts
+  const { contract, collections, defaultRoles = ['user'], accessTokenTtlMs = 30 * DAY_MS, usersReadable = true } = opts
   const contractRoles = new Set(Object.keys(contract.roles))
   const jwtSecret = opts.jwt ? new TextEncoder().encode(opts.jwt.secret) : undefined
   const jwtTtlMs = opts.jwt?.ttlMs ?? 15 * 60_000
   const sendPasswordReset = opts.sendPasswordReset
   const passwordResetTtlMs = opts.passwordResetTtlMs ?? 60 * 60_000
 
-  const readSession = (token: string) => collections.read('sessions', tokenHash(token)) as Promise<AuthSession | undefined>
+  const readAccessToken = (token: string) => collections.read('accessTokens', tokenHash(token)) as Promise<AuthAccessToken | undefined>
   const readUser = (id: string) => collections.read('users', id) as Promise<AuthUser | undefined>
   const readApiKey = (raw: string) => collections.read('apiKeys', tokenHash(raw)) as Promise<AuthApiKey | undefined>
-  const verifyJwt = async (raw: string): Promise<{ userId: string; roles: string[] } | null> => {
+  const verifyJwt = async (raw: string): Promise<{ userId: string; roles: string[]; jti: string | null } | null> => {
     if (!jwtSecret) return null
     try {
       const { payload } = await jwtVerify(raw, jwtSecret)
-      return payload.sub ? { userId: payload.sub, roles: Array.isArray(payload.roles) ? (payload.roles as string[]) : [] } : null
+      return payload.sub
+        ? { userId: payload.sub, roles: Array.isArray(payload.roles) ? (payload.roles as string[]) : [], jti: typeof payload.jti === 'string' ? payload.jti : null }
+        : null
     } catch {
       return null // bad/expired signature → treated as unauthenticated
     }
   }
 
   const resolveBase = async (handshake: Handshake): Promise<AuthResultOf<C>> => {
-    const guest = { role: GUEST_ROLE, ctx: { userId: null, roles: [], sessionId: null } } as AuthResultOf<C>
+    const guest = {
+      role: GUEST_ROLE,
+      ctx: { userId: null, roles: [], sessionId: null, authMethod: null, authId: null },
+    } as AuthResultOf<C>
     const requestedRole = handshake.query.role
     if (requestedRole === GUEST_ROLE) return guest
 
@@ -169,7 +179,10 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
       if (!contractRoles.has(key.role)) throw new SuperLineError('BAD_REQUEST', `api key role '${key.role}' is not a contract role`)
       if (requestedRole && requestedRole !== key.role)
         throw new SuperLineError('FORBIDDEN', `api key grants '${key.role}', not '${requestedRole}'`)
-      return { role: key.role, ctx: { userId: key.userId, roles: [key.role], sessionId: null } } as AuthResultOf<C>
+      return {
+        role: key.role,
+        ctx: { userId: key.userId, roles: [key.role], sessionId: null, authMethod: 'api-key', authId: key.id },
+      } as AuthResultOf<C>
     }
 
     // JWT — verify signature + expiry and trust its role claims. One user read (the deactivation check —
@@ -183,57 +196,137 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
       if (!requestedRole) throw new SuperLineError('BAD_REQUEST', 'a role is required to authenticate')
       if (!contractRoles.has(requestedRole)) throw new SuperLineError('BAD_REQUEST', `unknown role '${requestedRole}'`)
       if (!claims.roles.includes(requestedRole)) throw new SuperLineError('FORBIDDEN', `role '${requestedRole}' not granted`)
-      return { role: requestedRole, ctx: { userId: claims.userId, roles: claims.roles, sessionId: null } } as AuthResultOf<C>
+      return {
+        role: requestedRole,
+        ctx: { userId: claims.userId, roles: claims.roles, sessionId: null, authMethod: 'jwt', authId: claims.jti },
+      } as AuthResultOf<C>
     }
 
-    // Session token — no token degrades to guest; an expired/absent session, vanished user, or deactivated
+    // Access token — no token degrades to guest; an expired/absent token, vanished user, or deactivated
     // user does too (client re-logs in).
     const token = handshake.query.token
     if (!token) return guest
-    const session = await readSession(token)
-    if (!session || session.expiresAt < Date.now()) return guest
-    const user = await readUser(session.userId)
+    const accessToken = await readAccessToken(token)
+    if (!accessToken || accessToken.expiresAt < Date.now()) return guest
+    const user = await readUser(accessToken.userId)
     if (!user || isDeactivated(user)) return guest
     // valid session: the requested role must be a real contract role AND granted to this user
     if (!requestedRole) throw new SuperLineError('BAD_REQUEST', 'a role is required to authenticate')
     if (!contractRoles.has(requestedRole)) throw new SuperLineError('BAD_REQUEST', `unknown role '${requestedRole}'`)
     if (!user.roles.includes(requestedRole)) throw new SuperLineError('FORBIDDEN', `role '${requestedRole}' not granted`)
-    return { role: requestedRole, ctx: { userId: user.id, roles: user.roles, sessionId: session.id } } as AuthResultOf<C>
+    return {
+      role: requestedRole,
+      ctx: { userId: user.id, roles: user.roles, sessionId: null, authMethod: 'access-token', authId: accessToken.id },
+    } as AuthResultOf<C>
+  }
+
+  let pluginCtx: PluginContext | undefined
+  let initialization = Promise.resolve()
+  let stopping = false
+  const pendingWork = new Set<Promise<unknown>>()
+  const track = <T>(work: Promise<T>): Promise<T> => {
+    pendingWork.add(work)
+    void work.then(
+      () => pendingWork.delete(work),
+      () => pendingWork.delete(work),
+    )
+    return work
   }
 
   // Resolve identity (above), then seed the client-visible env (ADR-0012) from it via the host's resolveEnv.
-  // ctx and env are produced by ONE connect-time call but stay separate: ctx server-only+frozen, env client-visible.
-  const authenticate = async (handshake: Handshake): Promise<AuthResultOf<C>> => {
-    const base = await resolveBase(handshake)
-    if (!opts.resolveEnv) return base
-    const env = await opts.resolveEnv(base.ctx as AuthContext)
-    return (env == null ? base : { ...base, env }) as AuthResultOf<C>
+  // Tracking the whole attempt closes the shutdown race: the disposer blocks new attempts, drains accepted
+  // in-flight work, then sweeps every session that work could have inserted.
+  const authenticate = (handshake: Handshake): Promise<AuthResultOf<C>> => {
+    if (stopping) return Promise.reject(new Error('plugin-auth is shutting down'))
+    return track(
+      (async () => {
+        const base = await resolveBase(handshake)
+        const authCtx = base.ctx as AuthContext
+        if (!authCtx.userId) return base
+        await initialization
+        if (stopping) throw new Error('plugin-auth is shutting down')
+        const ctx = pluginCtx
+        if (!ctx?.nodeKey) throw new Error('plugin-auth requires createSuperLineServer({ nodeKey })')
+        const now = Date.now()
+        const sessionId = newId()
+        await ctx.collection('sessions').insert({
+          id: sessionId,
+          userId: authCtx.userId,
+          nodeId: ctx.nodeId,
+          nodeKey: ctx.nodeKey,
+          role: base.role,
+          transport: handshake.transport,
+          authMethod: authCtx.authMethod!,
+          authId: authCtx.authId,
+          connectedAt: now,
+          lastSeenAt: now,
+          endedAt: null,
+        } satisfies AuthSession)
+        await refreshPresence(authCtx.userId)
+        const connectionCtx = { ...authCtx, sessionId }
+        const env = opts.resolveEnv ? await opts.resolveEnv(connectionCtx) : undefined
+        return {
+          ...base,
+          ctx: connectionCtx,
+          connectionId: sessionId,
+          ...(env == null ? {} : { env }),
+        } as AuthResultOf<C>
+      })(),
+    )
   }
 
   const identify = (conn: { ctx: unknown }): string | undefined => (conn.ctx as AuthContext).userId ?? undefined
 
   // captured at startup so `revoke` (callable outside a handler) can reach the co-writer + cluster-wide kick
-  let pluginCtx: PluginContext | undefined
   const plugin: SuperLinePlugin<AuthSurface> = {
     name: 'auth',
-    setup: (ctx) => void (pluginCtx = ctx),
+    onEvent: (event) => {
+      if (stopping || event.type !== 'collection.change' || event.n !== 'sessions' || !event.row) return
+      const userId = (event.row as Partial<AuthSession>).userId
+      if (userId) void track(refreshPresence(userId))
+    },
+    setup: (ctx) => {
+      if (!ctx.nodeKey) throw new Error('plugin-auth requires createSuperLineServer({ nodeKey })')
+      pluginCtx = ctx
+      initialization = (async () => {
+        const now = Date.now()
+        const rows = (await ctx.collection('sessions').snapshot({ filter: eq('nodeKey', ctx.nodeKey!) })) as AuthSession[]
+        const unfinished = rows.filter((row) => row.endedAt === null)
+        await Promise.all(unfinished.map((row) => ctx.collection('sessions').update({ ...row, endedAt: now })))
+        await Promise.all([...new Set(unfinished.map((row) => row.userId))].map((userId) => refreshPresence(userId)))
+      })()
+      void initialization.catch(() => {})
+      return async () => {
+        stopping = true
+        await initialization
+        await Promise.allSettled(pendingWork)
+        const now = Date.now()
+        const rows = (await ctx.collection('sessions').snapshot({ filter: eq('nodeId', ctx.nodeId) })) as AuthSession[]
+        const unfinished = rows.filter((row) => row.endedAt === null)
+        await Promise.all(unfinished.map((row) => ctx.collection('sessions').update({ ...row, endedAt: now })))
+        await Promise.all([...new Set(unfinished.map((row) => row.userId))].map((userId) => refreshPresence(userId)))
+      }
+    },
+    onHeartbeat: (_conn, rawCtx, at) => (stopping ? undefined : track(updateSession(rawCtx as AuthContext, at))),
+    onDisconnect: (conn, rawCtx) => (stopping ? undefined : track(endSession(rawCtx as AuthContext, conn.lastPongAt))),
     policies: {
       users: usersReadable ? { read: () => undefined } : {}, // open read (public directory); never client-writable
       credentials: {}, // locked: server-only (the co-writer bypasses)
+      accessTokens: {}, // locked: server-only
       sessions: {}, // locked: server-only
+      userPresence: usersReadable ? { read: () => undefined } : {},
       apiKeys: {}, // locked: server-only
       passwordResets: {}, // locked: server-only
     },
     handlers: (ctx) => {
-      const users = () => ctx.collection('users')
       const creds = () => ctx.collection('credentials')
-      const sessions = () => ctx.collection('sessions')
+      const accessTokens = () => ctx.collection('accessTokens')
       const keys = () => ctx.collection('apiKeys')
       const resets = () => ctx.collection('passwordResets')
       const mint = async (userId: string): Promise<string> => {
         const token = randomToken()
         const now = Date.now()
-        await sessions().insert({ id: tokenHash(token), userId, createdAt: now, expiresAt: now + sessionTtlMs })
+        await accessTokens().insert({ id: tokenHash(token), userId, createdAt: now, expiresAt: now + accessTokenTtlMs })
         return token
       }
       return {
@@ -242,10 +335,21 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
           if (await creds().read(email)) throw new SuperLineError('CONFLICT', 'email already registered')
           const userId = newId()
           const passwordHash = await hashPassword(input.password)
-          // ordered so the fail-fast (dup email) hits first; residual failures leave at worst an unreferenced user row
-          await creds().insert({ email, userId, passwordHash } satisfies AuthCredential)
-          await users().insert({ id: userId, displayName: input.displayName, roles: [...defaultRoles], createdAt: Date.now() } satisfies AuthUser)
-          const token = await mint(userId)
+          const token = randomToken()
+          const now = Date.now()
+          await ctx.batch([
+            {
+              op: 'insert',
+              collection: 'users',
+              row: { id: userId, displayName: input.displayName, roles: [...defaultRoles], createdAt: now } satisfies AuthUser,
+            },
+            { op: 'insert', collection: 'credentials', row: { email, userId, passwordHash } satisfies AuthCredential },
+            {
+              op: 'insert',
+              collection: 'accessTokens',
+              row: { id: tokenHash(token), userId, createdAt: now, expiresAt: now + accessTokenTtlMs } satisfies AuthAccessToken,
+            },
+          ])
           return { token, userId, roles: [...defaultRoles], displayName: input.displayName }
         },
         signIn: async (input) => {
@@ -265,14 +369,20 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
             readUser(cred.userId),
           ])
           if (!freshCred || freshCred.passwordHash !== cred.passwordHash || !freshUser || isDeactivated(freshUser)) {
-            await sessions().delete(tokenHash(token))
+            await accessTokens().delete(tokenHash(token))
             throw new SuperLineError('UNAUTHORIZED', 'invalid email or password')
           }
           return { token, userId: user.id, roles: user.roles, displayName: user.displayName }
         },
         signOut: async (_input, connCtx) => {
-          const { sessionId } = connCtx as AuthContext
-          if (sessionId) await sessions().delete(sessionId)
+          const auth = connCtx as AuthContext
+          if (auth.authMethod === 'access-token' && auth.authId) {
+            await accessTokens().delete(auth.authId)
+            if (auth.userId) await endSessions(auth.userId, auth.authId, 'access-token')
+          } else {
+            await endSession(auth)
+            if (auth.sessionId) setTimeout(() => requireCtx().toConn(auth.sessionId!).close(), 0)
+          }
           return { ok: true }
         },
         whoami: async (_input, connCtx) => {
@@ -318,17 +428,19 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
           const key = (await keys().read(input.id)) as AuthApiKey | undefined
           if (!key || key.userId !== userId) throw new SuperLineError('NOT_FOUND', 'no such API key')
           await keys().delete(input.id)
+          await endSessions(userId, key.id, 'api-key')
           return { ok: true }
         },
         getToken: async (_input, connCtx) => {
           if (!jwtSecret) throw new SuperLineError('BAD_REQUEST', 'JWT is not enabled on this server')
-          const { userId, roles, sessionId } = connCtx as AuthContext
+          const { userId, roles } = connCtx as AuthContext
           if (!userId) throw new SuperLineError('UNAUTHORIZED', 'sign in to get a token')
           const now = Date.now()
           const expiresAt = now + jwtTtlMs
-          const token = await new SignJWT({ roles, sid: sessionId })
+          const token = await new SignJWT({ roles })
             .setProtectedHeader({ alg: 'HS256' })
             .setSubject(userId)
+            .setJti(newId())
             .setIssuedAt(Math.floor(now / 1000))
             .setExpirationTime(Math.floor(expiresAt / 1000))
             .sign(jwtSecret)
@@ -359,8 +471,9 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
           await creds().update({ email: cred.email, userId: cred.userId, passwordHash: await hashPassword(input.newPassword) })
           await resets().delete(reset.id)
           // a password reset logs out every existing session
-          const sess = (await sessions().snapshot({ filter: eq('userId', reset.userId) })) as AuthSession[]
-          await Promise.all(sess.map((s) => sessions().delete(s.id)))
+          const tokens = (await accessTokens().snapshot({ filter: eq('userId', reset.userId) })) as AuthAccessToken[]
+          await Promise.all(tokens.map((token) => accessTokens().delete(token.id)))
+          await endSessions(reset.userId, undefined, 'access-token')
           return { ok: true }
         },
       }
@@ -378,7 +491,71 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
       )
     return pluginCtx
   }
-  const col = (n: 'users' | 'credentials' | 'sessions' | 'apiKeys' | 'passwordResets') => requireCtx().collection(n)
+  const col = (n: 'users' | 'credentials' | 'accessTokens' | 'sessions' | 'userPresence' | 'apiKeys' | 'passwordResets') =>
+    requireCtx().collection(n)
+
+  const withLock = async <T>(locks: Map<string, Promise<void>>, key: string, work: () => Promise<T>): Promise<T> => {
+    const previous = locks.get(key) ?? Promise.resolve()
+    const current = previous.then(work, work)
+    const tail = current.then(
+      () => undefined,
+      () => undefined,
+    )
+    locks.set(key, tail)
+    try {
+      return await current
+    } finally {
+      if (locks.get(key) === tail) locks.delete(key)
+    }
+  }
+
+  const presenceLocks = new Map<string, Promise<void>>()
+  const refreshPresence = (userId: string): Promise<void> =>
+    withLock(presenceLocks, userId, async () => {
+      const rows = (await col('sessions').snapshot({ filter: eq('userId', userId) })) as AuthSession[]
+      const live = rows.filter((row) => row.endedAt === null)
+      const connectedAt = live.length ? Math.min(...live.map((row) => row.connectedAt)) : null
+      const lastSeenAt = rows.length ? Math.max(...rows.map((row) => row.lastSeenAt)) : null
+      const existing = await col('userPresence').read(userId)
+      const next = { userId, connectedAt, lastSeenAt }
+      if (existing) await col('userPresence').update(next)
+      else {
+        try {
+          await col('userPresence').insert(next)
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'CONFLICT') throw error
+          await col('userPresence').update(next)
+        }
+      }
+    })
+
+  const sessionLocks = new Map<string, Promise<void>>()
+  const withSessionLock = (sessionId: string, work: () => Promise<void>): Promise<void> =>
+    withLock(sessionLocks, sessionId, work)
+
+  const updateSession = async (authCtx: AuthContext, lastSeenAt: number): Promise<void> => {
+    if (!authCtx.userId || !authCtx.sessionId) return
+    await withSessionLock(authCtx.sessionId, async () => {
+      const row = (await col('sessions').read(authCtx.sessionId!)) as AuthSession | undefined
+      if (!row || row.endedAt !== null) return
+      await col('sessions').update({ ...row, lastSeenAt })
+    })
+    await refreshPresence(authCtx.userId)
+  }
+
+  const endSession = async (authCtx: AuthContext, lastPongAt?: number): Promise<void> => {
+    if (!authCtx.userId || !authCtx.sessionId) return
+    await withSessionLock(authCtx.sessionId, async () => {
+      const row = (await col('sessions').read(authCtx.sessionId!)) as AuthSession | undefined
+      if (!row || row.endedAt !== null) return
+      await col('sessions').update({
+        ...row,
+        lastSeenAt: lastPongAt === undefined ? row.lastSeenAt : Math.max(row.lastSeenAt, lastPongAt),
+        endedAt: Date.now(),
+      })
+    })
+    await refreshPresence(authCtx.userId)
+  }
 
   const mustRead = async (id: string): Promise<AuthUser> => {
     const user = (await col('users').read(id)) as AuthUser | undefined
@@ -388,35 +565,45 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
   const assertContractRoles = (roles: string[]): void => {
     for (const r of roles) if (!contractRoles.has(r)) throw new SuperLineError('BAD_REQUEST', `unknown role '${r}'`)
   }
-  const deleteWhere = async (n: 'sessions' | 'apiKeys' | 'passwordResets', userId: string): Promise<void> => {
+  const deleteWhere = async (n: 'accessTokens' | 'apiKeys' | 'passwordResets', userId: string): Promise<void> => {
     const rows = (await col(n).snapshot({ filter: eq('userId', userId) })) as { id: string }[]
     await Promise.all(rows.map((r) => col(n).delete(r.id)))
   }
-  const flushSessions = (userId: string) => deleteWhere('sessions', userId)
+  const flushAccessTokens = (userId: string) => deleteWhere('accessTokens', userId)
   const deleteApiKeys = (userId: string) => deleteWhere('apiKeys', userId)
   const deleteResets = (userId: string) => deleteWhere('passwordResets', userId)
+
+  const endSessions = async (userId: string, authId?: string, authMethod?: string): Promise<void> => {
+    const rows = (await col('sessions').snapshot({ filter: eq('userId', userId) })) as AuthSession[]
+    const now = Date.now()
+    const active = rows.filter(
+      (row) =>
+        row.endedAt === null &&
+        (authId === undefined || row.authId === authId) &&
+        (authMethod === undefined || row.authMethod === authMethod),
+    )
+    await Promise.all(
+      active.map((row) =>
+        withSessionLock(row.id, async () => {
+          const current = (await col('sessions').read(row.id)) as AuthSession | undefined
+          if (current && current.endedAt === null) await col('sessions').update({ ...current, endedAt: now })
+        }),
+      ),
+    )
+    await refreshPresence(userId)
+    setTimeout(() => {
+      for (const row of active) requireCtx().toConn(row.id).close()
+    }, 0)
+  }
 
   // Per-user serialization of the imperative mutators (this kit is the only imperative writer, so a
   // process-local chain suffices): without it, update()'s full-row LWW write-back could race deactivate()
   // and silently erase the deletedAt stamp — un-banning the user.
   const userLocks = new Map<string, Promise<void>>()
-  const withUserLock = <T>(id: string, fn: () => Promise<T>): Promise<T> => {
-    const prev = userLocks.get(id) ?? Promise.resolve()
-    const run = prev.then(fn, fn)
-    const tail = run.then(
-      () => undefined,
-      () => undefined,
-    )
-    userLocks.set(id, tail)
-    void tail.then(() => {
-      if (userLocks.get(id) === tail) userLocks.delete(id)
-    })
-    return run
-  }
+  const withUserLock = <T>(id: string, fn: () => Promise<T>): Promise<T> => withLock(userLocks, id, fn)
 
   const revoke = async (userId: string): Promise<void> => {
-    // relay-safe session deletes via the co-writer, then a cluster-wide kick of the live connections
-    await flushSessions(userId)
+    await Promise.all([flushAccessTokens(userId), endSessions(userId)])
     requireCtx().toUser(userId).disconnect()
   }
 
@@ -438,15 +625,9 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
     },
     create: async (input) => {
       requireCtx() // fail fast before any store traffic
-      const email = input.email.toLowerCase()
       const roles = input.roles ?? [...defaultRoles]
       assertContractRoles(roles)
-      if (await col('credentials').read(email)) throw new SuperLineError('CONFLICT', 'email already registered')
       const userId = newId()
-      // no password → unclaimed (invite flow): an empty hash verifies false for EVERY password, so the
-      // account can't sign in until claimed through the password-reset flow
-      const passwordHash = input.password ? await hashPassword(input.password) : ''
-      await col('credentials').insert({ email, userId, passwordHash } satisfies AuthCredential)
       const row: AuthUser = {
         id: userId,
         displayName: input.displayName,
@@ -478,24 +659,38 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
       withUserLock(id, async () => {
         const user = await mustRead(id)
         await col('users').update({ ...user, deletedAt: Date.now() })
-        await Promise.all([flushSessions(id), deleteApiKeys(id), deleteResets(id)])
+        await Promise.all([flushAccessTokens(id), deleteApiKeys(id), deleteResets(id), endSessions(id)])
         requireCtx().toUser(id).disconnect()
       }),
     reactivate: (id) =>
       withUserLock(id, async () => {
         const user = await mustRead(id)
         // purge anything that slipped past deactivate's point-in-time flushes — leftovers must never revive
-        await Promise.all([flushSessions(id), deleteApiKeys(id), deleteResets(id)])
+        await Promise.all([flushAccessTokens(id), deleteApiKeys(id), deleteResets(id), endSessions(id)])
         await col('users').update({ ...user, deletedAt: null })
       }),
-    setPassword: (id, newPassword) =>
-      withUserLock(id, async () => {
-        await mustRead(id)
-        const [cred] = (await col('credentials').snapshot({ filter: eq('userId', id) })) as AuthCredential[]
-        if (!cred) throw new SuperLineError('NOT_FOUND', `no credential for user '${id}'`)
-        await col('credentials').update({ ...cred, passwordHash: await hashPassword(newPassword) })
-        // a rotation revokes every outstanding way back in: live sessions AND pending reset tokens
-        await Promise.all([flushSessions(id), deleteResets(id)])
+  }
+
+  const credentials: AuthCredentialsApi = {
+    create: async (userId, input) => {
+      await mustRead(userId)
+      const email = input.email.toLowerCase()
+      if (await col('credentials').read(email)) throw new SuperLineError('CONFLICT', 'email already registered')
+      const row: AuthCredential = { email, userId, passwordHash: input.password ? await hashPassword(input.password) : '' }
+      await col('credentials').insert(row)
+      return row
+    },
+    setPassword: (userId, newPassword) =>
+      withUserLock(userId, async () => {
+        await mustRead(userId)
+        const [credential] = (await col('credentials').snapshot({ filter: eq('userId', userId) })) as AuthCredential[]
+        if (!credential) throw new SuperLineError('NOT_FOUND', `no credential for user '${userId}'`)
+        await col('credentials').update({ ...credential, passwordHash: await hashPassword(newPassword) })
+        await Promise.all([
+          flushAccessTokens(userId),
+          deleteResets(userId),
+          endSessions(userId, undefined, 'access-token'),
+        ])
       }),
   }
 
@@ -530,8 +725,9 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
       const key = (await col('apiKeys').read(id)) as AuthApiKey | undefined
       if (!key) throw new SuperLineError('NOT_FOUND', 'no such API key')
       await col('apiKeys').delete(id)
+      await endSessions(key.userId, id, 'api-key')
     },
   }
 
-  return { authenticate, identify, plugin, revoke, pushEnv, users, apiKeys }
+  return { authenticate, identify, plugin, revoke, pushEnv, users, credentials, apiKeys }
 }

@@ -58,6 +58,7 @@ async function main(): Promise<void> {
   })
 
   createSuperLineServer(app, {
+    nodeKey: 'chat-resources-example',
     transports: [webSocketServerTransport({ server })],
     collections: backend,
     crdtCollections: crdtMemoryCollections(),

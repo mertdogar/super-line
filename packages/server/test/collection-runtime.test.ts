@@ -403,4 +403,24 @@ describe('Collection runtime · server handle + infos', () => {
       code: 'VALIDATION',
     })
   })
+
+  it('applies server co-writes atomically across row collections', async () => {
+    const h2 = host()
+    const { r, store } = runtime({}, h2)
+    await r.batch([
+      { op: 'insert', collection: 'users', row: { id: 'u1', name: 'Ann' } },
+      { op: 'insert', collection: 'messages', row: msg('m1', 'general', 'u1') },
+    ])
+    expect(await store.read('users', 'u1')).toMatchObject({ name: 'Ann' })
+    expect(await store.read('messages', 'm1')).toMatchObject({ authorId: 'u1' })
+    expect(h2.published).toHaveLength(1)
+
+    await expect(
+      r.batch([
+        { op: 'insert', collection: 'users', row: { id: 'orphan', name: 'Nope' } },
+        { op: 'insert', collection: 'messages', row: msg('m1') },
+      ]),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(await store.read('users', 'orphan')).toBeUndefined()
+  })
 })

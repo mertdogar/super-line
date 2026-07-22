@@ -10,7 +10,7 @@ export interface AuthState {
   roles: string[]
 }
 
-/** Where the session token is persisted between page loads. Defaults to `localStorage` when available. */
+/** Where the access token is persisted between page loads. Defaults to `localStorage` when available. */
 export interface TokenStorage {
   get(): string | null
   set(token: string | null): void
@@ -24,7 +24,7 @@ export interface AuthClientOptions<C extends Contract, R extends RoleOf<C>> {
    * and, after login, as `authedRole` ({ token }). The app owns transport/URL here.
    */
   connect: (args: { role: string; params: Record<string, string> }) => SuperLineClient<C, R>
-  /** Persist/restore the session token. Defaults to `localStorage` under `superline.auth.token`. */
+  /** Persist/restore the access token. Defaults to `localStorage` under `superline.auth.token`. */
   storage?: TokenStorage
 }
 
@@ -60,7 +60,7 @@ interface Dyn {
 /**
  * Wrap the guest↔authed lifecycle behind a plain `signIn`/`signUp`/`signOut`. Because super-line freezes a
  * connection's role at connect, "logging in" means tearing down the guest connection and reconnecting with the
- * session token as `authedRole` — this helper does that transparently and persists the token across reloads.
+ * access token as `authedRole` — this helper does that transparently and persists the token across reloads.
  */
 export function authClient<C extends Contract, R extends RoleOf<C>>(options: AuthClientOptions<C, R>): AuthClient<C, R> {
   const storage = options.storage ?? browserStorage()

@@ -47,7 +47,7 @@ export interface Handshake {
  * callbacks return `role` + `ctx`, and optionally `env` (the initial client-visible per-connection
  * state seeded at connect; ADR-0012). `ctx` is server-only + frozen; `env` is client-visible + mutable.
  */
-export type AuthOutcome = { role: string; ctx: unknown; env?: unknown; transport?: string }
+export type AuthOutcome = { role: string; ctx: unknown; env?: unknown; transport?: string; connectionId?: string }
 
 /**
  * A plugin-owned (reserved) connection class the server declares to its transports: a role name the

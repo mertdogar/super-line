@@ -18,7 +18,6 @@ type ChatKit = ReturnType<typeof chatKitFactory<typeof chat>>
 /** The channel the AI agent lives in. Humans are auto-joined so the bot is reachable out of the box. */
 export const AGENT_CHANNEL = 'ask-ai'
 const BOT_NAME = 'Ask AI'
-const BOT_EMAIL = 'ask-ai@collections-chat.local'
 const RUNTIME_MARKER = 'collections-chat-agent'
 // A Vercel AI Gateway model string ("provider/model"). The gateway reaches Anthropic/OpenAI/Google
 // behind one API key (AI_GATEWAY_API_KEY), so swapping providers is a one-line change.
@@ -51,7 +50,6 @@ export async function startAgent(deps: { authKit: AuthKit; chatKit: ChatKit; url
   )
   if (!user) {
     user = await authKit.users.create({
-      email: BOT_EMAIL,
       displayName: BOT_NAME,
       metadata: { runtime: RUNTIME_MARKER },
     })

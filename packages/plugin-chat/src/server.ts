@@ -308,6 +308,7 @@ const swallow =
  * ```ts
  * const chatKit = chat({ contract: app, hooks: { sendMessage: { before: noSpam } } })
  * createSuperLineServer(app, {
+ *   nodeKey: 'chat-replica-1',
  *   collections: backend,
  *   authenticate: authKit.authenticate,
  *   identify: authKit.identify,             // principal := userId — drives the chat read policies
@@ -322,7 +323,7 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
   // fail fast at startup: both fragments must be merged into the contract
   const contractCollections = (opts.contract as { collections?: Record<string, unknown> }).collections ?? {}
   const declared = new Set(Object.keys(contractCollections))
-  for (const need of ['users', 'channels', 'memberships', 'messages', 'messageParts', 'resources', 'resourcePresence'] as const) {
+  for (const need of ['users', 'userPresence', 'channels', 'memberships', 'messages', 'messageParts', 'resources', 'resourcePresence'] as const) {
     if (!declared.has(need))
       throw new Error(
         `plugin-chat: the contract is missing the '${need}' collection — declare plugins: [authContract(), chatContract()] in defineContract`,

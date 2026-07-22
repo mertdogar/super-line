@@ -1,15 +1,16 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { decodeJwt } from 'jose'
 import { z } from 'zod'
 import { defineContract } from '@super-line/core'
 import { createSuperLineServer } from '@super-line/server'
 import { memoryCollections } from '@super-line/collections-memory'
-import { authContract } from '@super-line/plugin-auth'
+import { authContract, type AuthSession } from '@super-line/plugin-auth'
 import { auth } from '@super-line/plugin-auth/server'
 import { authClient } from '@super-line/plugin-auth/client'
 import { createHarness, waitFor } from '../../server/test/harness.js'
 
 // A tiny app: a protected `secret` on `user`, an `adminOnly` on `admin`, plus the auth plugin (adds
-// the `guest` role, users/credentials/sessions collections, and signIn/signUp/signOut/whoami).
+// the `guest` role, auth collections, and signIn/signUp/signOut/whoami).
 const app = defineContract({
   roles: {
     user: { clientToServer: { secret: { input: z.void(), output: z.object({ me: z.string() }) } } },
@@ -23,6 +24,7 @@ function _authTypeCheck(): void {
   const backend = memoryCollections()
   const authKit = auth({ contract: app, collections: backend })
   const srv = createSuperLineServer(app, {
+    nodeKey: 'auth-typecheck',
     transports: [],
     collections: backend,
     authenticate: authKit.authenticate, // A = AuthResultOf<app> is inferred here (uniform AuthContext)
@@ -50,10 +52,15 @@ void _authTypeCheck
 const h = createHarness()
 afterEach(() => h.dispose())
 
-async function boot(jwt?: { secret: string }, sendPasswordReset?: (args: { user: { id: string }; token: string }) => void) {
+async function boot(
+  jwt?: { secret: string },
+  sendPasswordReset?: (args: { user: { id: string }; token: string }) => void,
+  usersReadable = true,
+) {
   const backend = memoryCollections()
-  const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'], jwt, sendPasswordReset })
+  const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'], jwt, sendPasswordReset, usersReadable })
   const { srv, url } = await h.server(app, {
+    nodeKey: 'auth-test',
     authenticate: authKit.authenticate,
     identify: authKit.identify,
     collections: backend,
@@ -99,6 +106,23 @@ describe('plugin-auth — sign-up / login / roles', () => {
     user.close()
   })
 
+  it('keeps concurrent duplicate sign-up atomic', async () => {
+    const { srv, url } = await boot()
+    const first = h.client(app, { url, role: 'guest' })
+    const second = h.client(app, { url, role: 'guest' })
+    const outcomes = await Promise.allSettled([
+      first.signUp({ email: 'race@x.com', password: 'passpass', displayName: 'First' }),
+      second.signUp({ email: 'RACE@x.com', password: 'passpass', displayName: 'Second' }),
+    ])
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1)
+    expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(1)
+    expect(await srv.collection('users').snapshot({})).toHaveLength(1)
+    expect(await srv.collection('credentials').snapshot({})).toHaveLength(1)
+    expect(await srv.collection('accessTokens').snapshot({})).toHaveLength(1)
+    first.close()
+    second.close()
+  })
+
   it('enforces data-driven roles: default user cannot open an admin connection until granted', async () => {
     const { srv, url } = await boot()
     const guest = h.client(app, { url, role: 'guest' })
@@ -130,25 +154,45 @@ describe('plugin-auth — sign-up / login / roles', () => {
 
     const user = h.client(app, { url, role: 'user', params: { token } })
     expect(await user.whoami()).not.toBeNull()
-    await user.signOut() // deletes the session row
+    await user.signOut() // revokes the access token and ends its active sessions
     user.close()
 
-    // reconnecting with the revoked token: authenticate finds no session → guest, so whoami is null
+    // reconnecting with the revoked token: authenticate finds no access token → guest, so whoami is null
     const stale = h.client(app, { url, role: 'user', params: { token } })
     expect(await stale.whoami()).toBeNull()
     stale.close()
   })
 
-  it('keeps secret collections server-only (deny-all): a client cannot read sessions or credentials', async () => {
+  it('keeps every secret auth collection server-only', async () => {
     const { url } = await boot()
     const guest = h.client(app, { url, role: 'guest' })
     const { token } = await guest.signUp({ email: 'ed@x.com', password: 'passpass', displayName: 'Ed' })
     guest.close()
     const user = h.client(app, { url, role: 'user', params: { token } })
-    // a real session row exists; a denied read must surface as EITHER a rejected subscribe OR an empty set
-    const sessions = user.collection('sessions').subscribe({})
-    const denied = await sessions.ready.then(() => sessions.rows().length === 0).catch(() => true)
-    expect(denied).toBe(true)
+    // a real connection-session row exists; a denied read must reject or return an empty set
+    for (const name of ['sessions', 'credentials', 'accessTokens', 'apiKeys', 'passwordResets'] as const) {
+      const rows = user.collection(name).subscribe({})
+      const denied = await rows.ready.then(() => rows.rows().length === 0).catch(() => true)
+      expect(denied).toBe(true)
+      rows.close()
+    }
+    user.close()
+  })
+
+  it('locks both the user directory and safe presence when usersReadable is false', async () => {
+    const { url } = await boot(undefined, undefined, false)
+    const guest = h.client(app, { url, role: 'guest' })
+    const { token } = await guest.signUp({ email: 'private@x.com', password: 'passpass', displayName: 'Private' })
+    guest.close()
+    const user = h.client(app, { url, role: 'user', params: { token } })
+    expect(await user.whoami()).not.toBeNull()
+
+    for (const name of ['users', 'userPresence'] as const) {
+      const rows = user.collection(name).subscribe({})
+      const denied = await rows.ready.then(() => rows.rows().length === 0).catch(() => true)
+      expect(denied).toBe(true)
+      rows.close()
+    }
     user.close()
   })
 
@@ -170,7 +214,7 @@ describe('plugin-auth — sign-up / login / roles', () => {
 })
 
 describe('plugin-auth — API keys', () => {
-  it('creates a key, authenticates a connection with it (no session), then revokes it', async () => {
+  it('creates a key, records its connection session, then revokes it', async () => {
     const { url } = await boot()
     const guest = h.client(app, { url, role: 'guest' })
     const { token, userId } = await guest.signUp({ email: 'ka@x.com', password: 'passpass', displayName: 'Ka' })
@@ -182,7 +226,7 @@ describe('plugin-auth — API keys', () => {
     expect(await user.listApiKeys()).toHaveLength(1)
     user.close()
 
-    // connect with ONLY the API key (no session token) → authorized as the key's role
+    // connect with only the API key → authorized as the key's role with a connection session
     const svc = h.client(app, { url, role: 'user', params: { apiKey: key.key } })
     expect(await svc.secret()).toEqual({ me: userId })
     svc.close()
@@ -209,7 +253,7 @@ describe('plugin-auth — API keys', () => {
 
 describe('plugin-auth — JWT', () => {
   it('issues a JWT and accepts it for a stateless connect', async () => {
-    const { url } = await boot({ secret: 'shhhh-a-very-secret-signing-key' })
+    const { srv, url } = await boot({ secret: 'shhhh-a-very-secret-signing-key' })
     const guest = h.client(app, { url, role: 'guest' })
     const { token, userId } = await guest.signUp({ email: 'jw@x.com', password: 'passpass', displayName: 'Jw' })
     guest.close()
@@ -219,9 +263,12 @@ describe('plugin-auth — JWT', () => {
     expect(jwt.split('.')).toHaveLength(3) // header.payload.signature
     user.close()
 
-    // connect with ONLY the JWT (no session token) → verified statelessly, no DB lookup
+    // connect with only the JWT → signature verified and a connection session recorded
     const svc = h.client(app, { url, role: 'user', params: { jwt } })
     expect(await svc.secret()).toEqual({ me: userId })
+    const sessions = (await srv.collection('sessions').snapshot({})) as AuthSession[]
+    const jwtSession = sessions.find((row) => row.authMethod === 'jwt')
+    expect(jwtSession).toMatchObject({ userId, authId: decodeJwt(jwt).jti, endedAt: null })
     svc.close()
   })
 
@@ -237,7 +284,7 @@ describe('plugin-auth — JWT', () => {
 })
 
 describe('plugin-auth — revoke-and-kick', () => {
-  it('revoke(userId) deletes the sessions AND disconnects the live connection', async () => {
+  it('revoke(userId) revokes access tokens, ends sessions, and disconnects the live connection', async () => {
     const { srv, url, authKit } = await boot()
     const guest = h.client(app, { url, role: 'guest' })
     const { token, userId } = await guest.signUp({ email: 're@x.com', password: 'passpass', displayName: 'Re' })

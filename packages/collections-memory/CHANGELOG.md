@@ -5,6 +5,10 @@ run `pnpm changelog` rather than editing by hand.
 
 ## Unreleased
 
+### Features
+
+- **release:** Generate per-package changelogs from the commit history ([82a2232])
+
 ### Documentation
 
 - Repo-wide refresh — counts, ctx policies, env propagation, front door, positioning ([13dd524])

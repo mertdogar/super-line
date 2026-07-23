@@ -5,6 +5,10 @@ run `pnpm changelog` rather than editing by hand.
 
 ## Unreleased
 
+### Features
+
+- **release:** Generate per-package changelogs from the commit history ([82a2232])
+
 ### Bug Fixes
 
 - **docs:** Two broken links that failed the Deploy docs workflow ([d1fda1e])

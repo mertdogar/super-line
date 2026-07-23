@@ -3,6 +3,16 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## Unreleased
+
+### Features
+
+- **release:** Generate per-package changelogs from the commit history ([82a2232])
+
+### Refactor
+
+- **example:** Port react-chat-transports to plugin-auth + plugin-chat ([afea616])
+
 ## [transport-http-v0.5.1] — 2026-07-16
 
 ### Features

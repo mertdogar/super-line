@@ -3,6 +3,51 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## 2026-07-23
+
+### Features
+
+- **control-center:** Join plugin-auth identity onto connections ([5e1621e])
+- **control-center:** Surface plugins as a first-class dimension ([dc7fe3a])
+- **core:** Report plugin provenance on getContract (ADR-0016) ([fd6270e])
+- **auth:** Split bearer assertions into signed and sealed ([785a839])
+- **example:** Demonstrate JWT auth and getToken ([73ba14b])
+
+### Refactor
+
+- **example:** Port react-chat-transports to plugin-auth + plugin-chat ([afea616])
+
+### Documentation
+
+- Cover plugin provenance and the Control Center identity lens ([3cf1cb5])
+
+## 2026-07-22
+
+### Features
+
+- **auth:** Add connection sessions and member presence ([1dcad5f])
+
+### Bug Fixes
+
+- **example:** Resolve websocket transport source ([2a15093])
+
+### Documentation
+
+- Plan auth connection sessions and presence ([2ccaaeb])
+
+## 2026-07-21
+
+### Features
+
+- **plugin-chat:** Publish the resource access resolvers on chatKit ([466812e])
+
+## 2026-07-20
+
+### Features
+
+- **adapter-libp2p:** Add Kubernetes DNS discovery ([4ea1b83])
+- **release:** Generate per-package changelogs from the commit history ([82a2232])
+
 ## 2026-07-20
 
 ### Bug Fixes

@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## Unreleased
+
+### Features
+
+- **release:** Generate per-package changelogs from the commit history ([82a2232])
+
 ## [react-v0.9.1] — 2026-07-20
 
 ### Bug Fixes

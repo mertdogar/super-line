@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [collections-pglite-v0.3.1] — 2026-07-23
+
+### Bug Fixes
+
+- **collections-pglite:** Alias camelCase primary key in the live.changes feed ([2348bd0])
+
 ## [collections-pglite-v0.3.0] — 2026-07-23
 
 ### Features

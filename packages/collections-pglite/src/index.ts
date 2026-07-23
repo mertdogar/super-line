@@ -24,6 +24,14 @@ const NOW_MS = '(extract(epoch from transaction_timestamp())*1000)::bigint'
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/
 
+// Electric's live-query builder quotes value columns but interpolates the key column RAW into its diff JOINs
+// (`curr.${key}`), so a camelCase key like `userId` folds to `userid` and the diff query errors on boot. It also
+// uses the key as a JS accessor (`row[key]`), so we can't hand it a pre-quoted string. Instead we alias the real
+// key column to a folded-safe sentinel in the live query and give Electric that — bare `_sl_key` survives folding,
+// and the physical column stays case-preserved for every other (already-quoted) query. Same trick the CRDT backend
+// uses with its synthetic `pk`/`seq` keys.
+const KEY_ALIAS = '_sl_key'
+
 /** Options for {@link pgliteCollections}. */
 export interface PgliteCollectionsOptions {
   /** Connection string for the central Postgres — source of truth for writes + strong reads (real Postgres or a PGLiteSocketServer). */
@@ -249,13 +257,13 @@ export async function pgliteCollections(opts: PgliteCollectionsOptions): Promise
   const liveSubs: Array<{ unsubscribe: () => Promise<void> }> = []
   for (const [n, t] of tables) {
     const sub = await db.live.changes<Record<string, unknown>>(
-      `SELECT ${t.selectList} FROM "${t.name}"`,
+      `SELECT ${t.selectList}, "${t.plan.key}" AS "${KEY_ALIAS}" FROM "${t.name}"`,
       [],
-      t.plan.key,
+      KEY_ALIAS,
       (changes) => {
         for (const ch of changes) {
           const op = (ch as { __op__?: string }).__op__
-          const id = String(ch[t.plan.key])
+          const id = String(ch[KEY_ALIAS])
           const origin = (ch['_sl_origin'] as string | null | undefined) ?? ''
           if (op === 'DELETE') {
             emit({ n, k: 'delete', id, origin })

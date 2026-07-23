@@ -35,6 +35,9 @@ const defs: Record<string, CollectionDef> = {
   messages: { schema: z.object({ id: z.string(), channelId: z.string(), text: z.string(), likes: z.number() }), key: 'id' },
   users: { schema: z.object({ id: z.string(), name: z.string() }), key: 'id' },
   feeds: { schema: z.object({ id: z.string(), v: z.number(), tag: z.string().optional() }), key: 'id' },
+  // camelCase primary key — Electric folds the raw key identifier in its live.changes diff JOINs, so this
+  // table's feed must alias the key to a folded-safe name or the backend crashes on boot (regression below).
+  presence: { schema: z.object({ userId: z.string(), online: z.boolean() }), key: 'userId' },
 }
 
 const pgUrl = `postgres://postgres:postgres@127.0.0.1:${PORT}/postgres`
@@ -91,5 +94,28 @@ describe('pglite collections — local replica feed (live.changes → onChange)'
     await db.query(`DELETE FROM "${t}" WHERE "id" = 'x'`)
     await waitFor(() => seen.some((c) => c.k === 'delete' && c.id === 'x'))
     expect(seen.find((c) => c.k === 'delete')).toMatchObject({ n: 'feeds', id: 'x' })
+  })
+
+  // Regression: a camelCase key (e.g. plugin-auth's userPresence keyed on `userId`) once crashed the backend on
+  // boot — Electric interpolates the key raw into its live-query diff JOINs, folding `userId` → `userid`. The feed
+  // aliases the key to a folded-safe sentinel so the whole insert/update/delete cycle still surfaces.
+  it('streams a camelCase-keyed collection through the feed', async () => {
+    const { store, db, tablePrefix } = await makeStore()
+    const t = `${tablePrefix}presence`
+    const seen: RowChange[] = []
+    store.onChange((c) => seen.push(c))
+
+    await db.query(`INSERT INTO "${t}" ("userId", "online", "_sl_origin") VALUES ('u1', true, 'c1')`)
+    await waitFor(() => seen.some((c) => c.k === 'insert' && c.id === 'u1'))
+    expect(seen.find((c) => c.k === 'insert')).toMatchObject({ n: 'presence', id: 'u1', origin: 'c1' })
+    expect(seen.find((c) => c.k === 'insert')?.next).toEqual({ userId: 'u1', online: true })
+
+    await db.query(`UPDATE "${t}" SET "online" = false, "_sl_origin" = 'c2' WHERE "userId" = 'u1'`)
+    await waitFor(() => seen.some((c) => c.k === 'update' && c.id === 'u1'))
+    expect(seen.find((c) => c.k === 'update')?.next).toEqual({ userId: 'u1', online: false })
+
+    await db.query(`DELETE FROM "${t}" WHERE "userId" = 'u1'`)
+    await waitFor(() => seen.some((c) => c.k === 'delete' && c.id === 'u1'))
+    expect(seen.find((c) => c.k === 'delete')).toMatchObject({ n: 'presence', id: 'u1' })
   })
 })

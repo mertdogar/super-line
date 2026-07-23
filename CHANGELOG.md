@@ -7,6 +7,16 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Bug Fixes
 
+- **collections-pglite:** Alias camelCase primary key in the live.changes feed ([2348bd0])
+
+### Documentation
+
+- **changelog:** Refresh the root aggregate for the peer-dependency release ([2ea57ef])
+
+## 2026-07-23
+
+### Bug Fixes
+
 - **deps:** Internal packages peer on their siblings instead of depending on them ([00375f6])
 
 ### Chores

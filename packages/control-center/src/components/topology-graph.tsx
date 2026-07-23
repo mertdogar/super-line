@@ -3,9 +3,10 @@ import { Background, Controls, ReactFlow, type Edge, type Node } from '@xyflow/r
 import '@xyflow/react/dist/style.css'
 import type { ConnDescriptor, NodeStat, NodeView } from '@super-line/core'
 import { buildGraph, type GraphNode, type Highlight } from '@/lib/topology'
+import { connLabel, type Directory } from '@/lib/identity'
 import { transportColor, transportFamily } from '@/lib/transport'
 
-function labelFor(n: GraphNode): React.ReactNode {
+function labelFor(n: GraphNode, directory: Directory): React.ReactNode {
   if (n.kind === 'bus') return 'Adapter · bus'
   if (n.kind === 'server') {
     return (
@@ -18,17 +19,21 @@ function labelFor(n: GraphNode): React.ReactNode {
       </div>
     )
   }
+  // identity first when the auth lens has a name for this conn, otherwise the pre-lens role/id rendering
+  const { title, subtitle } = connLabel({ id: n.id, role: n.role ?? '', userId: n.userId }, directory)
   return (
     <div className="leading-tight">
-      <div className="font-medium">{n.role}</div>
-      {n.userId ? <div className="text-[10px] opacity-70">{n.userId}</div> : null}
+      <div className="font-medium">{title}</div>
+      <div className="text-[10px] opacity-70">{subtitle}</div>
     </div>
   )
 }
 
-/** Does a conn node match the active highlight (by room membership or wire family)? */
+/** Does a conn node match the active highlight (by room membership, wire family, or user)? */
 function matches(n: GraphNode, h: Highlight): boolean {
-  return h.kind === 'room' ? !!n.rooms?.includes(h.value) : transportFamily(n.transport) === h.value
+  if (h.kind === 'room') return !!n.rooms?.includes(h.value)
+  if (h.kind === 'user') return n.userId === h.value
+  return transportFamily(n.transport) === h.value
 }
 
 function styleFor(n: GraphNode, highlight: Highlight | null): React.CSSProperties {
@@ -74,18 +79,20 @@ export function TopologyGraph({
   connections,
   node,
   highlight,
+  directory,
 }: {
   topology: NodeStat[]
   connections: ConnDescriptor[]
   node: NodeView | null
   highlight: Highlight | null
+  directory: Directory
 }): React.JSX.Element {
   const { nodes, edges, truncated } = React.useMemo(() => {
     const g = buildGraph(topology, connections, node)
     const nodes: Node[] = g.nodes.map((n) => ({
       id: n.id,
       position: { x: n.x, y: n.y },
-      data: { label: labelFor(n) },
+      data: { label: labelFor(n, directory) },
       style: styleFor(n, highlight),
       draggable: true,
       connectable: false,
@@ -102,7 +109,7 @@ export function TopologyGraph({
       },
     }))
     return { nodes, edges, truncated: g.truncated }
-  }, [topology, connections, node, highlight])
+  }, [topology, connections, node, highlight, directory])
 
   return (
     <div className="relative h-full w-full">

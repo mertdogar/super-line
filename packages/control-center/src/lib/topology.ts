@@ -11,7 +11,7 @@ export function roleColor(role: string): string {
 }
 
 /** A single active highlight in the topology lens — one dimension at a time. */
-export type Highlight = { kind: 'room' | 'transport'; value: string }
+export type Highlight = { kind: 'room' | 'transport' | 'user'; value: string }
 
 export interface GraphNode {
   id: string

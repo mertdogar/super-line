@@ -21,6 +21,7 @@ export function RoomLens({
   rooms,
   topics,
   transports,
+  users,
   selected,
   onSelect,
 }: {
@@ -28,6 +29,8 @@ export function RoomLens({
   rooms: string[]
   topics: string[]
   transports: { family: TransportFamily; count: number }[]
+  /** Connected identities — empty (and the section hidden) unless the auth lens is active. */
+  users: { userId: string; label: string; named: boolean; count: number }[]
   selected: Highlight | null
   onSelect: (h: Highlight | null) => void
 }): React.JSX.Element {
@@ -72,6 +75,29 @@ export function RoomLens({
           ))
         )}
       </Section>
+
+      {users.length > 0 ? (
+        <Section title="Users · highlight">
+          {users.map((u) => (
+            <button type="button"
+              key={u.userId}
+              onClick={() => toggle({ kind: 'user', value: u.userId })}
+              title={u.userId}
+              className={cn(
+                'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm',
+                isSel({ kind: 'user', value: u.userId })
+                  ? 'bg-accent text-accent-foreground'
+                  : 'hover:bg-accent/50',
+              )}
+            >
+              <span className={cn('flex-1 truncate', !u.named && 'font-mono text-xs text-muted-foreground')}>
+                {u.label}
+              </span>
+              <span className="text-xs text-muted-foreground">{u.count}</span>
+            </button>
+          ))}
+        </Section>
+      ) : null}
 
       <Section title="Rooms · highlight">
         {rooms.length === 0 ? (

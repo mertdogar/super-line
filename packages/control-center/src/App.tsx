@@ -8,6 +8,7 @@ import type {
   NodeView,
 } from '@super-line/core'
 import { useInspector } from '@/hooks/use-inspector'
+import { useDirectory } from '@/hooks/use-directory'
 import { Badge } from '@/components/ui/badge'
 import { TopologyGraph } from '@/components/topology-graph'
 import { RoomLens } from '@/components/room-lens'
@@ -23,6 +24,7 @@ import { StatusDot } from '@/components/status-dot'
 import { BrandMark } from '@/components/brand-mark'
 import { version } from '../package.json'
 import { roomsOf, type Highlight } from '@/lib/topology'
+import { connectedUsers } from '@/lib/identity'
 import { transportsOf } from '@/lib/transport'
 import { cn } from '@/lib/utils'
 
@@ -138,6 +140,9 @@ export default function App(): React.JSX.Element {
     }
   }, [client, status])
 
+  const directory = useDirectory(client, contract, connections)
+  const users = React.useMemo(() => connectedUsers(connections, directory), [connections, directory])
+
   const totalConns = topology.reduce((sum, n) => sum + n.connections, 0)
   const roles = React.useMemo(() => [...new Set(connections.map((c) => c.role))].sort(), [connections])
   const rooms = React.useMemo(() => roomsOf(connections), [connections])
@@ -201,6 +206,7 @@ export default function App(): React.JSX.Element {
                   connections={connections}
                   node={nodeView}
                   highlight={highlight}
+                  directory={directory}
                 />
               </div>
               <RoomLens
@@ -208,6 +214,7 @@ export default function App(): React.JSX.Element {
                 rooms={rooms}
                 topics={nodeView?.topics ?? []}
                 transports={transports}
+                users={users}
                 selected={highlight}
                 onSelect={setHighlight}
               />
@@ -217,6 +224,7 @@ export default function App(): React.JSX.Element {
               {view === 'connections' && (
                 <ConnectionsTable
                   connections={connections}
+                  directory={directory}
                   selectedId={selectedConnId}
                   onSelect={setSelectedConnId}
                 />
@@ -235,7 +243,12 @@ export default function App(): React.JSX.Element {
             </div>
           )}
           {view === 'connections' && (
-            <ConnDetail client={client} connId={selectedConnId} onClose={() => setSelectedConnId(null)} />
+            <ConnDetail
+              client={client}
+              connId={selectedConnId}
+              directory={directory}
+              onClose={() => setSelectedConnId(null)}
+            />
           )}
         </main>
       </div>

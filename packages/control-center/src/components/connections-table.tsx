@@ -3,14 +3,30 @@ import type { ConnDescriptor } from '@super-line/core'
 import { formatDuration, formatTime } from '@/lib/events'
 import { roleColor } from '@/lib/topology'
 import { transportColor, transportLabel } from '@/lib/transport'
+import { displayNameOf, shortId, type Directory } from '@/lib/identity'
 import { clickable, cn } from '@/lib/utils'
+
+/** Who holds this connection: the directory name over the raw key, which stays visible because it's what
+ *  correlates a row with the live feed and the drawer. */
+function UserCell({ userId, directory }: { userId?: string; directory: Directory }): React.JSX.Element {
+  if (!userId) return <span className="text-muted-foreground">—</span>
+  const name = displayNameOf(directory, userId)
+  return (
+    <span className="flex flex-col leading-tight" title={userId}>
+      {name ? <span>{name}</span> : null}
+      <span className={cn('font-mono text-xs', name && 'text-muted-foreground')}>{shortId(userId)}</span>
+    </span>
+  )
+}
 
 export function ConnectionsTable({
   connections,
+  directory,
   selectedId,
   onSelect,
 }: {
   connections: ConnDescriptor[]
+  directory: Directory
   selectedId: string | null
   onSelect: (id: string) => void
 }): React.JSX.Element {
@@ -54,7 +70,9 @@ export function ConnectionsTable({
                 </span>
               </td>
               <td className="px-3 py-2 font-mono text-xs">{c.id.slice(0, 8)}</td>
-              <td className="px-3 py-2">{c.userId ?? '—'}</td>
+              <td className="px-3 py-2">
+                <UserCell userId={c.userId} directory={directory} />
+              </td>
               <td className="px-3 py-2 text-xs">{c.nodeName}</td>
               <td className="px-3 py-2 text-muted-foreground">
                 {c.rooms.length ? c.rooms.join(', ') : '—'}

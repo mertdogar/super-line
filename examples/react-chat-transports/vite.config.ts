@@ -43,6 +43,7 @@ export default defineConfig({
       '/ws': { target: 'ws://localhost:8787', ws: true },
       '/superline': { target: 'http://localhost:8787' },
       '/libp2p-addr': { target: 'http://localhost:8787' },
+      '/sealed-handoff': { target: 'http://localhost:8787' },
       '/inspect': { target: 'ws://localhost:8787', ws: true },
       '/api': { target: 'http://localhost:8788' }, // the verifier — a DIFFERENT process (pnpm verifier)
     },

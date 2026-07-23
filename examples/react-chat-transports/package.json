@@ -31,7 +31,7 @@
     "@super-line/transport-websocket": "workspace:*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "jose": "^5.9.6",
+    "jose": "^6.2.4",
     "libp2p": "^3.3.4",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",

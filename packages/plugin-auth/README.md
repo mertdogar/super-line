@@ -75,10 +75,15 @@ client half hides the dance: `signIn()` connects as `guest`, mints an access tok
   writing the row (`srv.collection('users').update(...)`) or `authKit.users.setRoles(id, roles)`.
 - **API keys** — long-lived `slp_…` credentials with one fixed role, for services, CI, and agents. From a
   client: `createApiKey({ label, role })` (raw key returned once) · `listApiKeys()` · `revokeApiKey({ id })`.
-- **JWT** — enable `jwt: { secret }`; `getToken()` issues a short-lived HS256 JWT (via `jose`) for another
-  backend to verify statelessly, or to connect super-line without a DB round-trip (`params: { jwt }`). It
-  cannot be revoked — keep the TTL short; `users.deactivate()` is the emergency stop. Demonstrated in
-  [`examples/auth`](https://github.com/mertdogar/super-line/tree/main/examples/auth) (CLI) and
+- **Bearer assertions (JWT / JWE)** — enable `jwt: { secret }` and get two kinds (via `jose`), both connecting
+  through `params: { jwt }`. A **signed** assertion (JWS) has a public payload: `getToken({ claims })` issues one
+  for another backend to verify statelessly, or to connect without a DB round-trip. A **sealed** assertion (JWE)
+  is **server-minted only** (`authKit.tokens.mintSealed`) and is opaque to its own holder — the way to carry a
+  secret *through* a browser and read it back as `ctx.sealed`. Payloads are validated by your Standard Schemas;
+  algorithms are configurable and pinned on verify. Neither can be revoked — keep the TTL short;
+  `users.deactivate()` is the emergency stop. See
+  [ADR-0015](https://github.com/mertdogar/super-line/blob/main/docs/adr/0015-bearer-assertions-are-signed-or-sealed.md),
+  demonstrated in [`examples/auth`](https://github.com/mertdogar/super-line/tree/main/examples/auth) (CLI) and
   [`examples/react-chat-transports`](https://github.com/mertdogar/super-line/tree/main/examples/react-chat-transports)
   (browser panel + a separate verifier service).
 - **Password reset** — provide a `sendPasswordReset({ user, token })` callback (delivery is yours);
@@ -116,6 +121,13 @@ interface AuthServer {
     setPassword(userId, newPassword): Promise<void> // revokes access + reset tokens
   }
 
+  // ── tokens: bearer assertions (needs `jwt:`) ─────────────────────────────────────
+  tokens: {
+    mintSigned(userId, opts?: { claims?, expiresInMs? }): Promise<{ token, expiresAt }> // JWS — public payload
+    mintSealed(userId, opts?: { claims?, sealed?, expiresInMs? }): Promise<{ token, expiresAt }> // JWE — opaque to its holder
+    verify(token): Promise<VerifiedAssertion | null>  // either kind; roles are read fresh from the user row
+  }
+
   // ── apiKeys: agent + service provisioning (requires the running server) ───────────
   apiKeys: {
     create(userId, opts: { role, label, expiresInMs? }): Promise<ApiKeyInfo & { key }> // raw slp_… returned ONCE
@@ -135,7 +147,7 @@ const { key } = await authKit.apiKeys.create(bot.id, { role: 'user', label: 'age
 
 **Client-side requests** (typed methods on a connected client): `signUp` · `signIn` · `signOut` · `whoami`
 · `createApiKey({ label, role, expiresInMs? })` (raw key once) · `listApiKeys` · `revokeApiKey({ id })` ·
-`getToken` (JWT; needs `jwt:` enabled) · `requestPasswordReset` · `confirmPasswordReset`. In React/JS they
+`getToken({ claims? })` (signed assertion; needs `jwt:` enabled) · `requestPasswordReset` · `confirmPasswordReset`. In React/JS they
 sit behind `createAuth()` / `authClient()` as `signIn` / `signUp` / `signOut` + reactive `state`.
 
 ## Subpaths

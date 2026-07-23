@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, Copy, ExternalLink, KeyRound, ShieldCheck } from 'lucide-react'
+import { Check, Copy, ExternalLink, KeyRound, Lock, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -169,33 +169,104 @@ function MintedToken({
         </pre>
       )}
 
-      <div className="border-t pt-3">
-        <p className="text-xs text-muted-foreground">
-          Open this token in another tab, on any wire — it connects with{' '}
-          <code className="font-mono">params: {'{ jwt }'}</code> and never touches{' '}
-          <code className="font-mono">localStorage</code>, so it is the one way to hold two independent
-          connections in a single browser.
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {WIRES.map((wire) => (
-            <a
-              key={wire}
-              href={handoffUrl(minted.jwt, wire)}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-md border border-input px-2.5 py-1 text-xs hover:bg-muted"
-            >
-              <ExternalLink className="h-3 w-3" />
-              {TRANSPORT_LABELS[wire]}
-            </a>
-          ))}
-        </div>
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          A link is the wrong place for a real bearer credential — it lands in history and referrers. The
-          receiving tab strips it from the address bar on arrival, and production would use an{' '}
-          <code className="font-mono">Authorization</code> header or a one-time exchange code.
-        </p>
+      <Handoff token={minted.jwt} />
+      <SealedExchange signed={minted.jwt} />
+    </div>
+  )
+}
+
+/** Open a token in another tab, on any wire. Works identically for both kinds of assertion. */
+function Handoff({ token, sealed = false }: { token: string; sealed?: boolean }): React.JSX.Element {
+  return (
+    <div className="border-t pt-3">
+      <p className="text-xs text-muted-foreground">
+        Open this token in another tab, on any wire — it connects with{' '}
+        <code className="font-mono">params: {'{ jwt }'}</code> and never touches{' '}
+        <code className="font-mono">localStorage</code>, so it is the one way to hold two independent
+        connections in a single browser.
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {WIRES.map((wire) => (
+          <a
+            key={wire}
+            href={handoffUrl(token, wire)}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-input px-2.5 py-1 text-xs hover:bg-muted"
+          >
+            <ExternalLink className="h-3 w-3" />
+            {TRANSPORT_LABELS[wire]}
+          </a>
+        ))}
       </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        A link is the wrong place for a real bearer credential — it lands in history and referrers. The
+        receiving tab strips it from the address bar on arrival, and production would use an{' '}
+        <code className="font-mono">Authorization</code> header or a one-time exchange code.
+        {sealed && ' Sealing the payload does not change that: the token is still a bearer credential.'}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * The other kind. A sealed assertion is a JWE: same handshake param, but its payload is encrypted, so
+ * the browser holding it cannot read it — which is exactly what makes it safe to route a server secret
+ * *through* a client. There is no client-side mint by design, so this trades the signed token we just
+ * minted for a sealed one at `/sealed-handoff`, and back-office code picks what to seal in.
+ */
+function SealedExchange({ signed }: { signed: string }): React.JSX.Element {
+  const [sealed, setSealed] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const exchange = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch('/sealed-handoff', { headers: { authorization: `Bearer ${signed}` } })
+      const body = (await res.json()) as { token?: string; error?: string }
+      if (!res.ok || !body.token) throw new Error(body.error ?? 'exchange failed')
+      setSealed(body.token)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not get a sealed token')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="border-t pt-3">
+      <div className="flex items-center gap-2">
+        <Lock className="h-3.5 w-3.5 text-muted-foreground" />
+        <p className="text-sm font-medium">Sealed assertion</p>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Server-minted only. Carries a public half (vended back to the browser as{' '}
+        <code className="font-mono">env</code>) and an encrypted half only the server can read.
+      </p>
+
+      {!sealed ? (
+        <>
+          <Button type="button" variant="outline" size="sm" className="mt-2" onClick={exchange} disabled={busy}>
+            {busy ? 'Exchanging…' : 'Exchange for a sealed token'}
+          </Button>
+          {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+        </>
+      ) : (
+        <div className="mt-2 space-y-2">
+          <div className="max-h-24 overflow-y-auto rounded-md border border-input bg-muted/40 p-2 font-mono text-[11px] leading-relaxed break-all">
+            {sealed}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {sealed.split('.').length} parts, and{' '}
+            <span className="font-semibold">{readClaims(sealed) ? 'readable' : 'unreadable'}</span> from here —
+            a JWE has 5 segments and its payload is ciphertext. Open it below and the receiving tab will show
+            you what the server says is inside, because it cannot look for itself.
+          </p>
+          <Handoff token={sealed} sealed />
+        </div>
+      )}
     </div>
   )
 }

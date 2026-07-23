@@ -55,6 +55,33 @@ server.on('request', (req, res) => {
   res.end(JSON.stringify({ port: P2P_PORT, peerId: node.peerId.toString() }))
 })
 
+/**
+ * Exchange a SIGNED assertion for a SEALED one. There is no client-facing mint for a sealed token by
+ * design (ADR-0015) — if a browser could mint one, `ctx.sealed` would be exactly as client-authored as
+ * `ctx.claims`, and the whole distinction would carry no information. So the browser proves who it is
+ * with a token it *can* hold, and back-office code decides what secret to seal into the reply.
+ *
+ * This is the realistic shape: `UPSTREAM_KEY` stands in for a per-user credential to some third-party
+ * API. The browser carries it to the server on the next connect and can never read it.
+ */
+server.on('request', (req, res) => {
+  if ((req.url ?? '').split('?')[0] !== '/sealed-handoff') return
+  const json = (status: number, body: unknown) => {
+    res.writeHead(status, { 'content-type': 'application/json', 'access-control-allow-origin': '*' })
+    res.end(JSON.stringify(body))
+  }
+  void (async () => {
+    const bearer = (req.headers.authorization ?? '').replace(/^Bearer /i, '')
+    const verified = bearer ? await authKit.tokens.verify(bearer) : null
+    if (!verified) return json(401, { error: 'present a valid signed assertion to exchange' })
+    const { token, expiresAt } = await authKit.tokens.mintSealed(verified.userId, {
+      claims: { workspace: 'acme-demo' }, // public: vended to the browser as `env`
+      sealed: { upstreamKey: `sk-live-${verified.userId.slice(0, 8)}` }, // encrypted: server-side only
+    })
+    json(200, { token, expiresAt })
+  })().catch((err: unknown) => json(500, { error: err instanceof Error ? err.message : 'mint failed' }))
+})
+
 // One CollectionStore shared by the server AND the auth kit (so authenticate reads sessions/users from it).
 const backend = sqliteCollections({ file: DB_FILE, collections: chat.collections })
 
@@ -69,6 +96,13 @@ const authKit = auth({
   collections: backend,
   defaultRoles: ['user'],
   jwt: { secret: JWT_SECRET, ttlMs: 2 * 60_000 },
+  // An assertion's payloads land on `ctx` (server-only). This one line vends the PUBLIC half as `env`
+  // (ADR-0012), which is how the browser holding a SEALED token — which it cannot decode — learns what
+  // is in it. `ctx.sealed` is deliberately absent here: `env` is what the client is allowed to see.
+  resolveEnv: (ctx) => {
+    const workspace = ctx.claims?.workspace
+    return typeof workspace === 'string' ? { workspace } : undefined
+  },
 })
 const chatKit = chatKitFactory({
   contract: chat,

@@ -21,6 +21,12 @@
 		reverse_proxy node-1:8787
 	}
 
+	# Exchange a signed assertion for a sealed one. On the chat node, not the verifier: only the node
+	# holds the encryption key, and only server-side code may mint a sealed assertion at all.
+	handle /sealed-handoff {
+		reverse_proxy node-1:8787
+	}
+
 	# NOT the chat node: a separate service that verifies JWTs with the shared secret alone.
 	handle /api* {
 		reverse_proxy verifier:8788

@@ -79,13 +79,25 @@ export type AuthUserPresence = z.infer<typeof userPresenceSchema>
 export type AuthApiKey = z.infer<typeof apiKeySchema>
 export type AuthPasswordReset = z.infer<typeof passwordResetSchema>
 
-/** The per-connection auth context (`conn.ctx`) the plugin resolves — uniform across roles, `null` fields for a guest. */
-export interface AuthContext {
+/**
+ * The per-connection auth context (`conn.ctx`) the plugin resolves — uniform across roles, `null` fields for a guest.
+ *
+ * `claims`/`sealed` are present only on a connection that authenticated with a bearer assertion, and carry the
+ * payloads it was minted with. **`claims` on a `signed` assertion is client-authored** (any authenticated client can
+ * call `getToken({ claims })`), so never authorize on it without checking `authMethod === 'jwt-sealed'` — only a
+ * sealed assertion's payloads are server-minted. See ADR-0015.
+ */
+export interface AuthContext<Claims = Record<string, unknown>, Sealed = Record<string, unknown>> {
   userId: string | null
   roles: string[]
   sessionId: string | null
+  /** `'access-token'` · `'api-key'` · `'jwt'` (signed assertion) · `'jwt-sealed'` (sealed assertion). */
   authMethod: string | null
   authId: string | null
+  /** The assertion's public payload. Absent on non-assertion connections. */
+  claims?: Claims
+  /** The assertion's sealed payload — server-minted, never readable by the token's holder. `sealed` assertions only. */
+  sealed?: Sealed
 }
 
 // ── request defs (shared by the contract fragment AND the server plugin's paired surface) ─────────
@@ -114,9 +126,16 @@ const createApiKeyDef = {
 }
 const listApiKeysDef = { input: z.void(), output: z.array(apiKeyInfo) }
 const revokeApiKeyDef = { input: z.object({ id: z.string() }), output: z.object({ ok: z.boolean() }) }
-// A short-lived signed JWT derived from the current session — for stateless verification by other backends,
-// or to connect super-line without a DB round-trip. Only issued when the server enables `jwt`.
-const getTokenDef = { input: z.void(), output: z.object({ jwt: z.string(), expiresAt: z.number() }) }
+// A short-lived SIGNED assertion (JWS) derived from the current session — for stateless verification by other
+// backends, or to connect super-line without a DB round-trip. Only issued when the server enables `jwt`.
+// `claims` is an optional public payload; it is client-authored, so the server validates it against the host's
+// `jwt.claims` schema and surfaces it as `ctx.claims` — never as authority. Sealed assertions are server-only
+// (`authKit.tokens.mintSealed`) and deliberately have no client-facing mint. The input is a `void` union so that
+// existing `getToken()` callers keep compiling (a `X | undefined` parameter cannot be omitted; `void | X` can).
+const getTokenDef = {
+  input: z.union([z.void(), z.object({ claims: z.record(z.string(), z.unknown()).optional() })]),
+  output: z.object({ jwt: z.string(), expiresAt: z.number() }),
+}
 // Logged-out password recovery. `requestPasswordReset` always returns { ok: true } (never leaks whether the
 // email exists); the server delivers the token via a host `sendPasswordReset` callback.
 const requestResetDef = { input: z.object({ email: z.string().email() }), output: z.object({ ok: z.boolean() }) }

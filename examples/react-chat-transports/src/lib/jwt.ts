@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { decodeJwt } from 'jose'
 import { kind, TRANSPORT_LABELS, type TransportKind } from '@/lib/transport'
 
-// The bearer-token half of the demo. plugin-auth mints a short-lived signed JWT from a live session
-// (`getToken`) and accepts one at connect (`params: { jwt }`) — two separate capabilities, and this
-// module is the browser's side of both.
+// The bearer-assertion half of the demo. plugin-auth mints a short-lived SIGNED assertion from a live
+// session (`getToken`), the server can mint a SEALED one (`tokens.mintSealed`), and either connects via
+// `params: { jwt }`. This module is the browser's side of all of it.
 
 export interface Claims {
   userId: string
@@ -14,9 +14,30 @@ export interface Claims {
 }
 
 /**
- * Read a JWT's claims WITHOUT verifying it. Safe here only because these claims are used for display
- * and to label the connection — never to decide anything. The signature check that matters happens on
- * the server at connect, and in the verifier service.
+ * Which kind of assertion is this? A compact JWS has 3 parts, a compact JWE has 5 — the same shape check
+ * the server does at connect. The browser needs it because a *sealed* token is legitimately undecodable
+ * here: `readClaims` returning null means "encrypted", not "malformed".
+ */
+export function assertionKind(token: string): 'signed' | 'sealed' | null {
+  const parts = token.split('.').length
+  if (parts === 3) return 'signed'
+  if (parts === 5) return 'sealed'
+  return null
+}
+
+/** What a bearer tab knows about its own credential — which differs sharply by kind. */
+export type BearerInfo =
+  | { kind: 'signed'; claims: Claims }
+  /** A sealed token tells its holder NOTHING. Everything here came from the server, over `env`. */
+  | { kind: 'sealed'; env: { workspace: string } | null }
+
+/**
+ * Read a SIGNED assertion's claims WITHOUT verifying it. Safe here only because these claims are used
+ * for display and to label the connection — never to decide anything. The signature check that matters
+ * happens on the server at connect, and in the verifier service.
+ *
+ * Returns null for a sealed assertion, and that is the demo: its payload is ciphertext, so its own
+ * holder cannot read it even to look.
  */
 export function readClaims(token: string): Claims | null {
   try {

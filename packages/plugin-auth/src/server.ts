@@ -1,17 +1,23 @@
-import { SignJWT, jwtVerify } from 'jose'
 import { andFilters, eq, gt, not, SuperLineError } from '@super-line/core'
-import type { Contract, RoleOf, Handshake, CollectionStore, Expr, AnyEnv } from '@super-line/core'
+import type { Contract, RoleOf, Handshake, CollectionStore, Expr, AnyEnv, EnvOf } from '@super-line/core'
 import type { PluginContext, SuperLinePlugin } from '@super-line/server'
 import { GUEST_ROLE } from './index.js'
 import type { AuthAccessToken, AuthApiKey, AuthContext, AuthCredential, AuthPasswordReset, AuthSession, AuthSurface, AuthUser } from './index.js'
 import { apiKeyToken, hashPassword, newId, randomToken, tokenHash, verifyPassword } from './crypto.js'
+import { createAssertions, type AssertionOptions, type VerifiedAssertion } from './assertions.js'
+
+export { assertionKind } from './assertions.js'
+export type { AssertionKey, AssertionKind, AssertionOptions, VerifiedAssertion } from './assertions.js'
 
 /**
  * The discriminated auth result — a member per contract role, all sharing the uniform {@link AuthContext}. Assignable
  * to the server's `AuthResult<C>` (whose per-role ctx is `unknown`), so `authenticate:` infers `A` on the proven path.
  */
 type AuthResultOf<C extends Contract> = {
-  [R in RoleOf<C>]: { role: R; ctx: AuthContext; env?: AnyEnv<C>; connectionId?: string }
+  // `env` is per-role, NOT the union: a role that declares no `env` schema has `EnvOf<C, R> = null`, so a
+  // contract mixing env-having and env-less roles (guest never has one) stays assignable to the server's
+  // own AuthResult. Using AnyEnv here would claim a guest result could carry the user role's env.
+  [R in RoleOf<C>]: { role: R; ctx: AuthContext; env?: EnvOf<C, R>; connectionId?: string }
 }[RoleOf<C>]
 
 export interface AuthServerOptions<C extends Contract> {
@@ -25,8 +31,12 @@ export interface AuthServerOptions<C extends Contract> {
   accessTokenTtlMs?: number
   /** Whether the `users` directory is client-readable (open read policy). Default `true`. */
   usersReadable?: boolean
-  /** Enable JWT: `getToken` issuance + stateless JWT connect (HS256). Omit to disable both. `ttlMs` default 15 min. */
-  jwt?: { secret: string; ttlMs?: number }
+  /**
+   * Enable bearer assertions: `getToken` issuance, `authKit.tokens.*`, and stateless assertion connect. Omit to
+   * disable all three. `{ secret }` alone is the zero-config form — HS256 signing plus an HKDF-derived `dir`
+   * content-encryption key. See {@link AssertionOptions} for algorithms, JWK keys, and the payload schemas.
+   */
+  jwt?: AssertionOptions
   /** Deliver a password-reset token (email/SMS/…). Without it, `requestPasswordReset` is a silent no-op. */
   sendPasswordReset?: (args: { user: AuthUser; token: string }) => void | Promise<void>
   /** Password-reset token lifetime in ms. Default 1 hour. */
@@ -90,6 +100,30 @@ export interface AuthApiKeysApi {
   revoke(id: string): Promise<void>
 }
 
+/**
+ * Server-side minting + verification of bearer assertions. Both kinds identify an existing, active user; the
+ * asymmetry is deliberate (ADR-0015): a **signed** assertion is also mintable by any authenticated client via
+ * `getToken`, while a **sealed** one has no client-facing mint at all, which is what makes `ctx.sealed`
+ * trustworthy as server-authored data.
+ */
+export interface AuthTokensApi {
+  /** Mint a signed assertion (JWS) — public `claims`, third-party verifiable. Roles are read from the user row. */
+  mintSigned(
+    userId: string,
+    opts?: { claims?: unknown; expiresInMs?: number },
+  ): Promise<{ token: string; expiresAt: number }>
+  /** Mint a sealed assertion (JWE) — `claims` plus a `sealed` payload only this deployment can decrypt. */
+  mintSealed(
+    userId: string,
+    opts?: { claims?: unknown; sealed?: unknown; expiresInMs?: number },
+  ): Promise<{ token: string; expiresAt: number }>
+  /**
+   * Verify either kind and return its payloads plus the subject's CURRENT roles. `null` for anything that
+   * would not authenticate: bad signature, wrong algorithm, expired, undecryptable, or a deactivated subject.
+   */
+  verify(token: string): Promise<VerifiedAssertion | null>
+}
+
 export interface AuthServer<C extends Contract> {
   /** Wire at the server's top-level `authenticate:` option. */
   authenticate: (handshake: Handshake) => Promise<AuthResultOf<C>>
@@ -113,6 +147,8 @@ export interface AuthServer<C extends Contract> {
   apiKeys: AuthApiKeysApi
   /** Imperative email/password credential management. Requires the running server. */
   credentials: AuthCredentialsApi
+  /** Mint + verify bearer assertions. Needs `auth({ jwt })`; the mints need the running server. */
+  tokens: AuthTokensApi
 }
 
 const DAY_MS = 86_400_000
@@ -141,25 +177,13 @@ const activeOnly = (): Expr => not(gt('deletedAt', 0))
 export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer<C> {
   const { contract, collections, defaultRoles = ['user'], accessTokenTtlMs = 30 * DAY_MS, usersReadable = true } = opts
   const contractRoles = new Set(Object.keys(contract.roles))
-  const jwtSecret = opts.jwt ? new TextEncoder().encode(opts.jwt.secret) : undefined
-  const jwtTtlMs = opts.jwt?.ttlMs ?? 15 * 60_000
+  const assertions = createAssertions(opts.jwt)
   const sendPasswordReset = opts.sendPasswordReset
   const passwordResetTtlMs = opts.passwordResetTtlMs ?? 60 * 60_000
 
   const readAccessToken = (token: string) => collections.read('accessTokens', tokenHash(token)) as Promise<AuthAccessToken | undefined>
   const readUser = (id: string) => collections.read('users', id) as Promise<AuthUser | undefined>
   const readApiKey = (raw: string) => collections.read('apiKeys', tokenHash(raw)) as Promise<AuthApiKey | undefined>
-  const verifyJwt = async (raw: string): Promise<{ userId: string; roles: string[]; jti: string | null } | null> => {
-    if (!jwtSecret) return null
-    try {
-      const { payload } = await jwtVerify(raw, jwtSecret)
-      return payload.sub
-        ? { userId: payload.sub, roles: Array.isArray(payload.roles) ? (payload.roles as string[]) : [], jti: typeof payload.jti === 'string' ? payload.jti : null }
-        : null
-    } catch {
-      return null // bad/expired signature → treated as unauthenticated
-    }
-  }
 
   const resolveBase = async (handshake: Handshake): Promise<AuthResultOf<C>> => {
     const guest = {
@@ -185,20 +209,31 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
       } as AuthResultOf<C>
     }
 
-    // JWT — verify signature + expiry and trust its role claims. One user read (the deactivation check —
-    // PLAN-plugin-chat decision 10) is the deliberate dent in statelessness; roles still come from the claims.
+    // Bearer assertion — one param carries both serializations (RFC 7519: a JWT is a claims set in JWS *or* JWE
+    // form), dispatched on the compact dot count. Signature/decryption + expiry are checked statelessly; the one
+    // deliberate dent is a user read (the deactivation check — PLAN-plugin-chat decision 10), which also supplies
+    // a SEALED assertion's roles. A `signed` assertion keeps trusting its own role claims (ADR-0015).
     const jwtParam = handshake.query.jwt
-    if (jwtSecret && jwtParam) {
-      const claims = await verifyJwt(jwtParam)
-      if (!claims) return guest
-      const subject = await readUser(claims.userId)
+    if (assertions && jwtParam) {
+      const verified = await assertions.verify(jwtParam)
+      if (!verified) return guest
+      const subject = await readUser(verified.userId)
       if (!subject || isDeactivated(subject)) return guest
+      const roles = verified.kind === 'sealed' ? subject.roles : verified.roles
       if (!requestedRole) throw new SuperLineError('BAD_REQUEST', 'a role is required to authenticate')
       if (!contractRoles.has(requestedRole)) throw new SuperLineError('BAD_REQUEST', `unknown role '${requestedRole}'`)
-      if (!claims.roles.includes(requestedRole)) throw new SuperLineError('FORBIDDEN', `role '${requestedRole}' not granted`)
+      if (!roles.includes(requestedRole)) throw new SuperLineError('FORBIDDEN', `role '${requestedRole}' not granted`)
       return {
         role: requestedRole,
-        ctx: { userId: claims.userId, roles: claims.roles, sessionId: null, authMethod: 'jwt', authId: claims.jti },
+        ctx: {
+          userId: verified.userId,
+          roles,
+          sessionId: null,
+          authMethod: verified.kind === 'sealed' ? 'jwt-sealed' : 'jwt',
+          authId: verified.jti,
+          claims: verified.claims,
+          ...(verified.sealed ? { sealed: verified.sealed } : {}),
+        },
       } as AuthResultOf<C>
     }
 
@@ -431,19 +466,12 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
           await endSessions(userId, key.id, 'api-key')
           return { ok: true }
         },
-        getToken: async (_input, connCtx) => {
-          if (!jwtSecret) throw new SuperLineError('BAD_REQUEST', 'JWT is not enabled on this server')
+        getToken: async (input, connCtx) => {
+          if (!assertions) throw new SuperLineError('BAD_REQUEST', 'JWT is not enabled on this server')
           const { userId, roles } = connCtx as AuthContext
           if (!userId) throw new SuperLineError('UNAUTHORIZED', 'sign in to get a token')
-          const now = Date.now()
-          const expiresAt = now + jwtTtlMs
-          const token = await new SignJWT({ roles })
-            .setProtectedHeader({ alg: 'HS256' })
-            .setSubject(userId)
-            .setJti(newId())
-            .setIssuedAt(Math.floor(now / 1000))
-            .setExpirationTime(Math.floor(expiresAt / 1000))
-            .sign(jwtSecret)
+          const claims = (input as { claims?: unknown } | undefined)?.claims
+          const { token, expiresAt } = await assertions.mintSigned(userId, { roles, claims })
           return { jwt: token, expiresAt }
         },
         requestPasswordReset: async (input) => {
@@ -729,5 +757,33 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
     },
   }
 
-  return { authenticate, identify, plugin, revoke, pushEnv, users, credentials, apiKeys }
+  const requireAssertions = (): NonNullable<typeof assertions> => {
+    if (!assertions) throw new SuperLineError('BAD_REQUEST', 'bearer assertions need auth({ jwt: { secret } })')
+    return assertions
+  }
+
+  const tokens: AuthTokensApi = {
+    mintSigned: async (userId, opts = {}) => {
+      const kit = requireAssertions()
+      const user = await mustRead(userId)
+      if (isDeactivated(user)) throw new SuperLineError('CONFLICT', `user '${userId}' is deactivated`)
+      return kit.mintSigned(userId, { roles: user.roles, ...opts })
+    },
+    mintSealed: async (userId, opts = {}) => {
+      const kit = requireAssertions()
+      const user = await mustRead(userId)
+      if (isDeactivated(user)) throw new SuperLineError('CONFLICT', `user '${userId}' is deactivated`)
+      return kit.mintSealed(userId, opts)
+    },
+    verify: async (token) => {
+      const verified = await requireAssertions().verify(token)
+      if (!verified) return null
+      const user = await readUser(verified.userId)
+      if (!user || isDeactivated(user)) return null
+      // A sealed assertion carries no roles — connect resolves them from the row, so report the same thing.
+      return { ...verified, roles: verified.kind === 'sealed' ? user.roles : verified.roles }
+    },
+  }
+
+  return { authenticate, identify, plugin, revoke, pushEnv, users, credentials, apiKeys, tokens }
 }

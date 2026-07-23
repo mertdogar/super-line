@@ -112,14 +112,14 @@ badge renders; a wire change always breaks message grouping so the switch is vis
 *(There is no in-place hot swap: `plugin-auth` owns the connection lifecycle, and a reload is the honest,
 zero-machinery way to hand it a different transport.)*
 
-## Bearer tokens (JWT)
+## Bearer assertions (JWT / JWE)
 
-The key icon beside the dial opens the **bearer token** panel. It demonstrates the two halves of
-plugin-auth's JWT support, which are separate capabilities:
+The key icon beside the dial opens the **bearer token** panel. It demonstrates plugin-auth's two kinds of
+assertion, which differ in exactly one way that changes everything: **who can read the payload**.
 
-**Minting.** `client.getToken()` — a `shared` request, so any authenticated connection can call it over any
-wire — returns a short-lived HS256 token signed from your live session. The panel shows its claims and counts
-down its life. The server enables this with one option:
+**Minting a signed assertion.** `client.getToken({ claims })` — a `shared` request, so any authenticated
+connection can call it over any wire — returns a short-lived HS256 JWS signed from your live session. The
+panel shows its claims and counts down its life. The server enables all of this with one option:
 
 ```ts
 auth({ …, jwt: { secret: JWT_SECRET, ttlMs: 2 * 60_000 } })   // 2 minutes here; the default is 15
@@ -129,13 +129,30 @@ auth({ …, jwt: { secret: JWT_SECRET, ttlMs: 2 * 60_000 } })   // 2 minutes her
 what [`src/verifier.ts`](./src/verifier.ts) imports: `node:http` and `jose`. No super-line, no contract, no
 collections — and in `docker-compose.yml` it has no `chat-db` volume and no route to the database. It shares
 exactly **one** thing with the chat node, the signing secret, and that is enough to trust the caller. That is
-the difference between a JWT and an access token: an access token is a lookup key, so whoever validates it
-needs your database; a JWT is a signed assertion that anyone holding the secret can check alone.
+the difference between an assertion and an access token: an access token is a lookup key, so whoever validates
+it needs your database.
 
-**Connecting.** The three links at the bottom of the panel open the app on a wire of your choice carrying the
-token, and it connects with `params: { jwt }` instead of a stored access token. A yellow banner marks the tab.
-Because it never touches `localStorage`, this is the one way to hold **two independent connections in one
-browser** — though both are the same user, so two *people* still means a private window.
+**Exchanging it for a sealed assertion.** *Exchange for a sealed token* posts the signed token to
+`/sealed-handoff` on the chat node, which mints a **JWE** — and the panel then reports that it cannot read
+what it just received. That is the point. A sealed assertion is server-minted only (there is deliberately no
+`getToken` for it), carries a public `claims` bag and an encrypted `sealed` one, and lets you route a secret
+*through* a browser that can never see it. Here the endpoint seals a stand-in upstream API key.
+
+**Connecting.** The links at the bottom of each section open the app on a wire of your choice carrying that
+token; both kinds connect with `params: { jwt }` instead of a stored access token, and a yellow banner marks
+the tab. The banners differ, because the tabs genuinely know different things: a signed tab decoded its own
+claims and runs an expiry countdown; a sealed tab shows only what the server chose to vend it as
+[`env`](https://super-line.dogar.biz/how-to/connection-env) — one line in `src/server.ts`:
+
+```ts
+resolveEnv: (ctx) => (typeof ctx.claims?.workspace === 'string' ? { workspace: ctx.claims.workspace } : undefined)
+```
+
+`ctx.sealed` never appears there, so the encrypted half stays on the server while the handler that needs it
+reads it straight off the connection context.
+
+Because none of this touches `localStorage`, a bearer tab is the one way to hold **two independent
+connections in one browser** — though both are the same user, so two *people* still means a private window.
 
 A few behaviours worth watching for, because they are properties of JWTs rather than quirks of this app:
 

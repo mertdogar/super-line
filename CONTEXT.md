@@ -145,14 +145,33 @@ a **lookup key**: whoever validates it needs the database, which is precisely wh
 does not require.
 
 ### Bearer assertion (JWT)
-Resolved 2026-07-23. A **short-lived signed claim about identity that is stored nowhere** — the only credential
-here that authenticates without a server-side secret to look up, so it sits outside [[Credential]] by
-definition. Verification is a signature check, which is why a service holding only the secret (no super-line,
-no database) can trust it. The trade-off is symmetric and unavoidable: nothing is stored, so nothing can be
-revoked — `revoke(userId)` cannot reach it and short TTLs are the mitigation. The **one deliberate dent** is a
-user read at connect, which makes `users.deactivate()` an emergency stop. Distinct from an [[Access token]]
-(stored, revocable, a lookup key) and from a [[Connection session]] (which a JWT connection still creates,
-stamped `authMethod: 'jwt'`).
+Resolved 2026-07-23. A **short-lived claim about identity that is stored nowhere** — the only credential here
+that authenticates without a server-side secret to look up, so it sits outside [[Credential]] by definition.
+Verification is a key operation, not a database read, which is why a service holding only the key (no
+super-line, no database) can trust it. The trade-off is symmetric and unavoidable: nothing is stored, so
+nothing can be revoked — `revoke(userId)` cannot reach it and short TTLs are the mitigation. The **one
+deliberate dent** is a user read at connect, which makes `users.deactivate()` an emergency stop. Comes in two
+kinds — [[Signed assertion]] and [[Sealed assertion]] — which share one handshake param (`params: { jwt }`,
+dispatched on the compact dot count) because RFC 7519 admits a claims set in either serialization. Distinct
+from an [[Access token]] (stored, revocable, a lookup key) and from a [[Connection session]] (which an
+assertion connection still creates).
+
+### Signed assertion
+Resolved 2026-07-23 (ADR-0015). The **JWS** kind: a bearer assertion whose payload is **public by
+construction** — base64, readable by anyone holding the token, checkable by anyone holding the verification
+key. That readability *is* its purpose: it is the kind another backend verifies statelessly. Mintable by any
+authenticated **client** (`getToken({ claims })`) as well as the server, which is exactly why its `claims` are
+**client-authored** and must never be authorized on. Carries its own `roles` and stamps `authMethod: 'jwt'`.
+
+### Sealed assertion
+Resolved 2026-07-23 (ADR-0015). The **JWE** kind: a bearer assertion that is **opaque to its own holder**.
+Carries a public `claims` bag and a `sealed` bag, both readable only by a party with the encryption key —
+so it is the only credential here that can carry a secret *through* the client that presents it.
+**Server-minted only** (`authKit.tokens.mintSealed`); the absence of a client-facing mint is the entire
+reason `ctx.sealed` is trustworthy where `ctx.claims` on a [[Signed assertion]] is not. Its roles come from
+the user row at connect, not from the token — making it "a stateless [[Access token]] that carries a typed
+payload" — and it stamps `authMethod: 'jwt-sealed'`. Its public half reaches the client only via
+[[Connection env]], never automatically.
 
 ### Connection session
 Resolved 2026-07-17. A **live connection plus its server-side state**. Every authenticated connection has one —

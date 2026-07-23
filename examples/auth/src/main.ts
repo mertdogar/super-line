@@ -16,7 +16,18 @@ import { authClient } from '@super-line/plugin-auth/client'
 // app declares only its OWN surface: a private `notes` collection and an admin-only `stats` request.
 const app = defineContract({
   roles: {
-    user: {}, // a plain user acts through the notes collection + the shared whoami/signOut
+    // A user acts through the notes collection + the shared whoami/signOut. `useUpstream` exists to prove a
+    // point about sealed assertions: it reads a secret the CLIENT is carrying but cannot read, and returns
+    // only a fingerprint of it. `env` is the client-visible slice — here, the assertion's public claims.
+    user: {
+      env: z.object({ workspace: z.string().optional() }),
+      clientToServer: {
+        useUpstream: {
+          input: z.void(),
+          output: z.object({ workspace: z.string().nullable(), upstreamKeyTail: z.string().nullable() }),
+        },
+      },
+    },
     admin: { clientToServer: { stats: { input: z.void(), output: z.object({ users: z.number() }) } } },
   },
   collections: {
@@ -38,7 +49,15 @@ async function main(): Promise<void> {
   const backend = memoryCollections()
   // The SAME backend is handed to both the auth kit (so `authenticate` can read sessions/users) and the server.
   // `jwt` turns on both halves of the JWT feature: the `getToken` request, and `params: { jwt }` at connect.
-  const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'], jwt: { secret: JWT_SECRET } })
+  const authKit = auth({
+    contract: app,
+    collections: backend,
+    defaultRoles: ['user'],
+    jwt: { secret: JWT_SECRET },
+    // The public half of an assertion is NOT client-visible by default. This one line vends it as `env`
+    // (ADR-0012) — the sealed half stays server-side because nothing here ever puts it on the wire.
+    resolveEnv: (ctx) => ({ workspace: (ctx.claims?.workspace as string | undefined) ?? undefined }),
+  })
 
   const srv = createSuperLineServer(app, {
     nodeKey: 'auth-example',
@@ -57,7 +76,20 @@ async function main(): Promise<void> {
     plugins: [authKit.plugin],
   })
   // signIn/signUp/signOut/whoami are plugin-handled → subtracted; the empty user/guest/shared blocks are optional.
-  srv.implement({ admin: { stats: async () => ({ users: (await srv.collection('users').snapshot()).length }) } })
+  srv.implement({
+    admin: { stats: async () => ({ users: (await srv.collection('users').snapshot()).length }) },
+    user: {
+      // ctx.sealed is server-minted and arrives decrypted. Returning a 4-char tail is the whole point: the
+      // client handed us the key without ever being able to read it.
+      useUpstream: async (_input, ctx) => {
+        const key = ctx.sealed?.upstreamKey as string | undefined
+        return {
+          workspace: (ctx.claims?.workspace as string | undefined) ?? null,
+          upstreamKeyTail: key ? `…${key.slice(-4)}` : null,
+        }
+      },
+    },
+  })
 
   await new Promise<void>((resolve) => server.listen(0, resolve))
   const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -106,14 +138,16 @@ async function main(): Promise<void> {
   console.log('  admin stats →', await adminAlice.stats()) // { users: 2 } — the same token now authorizes 'admin'
   adminAlice.close()
 
-  // ── A JWT is a signed ASSERTION, not a stored credential. `getToken()` mints one from the live
+  // ── A bearer assertion is a CLAIM, not a stored credential. `getToken()` mints one from the live
   //    session; nothing about it is written down, so verifying it needs the secret and nothing else. ──
-  console.log('\n— Bob mints a JWT —')
-  const { jwt } = await bob.client.getToken()
+  console.log('\n— Bob mints a signed assertion —')
+  const { jwt } = await bob.client.getToken({ claims: { workspace: 'acme' } })
 
   // 1 · Another backend verifies it offline. No super-line, no database, no call home — just the secret.
+  //     Note `claims` is right there in the payload: a signed assertion hides NOTHING from its holder, and
+  //     because `getToken` is a client request, Bob wrote that bag himself. Never authorize on it.
   const { payload } = await jwtVerify(jwt, new TextEncoder().encode(JWT_SECRET))
-  console.log('  verified offline →', { sub: payload.sub, roles: payload.roles })
+  console.log('  verified offline →', { sub: payload.sub, roles: payload.roles, claims: payload.claims })
 
   // 2 · Or connect with it. No access-token lookup — but the connection is still a first-class one, and
   //     `authenticate` records a session row for it, stamped with how it authenticated.
@@ -122,6 +156,36 @@ async function main(): Promise<void> {
   const jwtSession = (await srv.collection('sessions').snapshot()).find((s) => s.authMethod === 'jwt')
   console.log('  session row →', { authMethod: jwtSession?.authMethod, userId: jwtSession?.userId })
   viaJwt.close()
+
+  // ── A SEALED assertion is the other kind: a JWE. Same handshake param, but the payload is encrypted, so
+  //    its own holder cannot read it — which is what lets you route a secret THROUGH a client. Only the
+  //    server mints one; there is deliberately no client-facing equivalent of getToken for it. ──
+  console.log('\n— The server mints a sealed assertion for Bob —')
+  const { token: sealedToken } = await authKit.tokens.mintSealed(bobId, {
+    claims: { workspace: 'acme' }, // public half — safe to show Bob
+    sealed: { upstreamKey: 'sk-live-7f3a-9c21' }, // encrypted half — Bob carries it, never sees it
+  })
+  console.log('  parts →', sealedToken.split('.').length, '(a JWE has 5; a JWS has 3)')
+  console.log('  the secret is not in the token →', !sealedToken.includes('sk-live'))
+  // Bob holds the token, and the shared secret is not even what decrypts it — the CEK is derived separately.
+  const bobCanRead = await jwtVerify(sealedToken, new TextEncoder().encode(JWT_SECRET)).then(
+    () => true,
+    () => false,
+  )
+  console.log('  Bob can decode it →', bobCanRead) // false
+
+  // Connect with it. The server sees BOTH bags on ctx; Bob receives only what a handler chooses to return.
+  const viaSealed = createSuperLineClient(app, { transport: transport(), role: 'user', params: { jwt: sealedToken } })
+  console.log('  server read the sealed key →', await viaSealed.useUpstream())
+  await viaSealed.env.ready // the first env frame lands at accept; awaiting it kills the connect-time race
+  console.log('  Bob’s client.env →', viaSealed.env.current) // the PUBLIC half only, via resolveEnv
+  const sealedSession = (await srv.collection('sessions').snapshot()).find((s) => s.authMethod === 'jwt-sealed')
+  console.log('  session row →', { authMethod: sealedSession?.authMethod, userId: sealedSession?.userId })
+  viaSealed.close()
+
+  // Roles are NOT baked into a sealed assertion — connect reads them from the user row, so a grant made
+  // after minting is live on the very next connection, and the mint site cannot escalate anyone.
+  console.log('  roles reported by verify →', (await authKit.tokens.verify(sealedToken))?.roles)
 
   // 3 · The cost of statelessness, stated plainly. `revoke` flushes access tokens, ends sessions and
   //     disconnects Bob everywhere — but an outstanding JWT is in no table, so there is nothing to

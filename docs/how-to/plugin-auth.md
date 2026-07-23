@@ -122,48 +122,116 @@ createSuperLineClient(app, { role: 'user', params: { apiKey: key } })
 
 `listApiKeys()` and `revokeApiKey({ id })` manage them.
 
-## JWT
+## Bearer assertions (JWT / JWE)
 
-An access token is a **lookup key** — whoever validates it needs your database. A JWT is a **signed assertion**:
-anyone holding the secret can verify it alone. Enable it with `jwt: { secret, ttlMs? }` on `auth(...)` (`ttlMs`
-defaults to 15 minutes), which turns on two separate capabilities.
+An access token is a **lookup key** — whoever validates it needs your database. A bearer assertion carries its
+own proof, so verification is a key operation instead. Enable it with `jwt: { secret, ttlMs? }` on `auth(...)`
+(`ttlMs` defaults to 15 minutes).
 
-**Mint.** `getToken()` is on `shared`, so any authenticated connection can call it:
+There are **two kinds**, and the difference is who can read the payload:
+
+|  | **signed** (JWS) | **sealed** (JWE) |
+|---|---|---|
+| payload | public — anyone holding the token can read it | opaque, even to its own holder |
+| minted by | a client (`getToken`) **or** the server | the **server only** |
+| verified by | anyone with the verification key | only a holder of the encryption key |
+| roles from | the token's own claims | the user row, at connect |
+| `authMethod` | `'jwt'` | `'jwt-sealed'` |
+
+Both are JWTs (RFC 7519 admits either serialization) and both connect through the same
+`params: { jwt }` — super-line tells them apart by shape.
+
+### Signed — mint, verify anywhere, connect
+
+`getToken()` is on `shared`, so any authenticated connection can call it:
 
 ```ts
-const { jwt, expiresAt } = await client.getToken() // HS256, sub = userId, a `roles` claim, jti, exp
+const { jwt, expiresAt } = await client.getToken()                 // sub = userId, roles, jti, exp
+const { jwt: tagged } = await client.getToken({ claims: { workspace: 'acme' } })
 ```
 
-**Verify elsewhere.** The point of the format — a service with none of your infrastructure:
+The point of the format is a service with none of your infrastructure:
 
 ```ts
 import { jwtVerify } from 'jose'
 const { payload } = await jwtVerify(bearer, new TextEncoder().encode(secret)) // no super-line, no DB
 ```
 
-**Connect with it.** A JWT connection is a first-class one — `authenticate` still records a session row, stamped
-`authMethod: 'jwt'`:
+### Sealed — carry a secret *through* the client
+
+Only the server mints one, and only your deployment can read it:
 
 ```ts
-createSuperLineClient(app, { role: 'user', params: { jwt } })
+const { token } = await authKit.tokens.mintSealed(userId, {
+  claims: { workspace: 'acme' },              // public half — safe to show the user
+  sealed: { upstreamKey: 'sk-live-…' },       // encrypted; the browser holding this cannot read it
+  expiresInMs: 5 * 60_000,
+})
 ```
 
-Three behaviours to design around:
+Hand it to a browser, which connects with it exactly like a signed one:
 
-- **A role is required, and must be in the claims.** Connecting without one is a `BAD_REQUEST`; asking for a role
-  the token doesn't grant is `FORBIDDEN`.
-- **A bad token degrades to `guest`, it does not throw.** An expired or forged JWT resolves to the guest role and
-  the connection is *accepted* there — so a client built for `user` will get `NOT_FOUND` on every call rather
-  than a connect error. Confirm with `whoami()` (it's on `shared`, and returns `null` for a guest) before
-  trusting the connection, exactly as `authClient` does when it restores a stored access token.
+```ts
+createSuperLineClient(app, { role: 'user', params: { jwt: token } })
+```
+
+Server-side, both bags are on the connection context:
+
+```ts
+srv.implement({ user: { doWork: async (_i, ctx) => callUpstream(ctx.sealed.upstreamKey) } })
+```
+
+`authKit.tokens.verify(token)` checks either kind out-of-band and returns the payloads plus the subject's
+**current** roles, or `null` for anything that would not authenticate.
+
+### Showing the public half to the client
+
+Nothing is client-visible automatically. The public half reaches the browser through
+[`env`](/how-to/connection-env) — one line, and it's validated against the `env` schema you already declared:
+
+```ts
+auth({ contract: app, collections: backend, resolveEnv: (ctx) => ctx.claims })
+```
+
+### Algorithms
+
+`jwt: { secret }` means HS256 signing plus an HKDF-derived `dir` + `A256GCM` encryption key. Override either
+side, with a raw secret or a JWK:
+
+```ts
+jwt: {
+  signed: { alg: 'EdDSA', key: signingJwk },        // third parties verify with the public half only
+  sealed: { alg: 'dir', enc: 'A256GCM', key: cek },
+  claims: z.object({ workspace: z.string() }),      // any Standard Schema — validated at mint and verify
+  sealedClaims: z.object({ upstreamKey: z.string() }),
+}
+```
+
+Verification always uses the algorithms **you configured**; the token's own header never selects a key, which
+is what closes the alg-confusion attack.
+
+### Behaviours to design around
+
+- **`ctx.claims` on a signed assertion is client-authored.** `getToken` is a client request, so a user can put
+  anything there (subject to your `claims` schema). **Never authorize on it** unless
+  `ctx.authMethod === 'jwt-sealed'` — only a sealed assertion's payloads are server-minted.
+- **A role is required.** Connecting without one is a `BAD_REQUEST`; asking for a role the assertion doesn't
+  grant is `FORBIDDEN`.
+- **A bad token degrades to `guest`, it does not throw.** An expired, forged, or schema-drifted assertion
+  resolves to the guest role and the connection is *accepted* there — so a client built for `user` will get
+  `NOT_FOUND` on every call rather than a connect error. Confirm with `whoami()` (it's on `shared`, and returns
+  `null` for a guest) before trusting the connection, exactly as `authClient` does when it restores a stored
+  access token.
 - **You cannot revoke one.** `revoke(userId)` flushes access tokens, ends sessions and disconnects live
-  connections — but an outstanding JWT is in no table, so it keeps working until `exp`. Keep `ttlMs` short. The
-  escape hatch is `users.deactivate(id)`: connect performs one user read (the deliberate dent in statelessness),
-  so deactivation closes even a validly-signed door.
+  connections — but an outstanding assertion is in no table, so it keeps working until `exp`. Keep `ttlMs` short.
+  The escape hatch is `users.deactivate(id)`: connect performs one user read (the deliberate dent in
+  statelessness), so deactivation closes even a validly-signed door.
+- **Assertions ride in the URL query string.** A large `sealed` payload can approach browser URL limits (~2k).
 
-Both are demonstrated end to end — the CLI narrative in [`examples/auth`](https://github.com/mertdogar/super-line/tree/main/examples/auth),
+Both kinds are demonstrated end to end — the CLI narrative in [`examples/auth`](https://github.com/mertdogar/super-line/tree/main/examples/auth),
 and a browser panel with a separate verifier service in
 [`examples/react-chat-transports`](https://github.com/mertdogar/super-line/tree/main/examples/react-chat-transports).
+The design is recorded in [ADR-0015](https://github.com/mertdogar/super-line/blob/main/docs/adr/0015-bearer-assertions-are-signed-or-sealed.md).
 
 ## Revocation
 

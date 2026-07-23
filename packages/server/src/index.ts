@@ -396,6 +396,12 @@ export interface PluginContext {
   readonly serializer: Serializer
   /** The raw contract, for reflection (e.g. `classifyContract`). */
   readonly contract: Contract
+  /**
+   * Names of every plugin registered on this server, in registration order — including this one, and
+   * including plugins that contribute no contract fragment. Distinct from `contract.plugins`, which is
+   * the contract-time half (ADR-0016).
+   */
+  readonly plugins: readonly string[]
   /** Connections accepted on THIS node (read-only snapshot; excludes reserved conns). */
   readonly conns: readonly Conn[]
   /** Node-local introspection (connections, rooms, topics on this process). */
@@ -596,6 +602,7 @@ export function createSuperLineServer<
     if (pluginNames.has(p.name)) throw new Error(`Duplicate plugin name: ${p.name}`)
     pluginNames.add(p.name)
   }
+  const pluginNameList = Object.freeze(plugins.map((p) => p.name))
 
   // ---- Collections: contract-declared defs + the host's and plugins' policies ----
   const collectionDefs = (c.collections ?? {}) as Record<string, CollectionDef>
@@ -1568,6 +1575,7 @@ export function createSuperLineServer<
       instanceId,
       serializer,
       contract: c,
+      plugins: pluginNameList,
       get conns() {
         return [...conns]
       },

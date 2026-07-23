@@ -127,6 +127,14 @@ export interface Contract {
    * not contract structure.
    */
   collections?: Record<string, CollectionDef>
+  /**
+   * The {@link ContractPlugin}s whose fragments were merged in (ADR-0016). An INPUT to `defineContract`,
+   * retained on the merged result so the origin of each collection/surface key stays knowable — the
+   * Control Center attributes contract entries to their owning plugin from this. Contract-time only:
+   * a plugin may contribute runtime behavior without a fragment (the inspector), so this is NOT the
+   * list of plugins registered on the server.
+   */
+  plugins?: readonly ContractPlugin[]
 }
 
 /**
@@ -175,7 +183,7 @@ export function defineContract(contract: ContractWithPlugins): Contract {
       roles[name] = current ? mergeRoleBlock(current, block, `plugin '${plugin.name}' role '${name}'`) : { ...block }
     }
   }
-  return { ...(shared ? { shared } : {}), roles, collections }
+  return { ...(shared ? { shared } : {}), roles, collections, plugins: pluginList }
 }
 
 /** Union of a contract's role names. */
@@ -300,8 +308,11 @@ type PluginsOf<C> = C extends { plugins: infer P extends readonly ContractPlugin
 type FragmentsOf<P extends readonly ContractPlugin[]> = P extends readonly []
   ? unknown
   : UnionToIntersection<P[number]['fragment']>
-/** The contract type after merging all plugin fragments: base (minus `plugins`) intersected with every fragment. */
-export type ResolveContract<C extends ContractWithPlugins> = Flat<Omit<C, 'plugins'> & FragmentsOf<PluginsOf<C>>>
+/**
+ * The contract type after merging all plugin fragments: the base intersected with every fragment. `plugins`
+ * is KEPT (ADR-0016) — the merged contract carries the fragments that formed it, so provenance survives.
+ */
+export type ResolveContract<C extends ContractWithPlugins> = Flat<C & FragmentsOf<PluginsOf<C>>>
 
 function mergeDirectional(a: Directional | undefined, b: Directional, where: string): Directional {
   const out: Directional = { clientToServer: { ...a?.clientToServer }, serverToClient: { ...a?.serverToClient } }

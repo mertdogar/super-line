@@ -110,4 +110,21 @@ describe('contract plugins (defineContract plugins fragment-merge)', () => {
     const plain = { roles: { user: {} }, collections: { m: { schema: z.object({ id: z.string() }), key: 'id' } } }
     expect(defineContract(plain)).toBe(plain)
   })
+
+  // ADR-0016: the merge used to discard `plugins`, so nothing downstream could attribute a merged key to
+  // the fragment that contributed it. The merged contract now carries the fragments that formed it.
+  it('retains the plugin fragments on the merged contract (provenance)', () => {
+    expect(contract.plugins?.map((p) => p.name)).toEqual(['auth'])
+    const fragment = contract.plugins![0]!.fragment
+    expect(Object.keys(fragment.collections ?? {}).sort()).toEqual(['sessions', 'users'])
+    expect(Object.keys(fragment.roles?.guest?.clientToServer ?? {}).sort()).toEqual(['signIn', 'signUp'])
+    // provenance is the fragment as authored — NOT the merged product
+    expect(Object.keys(fragment.roles?.user?.clientToServer ?? {})).toEqual(['signOut'])
+    expect(Object.keys(contract.roles.user.clientToServer!).sort()).toEqual(['sendMessage', 'signOut'])
+  })
+
+  it('has no plugins key on a plugin-free contract', () => {
+    const plain: Contract = defineContract({ roles: { user: {} } })
+    expect(plain.plugins).toBeUndefined()
+  })
 })

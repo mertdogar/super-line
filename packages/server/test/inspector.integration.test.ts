@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { defineContract, INSPECTOR_SUBPROTOCOL } from '@super-line/core'
+import { defineContract, defineContractPlugin, INSPECTOR_SUBPROTOCOL } from '@super-line/core'
 import type { InspectedContract, Schema } from '@super-line/core'
 import { MemoryBus, createInMemoryAdapter } from '@super-line/server'
 import { inspector } from '@super-line/plugin-inspector'
@@ -127,6 +127,20 @@ const richContract = defineContract({
   },
 })
 
+// `billing` ships both halves (fragment + server plugin); `analytics` ships only a fragment.
+const billingFragment = defineContractPlugin('billing', {
+  collections: { invoices: { schema: z.object({ id: z.string() }), key: 'id' } },
+  shared: { clientToServer: { charge: { input: z.void(), output: z.void() } } },
+  roles: { user: { clientToServer: { refund: { input: z.void(), output: z.void() } } } },
+})
+const analyticsFragment = defineContractPlugin('analytics', {
+  collections: { events: { schema: z.object({ id: z.string() }), key: 'id' } },
+})
+const pluginContract = defineContract({
+  roles: { user: { clientToServer: { say: { input: z.void(), output: z.void() } } } },
+  plugins: [billingFragment, analyticsFragment],
+})
+
 describe('inspector getContract (slice 3)', () => {
   it('returns structure + best-effort JSON Schema, falling back to structure-only per message', async () => {
     const { url } = await h.server(richContract, {
@@ -152,6 +166,34 @@ describe('inspector getContract (slice 3)', () => {
     const feed = (got.roles.user?.serverToClient ?? []).find((m) => m.name === 'feed')
     expect(feed?.flavor).toBe('topic')
     expect(feed?.payload).toMatchObject({ type: 'object' })
+
+    insp.close()
+  })
+
+  // ADR-0016: `getContract` reports what the server is composed of — the contract-time half (each merged
+  // fragment's keys) joined by name with the runtime half (plugins actually registered).
+  it('reports plugin provenance joined with the runtime plugin list', async () => {
+    const { url } = await h.server(pluginContract, {
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      plugins: [inspector(), { name: 'billing' }],
+    })
+    const insp = await connectInspector(url)
+    const got = (await insp.request('getContract')) as InspectedContract
+    const byName = Object.fromEntries((got.plugins ?? []).map((p) => [p.name, p]))
+
+    // both halves: fragment merged AND server plugin registered
+    expect(byName.billing?.runtime).toBe(true)
+    expect(byName.billing?.contract?.collections).toEqual(['invoices'])
+    expect(byName.billing?.contract?.shared?.clientToServer).toEqual(['charge'])
+    expect(byName.billing?.contract?.roles?.user?.clientToServer).toEqual(['refund'])
+
+    // runtime-only: the inspector serves this very request and contributes no fragment
+    expect(byName.inspector).toEqual({ name: 'inspector', runtime: true })
+
+    // contract-only: fragment merged, server half never registered — the misconfiguration that
+    // otherwise only shows up as NOT_FOUND at call time
+    expect(byName.analytics?.runtime).toBe(false)
+    expect(byName.analytics?.contract?.collections).toEqual(['events'])
 
     insp.close()
   })

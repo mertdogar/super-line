@@ -70,6 +70,8 @@ export type {
   InspectedMessage,
   InspectedDirectional,
   InspectedContract,
+  InspectedContribution,
+  InspectedPlugin,
   NodeView,
   ConnView,
   InspectorEvent,

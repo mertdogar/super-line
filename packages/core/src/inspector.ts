@@ -33,10 +33,35 @@ export interface InspectedDirectional {
   serverToClient: InspectedMessage[]
 }
 
+/** The keys one plugin fragment contributed to a direction of a `shared`/role block. */
+export interface InspectedContribution {
+  clientToServer: string[]
+  serverToClient: string[]
+}
+
+/**
+ * One plugin the server is composed of — what each entry of {@link InspectedContract.plugins} carries
+ * (ADR-0016). The two halves are independent: `runtime` is whether a plugin of this name is registered on
+ * the server, `contract` is what its fragment merged into the contract. Runtime-only (the inspector itself)
+ * has no `contract`; a `contract` with `runtime: false` means a fragment was merged but its server half was
+ * never registered — a misconfiguration whose only other symptom is `NOT_FOUND` at call time.
+ */
+export interface InspectedPlugin {
+  name: string
+  runtime: boolean
+  contract?: {
+    collections: string[]
+    shared?: InspectedContribution
+    roles?: Record<string, InspectedContribution>
+  }
+}
+
 /** A serializable projection of a {@link Contract}'s structure — what `getContract` returns. */
 export interface InspectedContract {
   shared: InspectedDirectional
   roles: Record<string, InspectedDirectional>
+  /** The plugins this server is composed of. Absent on nodes older than the provenance change. */
+  plugins?: InspectedPlugin[]
 }
 
 /** The connected node's local view — what `getNode` returns. */

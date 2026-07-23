@@ -12,12 +12,15 @@ import {
   ROW_CREATED_AT,
   ROW_UPDATED_AT,
   type Contract,
+  type Directional,
   type Schema,
   type Expr,
   type DocListOpts,
   type InspectorEvent,
   type InspectorEnvelope,
   type InspectedContract,
+  type InspectedContribution,
+  type InspectedPlugin,
   type ConnView,
   type NodeView,
   type CollectionInfo,
@@ -51,6 +54,33 @@ async function loadJsonConverter(): Promise<((s: Schema) => Promise<unknown>) | 
   } catch {
     return null
   }
+}
+
+// The plugins this server is composed of (ADR-0016): the contract-time half (each merged fragment's keys,
+// read straight off the retained `contract.plugins`) joined by name with the runtime half (`ctx.plugins`).
+// A plugin present in only one half is reported as such — that asymmetry is the diagnostic.
+function buildInspectedPlugins(contract: Contract, runtime: readonly string[]): InspectedPlugin[] {
+  const keysOf = (d: Directional | undefined): InspectedContribution => ({
+    clientToServer: Object.keys(d?.clientToServer ?? {}),
+    serverToClient: Object.keys(d?.serverToClient ?? {}),
+  })
+  const out: InspectedPlugin[] = []
+  const seen = new Set<string>()
+  for (const { name, fragment } of contract.plugins ?? []) {
+    seen.add(name)
+    const roles = Object.fromEntries(Object.entries(fragment.roles ?? {}).map(([r, b]) => [r, keysOf(b)]))
+    out.push({
+      name,
+      runtime: runtime.includes(name),
+      contract: {
+        collections: Object.keys(fragment.collections ?? {}),
+        ...(fragment.shared ? { shared: keysOf(fragment.shared) } : {}),
+        ...(Object.keys(roles).length > 0 ? { roles } : {}),
+      },
+    })
+  }
+  for (const name of runtime) if (!seen.has(name)) out.push({ name, runtime: true }) // runtime-only (e.g. the inspector)
+  return out
 }
 
 // getContract structure + best-effort JSON Schema for each message.
@@ -248,7 +278,10 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
       subprotocol: INSPECTOR_SUBPROTOCOL,
       contract: InspectorContract,
       handlers: (ctx) => ({
-        getContract: () => buildInspectedContract(ctx.contract),
+        getContract: async () => ({
+          ...(await buildInspectedContract(ctx.contract)),
+          plugins: buildInspectedPlugins(ctx.contract, ctx.plugins),
+        }),
         getTopology: () => ctx.cluster.topology(),
         listConnections: () => ctx.cluster.connections(),
         getNode: async () =>

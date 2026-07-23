@@ -5,6 +5,20 @@ run `pnpm changelog` rather than editing by hand.
 
 ## 2026-07-23
 
+### Bug Fixes
+
+- **deps:** Internal packages peer on their siblings instead of depending on them ([00375f6])
+
+### Chores
+
+- Add VS Code debug configs for tsx examples ([0293788])
+
+### Documentation
+
+- **changelog:** Refresh the root aggregate and the per-package backlog ([1b17da1])
+
+## 2026-07-23
+
 ### Features
 
 - **control-center:** Join plugin-auth identity onto connections ([5e1621e])

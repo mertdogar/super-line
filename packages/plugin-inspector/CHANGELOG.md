@@ -3,7 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
-## Unreleased
+## [plugin-inspector-v0.3.1] — 2026-07-23
+
+### Features
+
+- **core:** Report plugin provenance on getContract (ADR-0016) ([fd6270e])
+- **release:** Generate per-package changelogs from the commit history ([82a2232])
 
 ### Documentation
 

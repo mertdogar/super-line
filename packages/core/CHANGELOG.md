@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [core-v0.14.1] — 2026-07-23
+
+### Features
+
+- **core:** Report plugin provenance on getContract (ADR-0016) ([fd6270e])
+
 ## [core-v0.14.0] — 2026-07-22
 
 ### Features

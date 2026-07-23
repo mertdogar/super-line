@@ -3,6 +3,14 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [control-center-v0.11.0] — 2026-07-23
+
+### Features
+
+- **control-center:** Join plugin-auth identity onto connections ([5e1621e])
+- **control-center:** Surface plugins as a first-class dimension ([dc7fe3a])
+- **release:** Generate per-package changelogs from the commit history ([82a2232])
+
 ## [control-center-v0.10.5] — 2026-07-20
 
 ### Bug Fixes

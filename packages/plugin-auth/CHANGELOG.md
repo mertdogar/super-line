@@ -3,6 +3,13 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [plugin-auth-v0.6.0] — 2026-07-23
+
+### Features
+
+- **auth:** Split bearer assertions into signed and sealed ([785a839])
+- **example:** Demonstrate JWT auth and getToken ([73ba14b])
+
 ## [plugin-auth-v0.5.0] — 2026-07-22
 
 ### Features

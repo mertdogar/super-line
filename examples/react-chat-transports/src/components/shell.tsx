@@ -1,0 +1,58 @@
+import { useEffect, useMemo, useState } from 'react'
+import { ChannelView } from '@/components/channel-view'
+import { Sidebar } from '@/components/sidebar'
+import { useChannels, useMe, useMyMemberships } from '@/lib/chat'
+import { cn } from '@/lib/utils'
+
+export function Shell({ onSignOut }: { onSignOut: () => void }): React.JSX.Element {
+  const me = useMe()
+  // Every channel I can see: public ones + private ones I belong to (the plugin's read policy).
+  const channels = useChannels()
+  const myMemberships = useMyMemberships()
+  const joinedIds = useMemo(() => myMemberships.map((m) => m.channelId), [myMemberships])
+
+  const [activeId, setActiveId] = useState<string | null>(null)
+  // mobile: the sidebar is an off-canvas drawer (hamburger in the channel header opens it)
+  const [navOpen, setNavOpen] = useState(false)
+  // default to the first channel once the directory arrives
+  const active = channels.find((c) => c.id === activeId) ?? channels[0]
+  useEffect(() => {
+    if (!activeId && active) setActiveId(active.id)
+  }, [activeId, active])
+
+  const isMember = active ? joinedIds.includes(active.id) : false
+
+  return (
+    <div className="flex h-full">
+      {navOpen && <div className="fixed inset-0 z-30 bg-black/50 md:hidden" aria-hidden onClick={() => setNavOpen(false)} />}
+      <div
+        className={cn(
+          'fixed inset-y-0 left-0 z-40 transition-transform md:static md:z-auto md:translate-x-0',
+          navOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+        )}
+      >
+        <Sidebar
+          channels={channels}
+          joined={joinedIds}
+          activeId={active?.id ?? ''}
+          onSelect={(id) => {
+            setActiveId(id)
+            setNavOpen(false)
+          }}
+          onSignOut={onSignOut}
+        />
+      </div>
+      {active ? (
+        <ChannelView
+          key={active.id}
+          myUserId={me}
+          channel={active}
+          isMember={isMember}
+          onOpenNav={() => setNavOpen(true)}
+        />
+      ) : (
+        <div className="grid flex-1 place-items-center bg-background text-sm text-muted-foreground">No channels yet.</div>
+      )}
+    </div>
+  )
+}

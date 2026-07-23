@@ -109,17 +109,17 @@ pnpm --filter @super-line/example-transports start
 
 Demonstrates: [transports](/how-to/choose-a-transport), [the HTTP transport](/how-to/transport-http), [the libp2p transport](/how-to/transport-libp2p).
 
-## react-chat-transports — the browser app with a live transport dial
+## react-chat-transports — the whole plugin stack, on any wire
 
-A React chat with a transport dropdown: flip between **WebSocket**, **HTTP (SSE)**, and **libp2p** live in the browser. The contract, handlers, hooks, and UI are identical — only the client transport line changes, and each message shows the wire it arrived on (the server stamps `h.transport` into `ctx`). Single node by design: this is the *client*-transport axis, not server↔server fan-out (for that, see the `react-chat-cluster-*` examples). Needs Docker (or run the server + SPA locally).
+A Slack-shaped React chat built almost entirely out of [`plugin-auth`](/how-to/plugin-auth) and [`plugin-chat`](/how-to/plugin-chat) — accounts, sessions, channels, membership control, row-level security, durable history — running over **WebSocket**, **HTTP (SSE)** or **libp2p**. This is the example that proves the plugins sit *above* the transport seam: the app's whole contract is `defineContract({ roles: { user: {} }, plugins: [authContract(), chatContract()] })`, and `srv.implement({})` asserts it added no surface of its own. Pick the wire per tab with `?transport=` (choosing one reloads; the access token persists, so you land back signed in on the new wire), and each message carries a badge showing which wire sent it. Single node by design: this is the *client*-transport axis, not server↔server fan-out (for that, see the `react-chat-cluster-*` examples). Needs Docker (or run the server + SPA locally).
 
 ```bash
 cd examples/react-chat-transports && docker compose up --build
 ```
 
-Chat at `http://localhost:8100`, Control Center at `http://localhost:8101`.
+Chat at `http://localhost:8100` (seeded demo logins `ada@example.com` / `grace@example.com`, password `superline`), Control Center at `http://localhost:8101`.
 
-Demonstrates: [transports](/how-to/choose-a-transport), [React hooks](/how-to/react), [the HTTP transport](/how-to/transport-http).
+Demonstrates: [transports](/how-to/choose-a-transport), [plugin-auth](/how-to/plugin-auth), [plugin-chat](/how-to/plugin-chat), [the HTTP transport](/how-to/transport-http).
 
 ## auth — roles as an authorization boundary
 

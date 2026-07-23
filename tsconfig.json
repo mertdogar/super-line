@@ -4,5 +4,10 @@
     "noEmit": true
   },
   "include": ["packages/*/src", "packages/*/test", "examples/*/src"],
-  "exclude": ["packages/control-center", "examples/collections-chat", "examples/chat-supervisor"]
+  "exclude": [
+    "packages/control-center",
+    "examples/collections-chat",
+    "examples/chat-supervisor",
+    "examples/react-chat-transports"
+  ]
 }

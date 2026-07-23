@@ -1,0 +1,4 @@
+# local SQLite workspace (accounts, channels, messages) — delete to reset
+*.db
+*.db-wal
+*.db-shm

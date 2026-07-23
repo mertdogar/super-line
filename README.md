@@ -288,7 +288,7 @@ cd examples/react-chat-cluster-zeromq && docker compose up --build
 # Same react-chat-cluster on a RabbitMQ (AMQP) broker via adapter-rabbitmq (needs Docker):
 cd examples/react-chat-cluster-rabbitmq && docker compose up --build
 
-# React chat with a live transport dial — switch WebSocket / HTTP / libp2p at runtime (needs Docker):
+# The auth + chat plugin stack over any wire — pick WebSocket / HTTP / libp2p per tab (needs Docker):
 cd examples/react-chat-transports && docker compose up --build
 
 # AI co-writer canvas on a self-clustering CRDT document collection (Postgres + Electric, NO adapter).

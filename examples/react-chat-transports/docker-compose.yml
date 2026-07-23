@@ -1,15 +1,17 @@
 name: react-chat-transports
 
 # One chat node mounting THREE client↔server transports (WebSocket + HTTP on the http.Server,
-# libp2p on a node). The browser's dial picks which wire to dial. No cluster, no broker — the
-# point here is three transports to ONE server, not cross-node fan-out.
+# libp2p on a node). The browser's `?transport=` dial picks which wire to dial. No cluster, no broker
+# — the point here is three transports to ONE server, not cross-node fan-out.
 services:
   node-1:
     build:
       context: ../..
       dockerfile: examples/react-chat-transports/Dockerfile
     image: super-line-react-chat-transports:dev
-    environment: { PORT: '8787', P2P_PORT: '9101', NODE_NAME: node-1 }
+    environment: { PORT: '8787', P2P_PORT: '9101', NODE_NAME: node-1, DB_FILE: /data/chat.db }
+    # accounts, channels and messages live in sqlite; the volume keeps them across `docker compose down`
+    volumes: ['chat-db:/data']
     # the libp2p /ws port is dialed DIRECTLY by the browser (not proxied through Caddy)
     ports: ['9101:9101']
 
@@ -31,3 +33,6 @@ services:
     image: super-line-react-chat-transports-cc:dev
     ports: ['8101:8101']
     depends_on: [web]
+
+volumes:
+  chat-db:

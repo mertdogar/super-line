@@ -73,7 +73,7 @@ In the browser `EventSource` and `fetch` are globals, so `httpClientTransport({ 
 
 - 📖 Docs: <https://super-line.dogar.biz/>
 - 📚 Guide: [HTTP transport](https://super-line.dogar.biz/how-to/transport-http)
-- 🧩 Example: [`react-chat-transports`](https://github.com/mertdogar/super-line/tree/main/examples/react-chat-transports) — flip between WebSocket, HTTP (SSE), and libp2p live in the browser
+- 🧩 Example: [`react-chat-transports`](https://github.com/mertdogar/super-line/tree/main/examples/react-chat-transports) — the auth + chat plugin stack running over WebSocket, HTTP (SSE) or libp2p, picked per tab
 - 🧩 Source: <https://github.com/mertdogar/super-line>
 
 MIT © Mert

@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [server-v0.15.0] — 2026-07-23
+
+### Bug Fixes
+
+- **deps:** Internal packages peer on their siblings instead of depending on them ([00375f6])
+
 ## [server-v0.14.1] — 2026-07-23
 
 ### Features

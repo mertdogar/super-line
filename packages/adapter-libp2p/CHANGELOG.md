@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [adapter-libp2p-v0.8.0] — 2026-07-23
+
+### Bug Fixes
+
+- **deps:** Internal packages peer on their siblings instead of depending on them ([00375f6])
+
 ## [adapter-libp2p-v0.7.0] — 2026-07-20
 
 ### Features

@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## Unreleased
+
+### Bug Fixes
+
+- **deps:** Internal packages peer on their siblings instead of depending on them ([00375f6])
+
 ## [control-center-v0.11.0] — 2026-07-23
 
 ### Features

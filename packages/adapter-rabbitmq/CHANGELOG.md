@@ -3,11 +3,19 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
-## Unreleased
+## [adapter-rabbitmq-v0.6.0] — 2026-07-23
 
 ### Features
 
 - **release:** Generate per-package changelogs from the commit history ([82a2232])
+
+### Bug Fixes
+
+- **deps:** Internal packages peer on their siblings instead of depending on them ([00375f6])
+
+### Documentation
+
+- **changelog:** Refresh the root aggregate and the per-package backlog ([1b17da1])
 
 ## [adapter-rabbitmq-v0.5.1] — 2026-07-16
 

@@ -3,7 +3,7 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
-## Unreleased
+## [client-v0.12.0] — 2026-07-23
 
 ### Features
 
@@ -11,7 +11,12 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Bug Fixes
 
+- **deps:** Internal packages peer on their siblings instead of depending on them ([00375f6])
 - **docs:** Two broken links that failed the Deploy docs workflow ([d1fda1e])
+
+### Documentation
+
+- **changelog:** Refresh the root aggregate and the per-package backlog ([1b17da1])
 
 ## [client-v0.11.1] — 2026-07-17
 

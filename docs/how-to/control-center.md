@@ -55,25 +55,33 @@ This serves the app on a local port and opens your browser. Change the endpoint 
 
 ### Topology
 
-A hub-and-spoke graph of the whole cluster. The `Adapter · bus` sits at the center (multi-node clusters only — nodes have no direct sockets, they coordinate through the bus), server nodes around it, and each connection around its owning node. Connection nodes are colored by their **wire family** (WebSocket / HTTP / libp2p / loopback), and each server node labels its wire mix (e.g. `3 ws / 2 http`). A side lens lists roles as a color legend, the wire families in play with live counts, the rooms, and this node's topics — click a room or a wire family to highlight its connections across every node. The graph updates on every live event.
+A hub-and-spoke graph of the whole cluster. The `Adapter · bus` sits at the center (multi-node clusters only — nodes have no direct sockets, they coordinate through the bus), server nodes around it, and each connection around its owning node. Connection nodes are colored by their **wire family** (WebSocket / HTTP / libp2p / loopback), and each server node labels its wire mix (e.g. `3 ws / 2 http`). A side lens lists roles as a color legend, the wire families in play with live counts, the connected users, the rooms, and this node's topics — click a user, a room, or a wire family to highlight its connections across every node. The graph updates on every live event.
+
+When [`@super-line/plugin-auth`](/how-to/plugin-auth) is on the server, each connection node is labelled with the user's **display name** over its role and connection id, instead of a raw user key — so a person holding six connections reads as one person on six wires rather than six identical `user` boxes. Without the plugin (or before a directory row arrives) nodes fall back to role + id.
 
 ### Connections
 
-A table of every connection cluster-wide — role, **transport**, id, user, owning node, rooms, and uptime. The transport column is the **wire** each connection was accepted on, shown with a friendly label (`WebSocket`, `HTTP · SSE`, `HTTP · long-poll`, `libp2p`, `Loopback`) and color-keyed to the same wire-family palette as the topology graph — so a mixed-transport cluster is legible at a glance.
+A table of every connection cluster-wide — role, **transport**, id, user, owning node, rooms, and uptime. With `plugin-auth` on the server the **user** column shows the display name over the short user key (the key stays visible — it is what correlates a row with the live feed and the drawer). The transport column is the **wire** each connection was accepted on, shown with a friendly label (`WebSocket`, `HTTP · SSE`, `HTTP · long-poll`, `libp2p`, `Loopback`) and color-keyed to the same wire-family palette as the topology graph — so a mixed-transport cluster is legible at a glance.
 
 <img src="/control-center/connections.png" alt="Control Center connections view — a table of every connection across the cluster with role, id, user, node, rooms, and connected time" class="sl-shot" />
 
 Click a row to open its descriptor — including the wire it came in over — plus a best-effort, **node-local** snapshot of `ctx`, `conn.data`, and, when the role declares one, `conn.env` — the server-vended, client-visible [`env`](/how-to/connection-env). `env` is **masked by default** (the opposite of `ctx`/`data`): values render as `•••` unless the key is allow-listed via `inspector({ revealEnvKeys: [...] })`. A connection owned by another node shows descriptor-only — point the Control Center at that node to read its `ctx`.
 
+With `plugin-auth`, the drawer leads with a **user** section drawn from the auth directory: display name, user key, the user's roles, when the account was created (and whether it is deactivated), and the host's opaque `metadata`. It comes from the directory rather than `ctx`, so unlike `ctx` it is present for connections owned by **any** node.
+
 ### Contract
 
-The full contract surface: `shared` and each role, split by direction with a flavor badge (`request` / `event` / `topic`) and an expandable best-effort JSON Schema per message.
+The full contract surface: `shared` and each role, split by direction with a flavor badge (`request` / `event` / `topic`) and an expandable best-effort JSON Schema per message. Entries contributed by a [contract plugin](/concepts/plugins) also carry the plugin's name, so a surface merged from several plugins stays attributable; entries your app declared itself are unmarked.
 
 <img src="/control-center/contract.png" alt="Control Center contract view — shared and per-role messages grouped by direction, each with a flavor badge and an expandable JSON Schema payload" class="sl-shot" />
 
+### Plugins
+
+What the server is composed of: every plugin, with its two independent halves — whether a **runtime** plugin of that name is registered, and whether it merged a **contract** fragment — plus the collections and messages that fragment contributed. Most plugins have both halves; the inspector itself is runtime-only. A plugin showing *contract* but not *runtime* is a misconfiguration worth catching: the fragment was merged (so the calls type-check) but no server half is registered, and those requests will fail with `NOT_FOUND` at call time.
+
 ### Collections
 
-Every declared collection, with its schema (fields + primary key) and advisory foreign-key edges, plus a row browser that scans the backend directly — bypassing row policies, since the inspector is a trusted observer. Each row lists its **id**, **created**, **updated**, and full **row** JSON; click a row for the pretty-printed detail. CRDT document collections browse here too, as `{ id, ...snapshot }` doc-rows.
+Every declared collection, with the plugin that declared it (if any), its schema (fields + primary key) and advisory foreign-key edges, plus a row browser that scans the backend directly — bypassing row policies, since the inspector is a trusted observer. Each row lists its **id**, **created**, **updated**, and full **row** JSON; click a row for the pretty-printed detail. CRDT document collections browse here too, as `{ id, ...snapshot }` doc-rows.
 
 **Filter** with a builder of `field · operator · value` conditions that AND together and are pushed to the server as a query — so they narrow the **whole** collection, not just the rows already loaded. Operators are offered by field type (strings: `= · ≠ · contains`; numbers: `= ≠ < ≤ > ≥`; booleans: `is`). The **created** and **updated** timestamps are filterable too — `after` / `before` a datetime, or `within last` N minutes/hours/days (evaluated inspector-side, since they live outside the row data). CRDT collections aren't content-queryable, so their filter is an **id contains** substring. A separate **quick-find** box does a client-side substring over the currently-loaded rows. **Sort** by clicking the **id**, **created**, or **updated** column header (toggles ascending/descending), also pushed to the server so it orders the whole collection before paging.
 

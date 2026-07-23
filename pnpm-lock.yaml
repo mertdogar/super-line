@@ -209,6 +209,9 @@ importers:
       '@super-line/transport-websocket':
         specifier: workspace:*
         version: link:../../packages/transport-websocket
+      jose:
+        specifier: ^5.9.6
+        version: 5.10.0
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -999,6 +1002,9 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      jose:
+        specifier: ^5.9.6
+        version: 5.10.0
       libp2p:
         specifier: ^3.3.4
         version: 3.3.4

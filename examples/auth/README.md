@@ -20,6 +20,12 @@ pnpm --filter @super-line/example-auth start
   and Bob each see only their own; the `users` directory is public.
 - **Roles are just data:** granting Alice `admin` (a co-write to her user row) lets her existing access token
   open an `admin` connection.
+- **JWT — a signed assertion, not a stored credential.** `getToken()` mints a short-lived HS256 token from a
+  live session. Another backend verifies it with the secret **alone** — no super-line, no database — and a
+  client can connect with `params: { jwt }` and still get a real connection session (`authMethod: 'jwt'`).
+  Then the cost, stated honestly: `revoke()` ends Bob's sessions and disconnects him everywhere, but his
+  outstanding JWT is in no table to revoke and **keeps working until it expires**. `deactivate()` stops even
+  that — the one user read at connect is the emergency stop.
 - **Sign-out revokes** the session and drops the client back to `guest`.
 
 The Slack-style [`collections-chat`](../collections-chat) example is the larger, UI-driven counterpart.

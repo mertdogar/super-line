@@ -18,6 +18,8 @@ docker compose up --build
 - **Chat** → http://localhost:8100 — sign in, then pick a wire in the sidebar footer.
 - **Control Center** → http://localhost:8101 — watch the traffic, whichever wire it took.
 
+Three services come up: the chat node, Caddy, and a **`verifier`** that exists only to check JWTs (below).
+
 Two seeded demo logins (password `superline`), one click away on the login screen:
 
 | | |
@@ -42,6 +44,8 @@ http://localhost:8100/?transport=libp2p
 pnpm --filter @super-line/example-react-chat-transports server
 # terminal 2 — the SPA (vite proxies WS/HTTP/libp2p-addr to the server)
 pnpm --filter @super-line/example-react-chat-transports dev
+# terminal 3 — the JWT verifier on :8788 (optional; only the Verify button needs it)
+pnpm --filter @super-line/example-react-chat-transports verifier
 ```
 
 Accounts, channels and messages live in `chat.db` next to the source (gitignored — delete it to reset the
@@ -107,6 +111,49 @@ badge renders; a wire change always breaks message grouping so the switch is vis
 
 *(There is no in-place hot swap: `plugin-auth` owns the connection lifecycle, and a reload is the honest,
 zero-machinery way to hand it a different transport.)*
+
+## Bearer tokens (JWT)
+
+The key icon beside the dial opens the **bearer token** panel. It demonstrates the two halves of
+plugin-auth's JWT support, which are separate capabilities:
+
+**Minting.** `client.getToken()` — a `shared` request, so any authenticated connection can call it over any
+wire — returns a short-lived HS256 token signed from your live session. The panel shows its claims and counts
+down its life. The server enables this with one option:
+
+```ts
+auth({ …, jwt: { secret: JWT_SECRET, ttlMs: 2 * 60_000 } })   // 2 minutes here; the default is 15
+```
+
+**Verifying, somewhere else.** *Verify elsewhere* calls `GET /api/verify` on the `verifier` service. Look at
+what [`src/verifier.ts`](./src/verifier.ts) imports: `node:http` and `jose`. No super-line, no contract, no
+collections — and in `docker-compose.yml` it has no `chat-db` volume and no route to the database. It shares
+exactly **one** thing with the chat node, the signing secret, and that is enough to trust the caller. That is
+the difference between a JWT and an access token: an access token is a lookup key, so whoever validates it
+needs your database; a JWT is a signed assertion that anyone holding the secret can check alone.
+
+**Connecting.** The three links at the bottom of the panel open the app on a wire of your choice carrying the
+token, and it connects with `params: { jwt }` instead of a stored access token. A yellow banner marks the tab.
+Because it never touches `localStorage`, this is the one way to hold **two independent connections in one
+browser** — though both are the same user, so two *people* still means a private window.
+
+A few behaviours worth watching for, because they are properties of JWTs rather than quirks of this app:
+
+- **A JWT is checked only at connect.** Let the banner's countdown run out and the tab keeps working — it was
+  authorized once. What expired is your ability to start a *new* connection; hit **Verify elsewhere** after
+  expiry and the verifier rejects the very token the live connection is still running on.
+- **A rejected token does not fail the connect.** `authenticate` resolves an expired or forged JWT to `guest`
+  and the server accepts the connection at that role. So the app confirms with a `whoami()` before trusting it
+  — the same confirm-then-trust step plugin-auth's own client does when restoring a stored token.
+- **Revocation is the trade-off.** `authKit.revoke(userId)` flushes access tokens and disconnects, but an
+  outstanding JWT is in no table to revoke. Short TTLs are the mitigation; `users.deactivate()` is the
+  emergency stop, and it works because connect performs one user read. The
+  [`auth`](../auth) CLI example walks through exactly this.
+
+> The handoff link carries a bearer credential in a URL, which is fine for a demo and wrong in production —
+> it lands in history and referrers. The receiving tab strips it from the address bar on arrival; a real
+> handoff uses an `Authorization` header or a one-time exchange code. The panel's **Copy token** button and
+> the login screen's *Have a bearer token?* box are the paste-based path.
 
 ## Notes
 

@@ -1,5 +1,6 @@
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { jwtVerify } from 'jose'
 import { z } from 'zod'
 import { defineContract, eq } from '@super-line/core'
 import { createSuperLineServer } from '@super-line/server'
@@ -28,11 +29,16 @@ const app = defineContract({
   plugins: [authContract()],
 })
 
+// The JWT signing secret. In a real deployment it is deployment config, shared with whichever other
+// services need to verify a token — and with nothing else.
+const JWT_SECRET = 'dev-only-insecure-shared-secret'
+
 async function main(): Promise<void> {
   const server = http.createServer()
   const backend = memoryCollections()
   // The SAME backend is handed to both the auth kit (so `authenticate` can read sessions/users) and the server.
-  const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
+  // `jwt` turns on both halves of the JWT feature: the `getToken` request, and `params: { jwt }` at connect.
+  const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'], jwt: { secret: JWT_SECRET } })
 
   const srv = createSuperLineServer(app, {
     nodeKey: 'auth-example',
@@ -99,6 +105,40 @@ async function main(): Promise<void> {
   const adminAlice = createSuperLineClient(app, { transport: transport(), role: 'admin', params: { token } })
   console.log('  admin stats →', await adminAlice.stats()) // { users: 2 } — the same token now authorizes 'admin'
   adminAlice.close()
+
+  // ── A JWT is a signed ASSERTION, not a stored credential. `getToken()` mints one from the live
+  //    session; nothing about it is written down, so verifying it needs the secret and nothing else. ──
+  console.log('\n— Bob mints a JWT —')
+  const { jwt } = await bob.client.getToken()
+
+  // 1 · Another backend verifies it offline. No super-line, no database, no call home — just the secret.
+  const { payload } = await jwtVerify(jwt, new TextEncoder().encode(JWT_SECRET))
+  console.log('  verified offline →', { sub: payload.sub, roles: payload.roles })
+
+  // 2 · Or connect with it. No access-token lookup — but the connection is still a first-class one, and
+  //     `authenticate` records a session row for it, stamped with how it authenticated.
+  const viaJwt = createSuperLineClient(app, { transport: transport(), role: 'user', params: { jwt } })
+  console.log('  whoami over jwt →', await viaJwt.whoami())
+  const jwtSession = (await srv.collection('sessions').snapshot()).find((s) => s.authMethod === 'jwt')
+  console.log('  session row →', { authMethod: jwtSession?.authMethod, userId: jwtSession?.userId })
+  viaJwt.close()
+
+  // 3 · The cost of statelessness, stated plainly. `revoke` flushes access tokens, ends sessions and
+  //     disconnects Bob everywhere — but an outstanding JWT is in no table, so there is nothing to
+  //     revoke. It keeps working until it expires. Short TTLs are the mitigation, not revocation.
+  console.log('\n— Bob is revoked —')
+  await authKit.revoke(bobId)
+  const afterRevoke = createSuperLineClient(app, { transport: transport(), role: 'user', params: { jwt } })
+  console.log('  whoami over jwt →', await afterRevoke.whoami()) // still Bob — the signature is still valid
+  afterRevoke.close()
+
+  // 4 · …and the emergency stop. `resolveBase` reads the user row to check for deactivation — the one
+  //     deliberate dent in statelessness — so deactivating Bob closes even the signed door.
+  console.log('\n— Bob is deactivated —')
+  await authKit.users.deactivate(bobId)
+  const afterDeactivate = createSuperLineClient(app, { transport: transport(), role: 'user', params: { jwt } })
+  console.log('  whoami over jwt →', await afterDeactivate.whoami()) // null — accepted as a guest
+  afterDeactivate.close()
 
   // ── Sign out revokes the session; the client drops back to guest. ──
   console.log('\n— Alice signs out —')

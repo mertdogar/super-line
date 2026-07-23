@@ -76,7 +76,11 @@ client half hides the dance: `signIn()` connects as `guest`, mints an access tok
 - **API keys** — long-lived `slp_…` credentials with one fixed role, for services, CI, and agents. From a
   client: `createApiKey({ label, role })` (raw key returned once) · `listApiKeys()` · `revokeApiKey({ id })`.
 - **JWT** — enable `jwt: { secret }`; `getToken()` issues a short-lived HS256 JWT (via `jose`) for another
-  backend to verify statelessly, or to connect super-line without a DB round-trip (`params: { jwt }`).
+  backend to verify statelessly, or to connect super-line without a DB round-trip (`params: { jwt }`). It
+  cannot be revoked — keep the TTL short; `users.deactivate()` is the emergency stop. Demonstrated in
+  [`examples/auth`](https://github.com/mertdogar/super-line/tree/main/examples/auth) (CLI) and
+  [`examples/react-chat-transports`](https://github.com/mertdogar/super-line/tree/main/examples/react-chat-transports)
+  (browser panel + a separate verifier service).
 - **Password reset** — provide a `sendPasswordReset({ user, token })` callback (delivery is yours);
   `requestPasswordReset` never reveals whether an email exists, and `confirmPasswordReset` revokes access tokens.
 - **Identity is all collections** — `users` and `userPresence` are public by default; `credentials` /

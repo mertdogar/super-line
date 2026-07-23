@@ -27,6 +27,9 @@ const P2P_PORT = Number(process.env.P2P_PORT ?? 9101) // libp2p /ws listener (br
 const NODE = process.env.NODE_NAME ?? 'node-1'
 // the durable workspace lives next to this file: examples/react-chat-transports/chat.db (gitignored)
 const DB_FILE = process.env.DB_FILE ?? fileURLToPath(new URL('../chat.db', import.meta.url))
+// The ONLY thing this process shares with the verifier (src/verifier.ts) — no database, no super-line.
+// A real deployment injects a real secret; this default keeps the example a one-command start.
+const JWT_SECRET = process.env.AUTH_JWT_SECRET ?? 'dev-only-insecure-shared-secret'
 
 // A stable, seed-derived PeerId so the browser can dial a known multiaddr it fetches from /libp2p-addr.
 const seed = new Uint8Array(32)
@@ -58,7 +61,15 @@ const backend = sqliteCollections({ file: DB_FILE, collections: chat.collections
 // plugin-auth owns identity, access tokens, connection sessions, presence and the `guest` role;
 // plugin-chat owns the whole chat model — its policies and its 20+ request handlers ship INSIDE
 // chatKit.plugin. There are no hand-rolled rooms, join/send handlers or presence topics in this file.
-const authKit = auth({ contract: chat, collections: backend, defaultRoles: ['user'] })
+// `jwt` enables BOTH halves of the feature: the `getToken` request (mint) and `params: { jwt }` at connect.
+// 2 minutes instead of the 15-minute default so the countdown — and an expired token's rejection — are
+// reachable within one sitting. A JWT is only checked at connect, so a short TTL costs a demo nothing.
+const authKit = auth({
+  contract: chat,
+  collections: backend,
+  defaultRoles: ['user'],
+  jwt: { secret: JWT_SECRET, ttlMs: 2 * 60_000 },
+})
 const chatKit = chatKitFactory({
   contract: chat,
   hooks: {
@@ -134,4 +145,5 @@ server.listen(PORT, () => {
   console.log(`[${NODE}] up on :${port} (WS + HTTP) · libp2p /ws :${P2P_PORT} · peer ${node.peerId.toString()}`)
   console.log(`  collections: ${DB_FILE}`)
   console.log('  demo logins: ada@example.com / grace@example.com — password "superline"')
+  console.log('  JWT: enabled (2-minute tokens) — run `pnpm verifier` for the stateless verifier service')
 })

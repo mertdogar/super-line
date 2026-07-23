@@ -9,9 +9,10 @@ import { kind, TRANSPORT_LABELS } from '@/lib/transport'
 
 const DEMO_PASSWORD = 'superline'
 
-export function LoginScreen(): React.JSX.Element {
+export function LoginScreen({ onBearer }: { onBearer: (token: string) => void }): React.JSX.Element {
   const { signIn, signUp } = useAuth()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+  const [pasted, setPasted] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
@@ -125,6 +126,25 @@ export function LoginScreen(): React.JSX.Element {
           </div>
           <TransportDial tone="light" />
         </div>
+
+        {/* The other way in: a bearer JWT minted by an already-signed-in tab. No password, no stored
+            access token — the signature is the whole credential. */}
+        <details className="mt-4 border-t pt-4">
+          <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+            Have a bearer token?
+          </summary>
+          <div className="mt-2 flex gap-2">
+            <Input
+              value={pasted}
+              onChange={(e) => setPasted(e.target.value)}
+              placeholder="eyJhbGciOiJIUzI1NiJ9…"
+              className="h-9 font-mono text-xs"
+            />
+            <Button type="button" variant="outline" size="sm" disabled={!pasted.trim()} onClick={() => onBearer(pasted.trim())}>
+              Use
+            </Button>
+          </div>
+        </details>
       </form>
     </div>
   )

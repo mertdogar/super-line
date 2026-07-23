@@ -124,8 +124,46 @@ createSuperLineClient(app, { role: 'user', params: { apiKey: key } })
 
 ## JWT
 
-Enable `jwt: { secret }` on `auth(...)`. `getToken()` then issues a short-lived HS256 JWT — for another backend to
-verify statelessly, or to connect super-line without a DB round-trip via `params: { jwt }`.
+An access token is a **lookup key** — whoever validates it needs your database. A JWT is a **signed assertion**:
+anyone holding the secret can verify it alone. Enable it with `jwt: { secret, ttlMs? }` on `auth(...)` (`ttlMs`
+defaults to 15 minutes), which turns on two separate capabilities.
+
+**Mint.** `getToken()` is on `shared`, so any authenticated connection can call it:
+
+```ts
+const { jwt, expiresAt } = await client.getToken() // HS256, sub = userId, a `roles` claim, jti, exp
+```
+
+**Verify elsewhere.** The point of the format — a service with none of your infrastructure:
+
+```ts
+import { jwtVerify } from 'jose'
+const { payload } = await jwtVerify(bearer, new TextEncoder().encode(secret)) // no super-line, no DB
+```
+
+**Connect with it.** A JWT connection is a first-class one — `authenticate` still records a session row, stamped
+`authMethod: 'jwt'`:
+
+```ts
+createSuperLineClient(app, { role: 'user', params: { jwt } })
+```
+
+Three behaviours to design around:
+
+- **A role is required, and must be in the claims.** Connecting without one is a `BAD_REQUEST`; asking for a role
+  the token doesn't grant is `FORBIDDEN`.
+- **A bad token degrades to `guest`, it does not throw.** An expired or forged JWT resolves to the guest role and
+  the connection is *accepted* there — so a client built for `user` will get `NOT_FOUND` on every call rather
+  than a connect error. Confirm with `whoami()` (it's on `shared`, and returns `null` for a guest) before
+  trusting the connection, exactly as `authClient` does when it restores a stored access token.
+- **You cannot revoke one.** `revoke(userId)` flushes access tokens, ends sessions and disconnects live
+  connections — but an outstanding JWT is in no table, so it keeps working until `exp`. Keep `ttlMs` short. The
+  escape hatch is `users.deactivate(id)`: connect performs one user read (the deliberate dent in statelessness),
+  so deactivation closes even a validly-signed door.
+
+Both are demonstrated end to end — the CLI narrative in [`examples/auth`](https://github.com/mertdogar/super-line/tree/main/examples/auth),
+and a browser panel with a separate verifier service in
+[`examples/react-chat-transports`](https://github.com/mertdogar/super-line/tree/main/examples/react-chat-transports).
 
 ## Revocation
 

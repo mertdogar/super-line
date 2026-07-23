@@ -130,14 +130,29 @@ Resolved 2026-07-15. A **`relay` backend's `apply` must be synchronous** — for
 ### Credential
 Resolved 2026-07-17. The **durable stored secret** that proves a connection's identity: a **password hash**
 (`credentials` collection) for a human, an **API key** for a bot. Verified at login/connect. Distinct from a
-[[Session token]] (which is issued *after* a credential is verified) and from [[Connection ctx (identity)]]
+[[Access token]] (which is issued *after* a credential is verified), from a [[Bearer assertion (JWT)]] (which
+is stored nowhere at all) and from [[Connection ctx (identity)]]
 (the resolved identity, not the secret).
 
-### Session token
-Resolved 2026-07-17. A **re-sendable substitute for a password**, issued once a [[Credential]] is verified, so
-a human's browser can reconnect without re-sending the password — and so a login can be revoked without
-changing the password. **Humans only.** A bot needs none: its **API key is already a safely-re-sendable durable
-credential**, so `sessionId: null` on an API-key connection is correct, not a gap.
+### Access token
+Resolved 2026-07-17, renamed 2026-07-23 (was "Session token"). A **re-sendable substitute for a password**,
+issued once a [[Credential]] is verified, so a human's browser can reconnect without re-sending the password —
+and so a login can be revoked without changing the password. **Humans only.** A bot needs none: its **API key
+is already a safely-re-sendable durable credential**, so `sessionId: null` on an API-key connection is correct,
+not a gap. Renamed because "session token" collided with [[Connection session]] — a different concept that a
+token-authenticated connection also creates — and because the code has always called it `accessTokens`. It is
+a **lookup key**: whoever validates it needs the database, which is precisely what a [[Bearer assertion (JWT)]]
+does not require.
+
+### Bearer assertion (JWT)
+Resolved 2026-07-23. A **short-lived signed claim about identity that is stored nowhere** — the only credential
+here that authenticates without a server-side secret to look up, so it sits outside [[Credential]] by
+definition. Verification is a signature check, which is why a service holding only the secret (no super-line,
+no database) can trust it. The trade-off is symmetric and unavoidable: nothing is stored, so nothing can be
+revoked — `revoke(userId)` cannot reach it and short TTLs are the mitigation. The **one deliberate dent** is a
+user read at connect, which makes `users.deactivate()` an emergency stop. Distinct from an [[Access token]]
+(stored, revocable, a lookup key) and from a [[Connection session]] (which a JWT connection still creates,
+stamped `authMethod: 'jwt'`).
 
 ### Connection session
 Resolved 2026-07-17. A **live connection plus its server-side state**. Every authenticated connection has one —

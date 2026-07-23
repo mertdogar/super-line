@@ -44,6 +44,7 @@ export default defineConfig({
       '/superline': { target: 'http://localhost:8787' },
       '/libp2p-addr': { target: 'http://localhost:8787' },
       '/inspect': { target: 'ws://localhost:8787', ws: true },
+      '/api': { target: 'http://localhost:8788' }, // the verifier — a DIFFERENT process (pnpm verifier)
     },
   },
 })

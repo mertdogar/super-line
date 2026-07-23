@@ -13,6 +13,7 @@
     "@super-line/plugin-auth": "workspace:*",
     "@super-line/server": "workspace:*",
     "@super-line/transport-websocket": "workspace:*",
+    "jose": "^5.9.6",
     "zod": "^3.24.1"
   },
   "devDependencies": {

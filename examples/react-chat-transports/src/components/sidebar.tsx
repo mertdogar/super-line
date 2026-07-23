@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Hash, Lock, LogOut, MessageSquare } from 'lucide-react'
 import { CreateChannelDialog } from '@/components/create-channel-dialog'
+import { TokenDialog } from '@/components/token-dialog'
 import { TransportDial } from '@/components/transport-dial'
 import type { Channel } from '@/contract'
 import { useMe, useOnline, useUsers } from '@/lib/chat'
@@ -76,8 +77,11 @@ export function Sidebar({ channels, joined, activeId, onSelect, onSignOut }: Sid
         </ul>
       </div>
 
-      <div className="border-t border-sidebar-border px-3 py-3">
-        <TransportDial />
+      <div className="flex items-center gap-2 border-t border-sidebar-border px-3 py-3">
+        <div className="min-w-0 flex-1">
+          <TransportDial />
+        </div>
+        <TokenDialog />
       </div>
     </aside>
   )

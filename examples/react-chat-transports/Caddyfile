@@ -21,6 +21,11 @@
 		reverse_proxy node-1:8787
 	}
 
+	# NOT the chat node: a separate service that verifies JWTs with the shared secret alone.
+	handle /api* {
+		reverse_proxy verifier:8788
+	}
+
 	handle {
 		root * /srv
 		encode gzip

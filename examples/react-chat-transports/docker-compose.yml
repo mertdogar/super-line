@@ -9,11 +9,24 @@ services:
       context: ../..
       dockerfile: examples/react-chat-transports/Dockerfile
     image: super-line-react-chat-transports:dev
-    environment: { PORT: '8787', P2P_PORT: '9101', NODE_NAME: node-1, DB_FILE: /data/chat.db }
+    environment:
+      { PORT: '8787', P2P_PORT: '9101', NODE_NAME: node-1, DB_FILE: /data/chat.db, AUTH_JWT_SECRET: dev-only-insecure-shared-secret }
     # accounts, channels and messages live in sqlite; the volume keeps them across `docker compose down`
     volumes: ['chat-db:/data']
     # the libp2p /ws port is dialed DIRECTLY by the browser (not proxied through Caddy)
     ports: ['9101:9101']
+
+  # The other backend, and the point of a JWT: it shares exactly ONE thing with node-1 — the signing
+  # secret — and deliberately has no `chat-db` volume, no super-line, and no route to the database.
+  # That is enough for it to trust a caller's identity. Same image, different command.
+  verifier:
+    build:
+      context: ../..
+      dockerfile: examples/react-chat-transports/Dockerfile
+    image: super-line-react-chat-transports:dev
+    command: ['pnpm', '--filter', '@super-line/example-react-chat-transports', 'verifier']
+    environment: { VERIFIER_PORT: '8788', AUTH_JWT_SECRET: dev-only-insecure-shared-secret }
+    depends_on: [node-1]
 
   # Caddy: serves the built SPA and reverse-proxies /ws, /superline*, /inspect, /libp2p-addr to the node.
   web:
@@ -23,7 +36,7 @@ services:
     image: super-line-react-chat-transports-web:dev
     ports: ['8100:8100']
     volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']
-    depends_on: [node-1]
+    depends_on: [node-1, verifier]
 
   # The Control Center webapp on :8101; the browser connects it back to ws://localhost:8100/inspect.
   control-center:

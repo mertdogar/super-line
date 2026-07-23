@@ -119,17 +119,19 @@ cd examples/react-chat-transports && docker compose up --build
 
 Chat at `http://localhost:8100` (seeded demo logins `ada@example.com` / `grace@example.com`, password `superline`), Control Center at `http://localhost:8101`.
 
+It also carries the browser-side **JWT** demo: a bearer-token panel that mints a short-lived token with `getToken()`, has a third service verify it with the shared secret alone — no super-line, no database — and hands it to another tab on another wire, which connects with `params: { jwt }` and no stored access token.
+
 Demonstrates: [transports](/how-to/choose-a-transport), [plugin-auth](/how-to/plugin-auth), [plugin-chat](/how-to/plugin-chat), [the HTTP transport](/how-to/transport-http).
 
-## auth — roles as an authorization boundary
+## auth — identity, row security & bearer tokens (CLI)
 
-Token auth with an `admin` and a `user` role. `whoami` is shared; `secret` is admin-only. A user calling `secret` gets `NOT_FOUND`; a bad token is rejected at the upgrade.
+The [`plugin-auth`](/how-to/plugin-auth) walkthrough, printed step by step: email/password sign-up, a private `notes` collection where row security keys on the logged-in user, roles granted as plain data (a co-write to a user row lets Alice's existing token open an `admin` connection), and **JWT** — minted from a live session, verified offline with `jose` and nothing else, then used to connect. It closes on the honest part: `revoke()` disconnects Bob everywhere, yet his outstanding JWT still connects until it expires, and only `users.deactivate()` shuts that door.
 
 ```bash
 pnpm --filter @super-line/example-auth start
 ```
 
-Demonstrates: [auth](/how-to/roles-auth), [`NOT_FOUND` enforcement](/how-to/roles-auth), [errors](/how-to/errors).
+Demonstrates: [plugin-auth](/how-to/plugin-auth), [roles & auth](/how-to/roles-auth), [policies](/collections/policies).
 
 ## presence — introspection, targeted send & server→client requests
 

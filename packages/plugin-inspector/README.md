@@ -3,7 +3,7 @@
 The [Control Center](https://super-line.dogar.biz/how-to/control-center) inspector for [**super-line**](https://super-line.dogar.biz/), packaged as a [plugin](https://super-line.dogar.biz/concepts/plugins) — taps every request/event, redacts + snapshots payloads, and serves a plugin-owned connection class the Control Center attaches to. **Dev / trusted-network only** — it's unauthenticated and read-only, off by default.
 
 ```bash
-pnpm add @super-line/plugin-inspector
+pnpm add @super-line/core @super-line/server @super-line/plugin-inspector
 ```
 
 ```ts

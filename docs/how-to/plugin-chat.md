@@ -7,7 +7,7 @@ A reusable chat model as a **paired plugin**: **channels** (public + private), *
 `users` directory and every action is keyed on the signed-in user.
 
 ```bash
-pnpm add @super-line/plugin-chat @super-line/plugin-auth
+pnpm add @super-line/core @super-line/plugin-chat @super-line/plugin-auth
 ```
 
 Unlike the raw [collections](/collections/) approach (direct, optimistic row-writes), this plugin makes

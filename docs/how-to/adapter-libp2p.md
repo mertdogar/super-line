@@ -3,7 +3,7 @@
 Broker-less and decentralized: nodes peer directly over a [libp2p](https://libp2p.io) gossipsub mesh — no Redis, no central service. The heavyweight decentralized option (NAT traversal, encrypted transports, peer discovery) for self-hosted / edge deployments. Provided by `@super-line/adapter-libp2p`.
 
 ```bash
-pnpm add @super-line/adapter-libp2p
+pnpm add @super-line/core @super-line/adapter-libp2p
 ```
 
 ::: tip Adapter, not transport

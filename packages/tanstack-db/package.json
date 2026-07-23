@@ -1,6 +1,6 @@
 {
   "name": "@super-line/tanstack-db",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "TanStack DB collection adapter for super-line — use super-line collections as a TanStack DB sync source with client-side live queries and joins.",
   "license": "MIT",
@@ -24,11 +24,11 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "peerDependencies": {
-    "@super-line/client": "workspace:^",
-    "@super-line/core": "workspace:^",
+    "@super-line/client": ">=0.12.0 <1.0.0",
+    "@super-line/core": ">=0.14.0 <1.0.0",
     "@tanstack/db": ">=0.1"
   },
   "devDependencies": {

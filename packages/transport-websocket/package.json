@@ -1,6 +1,6 @@
 {
   "name": "@super-line/transport-websocket",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "type": "module",
   "description": "WebSocket client↔server transport for super-line (Node `ws` server + browser/Node client).",
   "license": "MIT",
@@ -24,13 +24,16 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "dependencies": {
-    "@super-line/core": "workspace:^",
     "ws": "^8.18.0"
   },
+  "peerDependencies": {
+    "@super-line/core": ">=0.14.0 <1.0.0"
+  },
   "devDependencies": {
+    "@super-line/core": "workspace:^",
     "@types/ws": "^8.5.13"
   }
 }

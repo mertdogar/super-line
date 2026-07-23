@@ -6,7 +6,7 @@ subscriptions · synced state) over a libp2p protocol stream instead of a raw We
 behind NAT over WebRTC, dial by `PeerId` or multiaddr, and authenticate with the peer in the handshake.
 
 ```bash
-pnpm add @super-line/transport-libp2p libp2p
+pnpm add @super-line/core @super-line/transport-libp2p libp2p
 ```
 
 > **ESM-only** — libp2p is ESM-only, so this package ships ESM only (Node 18+, `"type": "module"`).

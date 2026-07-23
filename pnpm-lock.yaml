@@ -1358,45 +1358,49 @@ importers:
       '@multiformats/multiaddr':
         specifier: ^13.0.3
         version: 13.0.3
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
       datastore-fs:
         specifier: ^12.0.1
         version: 12.0.1
       libp2p:
         specifier: ^3.3.4
         version: 3.3.4
+    devDependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
 
   packages/adapter-rabbitmq:
     dependencies:
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
       rabbitmq-client:
         specifier: ^5.0.0
         version: 5.0.8
+    devDependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
 
   packages/adapter-redis:
     dependencies:
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
       ioredis:
         specifier: ^5.4.2
         version: 5.11.1
-
-  packages/adapter-zeromq:
-    dependencies:
+    devDependencies:
       '@super-line/core':
         specifier: workspace:^
         version: link:../core
+
+  packages/adapter-zeromq:
+    dependencies:
       zeromq:
         specifier: ^6.0.0
         version: 6.5.0
+    devDependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
 
   packages/client:
-    dependencies:
+    devDependencies:
       '@super-line/core':
         specifier: workspace:^
         version: link:../core
@@ -1406,25 +1410,26 @@ importers:
       '@libsql/client':
         specifier: ^0.15.0
         version: 0.15.15
+    devDependencies:
       '@super-line/collections-crdt-memory':
         specifier: workspace:^
         version: link:../collections-crdt-memory
       '@super-line/core':
         specifier: workspace:^
         version: link:../core
-    devDependencies:
       '@super-store/store':
         specifier: ^0.3.0
         version: 0.3.0
 
   packages/collections-crdt-memory:
     dependencies:
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
       '@super-store/store':
         specifier: ^0.3.0
         version: 0.3.0
+    devDependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
 
   packages/collections-crdt-pglite:
     dependencies:
@@ -1434,9 +1439,6 @@ importers:
       '@electric-sql/pglite-sync':
         specifier: ^0.6.3
         version: 0.6.3(@electric-sql/pglite@0.5.3)
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
       '@super-store/store':
         specifier: ^0.3.0
         version: 0.3.0
@@ -1447,12 +1449,15 @@ importers:
       '@electric-sql/pglite-socket':
         specifier: ^0.2.6
         version: 0.2.6(@electric-sql/pglite-age@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_hashids@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_ivm@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_textsearch@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_uuidv7@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgtap@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgvector@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite@0.5.3)
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
       testcontainers:
         specifier: ^10.13.2
         version: 10.28.0
 
   packages/collections-memory:
-    dependencies:
+    devDependencies:
       '@super-line/core':
         specifier: workspace:^
         version: link:../core
@@ -1465,9 +1470,6 @@ importers:
       '@electric-sql/pglite-sync':
         specifier: ^0.6.3
         version: 0.6.3(@electric-sql/pglite@0.5.3)
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
       postgres:
         specifier: ^3.4.9
         version: 3.4.9
@@ -1475,19 +1477,22 @@ importers:
       '@electric-sql/pglite-socket':
         specifier: ^0.2.6
         version: 0.2.6(@electric-sql/pglite-age@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_hashids@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_ivm@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_textsearch@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_uuidv7@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgtap@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgvector@0.0.4(@electric-sql/pglite@0.5.3))(@electric-sql/pglite@0.5.3)
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
       zod:
         specifier: ^3.24.1
         version: 3.25.76
 
   packages/collections-sqlite:
     dependencies:
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
       better-sqlite3:
         specifier: ^11.8.1
         version: 11.10.0
     devDependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
       '@types/better-sqlite3':
         specifier: ^7.6.12
         version: 7.6.13
@@ -1604,9 +1609,6 @@ importers:
 
   packages/plugin-chat:
     dependencies:
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -1620,6 +1622,9 @@ importers:
       '@super-line/collections-memory':
         specifier: workspace:*
         version: link:../collections-memory
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
       '@super-line/plugin-auth':
         specifier: workspace:^
         version: link:../plugin-auth
@@ -1665,17 +1670,16 @@ importers:
         version: link:../server
 
   packages/react:
-    dependencies:
+    devDependencies:
       '@super-line/client':
         specifier: workspace:^
         version: link:../client
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
-    devDependencies:
       '@super-line/collections-memory':
         specifier: workspace:*
         version: link:../collections-memory
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
       '@super-line/server':
         specifier: workspace:*
         version: link:../server
@@ -1705,10 +1709,6 @@ importers:
         version: 3.25.76
 
   packages/server:
-    dependencies:
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
     devDependencies:
       '@chainsafe/libp2p-noise':
         specifier: ^17.0.0
@@ -1749,6 +1749,9 @@ importers:
       '@super-line/client':
         specifier: workspace:*
         version: link:../client
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
       '@super-line/plugin-inspector':
         specifier: workspace:*
         version: link:../plugin-inspector
@@ -1824,11 +1827,10 @@ importers:
         version: 3.25.76
 
   packages/transport-http:
-    dependencies:
+    devDependencies:
       '@super-line/core':
         specifier: workspace:^
         version: link:../core
-    devDependencies:
       eventsource:
         specifier: ^3.0.2
         version: 3.0.7
@@ -1841,9 +1843,6 @@ importers:
       '@libp2p/utils':
         specifier: ^7.2.3
         version: 7.2.3
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
     devDependencies:
       '@chainsafe/libp2p-noise':
         specifier: ^17.0.0
@@ -1860,6 +1859,9 @@ importers:
       '@super-line/client':
         specifier: workspace:*
         version: link:../client
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
       '@super-line/server':
         specifier: workspace:*
         version: link:../server
@@ -1871,20 +1873,20 @@ importers:
         version: 3.25.76
 
   packages/transport-loopback:
-    dependencies:
+    devDependencies:
       '@super-line/core':
         specifier: workspace:^
         version: link:../core
 
   packages/transport-websocket:
     dependencies:
-      '@super-line/core':
-        specifier: workspace:^
-        version: link:../core
       ws:
         specifier: ^8.18.0
         version: 8.21.0
     devDependencies:
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1

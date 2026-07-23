@@ -3,7 +3,7 @@
 Carry the contract over a **libp2p protocol stream** — which means WebSocket, **WebRTC** (direct or relayed), or WebTransport, with libp2p handling all the connection establishment and signaling for you. Provided by `@super-line/transport-libp2p`.
 
 ```bash
-pnpm add @super-line/transport-libp2p libp2p
+pnpm add @super-line/core @super-line/transport-libp2p libp2p
 ```
 
 The big win: **you write no WebRTC signaling.** You hand the transport a libp2p node configured with the connectivity you want, and super-line rides its streams.

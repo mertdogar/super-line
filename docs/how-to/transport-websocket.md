@@ -3,7 +3,7 @@
 The default wire: a full-duplex WebSocket. Lowest latency, broadest support, and the closest match to a classic realtime connection. Provided by `@super-line/transport-websocket`.
 
 ```bash
-pnpm add @super-line/transport-websocket
+pnpm add @super-line/core @super-line/transport-websocket
 ```
 
 ## Server

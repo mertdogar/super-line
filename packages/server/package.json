@@ -1,6 +1,6 @@
 {
   "name": "@super-line/server",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "type": "module",
   "description": "Realtime data-bus server for super-line — requests, events, rooms, topics, collections, pluggable transports & adapters.",
   "license": "MIT",
@@ -47,10 +47,7 @@
   },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
-  },
-  "dependencies": {
-    "@super-line/core": "workspace:^"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "devDependencies": {
     "@chainsafe/libp2p-noise": "^17.0.0",
@@ -66,6 +63,7 @@
     "@super-line/adapter-redis": "workspace:*",
     "@super-line/adapter-zeromq": "workspace:*",
     "@super-line/client": "workspace:*",
+    "@super-line/core": "workspace:^",
     "@super-line/plugin-inspector": "workspace:*",
     "@super-line/transport-http": "workspace:*",
     "@super-line/transport-loopback": "workspace:*",
@@ -73,15 +71,18 @@
     "@types/ws": "^8.5.13",
     "eventsource": "^3.0.2",
     "ioredis": "^5.4.2",
-    "ws": "^8.18.0",
     "libp2p": "^3.3.4",
     "rabbitmq-client": "^5.0.0",
     "testcontainers": "^10.13.2",
+    "ws": "^8.18.0",
     "zeromq": "^6.0.0",
     "zod": "^3.24.1",
     "zod-to-json-schema": "^3.25.2"
   },
   "optionalDependencies": {
     "@standard-community/standard-json": "^0.3.5"
+  },
+  "peerDependencies": {
+    "@super-line/core": ">=0.14.0 <1.0.0"
   }
 }

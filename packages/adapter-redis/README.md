@@ -3,7 +3,7 @@
 Redis Pub/Sub adapter for [**super-line**](https://super-line.dogar.biz/) — fan out rooms, topics, and the cluster event bus (`server.publish` / `server.subscribe`) across multiple server processes.
 
 ```bash
-pnpm add @super-line/adapter-redis
+pnpm add @super-line/core @super-line/adapter-redis
 ```
 
 ```ts

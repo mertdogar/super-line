@@ -1,6 +1,6 @@
 {
   "name": "@super-line/react",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "type": "module",
   "description": "React hooks for super-line — useRequest, useEvent, useSubscription.",
   "license": "MIT",
@@ -24,17 +24,17 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
-  },
-  "dependencies": {
-    "@super-line/client": "workspace:^",
-    "@super-line/core": "workspace:^"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "peerDependencies": {
+    "@super-line/client": ">=0.12.0 <1.0.0",
+    "@super-line/core": ">=0.14.0 <1.0.0",
     "react": ">=18"
   },
   "devDependencies": {
+    "@super-line/client": "workspace:^",
     "@super-line/collections-memory": "workspace:*",
+    "@super-line/core": "workspace:^",
     "@super-line/server": "workspace:*",
     "@super-line/transport-websocket": "workspace:*",
     "@testing-library/react": "^16.1.0",

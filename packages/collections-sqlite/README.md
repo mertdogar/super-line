@@ -3,7 +3,7 @@
 Durable SQLite `CollectionStore` backend for [**super-line**](https://super-line.dogar.biz/) [collections](https://super-line.dogar.biz/collections/backends) (better-sqlite3, WAL mode) — typed row collections that survive a restart. `relay` tier: each node holds a full replica and replicates writes over the server↔server [adapter](https://super-line.dogar.biz/how-to/choose-an-adapter).
 
 ```bash
-pnpm add @super-line/collections-sqlite
+pnpm add @super-line/core @super-line/collections-sqlite
 ```
 
 ```ts

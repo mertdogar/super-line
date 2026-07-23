@@ -3,7 +3,7 @@
 The lightest way to go broker-less: nodes peer directly over plain [ZeroMQ](https://zeromq.org) sockets — no extra service, and no full libp2p stack. Provided by `@super-line/adapter-zeromq`.
 
 ```bash
-pnpm add @super-line/adapter-zeromq
+pnpm add @super-line/core @super-line/adapter-zeromq
 ```
 
 ::: warning ESM-only · native addon

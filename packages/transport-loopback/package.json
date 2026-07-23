@@ -1,6 +1,6 @@
 {
   "name": "@super-line/transport-loopback",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "type": "module",
   "description": "In-memory client↔server transport for super-line — zero-dependency test substrate.",
   "license": "MIT",
@@ -24,9 +24,12 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
-  "dependencies": {
+  "peerDependencies": {
+    "@super-line/core": ">=0.14.0 <1.0.0"
+  },
+  "devDependencies": {
     "@super-line/core": "workspace:^"
   }
 }

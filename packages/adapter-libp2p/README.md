@@ -6,7 +6,7 @@ event bus, and cluster presence across multiple server processes with **no centr
 A drop-in alternative to [`@super-line/adapter-redis`](https://www.npmjs.com/package/@super-line/adapter-redis).
 
 ```bash
-pnpm add @super-line/adapter-libp2p
+pnpm add @super-line/core @super-line/adapter-libp2p
 ```
 
 > **ESM-only** — libp2p is ESM-only, so this package ships ESM only (Node 18+, `"type": "module"`).

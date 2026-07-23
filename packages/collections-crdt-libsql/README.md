@@ -3,7 +3,7 @@
 Durable CRDT `CrdtCollectionStore` backend for [**super-line**](https://super-line.dogar.biz/) [CRDT document collections](https://super-line.dogar.biz/collections/crdt-documents) (Yjs, via super-store) — snapshots each document to libsql/Turso so state survives a restart. `relay` tier: each node holds a full replica and replicates over the server↔server [adapter](https://super-line.dogar.biz/how-to/choose-an-adapter).
 
 ```bash
-pnpm add @super-line/collections-crdt-libsql
+pnpm add @super-line/core @super-line/collections-crdt-memory @super-line/collections-crdt-libsql
 ```
 
 ```ts

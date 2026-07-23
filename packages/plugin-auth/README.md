@@ -7,7 +7,7 @@ builds on super-line's connect-time [`authenticate`](https://super-line.dogar.bi
 model; you wire it in three places and the plugin owns the rest.
 
 ```bash
-pnpm add @super-line/plugin-auth
+pnpm add @super-line/core @super-line/plugin-auth
 ```
 
 ## Wire it in — three touch-points

@@ -1,6 +1,6 @@
 {
   "name": "@super-line/collections-crdt-pglite",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "type": "module",
   "description": "Self-clustering CRDT (Yjs, via super-store) document collection backend for super-line — an append-only op-log in central Postgres that ElectricSQL ships to a per-node PGlite replica; validate-before-commit at ingress; no adapter.",
   "license": "MIT",
@@ -24,17 +24,20 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "dependencies": {
-    "@super-line/core": "workspace:^",
-    "@super-store/store": "^0.3.0",
     "@electric-sql/pglite": "^0.5.3",
     "@electric-sql/pglite-sync": "^0.6.3",
+    "@super-store/store": "^0.3.0",
     "postgres": "^3.4.9"
+  },
+  "peerDependencies": {
+    "@super-line/core": ">=0.14.0 <1.0.0"
   },
   "devDependencies": {
     "@electric-sql/pglite-socket": "^0.2.6",
+    "@super-line/core": "workspace:^",
     "testcontainers": "^10.13.2"
   }
 }

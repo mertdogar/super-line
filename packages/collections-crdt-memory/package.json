@@ -1,6 +1,6 @@
 {
   "name": "@super-line/collections-crdt-memory",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "type": "module",
   "description": "In-memory CRDT (Yjs, via super-store) document collection backend for super-line — merging collaborative docs under the collection API.",
   "license": "MIT",
@@ -24,10 +24,15 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "dependencies": {
-    "@super-line/core": "workspace:^",
     "@super-store/store": "^0.3.0"
+  },
+  "peerDependencies": {
+    "@super-line/core": ">=0.14.0 <1.0.0"
+  },
+  "devDependencies": {
+    "@super-line/core": "workspace:^"
   }
 }

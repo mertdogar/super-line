@@ -1,6 +1,6 @@
 {
   "name": "@super-line/plugin-inspector",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "type": "module",
   "description": "Control Center inspector for super-line, packaged as a plugin — taps + a plugin-owned CC connection.",
   "license": "MIT",
@@ -24,14 +24,14 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "dependencies": {
     "@standard-community/standard-json": "^0.3.5"
   },
   "peerDependencies": {
-    "@super-line/core": "workspace:^",
-    "@super-line/server": "workspace:^"
+    "@super-line/core": ">=0.14.0 <1.0.0",
+    "@super-line/server": ">=0.15.0 <1.0.0"
   },
   "devDependencies": {
     "@super-line/core": "workspace:^",

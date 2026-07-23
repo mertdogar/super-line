@@ -1,6 +1,6 @@
 {
   "name": "@super-line/adapter-zeromq",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "type": "module",
   "description": "ZeroMQ adapter for super-line — brokerless mesh (or lightweight forwarder) multi-node fan-out + presence.",
   "license": "MIT",
@@ -23,10 +23,15 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "dependencies": {
-    "@super-line/core": "workspace:^",
     "zeromq": "^6.0.0"
+  },
+  "peerDependencies": {
+    "@super-line/core": ">=0.14.0 <1.0.0"
+  },
+  "devDependencies": {
+    "@super-line/core": "workspace:^"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@super-line/plugin-chat",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "type": "module",
   "description": "Chat backbone for super-line — channels, membership control, and messages backed by typed collections, with hookable server-authoritative requests. A paired plugin (contract · server). Requires @super-line/plugin-auth.",
   "license": "MIT",
@@ -44,17 +44,17 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "dependencies": {
-    "@super-line/core": "workspace:^",
     "zod": "^3.24.1"
   },
   "peerDependencies": {
     "@mastra/core": ">=1.50",
-    "@super-line/client": "workspace:^",
-    "@super-line/plugin-auth": "workspace:^",
-    "@super-line/server": "workspace:^",
+    "@super-line/client": ">=0.12.0 <1.0.0",
+    "@super-line/core": ">=0.14.0 <1.0.0",
+    "@super-line/plugin-auth": ">=0.6.0 <1.0.0",
+    "@super-line/server": ">=0.15.0 <1.0.0",
     "ai": ">=6",
     "react": ">=18"
   },
@@ -69,6 +69,7 @@
     "@mastra/core": "1.50.1",
     "@super-line/client": "workspace:^",
     "@super-line/collections-memory": "workspace:*",
+    "@super-line/core": "workspace:^",
     "@super-line/plugin-auth": "workspace:^",
     "@super-line/server": "workspace:^",
     "@super-line/transport-websocket": "workspace:*",

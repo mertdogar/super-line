@@ -1,6 +1,6 @@
 {
   "name": "@super-line/transport-http",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "type": "module",
   "description": "HTTP client↔server transport for super-line (SSE or long-poll downstream + POST upstream).",
   "license": "MIT",
@@ -24,12 +24,13 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
-  },
-  "dependencies": {
-    "@super-line/core": "workspace:^"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "devDependencies": {
+    "@super-line/core": "workspace:^",
     "eventsource": "^3.0.2"
+  },
+  "peerDependencies": {
+    "@super-line/core": ">=0.14.0 <1.0.0"
   }
 }

@@ -6,7 +6,7 @@ full data bus (requests · events · subscriptions · synced state) over plain H
 A drop-in alternative to the default [`@super-line/transport-websocket`](https://www.npmjs.com/package/@super-line/transport-websocket).
 
 ```bash
-pnpm add @super-line/transport-http
+pnpm add @super-line/core @super-line/transport-http
 ```
 
 ```ts

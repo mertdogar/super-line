@@ -3,7 +3,7 @@
 Wire a **real** super-line server and client together in one process — no socket, no port, no `http.Server`. Provided by `@super-line/transport-loopback`.
 
 ```bash
-pnpm add -D @super-line/transport-loopback
+pnpm add -D @super-line/core @super-line/transport-loopback
 ```
 
 It's the in-memory analogue of the `Adapter`: messages cross directly between the two endpoints. That makes it ideal for fast, deterministic tests that exercise the *whole* stack — `authenticate`, validation, rooms, topics, the server→client request bus — without the flakiness or teardown of real sockets.

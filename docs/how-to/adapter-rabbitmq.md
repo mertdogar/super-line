@@ -3,7 +3,7 @@
 For teams already running RabbitMQ, or who want the broker to do **selective routing** — each node receives only the channels it actually has members for. Provided by `@super-line/adapter-rabbitmq`.
 
 ```bash
-pnpm add @super-line/adapter-rabbitmq
+pnpm add @super-line/core @super-line/adapter-rabbitmq
 ```
 
 ## Setup

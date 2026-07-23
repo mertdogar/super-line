@@ -1,3 +1,5 @@
+export { VERSION } from './version.js'
+
 export { SuperLineError } from './errors.js'
 export type { SuperLineErrorCode, ErrorCode } from './errors.js'
 

@@ -1,6 +1,6 @@
 {
   "name": "@super-line/plugin-auth",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "description": "First-party authentication for super-line — email/password, sessions, and roles backed by typed collections. A paired plugin (contract · server · client).",
   "license": "MIT",
@@ -36,16 +36,16 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "dependencies": {
     "jose": "^6.2.4",
     "zod": "^3.24.1"
   },
   "peerDependencies": {
-    "@super-line/client": "workspace:^",
-    "@super-line/core": "workspace:^",
-    "@super-line/server": "workspace:^",
+    "@super-line/client": ">=0.12.0 <1.0.0",
+    "@super-line/core": ">=0.14.0 <1.0.0",
+    "@super-line/server": ">=0.15.0 <1.0.0",
     "react": ">=18"
   },
   "peerDependenciesMeta": {
@@ -55,8 +55,8 @@
   },
   "devDependencies": {
     "@super-line/client": "workspace:^",
-    "@super-line/core": "workspace:^",
     "@super-line/collections-memory": "workspace:*",
+    "@super-line/core": "workspace:^",
     "@super-line/server": "workspace:^",
     "@super-line/transport-websocket": "workspace:*",
     "@types/react": "^18.3.0",

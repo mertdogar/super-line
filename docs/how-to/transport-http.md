@@ -3,7 +3,7 @@
 For environments where WebSocket is blocked or buffered (corporate proxies, some load balancers, locked-down networks), super-line runs over plain HTTP: a **Server-Sent Events** stream or **long-poll** downstream, plus a `POST` upstream — all over one logical connection. Provided by `@super-line/transport-http`.
 
 ```bash
-pnpm add @super-line/transport-http
+pnpm add @super-line/core @super-line/transport-http
 ```
 
 It carries the exact same contract as WebSocket. The transport hides the HTTP mechanics — the session that spans many requests, EventSource reconnects — so the core still sees one logical connection.

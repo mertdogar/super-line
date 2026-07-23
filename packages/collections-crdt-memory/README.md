@@ -3,7 +3,7 @@
 In-memory CRDT `CrdtCollectionStore` backend for [**super-line**](https://super-line.dogar.biz/) [CRDT document collections](https://super-line.dogar.biz/collections/crdt-documents) (Yjs, via super-store) — merging collaborative docs (canvases, rich text, scene graphs) under the same `collection(n)` API as rows. `relay` tier: not durable, replicates over the server↔server [adapter](https://super-line.dogar.biz/how-to/choose-an-adapter).
 
 ```bash
-pnpm add @super-line/collections-crdt-memory
+pnpm add @super-line/core @super-line/collections-crdt-memory
 ```
 
 ```ts

@@ -29,6 +29,7 @@ pnpm docs:build
 - `packages/server/test/reconnect.integration.test.ts` → "auto-reconnects after an abrupt drop" is timing-flaky under full parallel load; it passes in isolation. Don't chase it as a regression. (It lives in the serial integration lane for exactly this reason.)
 - The lane split is the `heavy` list in `vitest.config.ts` (Docker/socket/timing-sensitive files), NOT the `.integration.test.ts` suffix — most integration-named files are loopback tests and run in the parallel fast lane. To run one heavy file: `pnpm test:integration <name>`.
 - ESM-only packages. Lint/format is oxlint/oxfmt, not ESLint/Prettier.
+- **A package NEVER hard-depends on a sibling `@super-line/*`.** Internal deps are `peerDependencies` with an explicit wide range (`">=<x.y.0> <1.0.0"`, hand-written — *not* `workspace:^`) plus a `devDependencies: workspace:^` mirror that does the local linking. A regular dep publishes as a 0.x caret, so the next core minor installs two physical copies of core and `instanceof SuperLineError` silently returns false (typed errors degrade to `INTERNAL`). Enforced at publish by `scripts/check-manifest.mjs`, which also keeps `packages/core/src/version.ts` in step with core's `package.json`.
 
 ## Architecture
 

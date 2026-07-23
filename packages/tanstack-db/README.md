@@ -3,7 +3,7 @@
 [TanStack DB](https://tanstack.com/db) collection adapter for [**super-line**](https://super-line.dogar.biz/) [collections](https://super-line.dogar.biz/collections/tanstack-db) — super-line stays the server-authoritative sync source, TanStack DB becomes the client-side query engine (live queries, joins, optimistic mutations).
 
 ```bash
-pnpm add @super-line/tanstack-db @tanstack/db
+pnpm add @super-line/core @super-line/client @super-line/tanstack-db @tanstack/db
 ```
 
 ```ts

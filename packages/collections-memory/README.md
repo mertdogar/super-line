@@ -3,7 +3,7 @@
 In-memory `CollectionStore` backend for [**super-line**](https://super-line.dogar.biz/) [collections](https://super-line.dogar.biz/collections/backends) — the zero-dependency default for typed row collections. `relay` tier: not durable, replicates over the server↔server [adapter](https://super-line.dogar.biz/how-to/choose-an-adapter).
 
 ```bash
-pnpm add @super-line/collections-memory
+pnpm add @super-line/core @super-line/collections-memory
 ```
 
 ```ts

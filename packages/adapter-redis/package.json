@@ -1,6 +1,6 @@
 {
   "name": "@super-line/adapter-redis",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "type": "module",
   "description": "Redis Pub/Sub adapter for super-line — multi-node room/topic fan-out.",
   "license": "MIT",
@@ -24,10 +24,15 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "dependencies": {
-    "@super-line/core": "workspace:^",
     "ioredis": "^5.4.2"
+  },
+  "peerDependencies": {
+    "@super-line/core": ">=0.14.0 <1.0.0"
+  },
+  "devDependencies": {
+    "@super-line/core": "workspace:^"
   }
 }

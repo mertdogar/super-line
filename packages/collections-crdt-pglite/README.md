@@ -3,7 +3,7 @@
 Self-clustering CRDT `CrdtCollectionStore` backend for [**super-line**](https://super-line.dogar.biz/) [CRDT document collections](https://super-line.dogar.biz/collections/crdt-documents) (Yjs, via super-store) — an append-only op-log in central Postgres that [Electric](https://electric-sql.com/) streams to a per-node PGlite replica, with validate-before-commit at the ingress node. `self` tier: no [adapter](https://super-line.dogar.biz/how-to/choose-an-adapter) needed.
 
 ```bash
-pnpm add @super-line/collections-crdt-pglite
+pnpm add @super-line/core @super-line/collections-crdt-pglite
 ```
 
 ```ts

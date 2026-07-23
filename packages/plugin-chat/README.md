@@ -8,7 +8,7 @@ with ordinary channel memberships. A host application owns identity provisioning
 model memory, and response loops.
 
 ```bash
-pnpm add @super-line/plugin-chat @super-line/plugin-auth
+pnpm add @super-line/core @super-line/plugin-chat @super-line/plugin-auth
 ```
 
 ## Contract and server

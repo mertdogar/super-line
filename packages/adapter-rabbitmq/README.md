@@ -3,7 +3,7 @@
 RabbitMQ adapter for [**super-line**](https://super-line.dogar.biz/) — fan out rooms, topics, and the cluster event bus (`server.publish` / `server.subscribe`) across multiple server processes, with the broker doing selective per-channel routing.
 
 ```bash
-pnpm add @super-line/adapter-rabbitmq
+pnpm add @super-line/core @super-line/adapter-rabbitmq
 ```
 
 ```ts

@@ -84,6 +84,8 @@ pnpm add @super-line/tanstack-db         # the TanStack DB adapter (joins, live 
 pnpm add @super-line/react             # React hooks
 ```
 
+Every `@super-line/*` package declares `@super-line/core` as a **peer**, so install it once — the first line above does. pnpm and npm 7+ add missing peers for you; Yarn does not.
+
 Requirements: **Node 18+** (server). The WebSocket client uses the global `WebSocket` (browsers, and Node 22+); on older Node, pass `webSocketClientTransport({ url, WebSocket })`.
 
 ## Quickstart

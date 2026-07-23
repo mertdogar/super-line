@@ -1,6 +1,6 @@
 {
   "name": "@super-line/collections-crdt-libsql",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "type": "module",
   "description": "Durable CRDT (Yjs, via super-store) document collection backend for super-line — snapshot-per-doc to libsql/Turso.",
   "license": "MIT",
@@ -24,14 +24,18 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "dependencies": {
-    "@super-line/core": "workspace:^",
-    "@super-line/collections-crdt-memory": "workspace:^",
     "@libsql/client": "^0.15.0"
   },
+  "peerDependencies": {
+    "@super-line/collections-crdt-memory": ">=0.2.0 <1.0.0",
+    "@super-line/core": ">=0.14.0 <1.0.0"
+  },
   "devDependencies": {
+    "@super-line/collections-crdt-memory": "workspace:^",
+    "@super-line/core": "workspace:^",
     "@super-store/store": "^0.3.0"
   }
 }

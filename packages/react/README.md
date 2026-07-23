@@ -3,7 +3,7 @@
 React hooks for [**super-line**](https://super-line.dogar.biz/), the strictly-typed realtime data bus — typed `useRequest` / `useEvent` / `useSubscription` / `useCollection` / `useDoc` bound to a contract + role.
 
 ```bash
-pnpm add @super-line/react
+pnpm add @super-line/core @super-line/client @super-line/react
 ```
 
 ```tsx

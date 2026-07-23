@@ -7,7 +7,7 @@ Every other super-line README installs this; reach for [`@super-line/transport-h
 [`@super-line/transport-loopback`](https://www.npmjs.com/package/@super-line/transport-loopback) only when you want a different wire.
 
 ```bash
-pnpm add @super-line/transport-websocket
+pnpm add @super-line/core @super-line/transport-websocket
 ```
 
 ```ts

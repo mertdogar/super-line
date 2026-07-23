@@ -3,7 +3,7 @@
 The pragmatic default for a backend cluster: a central Redis every node points at. Simple, the strongest presence of any adapter, at-most-once delivery. Provided by `@super-line/adapter-redis`.
 
 ```bash
-pnpm add @super-line/adapter-redis
+pnpm add @super-line/core @super-line/adapter-redis
 ```
 
 ## Setup

@@ -6,7 +6,7 @@ It builds on super-line's connect-time [`authenticate`](/how-to/roles-auth) mode
 and the plugin owns the rest.
 
 ```bash
-pnpm add @super-line/plugin-auth
+pnpm add @super-line/core @super-line/plugin-auth
 ```
 
 ## Wire it in

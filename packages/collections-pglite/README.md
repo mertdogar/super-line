@@ -3,7 +3,7 @@
 Self-clustering `CollectionStore` backend for [**super-line**](https://super-line.dogar.biz/) [collections](https://super-line.dogar.biz/collections/backends) — a central Postgres plus a per-node [Electric](https://electric-sql.com/)-synced PGlite replica (`live.changes`). `self` tier: Postgres + Electric is the only fan-out infra, no [adapter](https://super-line.dogar.biz/how-to/choose-an-adapter) needed.
 
 ```bash
-pnpm add @super-line/collections-pglite
+pnpm add @super-line/core @super-line/collections-pglite
 ```
 
 ```ts

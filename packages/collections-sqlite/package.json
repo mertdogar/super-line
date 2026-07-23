@@ -1,6 +1,6 @@
 {
   "name": "@super-line/collections-sqlite",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Durable SQLite CollectionStore backend for super-line — typed row collections that survive a restart, with IR→SQL snapshot pushdown.",
   "license": "MIT",
@@ -24,13 +24,16 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "dependencies": {
-    "@super-line/core": "workspace:^",
     "better-sqlite3": "^11.8.1"
   },
+  "peerDependencies": {
+    "@super-line/core": ">=0.14.0 <1.0.0"
+  },
   "devDependencies": {
+    "@super-line/core": "workspace:^",
     "@types/better-sqlite3": "^7.6.12",
     "zod": "^3.24.1"
   }

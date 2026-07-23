@@ -3,7 +3,7 @@
 In-memory client↔server transport for [**super-line**](https://super-line.dogar.biz/) — a real server and client in one process, exchanging bytes directly with no sockets, ports, or network. The zero-dependency default for tests.
 
 ```bash
-pnpm add -D @super-line/transport-loopback
+pnpm add -D @super-line/core @super-line/transport-loopback
 ```
 
 ```ts

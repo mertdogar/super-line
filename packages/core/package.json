@@ -1,6 +1,6 @@
 {
   "name": "@super-line/core",
-  "version": "0.14.1",
+  "version": "0.14.2",
   "type": "module",
   "description": "Shared contract, validation, wire protocol and errors for super-line.",
   "license": "MIT",
@@ -24,7 +24,7 @@
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs"
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "dependencies": {
     "@standard-schema/spec": "^1.0.0"

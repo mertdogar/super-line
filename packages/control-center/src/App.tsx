@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Boxes, FileText, LibraryBig, Network, Radio, Settings, Table2 } from 'lucide-react'
+import { Blocks, Boxes, FileText, LibraryBig, Network, Radio, Settings, Table2 } from 'lucide-react'
 import type {
   ConnDescriptor,
   InspectedContract,
@@ -18,6 +18,7 @@ import { LiveFeed } from '@/components/live-feed'
 import { CollectionsExplorer } from '@/components/collections-explorer'
 import { SettingsPage } from '@/components/settings-page'
 import { ResourcesPage } from '@/components/resources-page'
+import { PluginsPage } from '@/components/plugins-page'
 import { StatusDot } from '@/components/status-dot'
 import { BrandMark } from '@/components/brand-mark'
 import { version } from '../package.json'
@@ -25,13 +26,14 @@ import { roomsOf, type Highlight } from '@/lib/topology'
 import { transportsOf } from '@/lib/transport'
 import { cn } from '@/lib/utils'
 
-type View = 'topology' | 'connections' | 'contract' | 'collections' | 'feed' | 'settings' | 'resources'
+type View = 'topology' | 'connections' | 'contract' | 'plugins' | 'collections' | 'feed' | 'settings' | 'resources'
 type NavItem = { id: View; label: string; icon: typeof Network }
 
 const NAV: NavItem[] = [
   { id: 'topology', label: 'Topology', icon: Network },
   { id: 'connections', label: 'Connections', icon: Boxes },
   { id: 'contract', label: 'Contract', icon: FileText },
+  { id: 'plugins', label: 'Plugins', icon: Blocks },
   { id: 'collections', label: 'Collections', icon: Table2 },
   { id: 'feed', label: 'Live feed', icon: Radio },
 ]
@@ -225,7 +227,8 @@ export default function App(): React.JSX.Element {
                 ) : (
                   <p className="text-sm text-muted-foreground">No contract.</p>
                 ))}
-              {view === 'collections' && <CollectionsExplorer client={client} />}
+              {view === 'plugins' && <PluginsPage contract={contract} />}
+              {view === 'collections' && <CollectionsExplorer client={client} contract={contract} />}
               {view === 'feed' && <LiveFeed events={feed} connections={connections} topology={topology} />}
               {view === 'settings' && <SettingsPage url={url} status={status} onConnect={connect} />}
               {view === 'resources' && <ResourcesPage />}

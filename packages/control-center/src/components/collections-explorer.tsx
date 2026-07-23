@@ -1,11 +1,12 @@
 import * as React from 'react'
 import { ArrowDown, ArrowRight, ArrowUp, KeyRound, Plus, RefreshCw, X } from 'lucide-react'
 import { andFilters, eq, gt, gte, ilike, lt, lte, neq, ROW_CREATED_AT, ROW_UPDATED_AT } from '@super-line/core'
-import type { CollectionInfo, Expr, Scalar } from '@super-line/core'
+import type { CollectionInfo, Expr, InspectedContract, Scalar } from '@super-line/core'
 import type { InspectorClient } from '@/lib/inspector-client'
 import { Badge } from '@/components/ui/badge'
 import { Json } from '@/components/json-view'
 import { formatDuration, formatTime } from '@/lib/events'
+import { buildOwnerIndex, ownerOfCollection } from '@/lib/plugins'
 import { clickable, cn } from '@/lib/utils'
 
 const PAGE = 100
@@ -166,7 +167,14 @@ function FilterRow({ cond, fields, schemaLess, onChange, onRemove }: { cond: Con
   )
 }
 
-export function CollectionsExplorer({ client }: { client: InspectorClient | null }): React.JSX.Element {
+export function CollectionsExplorer({
+  client,
+  contract,
+}: {
+  client: InspectorClient | null
+  contract: InspectedContract | null
+}): React.JSX.Element {
+  const owners = React.useMemo(() => buildOwnerIndex(contract?.plugins), [contract?.plugins])
   const [collections, setCollections] = React.useState<CollectionInfo[]>([])
   const [name, setName] = React.useState<string | null>(null)
   const [rows, setRows] = React.useState<Row[]>([])
@@ -279,15 +287,19 @@ export function CollectionsExplorer({ client }: { client: InspectorClient | null
               )}
             >
               <span className="truncate">{c.name}</span>
-              {c.crdt ? (
-                <Badge variant="muted" className="ml-auto">
-                  crdt
-                </Badge>
-              ) : Object.keys(c.references).length > 0 ? (
-                <Badge variant="muted" className="ml-auto">
-                  {Object.keys(c.references).length} fk
-                </Badge>
-              ) : null}
+              <span className="ml-auto flex shrink-0 items-center gap-1">
+                {/* which plugin declared this collection (ADR-0016); host-declared ones are unmarked */}
+                {ownerOfCollection(owners, c.name) ? (
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    {ownerOfCollection(owners, c.name)}
+                  </span>
+                ) : null}
+                {c.crdt ? (
+                  <Badge variant="muted">crdt</Badge>
+                ) : Object.keys(c.references).length > 0 ? (
+                  <Badge variant="muted">{Object.keys(c.references).length} fk</Badge>
+                ) : null}
+              </span>
             </button>
           ))}
           {collections.length === 0 && <p className="p-3 text-sm text-muted-foreground">No collections declared.</p>}

@@ -6,6 +6,7 @@ import type {
   MessageFlavor,
 } from '@super-line/core'
 import { flavorColor } from '@/lib/events'
+import { buildOwnerIndex, ownerOfMessage, type Direction as DirectionKey } from '@/lib/plugins'
 import { Json } from '@/components/json-view'
 
 function FlavorBadge({ flavor }: { flavor: MessageFlavor }): React.JSX.Element {
@@ -20,7 +21,16 @@ function FlavorBadge({ flavor }: { flavor: MessageFlavor }): React.JSX.Element {
   )
 }
 
-function Message({ message }: { message: InspectedMessage }): React.JSX.Element {
+/** The plugin that contributed this entry (ADR-0016). Host-declared entries carry no chip. */
+export function PluginChip({ name }: { name: string }): React.JSX.Element {
+  return (
+    <span className="rounded border border-border bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+      {name}
+    </span>
+  )
+}
+
+function Message({ message, owner }: { message: InspectedMessage; owner?: string }): React.JSX.Element {
   const [open, setOpen] = React.useState(false)
   const schemas = (
     [
@@ -40,6 +50,7 @@ function Message({ message }: { message: InspectedMessage }): React.JSX.Element 
       >
         <FlavorBadge flavor={message.flavor} />
         <span className="font-mono text-sm">{message.name}</span>
+        {owner ? <PluginChip name={owner} /> : null}
         {hasSchema ? <span className="ml-auto text-xs text-muted-foreground">{open ? '−' : '+'}</span> : null}
       </button>
       {open ? (
@@ -59,39 +70,67 @@ function Message({ message }: { message: InspectedMessage }): React.JSX.Element 
   )
 }
 
-function Direction({ label, messages }: { label: string; messages: InspectedMessage[] }): React.JSX.Element | null {
+function Direction({
+  label,
+  dir,
+  messages,
+  ownerOf,
+}: {
+  label: string
+  dir: DirectionKey
+  messages: InspectedMessage[]
+  ownerOf: (dir: DirectionKey, name: string) => string | undefined
+}): React.JSX.Element | null {
   if (messages.length === 0) return null
   return (
     <div>
       <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="flex flex-col gap-1.5">
         {messages.map((m) => (
-          <Message key={m.name} message={m} />
+          <Message key={m.name} message={m} owner={ownerOf(dir, m.name)} />
         ))}
       </div>
     </div>
   )
 }
 
-function Block({ title, dir }: { title: string; dir: InspectedDirectional }): React.JSX.Element | null {
+function Block({
+  title,
+  dir,
+  ownerOf,
+}: {
+  title: string
+  dir: InspectedDirectional
+  ownerOf: (dir: DirectionKey, name: string) => string | undefined
+}): React.JSX.Element | null {
   if (dir.clientToServer.length === 0 && dir.serverToClient.length === 0) return null
   return (
     <div className="rounded-lg border bg-card/40 p-3">
       <div className="mb-2 text-sm font-semibold">{title}</div>
       <div className="flex flex-col gap-3">
-        <Direction label="client → server" messages={dir.clientToServer} />
-        <Direction label="server → client" messages={dir.serverToClient} />
+        <Direction label="client → server" dir="clientToServer" messages={dir.clientToServer} ownerOf={ownerOf} />
+        <Direction label="server → client" dir="serverToClient" messages={dir.serverToClient} ownerOf={ownerOf} />
       </div>
     </div>
   )
 }
 
 export function ContractExplorer({ contract }: { contract: InspectedContract }): React.JSX.Element {
+  const owners = React.useMemo(() => buildOwnerIndex(contract.plugins), [contract.plugins])
   return (
     <div className="flex max-w-3xl flex-col gap-3">
-      <Block title="shared" dir={contract.shared} />
+      <Block
+        title="shared"
+        dir={contract.shared}
+        ownerOf={(dir, name) => ownerOfMessage(owners, undefined, dir, name)}
+      />
       {Object.entries(contract.roles).map(([role, dir]) => (
-        <Block key={role} title={`role · ${role}`} dir={dir} />
+        <Block
+          key={role}
+          title={`role · ${role}`}
+          dir={dir}
+          ownerOf={(d, name) => ownerOfMessage(owners, role, d, name)}
+        />
       ))}
     </div>
   )

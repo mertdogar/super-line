@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [adapter-libp2p-v0.9.0] — 2026-07-24
+
+### Features
+
+- **adapter-libp2p:** LogTape diagnostics for the gossipsub mesh ([38f7f14])
+
 ## [adapter-libp2p-v0.8.0] — 2026-07-23
 
 ### Bug Fixes

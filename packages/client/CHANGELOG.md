@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [client-v0.13.0] — 2026-07-24
+
+### Features
+
+- **logging:** Adopt LogTape for structured internal diagnostics (ADR-0018) ([6e4b841])
+
 ## [client-v0.12.0] — 2026-07-23
 
 ### Features

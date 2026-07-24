@@ -1,5 +1,5 @@
 /** This package's version. Kept in step with package.json by `scripts/check-manifest.mjs`. */
-export const VERSION = '0.14.2'
+export const VERSION = '0.15.0'
 
 // Two copies of core in one process is the failure that has no symptom: shapes still match so
 // TypeScript is happy, the wire is unchanged so nothing disconnects, and only `instanceof` — the

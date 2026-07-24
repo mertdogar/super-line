@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [transport-websocket-v0.8.0] — 2026-07-24
+
+### Features
+
+- **logging:** Surface swallowed auth throws + clarify the nodeKey requirement ([0120e54])
+
 ## [transport-websocket-v0.7.0] — 2026-07-23
 
 ### Features

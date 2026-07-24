@@ -3,6 +3,17 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [plugin-auth-v0.7.0] — 2026-07-24
+
+### Features
+
+- **plugin-auth:** ResolveToken + AuthState.error ([3f8a129])
+- **plugin-auth:** TokenParam + rejectUnauthenticated ([28b9798])
+- **plugin-auth:** Retire client-side token minting ([ae2f7d2])
+- **logging:** Surface swallowed auth throws + clarify the nodeKey requirement ([0120e54])
+- **logging:** Adopt LogTape for structured internal diagnostics (ADR-0018) ([6e4b841])
+- **plugin-auth:** Server-side hooks around authenticate + the imperative kit ([4763c80])
+
 ## [plugin-auth-v0.6.1] — 2026-07-23
 
 ### Bug Fixes

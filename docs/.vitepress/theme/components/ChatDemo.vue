@@ -176,11 +176,21 @@ onMounted(async () => {
     const { chat } = await import('@super-line/plugin-chat/server')
     const { chatClient } = await import('@super-line/plugin-chat/client')
 
-    // A minimal identity table satisfies the plugin's `users` requirement without
-    // pulling the full plugin-auth login into a marketing widget.
+    // Minimal identity + presence tables satisfy the plugin's `users`/`userPresence`
+    // requirement without pulling the full plugin-auth login into a marketing widget.
     const app = defineContract({
       roles: { user: {} },
-      collections: { users: { schema: z.object({ id: z.string(), name: z.string() }), key: 'id' } },
+      collections: {
+        users: { schema: z.object({ id: z.string(), name: z.string() }), key: 'id' },
+        userPresence: {
+          schema: z.object({
+            userId: z.string(),
+            connectedAt: z.number().nullable(),
+            lastSeenAt: z.number().nullable(),
+          }),
+          key: 'userId',
+        },
+      },
       plugins: [chatContract()],
     })
 

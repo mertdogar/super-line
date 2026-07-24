@@ -5,6 +5,7 @@ import { defineContract } from '@super-line/core'
 import { memoryCollections } from '@super-line/collections-memory'
 import { authContract, type AuthContext } from '@super-line/plugin-auth'
 import { auth, type AssertionOptions } from '@super-line/plugin-auth/server'
+import { authClient } from '@super-line/plugin-auth/client'
 import { createHarness } from '../../server/test/harness.js'
 
 // `peek` echoes the whole auth context back, so a test can assert exactly what a handler sees.
@@ -202,5 +203,76 @@ describe('plugin-auth — assertion algorithms + schemas', () => {
     const backend = memoryCollections()
     const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
     await expect(authKit.tokens.mintSealed('anyone')).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+  })
+})
+
+describe('plugin-auth — tokenParam + rejectUnauthenticated (Phase 1)', () => {
+  it('authClient tokenParam routes a server-minted token under { jwt } (sealed connect)', async () => {
+    const { url, authKit } = await boot()
+    const { userId } = await signUp(url, 'sj@x.com')
+    const { token: sealed } = await authKit.tokens.mintSealed(userId)
+    const ac = authClient<typeof app, 'user'>({
+      authedRole: 'user',
+      tokenParam: 'jwt',
+      storage: { get: () => sealed, set: () => {} },
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params }),
+    })
+    await ac.ready
+    // routed under { jwt } → the sealed assertion authenticates; the WRONG key ({ token }) would degrade to guest
+    expect(ac.state.status).toBe('authed')
+    expect(ac.state.userId).toBe(userId)
+    ac.client.close()
+  })
+
+  it('default tokenParam is "token" (the access-token slot)', async () => {
+    const { url } = await boot()
+    const { token } = await signUp(url, 'tp@x.com')
+    const ac = authClient<typeof app, 'user'>({
+      authedRole: 'user',
+      storage: { get: () => token, set: () => {} },
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params }),
+    })
+    await ac.ready
+    expect(ac.state.status).toBe('authed') // routed under { token } (default) → access-token path authenticates
+    ac.client.close()
+  })
+
+  it('rejectUnauthenticated refuses a presented-but-invalid token instead of downgrading to guest', async () => {
+    const backend = memoryCollections()
+    const authKit = auth({
+      contract: app,
+      collections: backend,
+      defaultRoles: ['user'],
+      jwt: { secret: SECRET },
+      rejectUnauthenticated: true,
+    })
+    const { srv, url } = await h.server(app, {
+      nodeKey: 'strict-test',
+      authenticate: authKit.authenticate,
+      identify: authKit.identify,
+      collections: backend,
+      plugins: [authKit.plugin],
+    })
+    srv.implement({
+      user: { peek: async (_i: unknown, ctx: AuthContext) => ({ ...ctx }) },
+      admin: { adminOnly: async () => ({ ok: true }) },
+    } as never)
+
+    // a PRESENTED-but-invalid token → authenticate throws → the upgrade is refused (reconnect:false surfaces it)
+    const bad = h.client(app, { url, role: 'user', params: { jwt: 'not.a.real.assertion' }, reconnect: false })
+    await expect(bad.whoami()).rejects.toThrow()
+    bad.close()
+
+    // a credential-LESS connect still resolves guest
+    const guest = h.client(app, { url, role: 'guest' })
+    expect(await guest.whoami()).toBeNull()
+    guest.close()
+  })
+
+  it('without rejectUnauthenticated (default) the same bad token degrades to guest', async () => {
+    const { url } = await boot()
+    const client = h.client(app, { url, role: 'user', params: { jwt: 'not.a.real.assertion' } })
+    expect(await client.whoami()).toBeNull() // accepted as guest, not refused
+    client.close()
   })
 })

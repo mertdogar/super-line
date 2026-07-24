@@ -101,6 +101,13 @@ export interface AuthServerOptions<C extends Contract> {
    * HKDF-derived `dir` content-encryption key. See {@link AssertionOptions} for algorithms, JWK keys, and schemas.
    */
   jwt?: AssertionOptions
+  /**
+   * When `true`, a connect that PRESENTS a credential (`apiKey` / `jwt` / `token`) which fails to verify —
+   * bad key, bad signature, wrong alg, expired, undecryptable, or a deactivated subject — throws `UNAUTHORIZED`
+   * instead of silently resolving to guest. A credential-less connect (and an explicit `role: 'guest'`) still
+   * resolves guest. Default `false` (preserves the guest-first downgrade).
+   */
+  rejectUnauthenticated?: boolean
   /** Deliver a password-reset token (email/SMS/…). Without it, `requestPasswordReset` is a silent no-op. */
   sendPasswordReset?: (args: { user: AuthUser; token: string }) => void | Promise<void>
   /** Password-reset token lifetime in ms. Default 1 hour. */
@@ -287,8 +294,11 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
       role: GUEST_ROLE,
       ctx: { userId: null, roles: [], sessionId: null, authMethod: null, authId: null },
     } as AuthResultOf<C>
-    // A resolution that falls back to guest — tagged with WHY, the top auth-debugging question.
+    // A PRESENTED credential failed to resolve — tagged with WHY, the top auth-debugging question. This is
+    // only ever reached on a credential-failure path (a credential-less connect returns `guest` directly), so
+    // `rejectUnauthenticated` throws here rather than silently downgrading a bad token to guest.
     const guestBecause = (reason: string): AuthResultOf<C> => {
+      if (opts.rejectUnauthenticated) throw new SuperLineError('UNAUTHORIZED', reason)
       logAuthn.debug('degraded to guest: {reason}', { reason, requestedRole })
       return guest
     }

@@ -26,6 +26,11 @@ export interface AuthClientOptions<C extends Contract, R extends RoleOf<C>> {
   connect: (args: { role: string; params: Record<string, string> }) => SuperLineClient<C, R>
   /** Persist/restore the access token. Defaults to `localStorage` under `superline.auth.token`. */
   storage?: TokenStorage
+  /**
+   * The handshake param key the token rides under. Default `'token'` (the password access-token slot). Set
+   * `'jwt'` to connect with a server-minted signed/sealed assertion (→ `authMethod: 'jwt'` / `'jwt-sealed'`).
+   */
+  tokenParam?: string
 }
 
 export interface AuthClient<C extends Contract, R extends RoleOf<C>> {
@@ -74,7 +79,8 @@ export function authClient<C extends Contract, R extends RoleOf<C>>(options: Aut
     for (const l of listeners) l(s)
   }
   const guestClient = (): SuperLineClient<C, R> => options.connect({ role: GUEST_ROLE, params: {} })
-  const authedClient = (token: string): SuperLineClient<C, R> => options.connect({ role: options.authedRole, params: { token } })
+  const authedClient = (token: string): SuperLineClient<C, R> =>
+    options.connect({ role: options.authedRole, params: { [options.tokenParam ?? 'token']: token } })
   const swap = (next: SuperLineClient<C, R>, s: AuthState): void => {
     const prev = current
     current = next

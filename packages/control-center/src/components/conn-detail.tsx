@@ -6,6 +6,7 @@ import { transportLabel } from '@/lib/transport'
 import { shortId, type Directory, type Identity } from '@/lib/identity'
 import { Json } from '@/components/json-view'
 import { Button } from '@/components/ui/button'
+import { DetailPanel } from '@/components/detail-panel'
 
 function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -94,10 +95,8 @@ export function ConnDetail({
   const identity = view?.descriptor.userId ? directory.get(view.descriptor.userId) : undefined
 
   return (
-    <div className="absolute inset-0 z-10 flex">
-      <button type="button" className="flex-1 bg-black/40" onClick={onClose} aria-label="Close detail" />
-      <div className="w-104 overflow-auto border-l bg-card p-4">
-        <div className="flex items-center justify-between">
+    <DetailPanel label={`Connection ${connId.slice(0, 8)}`} onClose={onClose}>
+      <div className="flex items-center justify-between">
           <div className="min-w-0">
             {identity?.displayName ? (
               <div className="truncate text-sm font-semibold">{identity.displayName}</div>
@@ -145,7 +144,6 @@ export function ConnDetail({
         ) : error ? null : (
           <p className="mt-3 text-sm text-muted-foreground">Loading…</p>
         )}
-      </div>
-    </div>
+    </DetailPanel>
   )
 }

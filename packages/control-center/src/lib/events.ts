@@ -170,26 +170,38 @@ export function eventCategory(type: InspectorEvent['type']): FeedCategory {
   return 'lifecycle'
 }
 
-/** Tailwind text/bg accent class for an event type (feed dot). */
-export function eventColor(type: InspectorEvent['type']): string {
-  if (type === 'connect') return 'bg-primary'
-  if (type === 'disconnect') return 'bg-destructive'
-  if (type.startsWith('room')) return 'bg-violet-400'
-  if (type.startsWith('topic')) return 'bg-amber-400'
-  if (type.startsWith('collection.')) return 'bg-teal-400'
-  if (type.startsWith('crdt.')) return 'bg-fuchsia-400'
-  if (type === 'msg.request' || type === 'msg.serverRequest') return 'bg-cyan-400'
-  if (type === 'msg.response' || type === 'msg.serverReply') return 'bg-emerald-400'
-  if (type === 'msg.event' || type === 'msg.broadcast' || type === 'msg.publish') return 'bg-sky-400'
-  if (type === 'env.set') return 'bg-lime-400'
-  return 'bg-amber-400'
+/** Whether an event represents a failure — a rejected op or non-ok response. Drives feed error escalation. */
+export function isErrorEvent(event: InspectorEvent): boolean {
+  switch (event.type) {
+    case 'msg.response':
+    case 'msg.serverReply':
+    case 'collection.sub':
+    case 'collection.write':
+    case 'crdt.open':
+    case 'crdt.write':
+      return event.ok === false
+    default:
+      return false
+  }
+}
+
+/**
+ * The feed dot color, collapsed to the one-accent doctrine: cyan for the live signal (a new
+ * connection + request/response traffic), destructive red for failures (so errors pop out of the
+ * stream), muted for everything else. The event-type label alongside carries the finer category.
+ */
+export function eventColor(event: InspectorEvent): string {
+  if (isErrorEvent(event)) return 'bg-destructive'
+  if (event.type === 'connect') return 'bg-primary'
+  if (eventCategory(event.type) === 'requests') return 'bg-primary'
+  return 'bg-muted-foreground'
 }
 
 const FLAVOR_COLORS: Record<MessageFlavor, string> = {
-  request: '#22d3ee',
-  event: '#34d399',
-  topic: '#a78bfa',
-  serverRequest: '#60a5fa',
+  request: '#22d3ee', // cyan — the request/response signal axis
+  serverRequest: '#22d3ee', // cyan — node↔node request, same axis
+  event: '#94a3b8', // muted slate — server push
+  topic: '#94a3b8', // muted slate — subscribable push
 }
 
 export function flavorColor(flavor: MessageFlavor): string {
@@ -382,10 +394,12 @@ export interface FeedFilters {
   windowMs: number | null
   latency: [number, number] | null
   size: [number, number] | null
+  /** Show only failures (rejected ops / non-ok responses) — the incident fast-path. */
+  errorsOnly: boolean
 }
 
 export function emptyFilters(): FeedFilters {
-  return { text: '', types: new Set(), nodes: new Set(), wires: new Set(), windowMs: null, latency: null, size: null }
+  return { text: '', types: new Set(), nodes: new Set(), wires: new Set(), windowMs: null, latency: null, size: null, errorsOnly: false }
 }
 
 /** Whether any filter is engaged (drives the Reset affordance + count badge). */
@@ -397,7 +411,8 @@ export function filtersActive(f: FeedFilters): boolean {
     f.wires.size > 0 ||
     f.windowMs !== null ||
     f.latency !== null ||
-    f.size !== null
+    f.size !== null ||
+    f.errorsOnly
   )
 }
 
@@ -420,6 +435,7 @@ export interface RowMatch {
 
 /** True if an envelope passes every engaged filter (AND across dimensions, OR within a multi-select). */
 export function matchesFilters(en: InspectorEnvelope, f: FeedFilters, row: RowMatch): boolean {
+  if (f.errorsOnly && !isErrorEvent(en.event)) return false
   if (f.text) {
     const q = f.text.toLowerCase()
     if (!`${en.event.type} ${row.summary}`.toLowerCase().includes(q)) return false
@@ -515,6 +531,7 @@ export function exportJson(
         windowMs: f.windowMs,
         latency: f.latency,
         size: f.size,
+        errorsOnly: f.errorsOnly,
       },
       nodes: meta.nodes,
       events: records,

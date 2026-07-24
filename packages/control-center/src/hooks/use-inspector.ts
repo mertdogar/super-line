@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { createInspector, type InspectorClient, type InspectorStatus } from '@/lib/inspector-client'
 
-/** Connect to an inspector endpoint, re-connecting whenever `url` changes. */
-export function useInspector(url: string): { client: InspectorClient | null; status: InspectorStatus } {
+/** Connect to an inspector endpoint, re-connecting whenever `url` changes or `nonce` is bumped (manual retry). */
+export function useInspector(url: string, nonce = 0): { client: InspectorClient | null; status: InspectorStatus } {
   const [client, setClient] = useState<InspectorClient | null>(null)
   const [status, setStatus] = useState<InspectorStatus>('connecting')
 
@@ -16,7 +16,7 @@ export function useInspector(url: string): { client: InspectorClient | null; sta
       c.close()
       setClient(null)
     }
-  }, [url])
+  }, [url, nonce])
 
   return { client, status }
 }

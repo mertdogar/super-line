@@ -4,6 +4,7 @@ import { connLabel, shortId, type Directory } from '@/lib/identity'
 import { breakdownLabel } from '@/lib/transport'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { DetailPanel } from '@/components/detail-panel'
 
 function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -58,10 +59,8 @@ export function NodeDetail({
   const breakdown = breakdownLabel(conns)
 
   return (
-    <div className="absolute inset-0 z-10 flex">
-      <button type="button" className="flex-1 bg-black/40" onClick={onClose} aria-label="Close detail" />
-      <div className="w-104 overflow-auto border-l bg-card p-4">
-        <div className="flex items-start justify-between gap-2">
+    <DetailPanel label={`Node ${shortId(nodeId)}`} onClose={onClose}>
+      <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h3 className="truncate text-sm font-semibold">{name}</h3>
@@ -120,7 +119,6 @@ export function NodeDetail({
             </div>
           )}
         </Section>
-      </div>
-    </div>
+    </DetailPanel>
   )
 }

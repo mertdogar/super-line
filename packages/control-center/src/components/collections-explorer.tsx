@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { ArrowDown, ArrowRight, ArrowUp, KeyRound, Plus, RefreshCw, X } from 'lucide-react'
+import { ArrowDown, ArrowRight, ArrowUp, KeyRound, Plus, RefreshCw, TriangleAlert, X } from 'lucide-react'
 import { andFilters, eq, gt, gte, ilike, lt, lte, neq, ROW_CREATED_AT, ROW_UPDATED_AT } from '@super-line/core'
 import type { CollectionInfo, Expr, InspectedContract, Scalar } from '@super-line/core'
 import type { InspectorClient } from '@/lib/inspector-client'
@@ -185,6 +185,7 @@ export function CollectionsExplorer({
   const [idFilter, setIdFilter] = React.useState('') // server-side id-substring filter (CRDT collections)
   const [sort, setSort] = React.useState<SortState>({ field: 'id', dir: 'asc' })
   const [selected, setSelected] = React.useState<Row | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
 
   const rowsRef = React.useRef<Row[]>([])
   React.useEffect(() => {
@@ -202,7 +203,13 @@ export function CollectionsExplorer({
 
   React.useEffect(() => {
     if (!client) return
-    client.listCollections().then(setCollections).catch(() => {})
+    client
+      .listCollections()
+      .then((c) => {
+        setCollections(c)
+        setError(null)
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [client])
 
   // Build the server-side filter IR from the current UI: id-substring for CRDT, ANDed field conditions for rows.
@@ -223,8 +230,10 @@ export function CollectionsExplorer({
           const next = page as Row[]
           setRows(reset ? next : [...rowsRef.current, ...next])
           setMore(next.length === PAGE)
+          setError(null)
         })
-        .catch(() => {})
+        // a debugging tool must not hide its own failures — a swallowed query reads as "the collection is empty"
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
         .finally(() => setLoading(false))
     },
     [client, name, buildFilter, sort],
@@ -302,7 +311,11 @@ export function CollectionsExplorer({
               </span>
             </button>
           ))}
-          {collections.length === 0 && <p className="p-3 text-sm text-muted-foreground">No collections declared.</p>}
+          {collections.length === 0 && (
+            <p className="p-3 text-sm text-muted-foreground">
+              No collections declared — add a <span className="font-mono text-foreground">collections</span> map to your contract.
+            </p>
+          )}
         </div>
       </div>
 
@@ -324,7 +337,7 @@ export function CollectionsExplorer({
                       key={f.name}
                       className={cn(
                         'inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[11px]',
-                        f.name === selectedCollection.key && 'border-amber-400/40 bg-amber-400/10 text-amber-300',
+                        f.name === selectedCollection.key && 'border-primary/40 bg-primary/10 text-primary',
                       )}
                     >
                       {f.name === selectedCollection.key ? <KeyRound className="h-3 w-3" /> : null}
@@ -338,7 +351,7 @@ export function CollectionsExplorer({
                 <div key={field} className="flex items-center gap-1 text-[11px] text-muted-foreground">
                   <span className="font-mono text-foreground">{field}</span>
                   <ArrowRight className="h-3 w-3" />
-                  <button type="button" onClick={() => pick(refCollection)} className="font-mono text-sky-300 underline-offset-2 hover:underline">
+                  <button type="button" onClick={() => pick(refCollection)} className="font-mono text-primary underline-offset-2 hover:underline">
                     {refCollection}
                   </button>
                 </div>
@@ -379,6 +392,20 @@ export function CollectionsExplorer({
                 <span className="text-xs text-muted-foreground">{shown.length} rows</span>
               </div>
             </div>
+
+            {error ? (
+              <div className="flex shrink-0 items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+                <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">Query failed — {error}</span>
+                <button
+                  type="button"
+                  onClick={() => load(true)}
+                  className="shrink-0 rounded px-1.5 py-0.5 font-medium hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : null}
 
             <div className="min-h-0 flex-1 overflow-auto rounded-md border">
               <table className="w-full border-collapse text-sm">

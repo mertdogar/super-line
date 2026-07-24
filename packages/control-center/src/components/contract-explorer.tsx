@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { ChevronRight } from 'lucide-react'
 import type {
   InspectedContract,
   InspectedDirectional,
@@ -8,6 +9,7 @@ import type {
 import { flavorColor } from '@/lib/events'
 import { buildOwnerIndex, ownerOfMessage, type Direction as DirectionKey } from '@/lib/plugins'
 import { Json } from '@/components/json-view'
+import { cn } from '@/lib/utils'
 
 function FlavorBadge({ flavor }: { flavor: MessageFlavor }): React.JSX.Element {
   const color = flavorColor(flavor)
@@ -46,12 +48,16 @@ function Message({ message, owner }: { message: InspectedMessage; owner?: string
       <button type="button"
         onClick={() => hasSchema && setOpen((o) => !o)}
         disabled={!hasSchema}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left"
+        className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <FlavorBadge flavor={message.flavor} />
         <span className="font-mono text-sm">{message.name}</span>
         {owner ? <PluginChip name={owner} /> : null}
-        {hasSchema ? <span className="ml-auto text-xs text-muted-foreground">{open ? '−' : '+'}</span> : null}
+        {hasSchema ? (
+          <ChevronRight
+            className={cn('ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')}
+          />
+        ) : null}
       </button>
       {open ? (
         <div className="space-y-2 border-t p-3">

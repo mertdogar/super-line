@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { ChevronRight, Download, Pause, Play, X } from 'lucide-react'
+import { ChevronRight, CircleAlert, Download, Pause, Play, SlidersHorizontal, X } from 'lucide-react'
 import type { ConnDescriptor, InspectorEnvelope, InspectorEvent, NodeStat } from '@super-line/core'
 import {
   ALL_EVENT_TYPES,
@@ -18,6 +18,7 @@ import {
   formatBytes,
   formatDuration,
   formatTime,
+  isErrorEvent,
   latencyColor,
   latencyMsToSlider,
   latencyOf,
@@ -59,6 +60,10 @@ const WIRE_LABELS: Record<TransportFamily, string> = {
 
 const fmtMs = (ms: number): string =>
   ms < 1000 ? `${Math.round(ms)}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms / 60_000)}m`
+
+// shared toolbar chip: consistent shape + the brand cyan focus ring (per-button hover/active layered on)
+const CHIP_BTN =
+  'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
 
 /** Options for a dynamic filter, with any selected-but-vanished values kept so they stay uncheckable. */
 function optionsWithSelected<T extends string>(
@@ -124,14 +129,11 @@ function ExportMenu({
     return () => document.removeEventListener('mousedown', onDoc)
   }, [open])
   return (
-    <div ref={ref} className="relative ml-auto">
+    <div ref={ref} className="relative">
       <button type="button"
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
-        className={cn(
-          'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors',
-          disabled ? 'cursor-not-allowed opacity-50' : 'text-muted-foreground hover:bg-accent/40',
-        )}
+        className={cn(CHIP_BTN, disabled ? 'cursor-not-allowed opacity-50' : 'text-muted-foreground hover:bg-accent/40')}
       >
         <Download className="h-3.5 w-3.5" />
         Export
@@ -150,6 +152,68 @@ function ExportMenu({
               {f}
             </button>
           ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** Latency + Size range sliders, collapsed behind one "Range" popover so the toolbar stays legible. */
+function RangePopover({
+  latency,
+  size,
+  latPos,
+  sizePos,
+  onLatency,
+  onSize,
+}: {
+  latency: [number, number] | null
+  size: [number, number] | null
+  latPos: [number, number]
+  sizePos: [number, number]
+  onLatency: (v: number[]) => void
+  onSize: (v: number[]) => void
+}): React.JSX.Element {
+  const [open, setOpen] = React.useState(false)
+  const ref = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+  const active = latency !== null || size !== null
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={cn(CHIP_BTN, 'hover:bg-accent/40', active ? 'text-foreground' : 'text-muted-foreground')}
+      >
+        <SlidersHorizontal className="h-3.5 w-3.5" />
+        Range
+        {active ? <span className="h-1.5 w-1.5 rounded-full bg-primary" /> : null}
+      </button>
+      {open ? (
+        <div className="absolute left-0 z-20 mt-1 w-72 rounded-md border bg-popover p-3 text-popover-foreground shadow-md">
+          <div className="mb-3">
+            <div className="mb-1.5 flex items-center justify-between text-[11px] uppercase tracking-wide text-muted-foreground">
+              <span>Latency</span>
+              <span className="tabular-nums normal-case">{latency ? `${fmtMs(latency[0])}–${fmtMs(latency[1])}` : 'any'}</span>
+            </div>
+            <Slider value={latPos} min={0} max={1000} step={1} onValueChange={onLatency} />
+          </div>
+          <div>
+            <div className="mb-1.5 flex items-center justify-between text-[11px] uppercase tracking-wide text-muted-foreground">
+              <span>Size</span>
+              <span className="tabular-nums normal-case">
+                {size ? `${formatBytes(Math.round(size[0]))}–${formatBytes(Math.round(size[1]))}` : 'any'}
+              </span>
+            </div>
+            <Slider value={sizePos} min={0} max={1000} step={1} onValueChange={onSize} />
+          </div>
         </div>
       ) : null}
     </div>
@@ -177,12 +241,17 @@ function FeedRow({
   const [open, setOpen] = React.useState(false)
   const payload = eventPayload(event)
   const hasPayload = payload !== undefined
+  const isError = isErrorEvent(event)
 
   return (
     <>
       <tr
         {...clickable(() => hasPayload && setOpen((v) => !v))}
-        className={cn('border-b last:border-0', hasPayload && 'cursor-pointer hover:bg-accent/40')}
+        className={cn(
+          'border-b last:border-0',
+          isError ? 'bg-destructive/10 hover:bg-destructive/15' : hasPayload && 'hover:bg-accent/40',
+          hasPayload && 'cursor-pointer',
+        )}
       >
         <td className="px-3 py-1.5">
           <span className="inline-flex items-center gap-1.5">
@@ -193,7 +262,7 @@ function FeedRow({
             ) : (
               <span className="w-3 shrink-0" />
             )}
-            <span className={cn('h-2 w-2 shrink-0 rounded-full', eventColor(event.type))} />
+            <span className={cn('h-2 w-2 shrink-0 rounded-full', eventColor(event))} />
             <span className="font-mono text-xs text-muted-foreground">{event.type}</span>
           </span>
         </td>
@@ -422,6 +491,7 @@ export function LiveFeed({
   return (
     <div className="flex h-full flex-col gap-2">
       <div className="flex flex-wrap items-center gap-1.5">
+        {/* facets */}
         <input
           value={filters.text}
           onChange={(e) => patch({ text: e.target.value })}
@@ -435,13 +505,30 @@ export function LiveFeed({
         {wireFamilies.length > 1 || filters.wires.size > 0 ? (
           <MultiSelect label="Wires" groups={wireGroups} selected={filters.wires} onChange={(s) => patch({ wires: s })} />
         ) : null}
+        <button
+          type="button"
+          onClick={() => patch({ errorsOnly: !filters.errorsOnly })}
+          aria-pressed={filters.errorsOnly}
+          className={cn(
+            CHIP_BTN,
+            filters.errorsOnly ? 'border-destructive/50 bg-destructive/15 text-destructive' : 'text-muted-foreground hover:bg-accent/40',
+          )}
+        >
+          <CircleAlert className="h-3.5 w-3.5" />
+          Errors
+        </button>
+
+        <span className="mx-0.5 hidden h-5 w-px shrink-0 bg-border sm:block" aria-hidden="true" />
+
+        {/* time window + range */}
         <div className="inline-flex overflow-hidden rounded-md border text-xs">
           {TIME_WINDOWS.map((w) => (
-            <button type="button"
+            <button
+              type="button"
               key={w.label}
               onClick={() => patch({ windowMs: w.ms })}
               className={cn(
-                'px-2 py-1 transition-colors',
+                'px-2 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                 filters.windowMs === w.ms ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/40',
               )}
             >
@@ -449,40 +536,40 @@ export function LiveFeed({
             </button>
           ))}
         </div>
-        <div className="inline-flex items-center gap-2 rounded-md border px-2 py-1">
-          <span className="text-xs text-muted-foreground">Latency</span>
-          <Slider value={latPos} min={0} max={1000} step={1} onValueChange={onLatency} className="w-28" />
-          <span className="w-24 text-right text-[10px] tabular-nums text-muted-foreground">
-            {filters.latency ? `${fmtMs(filters.latency[0])}–${fmtMs(filters.latency[1])}` : 'any'}
-          </span>
-        </div>
-        <div className="inline-flex items-center gap-2 rounded-md border px-2 py-1">
-          <span className="text-xs text-muted-foreground">Size</span>
-          <Slider value={sizePos} min={0} max={1000} step={1} onValueChange={onSize} className="w-28" />
-          <span className="w-24 text-right text-[10px] tabular-nums text-muted-foreground">
-            {filters.size ? `${formatBytes(Math.round(filters.size[0]))}–${formatBytes(Math.round(filters.size[1]))}` : 'any'}
-          </span>
-        </div>
-        {filtersActive(filters) ? (
-          <button type="button"
-            onClick={() => setFilters(emptyFilters())}
-            className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-accent/40"
+        <RangePopover
+          latency={filters.latency}
+          size={filters.size}
+          latPos={latPos}
+          sizePos={sizePos}
+          onLatency={onLatency}
+          onSize={onSize}
+        />
+
+        {/* actions — pinned right */}
+        <div className="ml-auto flex items-center gap-1.5">
+          {filtersActive(filters) ? (
+            <button
+              type="button"
+              onClick={() => setFilters(emptyFilters())}
+              className={cn(CHIP_BTN, 'text-muted-foreground hover:bg-accent/40')}
+            >
+              <X className="h-3 w-3" />
+              Reset
+            </button>
+          ) : null}
+          <ExportMenu disabled={rows.length === 0} onExport={onExport} />
+          <button
+            type="button"
+            onClick={togglePause}
+            className={cn(
+              CHIP_BTN,
+              paused ? 'border-primary/50 bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent/40',
+            )}
           >
-            <X className="h-3 w-3" />
-            Reset
+            {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+            {paused ? 'Paused' : 'Pause'}
           </button>
-        ) : null}
-        <ExportMenu disabled={rows.length === 0} onExport={onExport} />
-        <button type="button"
-          onClick={togglePause}
-          className={cn(
-            'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors',
-            paused ? 'bg-amber-400/20 text-amber-300' : 'text-muted-foreground hover:bg-accent/40',
-          )}
-        >
-          {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
-          {paused ? 'Paused' : 'Pause'}
-        </button>
+        </div>
       </div>
 
       {rows.length === 0 ? (

@@ -1,6 +1,5 @@
 import * as React from 'react'
 import { BookOpen, ExternalLink, Github, Package, Sparkles } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 const RESOURCES = [
   {
@@ -31,19 +30,21 @@ const RESOURCES = [
 
 export function ResourcesPage(): React.JSX.Element {
   return (
-    <div className="grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2">
+    <div className="flex max-w-2xl flex-col divide-y rounded-md border">
       {RESOURCES.map((r) => (
-        <a key={r.title} href={r.href} target="_blank" rel="noreferrer" className="group block">
-          <Card className="h-full transition-colors hover:border-primary/60 hover:bg-accent/30">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <r.icon className="h-4 w-4 text-primary" />
-                {r.title}
-                <ExternalLink className="ml-auto h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-xs text-muted-foreground">{r.blurb}</CardContent>
-          </Card>
+        <a
+          key={r.title}
+          href={r.href}
+          target="_blank"
+          rel="noreferrer"
+          className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          <r.icon className="h-4 w-4 shrink-0 text-primary" />
+          <div className="min-w-0">
+            <div className="text-sm font-medium">{r.title}</div>
+            <div className="truncate text-xs text-muted-foreground">{r.blurb}</div>
+          </div>
+          <ExternalLink className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
         </a>
       ))}
     </div>

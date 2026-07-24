@@ -7,11 +7,11 @@ import { cn } from '@/lib/utils'
  * connected, the pulse breathes while connecting, and it flatlines when the wire is closed.
  * CSS-only (`cc-sweep`/`cc-breathe` in index.css); honors prefers-reduced-motion.
  */
-export function BrandMark({ status }: { status: InspectorStatus }): React.JSX.Element {
+export function BrandMark({ status, className }: { status: InspectorStatus; className?: string }): React.JSX.Element {
   return (
     <svg
       viewBox="0 0 44 24"
-      className="h-6 w-11 shrink-0"
+      className={cn('shrink-0', className ?? 'h-6 w-11')}
       role="img"
       aria-label={`super-line — inspector ${status}`}
     >

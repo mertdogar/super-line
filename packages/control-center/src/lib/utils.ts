@@ -8,11 +8,13 @@ export function cn(...inputs: ClassValue[]): string {
 
 /** Props that make a clickable non-button element (a table row) reachable and activatable by keyboard. */
 export function clickable(onActivate: () => void): {
+  role: 'button'
   tabIndex: number
   onClick: () => void
   onKeyDown: (e: React.KeyboardEvent) => void
 } {
   return {
+    role: 'button',
     tabIndex: 0,
     onClick: onActivate,
     onKeyDown: (e) => {

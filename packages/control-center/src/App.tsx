@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Blocks, Boxes, FileText, LibraryBig, Network, Radio, Settings, Table2 } from 'lucide-react'
+import { Blocks, Boxes, FileText, Keyboard, LibraryBig, Network, Radio, Settings, Table2, TriangleAlert, X } from 'lucide-react'
 import type {
   ConnDescriptor,
   InspectedContract,
@@ -23,6 +23,7 @@ import { ResourcesPage } from '@/components/resources-page'
 import { PluginsPage } from '@/components/plugins-page'
 import { StatusDot } from '@/components/status-dot'
 import { BrandMark } from '@/components/brand-mark'
+import { ConnectionState } from '@/components/connection-state'
 import { version } from '../package.json'
 import { roomsOf, type Highlight } from '@/lib/topology'
 import { connectedUsers } from '@/lib/identity'
@@ -91,7 +92,8 @@ function NavButton({
 export default function App(): React.JSX.Element {
   const [url, setUrl] = React.useState(seedUrl)
   const [view, setView] = React.useState<View>('topology')
-  const { client, status } = useInspector(url)
+  const [reconnect, setReconnect] = React.useState(0)
+  const { client, status } = useInspector(url, reconnect)
 
   const [topology, setTopology] = React.useState<NodeStat[]>([])
   const [connections, setConnections] = React.useState<ConnDescriptor[]>([])
@@ -101,6 +103,9 @@ export default function App(): React.JSX.Element {
   const [highlight, setHighlight] = React.useState<Highlight | null>(null)
   const [selectedConnId, setSelectedConnId] = React.useState<string | null>(null)
   const [selectedNodeId, setSelectedNodeId] = React.useState<string | null>(null)
+  const [loadError, setLoadError] = React.useState<string | null>(null)
+  const [ready, setReady] = React.useState(false)
+  const [showShortcuts, setShowShortcuts] = React.useState(false)
 
   const connect = React.useCallback((next: string) => {
     setUrl(next)
@@ -128,6 +133,11 @@ export default function App(): React.JSX.Element {
     }
   }, [])
 
+  // Not connected ⇒ we haven't loaded, so the empty state reads "connecting/closed" not "0 nodes".
+  React.useEffect(() => {
+    if (status !== 'open') setReady(false)
+  }, [status])
+
   React.useEffect(() => {
     if (!client || status !== 'open') return
     let live = true
@@ -144,8 +154,13 @@ export default function App(): React.JSX.Element {
           setConnections(conns)
           setContract(ct)
           setNodeView(nv)
+          setLoadError(null)
+          setReady(true)
         })
-        .catch(() => {})
+        // in a DEBUGGING tool, a silently-swallowed load error reads as "the cluster is empty" — surface it
+        .catch((e: unknown) => {
+          if (live) setLoadError(e instanceof Error ? e.message : String(e))
+        })
     }
     load()
     const off = client.onEvent((event) => {
@@ -158,6 +173,45 @@ export default function App(): React.JSX.Element {
       off()
     }
   }, [client, status])
+
+  // Keyboard: digits switch views, `/` focuses the filter, `?` toggles the shortcuts sheet, Esc closes it.
+  // Ignored while typing or inside a dialog (the detail panels own Esc / Tab there).
+  React.useEffect(() => {
+    const all = [...NAV, ...NAV_BOTTOM]
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        setShowShortcuts(false)
+        return
+      }
+      const t = e.target
+      if (t instanceof HTMLElement && t.closest('input,textarea,select,[contenteditable="true"],[role="dialog"]')) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === '?') {
+        e.preventDefault()
+        setShowShortcuts((v) => !v)
+        return
+      }
+      if (e.key === '/') {
+        const input = document.querySelector<HTMLInputElement>('main input:not([type="range"])')
+        if (input) {
+          e.preventDefault()
+          input.focus()
+        }
+        return
+      }
+      const n = Number(e.key)
+      if (n >= 1 && n <= all.length) setView(all[n - 1]!.id)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Re-render on a slow cadence so relative "· 3m ago" durations keep ticking on an idle feed.
+  const [, tickNow] = React.useState(0)
+  React.useEffect(() => {
+    const id = setInterval(() => tickNow((n) => n + 1), 15_000)
+    return () => clearInterval(id)
+  }, [])
 
   const directory = useDirectory(client, contract, connections)
   const users = React.useMemo(() => connectedUsers(connections, directory), [connections, directory])
@@ -174,6 +228,10 @@ export default function App(): React.JSX.Element {
       : view === 'feed'
         ? `${feed.length} events`
         : ''
+
+  // Settings/Resources need no connection; the data views show a diagnostic state until a node reports.
+  const isDataView = view !== 'settings' && view !== 'resources'
+  const showState = isDataView && (status !== 'open' || (ready && topology.length === 0))
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">
@@ -216,9 +274,33 @@ export default function App(): React.JSX.Element {
           </div>
         </header>
 
-        <main className="relative min-h-0 flex-1 overflow-hidden">
-          {view === 'topology' ? (
-            <div className="flex h-full">
+        <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          {loadError && isDataView && !showState ? (
+            <div className="flex items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs text-destructive">
+              <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">Inspector request failed — {loadError}</span>
+              <button
+                type="button"
+                onClick={() => setReconnect((n) => n + 1)}
+                className="shrink-0 rounded px-1.5 py-0.5 font-medium hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                onClick={() => setLoadError(null)}
+                aria-label="Dismiss error"
+                className="shrink-0 rounded p-0.5 hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : null}
+
+          {showState ? (
+            <ConnectionState status={status} url={url} onRetry={() => setReconnect((n) => n + 1)} />
+          ) : view === 'topology' ? (
+            <div className="flex min-h-0 flex-1">
               <div className="min-w-0 flex-1">
                 <TopologyGraph
                   topology={topology}
@@ -241,7 +323,7 @@ export default function App(): React.JSX.Element {
               />
             </div>
           ) : (
-            <div className="h-full overflow-auto p-4">
+            <div className="min-h-0 flex-1 overflow-auto p-4">
               {view === 'connections' && (
                 <ConnectionsTable
                   connections={connections}
@@ -263,7 +345,8 @@ export default function App(): React.JSX.Element {
               {view === 'resources' && <ResourcesPage />}
             </div>
           )}
-          {(view === 'connections' || view === 'topology') && (
+
+          {!showState && (view === 'connections' || view === 'topology') && (
             <ConnDetail
               client={client}
               connId={selectedConnId}
@@ -271,7 +354,7 @@ export default function App(): React.JSX.Element {
               onClose={() => setSelectedConnId(null)}
             />
           )}
-          {view === 'topology' && (
+          {!showState && view === 'topology' && (
             <NodeDetail
               nodeId={selectedNodeId}
               topology={topology}
@@ -286,6 +369,41 @@ export default function App(): React.JSX.Element {
             />
           )}
         </main>
+      </div>
+      {showShortcuts ? <ShortcutsSheet onClose={() => setShowShortcuts(false)} /> : null}
+    </div>
+  )
+}
+
+const SHORTCUTS: { keys: string; label: string }[] = [
+  { keys: '1–8', label: 'Switch view (Topology → Resources)' },
+  { keys: '/', label: 'Focus the filter' },
+  { keys: 'Esc', label: 'Close a panel or this sheet' },
+  { keys: '?', label: 'Toggle this sheet' },
+]
+
+function ShortcutsSheet({ onClose }: { onClose: () => void }): React.JSX.Element {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Keyboard shortcuts"
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm rounded-lg border bg-card p-4 shadow-lg"
+      >
+        <div className="mb-3 flex items-center gap-2">
+          <Keyboard className="h-4 w-4 text-primary" />
+          <h2 className="text-sm font-semibold">Keyboard shortcuts</h2>
+        </div>
+        <dl className="flex flex-col gap-1.5">
+          {SHORTCUTS.map((s) => (
+            <div key={s.keys} className="flex items-center justify-between gap-3 text-sm">
+              <dt className="text-muted-foreground">{s.label}</dt>
+              <dd className="shrink-0 rounded border bg-muted/60 px-1.5 py-0.5 font-mono text-[11px]">{s.keys}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
     </div>
   )

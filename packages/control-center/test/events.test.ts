@@ -16,6 +16,7 @@ import {
   flavorColor,
   formatBytes,
   formatDuration,
+  isErrorEvent,
   latencyColor,
   sizeColor,
   latencyMsToSlider,
@@ -213,12 +214,19 @@ describe('event helpers', () => {
     expect(eventCategory('msg.publish')).toBe('events')
   })
 
-  it('maps event types and flavors to colors', () => {
-    expect(eventColor('connect')).toBe('bg-primary')
-    expect(eventColor('disconnect')).toBe('bg-destructive')
-    expect(eventColor('room.add')).toContain('violet')
-    expect(eventColor('msg.request')).toContain('cyan')
-    expect(eventColor('msg.broadcast')).toContain('sky')
+  it('collapses event colors to the one-accent scale (cyan signal / red error / muted)', () => {
+    const ev = (type: InspectorEvent['type'], ok?: boolean): InspectorEvent => ({ type, ok }) as unknown as InspectorEvent
+    expect(eventColor(ev('connect'))).toBe('bg-primary')
+    expect(eventColor(ev('msg.request'))).toBe('bg-primary')
+    expect(eventColor(ev('msg.response', true))).toBe('bg-primary')
+    expect(eventColor(ev('msg.response', false))).toBe('bg-destructive')
+    expect(eventColor(ev('collection.write', false))).toBe('bg-destructive')
+    expect(eventColor(ev('msg.broadcast'))).toBe('bg-muted-foreground')
+    expect(eventColor(ev('room.add'))).toBe('bg-muted-foreground')
+    expect(eventColor(ev('disconnect'))).toBe('bg-muted-foreground')
+    expect(isErrorEvent(ev('msg.response', false))).toBe(true)
+    expect(isErrorEvent(ev('msg.response', true))).toBe(false)
+    expect(isErrorEvent(ev('connect'))).toBe(false)
     expect(flavorColor('topic')).toMatch(/^#/)
   })
 })
@@ -448,6 +456,7 @@ describe('export', () => {
       windowMs: null,
       latency: [1, 100],
       size: null,
+      errorsOnly: false,
     })
     expect(out.nodes).toEqual([{ nodeId: 'node1234', nodeName: 'node-1' }])
     expect(out.events).toHaveLength(1)

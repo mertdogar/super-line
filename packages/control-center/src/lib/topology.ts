@@ -1,13 +1,14 @@
 import type { ConnDescriptor, NodeStat, NodeView } from '@super-line/core'
 import { breakdownLabel } from './transport'
 
-// brand-adjacent palette; roles map to a stable color by hash
-const ROLE_COLORS = ['#22d3ee', '#a78bfa', '#f472b6', '#facc15', '#34d399', '#fb923c', '#60a5fa', '#f87171']
+// Roles are labeled, not hue-coded (the one-accent doctrine) — a single muted marker keeps the legend
+// calm and stops a hashed role from colliding with the cyan signal / wire hues.
+const ROLE_COLORS = ['#64748b']
 
 export function roleColor(role: string): string {
   let h = 0
   for (let i = 0; i < role.length; i++) h = (h * 31 + role.charCodeAt(i)) >>> 0
-  return ROLE_COLORS[h % ROLE_COLORS.length] ?? ROLE_COLORS[0]!
+  return ROLE_COLORS[h % ROLE_COLORS.length]!
 }
 
 /** A single active highlight in the topology lens — one dimension at a time. */

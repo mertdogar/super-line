@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { authClient } from '@super-line/plugin-auth/client'
 import { createSuperLineClient, type SuperLineClient } from '@super-line/client'
 import { Workspace } from '@/components/workspace'
 import { Button } from '@/components/ui/button'
@@ -8,69 +9,60 @@ import { transport } from '@/lib/transport'
 
 type Session =
   | { status: 'connecting' }
-  | { status: 'ready'; client: SuperLineClient<typeof chat, 'user'>; me: string; bearer: BearerInfo }
+  | { status: 'authed'; client: SuperLineClient<typeof chat, 'user'>; me: string; bearer: BearerInfo }
   | { status: 'rejected'; reason: string }
 
 /**
  * The second way into this app: a connection authenticated by a bearer assertion instead of the access
- * token `plugin-auth` persists. It deliberately sits BESIDE `useAuth()` rather than inside it —
- * `authClient` hardcodes its handshake params (`{}` as guest, `{ token }` as authed), and an assertion
- * is a different credential with a different lifecycle, not a variant of that one.
+ * token plugin-auth persists. It drives that connection through the SAME helper `useAuth()` uses —
+ * `authClient` with `resolveToken` (this tab's token) and `tokenParam: 'jwt'` — so the guest-first connect,
+ * the `whoami` confirm, and the `state.error` on rejection are the LIBRARY's, not hand-rolled here. A
+ * downstream sealed-only app wires `createAuth` exactly this way.
  *
- * Both kinds land here. The difference is what this component can find out on its own: a signed token
- * it decodes locally, a sealed one it cannot read at all — so everything it displays for a sealed
- * session had to be told to it by the server, over `env`.
+ * (A one-shot handoff like this could equally `createSuperLineClient(..., params:{ jwt })` directly — the
+ * helper's real value is the guest↔authed swap a full app needs. The only cost here is one near-instant
+ * guest socket before the swap; the win is deleting the bespoke confirm/reject handling this file used to do.)
+ *
+ * What stays bespoke is display-only: a signed token this tab can decode locally (`readClaims`); a sealed one
+ * it cannot, so a sealed summary comes from the public half the server vended over `env`.
  */
 export function JwtSession({ token, onExit }: { token: string; onExit: () => void }): React.JSX.Element {
   const [session, setSession] = useState<Session>({ status: 'connecting' })
 
   useEffect(() => {
-    const kind = assertionKind(token)
-    if (!kind) {
-      setSession({ status: 'rejected', reason: 'That does not look like a bearer assertion.' })
-      return
-    }
-    const claims = kind === 'signed' ? readClaims(token) : null
-    if (kind === 'signed' && !claims) {
-      setSession({ status: 'rejected', reason: 'That token is malformed.' })
-      return
-    }
-
-    // The transport is this tab's wire — an assertion is orthogonal to it, so the handoff link can land
-    // on any of the three. `params: { jwt }` is the whole of the client-side connect API, for both kinds.
-    const client = createSuperLineClient(chat, { transport, role: 'user', params: { jwt: token } })
+    const auth = authClient<typeof chat, 'user'>({
+      authedRole: 'user',
+      tokenParam: 'jwt', // → params:{ jwt } → authMethod 'jwt' / 'jwt-sealed'
+      resolveToken: async () => ({ token }),
+      connect: ({ role, params }) => createSuperLineClient(chat, { transport, role: role as 'user', params }),
+    })
     let cancelled = false
 
-    // A failed assertion does NOT fail the connect: `authenticate` resolves to `guest` and the server
-    // accepts the connection at that role, so a client built as `user` would silently NOT_FOUND on every
-    // call. `whoami` is on `shared`, so it answers on either role — null means we came in as a guest.
-    // This is the same confirm-then-trust step plugin-auth's own client does for a restored token.
-    void client
-      .whoami()
-      .then(async (who) => {
+    void auth.ready.then(async () => {
+      if (cancelled) return
+      if (auth.state.status !== 'authed') {
+        setSession({
+          status: 'rejected',
+          reason: auth.state.error?.reason ?? 'That token was rejected — it has expired, or it was not issued by this server.',
+        })
+        return
+      }
+      // Display only — the connection is already confirmed. A sealed token tells its holder nothing, so its
+      // summary is whatever the server chose to vend as `env`; a signed one we can read ourselves.
+      let bearer: BearerInfo
+      if (assertionKind(token) === 'sealed') {
+        await auth.client.env.ready
         if (cancelled) return
-        if (!who) {
-          client.close()
-          setSession({ status: 'rejected', reason: 'That token was rejected — it has expired, or it was not issued by this server.' })
-          return
-        }
-        // For a sealed token this is the ONLY way to learn what it carries: the server chose to vend
-        // the public half as env. The sealed half is never on the wire, so it can't be shown here.
-        if (kind === 'sealed') await client.env.ready
-        if (cancelled) return
-        const bearer: BearerInfo =
-          kind === 'signed' ? { kind: 'signed', claims: claims! } : { kind: 'sealed', env: client.env.current }
-        setSession({ status: 'ready', client, me: who.userId, bearer })
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        client.close()
-        setSession({ status: 'rejected', reason: err instanceof Error ? err.message : 'Could not connect.' })
-      })
+        bearer = { kind: 'sealed', env: auth.client.env.current }
+      } else {
+        bearer = { kind: 'signed', claims: readClaims(token)! }
+      }
+      setSession({ status: 'authed', client: auth.client, me: auth.state.userId!, bearer })
+    })
 
     return () => {
       cancelled = true
-      client.close()
+      auth.client.close()
     }
   }, [token])
 

@@ -26,6 +26,9 @@
     "build": "tsup",
     "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
+  "dependencies": {
+    "@logtape/logtape": "^2.2.4"
+  },
   "peerDependencies": {
     "@super-line/core": ">=0.14.0 <1.0.0"
   },

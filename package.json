@@ -36,6 +36,7 @@
     "docs:build": "pnpm docs:packages && pnpm --filter @super-line/docs build"
   },
   "devDependencies": {
+    "@logtape/testing": "^2.2.4",
     "@types/node": "^22.10.0",
     "git-cliff": "2.13.1",
     "oxlint": "^0.15.0",

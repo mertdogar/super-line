@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import { getLogger } from '@logtape/logtape'
 import { and, eq, isIn, or, SuperLineError, validateSync } from '@super-line/core'
+
+const logStream = getLogger(['super-line', 'plugin-chat', 'stream'])
 import type { Contract, Expr, OrderBy, Schema } from '@super-line/core'
 import type { PluginContext, ServerCrdtCollectionHandle, SuperLinePlugin } from '@super-line/server'
 import type { AuthContext } from '@super-line/plugin-auth'
@@ -1095,6 +1098,11 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     error?: string,
   ): Promise<ChatStreamedMessage> => {
     if (streams.get(s.messageId) !== s) throw new SuperLineError('CONFLICT', 'stream already settled')
+    logStream.debug('settle {messageId} status={status}', {
+      messageId: s.messageId,
+      status,
+      ...(error !== undefined ? { error } : {}),
+    })
     const now = Date.now()
     const current = (await col('messages').read(s.messageId)) as ChatMessage | undefined
     const parts: ChatMessagePart[] = []

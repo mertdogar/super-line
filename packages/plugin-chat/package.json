@@ -47,6 +47,7 @@
     "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "dependencies": {
+    "@logtape/logtape": "^2.2.4",
     "zod": "^3.24.1"
   },
   "peerDependencies": {

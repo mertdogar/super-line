@@ -48,8 +48,14 @@ import {
   type EnvOf,
   type AnyEnv,
 } from '@super-line/core'
+import { getLogger } from '@logtape/logtape'
 import { Conn, resolvePrincipal } from './conn.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
+
+const logConn = getLogger(['super-line', 'server', 'conn'])
+const logDispatch = getLogger(['super-line', 'server', 'dispatch'])
+const logSub = getLogger(['super-line', 'server', 'sub'])
+const logCluster = getLogger(['super-line', 'server', 'cluster'])
 import { createCluster } from './cluster.js'
 import { createCollectionRuntime, CDOC, COLL_CHANNEL } from './collections/index.js'
 import type {
@@ -1067,7 +1073,13 @@ export function createSuperLineServer<
     }
 
     conns.add(conn)
+    logConn.debug('connection accepted {connId} role={role} via {transport}', {
+      connId,
+      role,
+      transport: conn.transport,
+    })
     raw.onClose((code) => {
+      logConn.debug('connection closed {connId} ({code})', { connId, code })
       conns.delete(conn)
       for (const channel of conn.channels) leaveChannel(conn, channel)
       collections.detach(conn) // drop this conn's collection subscriptions from the routing registry
@@ -1184,9 +1196,16 @@ export function createSuperLineServer<
   async function handleReq(conn: Conn, frame: ReqFrame): Promise<void> {
     // resolving by role inherently enforces the boundary: a cross-role method is unknown here. The `def`
     // lookup gates the plugin-handler fallback too, so a plugin handler only fires for a method in this role.
+    logDispatch.trace('request {name} #{reqId} from {connId} role={role}', {
+      name: frame.m,
+      reqId: frame.i,
+      connId: conn.id,
+      role: conn.role,
+    })
     const def = c.roles[conn.role]?.clientToServer?.[frame.m] ?? c.shared?.clientToServer?.[frame.m]
     const handler = impl[conn.role]?.[frame.m] ?? impl.shared?.[frame.m] ?? pluginHandlers[frame.m]
     if (!def || !handler) {
+      logDispatch.debug('unknown request {name} from role={role}', { name: frame.m, role: conn.role })
       conn.send({ t: 'err', i: frame.i, code: 'NOT_FOUND', m: `Unknown message: ${frame.m}` })
       return
     }
@@ -1224,9 +1243,13 @@ export function createSuperLineServer<
     await dispatchOp(conn, frame.i, { kind: 'subscribe', name: frame.c, conn }, async () => {
       if (opts.authorizeSubscribe) {
         const ok = await opts.authorizeSubscribe(frame.c, conn.ctx as CtxUnion<A>, conn)
-        if (ok === false) throw new SuperLineError('FORBIDDEN', `Subscribe denied: ${frame.c}`)
+        if (ok === false) {
+          logSub.debug('subscribe denied {topic} for {connId}', { topic: frame.c, connId: conn.id })
+          throw new SuperLineError('FORBIDDEN', `Subscribe denied: ${frame.c}`)
+        }
       }
       await joinChannel(conn, TOPIC + ns + ':' + frame.c) // await adapter.subscribe so ready == active
+      logSub.debug('subscribed {topic} for {connId}', { topic: frame.c, connId: conn.id })
       conn.send({ t: 'res', i: frame.i, d: null })
     })
   }
@@ -1288,6 +1311,7 @@ export function createSuperLineServer<
 
   function publishTo(ns: string, name: string, data: unknown): void {
     const channel = TOPIC + ns + ':' + name
+    logCluster.trace('publish {topic} (ns={ns}) fanning out', { topic: name, ns })
     if (taps.length) emitTap({ type: 'msg.publish', topic: name, data })
     // local echo: fire same-node bus subscribers in-process (no adapter round-trip), trusted (not re-validated)
     const busSet = busListeners.get(channel)

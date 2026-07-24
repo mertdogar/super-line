@@ -1,5 +1,8 @@
 export { VERSION } from './version.js'
 
+export { enableSuperLineLogging, LOG_ROOT, SUPER_LINE_REDACT_FIELDS } from './log.js'
+export type { EnableLoggingOptions } from './log.js'
+
 export { SuperLineError } from './errors.js'
 export type { SuperLineErrorCode, ErrorCode } from './errors.js'
 

@@ -120,6 +120,7 @@ export default defineConfig({
             { text: 'Drive a channel from scripts', link: '/how-to/chat-headless' },
             { text: 'Hook the connection lifecycle', link: '/how-to/middleware-lifecycle' },
             { text: 'Handle errors', link: '/how-to/errors' },
+            { text: 'Debug with logs', link: '/how-to/debugging-with-logs' },
             { text: 'Query presence & topology', link: '/how-to/introspection-and-presence' },
             { text: 'Compose / embed a library', link: '/how-to/composition' },
             { text: 'Build a plugin', link: '/how-to/building-plugins' },

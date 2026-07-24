@@ -36,7 +36,13 @@ import {
   type DocOf,
   type EnvOf,
 } from '@super-line/core'
+import { getLogger } from '@logtape/logtape'
 import { backoffDelay } from './backoff.js'
+
+const logConn = getLogger(['super-line', 'client', 'conn'])
+const logReconnect = getLogger(['super-line', 'client', 'reconnect'])
+const logSub = getLogger(['super-line', 'client', 'sub'])
+const logEnv = getLogger(['super-line', 'client', 'env'])
 
 export { backoffDelay } from './backoff.js'
 export type { BackoffOptions } from './backoff.js'
@@ -493,17 +499,27 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
         op.sent = true
       }
     }
+    if (connectedOnce && (topicListeners.size || openDocs.size || collectionSubs.size))
+      logSub.debug('re-subscribing {topics} topics, {docs} docs, {collections} collection subs', {
+        topics: topicListeners.size,
+        docs: openDocs.size,
+        collections: collectionSubs.size,
+      })
     for (const topic of topicListeners.keys()) sendSub(topic)
     for (const entry of openDocs.values()) sendDocOpen(entry) // re-open CRDT docs → fresh full Yjs state (client re-merges)
     for (const sub of collectionSubs.values()) sendCollectionSub(sub) // re-snapshot collection subscriptions (client re-diffs)
-    if (connectedOnce) fireLifecycle([...reconnectHooks, ...reconnectListeners], 'reconnect', 0)
-    else {
+    if (connectedOnce) {
+      logConn.debug('reconnected as {role}', { role })
+      fireLifecycle([...reconnectHooks, ...reconnectListeners], 'reconnect', 0)
+    } else {
       connectedOnce = true
+      logConn.debug('connected as {role}', { role })
       fireLifecycle(connectHooks, 'connect', 0)
     }
   }
 
   function onClose(code = 1006): void {
+    logConn.debug('connection closed ({code})', { code })
     fireLifecycle(disconnectHooks, 'disconnect', code)
     for (const [id, op] of requests) {
       if (op.sent) {
@@ -522,7 +538,10 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       }
       return
     }
-    reconnectTimer = setTimeout(connect, backoffDelay(attempt++, backoff))
+    const delay = backoffDelay(attempt, backoff)
+    logReconnect.debug('reconnect scheduled in {ms}ms (attempt {attempt})', { ms: delay, attempt: attempt + 1 })
+    reconnectTimer = setTimeout(connect, delay)
+    attempt++
   }
 
   function onMessage(data: Uint8Array): void {
@@ -585,6 +604,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       const set = topicListeners.get(frame.c)
       if (set) for (const cb of set) cb(frame.d)
     } else if (frame.t === 'env') {
+      logEnv.trace('env frame received {keys}', { keys: frame.d && typeof frame.d === 'object' ? Object.keys(frame.d) : [] })
       envCurrent = frame.d
       envReady.resolve()
       for (const cb of envListeners) cb(frame.d)

@@ -1,3 +1,4 @@
+import { getLogger } from '@logtape/logtape'
 import { andFilters, eq, gt, not, SuperLineError } from '@super-line/core'
 import type { Contract, RoleOf, Handshake, CollectionStore, Expr, AnyEnv, EnvOf } from '@super-line/core'
 import type { PluginContext, SuperLinePlugin } from '@super-line/server'
@@ -218,6 +219,9 @@ export interface AuthServer<C extends Contract> {
   tokens: AuthTokensApi
 }
 
+const logAuthn = getLogger(['super-line', 'plugin-auth', 'authn'])
+const logSession = getLogger(['super-line', 'plugin-auth', 'session'])
+
 const DAY_MS = 86_400_000
 
 /** Soft-deleted? Absent/null `deletedAt` = active (legacy rows never carry the field). */
@@ -282,6 +286,11 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
       role: GUEST_ROLE,
       ctx: { userId: null, roles: [], sessionId: null, authMethod: null, authId: null },
     } as AuthResultOf<C>
+    // A resolution that falls back to guest — tagged with WHY, the top auth-debugging question.
+    const guestBecause = (reason: string): AuthResultOf<C> => {
+      logAuthn.debug('degraded to guest: {reason}', { reason, requestedRole })
+      return guest
+    }
     const requestedRole = handshake.query.role
     if (requestedRole === GUEST_ROLE) return guest
 
@@ -289,12 +298,13 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
     const apiKey = handshake.query.apiKey
     if (apiKey) {
       const key = await readApiKey(apiKey)
-      if (!key || (key.expiresAt !== null && key.expiresAt < Date.now())) return guest
+      if (!key || (key.expiresAt !== null && key.expiresAt < Date.now())) return guestBecause('api key invalid or expired')
       const owner = await readUser(key.userId)
-      if (!owner || isDeactivated(owner)) return guest
+      if (!owner || isDeactivated(owner)) return guestBecause('api key owner missing or deactivated')
       if (!contractRoles.has(key.role)) throw new SuperLineError('BAD_REQUEST', `api key role '${key.role}' is not a contract role`)
       if (requestedRole && requestedRole !== key.role)
         throw new SuperLineError('FORBIDDEN', `api key grants '${key.role}', not '${requestedRole}'`)
+      logAuthn.debug('resolved {userId} role={role} via api-key', { userId: key.userId, role: key.role })
       return {
         role: key.role,
         ctx: { userId: key.userId, roles: [key.role], sessionId: null, authMethod: 'api-key', authId: key.id },
@@ -308,13 +318,18 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
     const jwtParam = handshake.query.jwt
     if (assertions && jwtParam) {
       const verified = await assertions.verify(jwtParam)
-      if (!verified) return guest
+      if (!verified) return guestBecause('bearer assertion failed verification')
       const subject = await readUser(verified.userId)
-      if (!subject || isDeactivated(subject)) return guest
+      if (!subject || isDeactivated(subject)) return guestBecause('assertion subject missing or deactivated')
       const roles = verified.kind === 'sealed' ? subject.roles : verified.roles
       if (!requestedRole) throw new SuperLineError('BAD_REQUEST', 'a role is required to authenticate')
       if (!contractRoles.has(requestedRole)) throw new SuperLineError('BAD_REQUEST', `unknown role '${requestedRole}'`)
       if (!roles.includes(requestedRole)) throw new SuperLineError('FORBIDDEN', `role '${requestedRole}' not granted`)
+      logAuthn.debug('resolved {userId} role={role} via {authMethod}', {
+        userId: verified.userId,
+        role: requestedRole,
+        authMethod: verified.kind === 'sealed' ? 'jwt-sealed' : 'jwt',
+      })
       return {
         role: requestedRole,
         ctx: {
@@ -334,13 +349,14 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
     const token = handshake.query.token
     if (!token) return guest
     const accessToken = await readAccessToken(token)
-    if (!accessToken || accessToken.expiresAt < Date.now()) return guest
+    if (!accessToken || accessToken.expiresAt < Date.now()) return guestBecause('access token missing or expired')
     const user = await readUser(accessToken.userId)
-    if (!user || isDeactivated(user)) return guest
+    if (!user || isDeactivated(user)) return guestBecause('access token user missing or deactivated')
     // valid session: the requested role must be a real contract role AND granted to this user
     if (!requestedRole) throw new SuperLineError('BAD_REQUEST', 'a role is required to authenticate')
     if (!contractRoles.has(requestedRole)) throw new SuperLineError('BAD_REQUEST', `unknown role '${requestedRole}'`)
     if (!user.roles.includes(requestedRole)) throw new SuperLineError('FORBIDDEN', `role '${requestedRole}' not granted`)
+    logAuthn.debug('resolved {userId} role={role} via access-token', { userId: user.id, role: requestedRole })
     return {
       role: requestedRole,
       ctx: { userId: user.id, roles: user.roles, sessionId: null, authMethod: 'access-token', authId: accessToken.id },
@@ -400,6 +416,11 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
       lastSeenAt: now,
       endedAt: null,
     } satisfies AuthSession)
+    logSession.debug('session {sessionId} created for {userId} via {authMethod}', {
+      sessionId,
+      userId: authCtx.userId,
+      authMethod: authCtx.authMethod,
+    })
     await refreshPresence(authCtx.userId)
     const connectionCtx = { ...authCtx, sessionId }
     const env = opts.resolveEnv ? await opts.resolveEnv(connectionCtx) : undefined
@@ -682,6 +703,7 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
         lastSeenAt: lastPongAt === undefined ? row.lastSeenAt : Math.max(row.lastSeenAt, lastPongAt),
         endedAt: Date.now(),
       })
+      logSession.debug('session {sessionId} ended for {userId}', { sessionId: authCtx.sessionId, userId: authCtx.userId })
     })
     await refreshPresence(authCtx.userId)
   }

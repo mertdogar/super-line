@@ -9,6 +9,8 @@ and the plugin owns the rest.
 pnpm add @super-line/core @super-line/plugin-auth
 ```
 
+Not sure you need the plugin over a hand-rolled `authenticate`? See [Choose an auth strategy](/how-to/choose-an-auth-strategy). New to it? Walk the [Add auth to your app](/tutorials/add-auth-to-your-app) tutorial first.
+
 ## Wire it in
 
 ### 1 · Contract
@@ -53,6 +55,8 @@ createSuperLineServer(app, {
 })
 ```
 
+A stable `nodeKey` is required — the plugin keys per-node session reconciliation on it, and a changing value leaks prior-boot sessions.
+
 ### 3 · Client (React)
 
 `createAuth()` wraps the guest↔authed lifecycle behind an `<AuthProvider>` + a `useAuth()` hook.
@@ -86,20 +90,10 @@ super-line freezes a connection's role at connect, so there's no "log in and upg
 hides the dance: `signIn()` connects as `guest`, mints an access token, then transparently **reconnects** as your
 `authedRole` carrying the token — and persists it across reloads.
 
-## Roles are data
-
-A user's `roles[]` live on their row. The client declares which role it wants; `authenticate` validates it's granted
-(`guest` is the only hardcoded role). Grant a role by writing the user row:
-
-```ts
-await srv.collection('users').update({ ...user, roles: ['user', 'admin'] })
-```
-
 ## Row security
 
 The plugin ships policies for its own collections — `users` is a public directory (readable), while
-`credentials`/`accessTokens`/`sessions`/`apiKeys` are server-only (deny-all). `userPresence` follows the
-`usersReadable` policy. Your collections key their policies on the
+`credentials`/`accessTokens`/`sessions`/`apiKeys` are server-only (deny-all). Your collections key their policies on the
 `principal`, which is now the logged-in `userId`:
 
 ```ts
@@ -110,248 +104,21 @@ policies: {
 
 See [Policies](/collections/policies) for the full row-security model.
 
-## API keys
+## Go deeper
 
-Long-lived credentials with one fixed role, for services and CI:
+The plugin's full surface is split across focused guides:
 
-```ts
-const { key } = await client.createApiKey({ label: 'ci', role: 'user' }) // the raw key is returned ONCE
-// a service connects with it and receives a normal connection session:
-createSuperLineClient(app, { role: 'user', params: { apiKey: key } })
-```
+- [Sessions, roles & API keys](/how-to/auth-sessions-roles-keys) — durable sessions, roles-as-data, and `slp_` API keys.
+- [JWT & sealed tokens](/how-to/auth-jwt-sealed-tokens) — server-minted bearer assertions for stateless and cross-service connect, including the sealed-only client (`resolveToken`/`tokenParam`).
+- [Server-side hooks](/how-to/auth-hooks) — before/after connection admission, provisioning policy, and audit (ADR-0017).
+- [Provision an agent identity](/how-to/auth-agent-identity) — run an AI agent as an API-key user, plus the `authKit` management surface and revocation.
+- [Reset a password](/how-to/auth-password-reset) — the logged-out recovery flow via a host callback.
 
-`listApiKeys()` and `revokeApiKey({ id })` manage them.
-
-## Bearer assertions (JWT / JWE)
-
-An access token is a **lookup key** — whoever validates it needs your database. A bearer assertion carries its
-own proof, so verification is a key operation instead. Enable it with `jwt: { secret, ttlMs? }` on `auth(...)`
-(`ttlMs` defaults to 15 minutes).
-
-There are **two kinds**, and the difference is who can read the payload:
-
-|  | **signed** (JWS) | **sealed** (JWE) |
-|---|---|---|
-| payload | public — anyone holding the token can read it | opaque, even to its own holder |
-| minted by | the **server** (`authKit.tokens.mintSigned`) | the **server only** (`mintSealed`) |
-| verified by | anyone with the verification key | only a holder of the encryption key |
-| roles from | the token's own claims | the user row, at connect |
-| `authMethod` | `'jwt'` | `'jwt-sealed'` |
-
-Both are JWTs (RFC 7519 admits either serialization) and both connect through the same
-`params: { jwt }` — super-line tells them apart by shape.
-
-### Signed — mint server-side, verify anywhere, connect
-
-The server mints a signed assertion; there is no client-facing mint. Deliver it to a client out-of-band
-(e.g. an authenticated HTTP route that returns it):
-
-```ts
-const { token, expiresAt } = await authKit.tokens.mintSigned(userId, { claims: { workspace: 'acme' } })
-```
-
-The point of the format is a service with none of your infrastructure:
-
-```ts
-import { jwtVerify } from 'jose'
-const { payload } = await jwtVerify(bearer, new TextEncoder().encode(secret)) // no super-line, no DB
-```
-
-### Sealed — carry a secret *through* the client
-
-Only the server mints one, and only your deployment can read it:
-
-```ts
-const { token } = await authKit.tokens.mintSealed(userId, {
-  claims: { workspace: 'acme' },              // public half — safe to show the user
-  sealed: { upstreamKey: 'sk-live-…' },       // encrypted; the browser holding this cannot read it
-  expiresInMs: 5 * 60_000,
-})
-```
-
-Hand it to a browser, which connects with it exactly like a signed one:
-
-```ts
-createSuperLineClient(app, { role: 'user', params: { jwt: token } })
-```
-
-Server-side, both bags are on the connection context:
-
-```ts
-srv.implement({ user: { doWork: async (_i, ctx) => callUpstream(ctx.sealed.upstreamKey) } })
-```
-
-`authKit.tokens.verify(token)` checks either kind out-of-band and returns the payloads plus the subject's
-**current** roles, or `null` for anything that would not authenticate.
-
-### Showing the public half to the client
-
-Nothing is client-visible automatically. The public half reaches the browser through
-[`env`](/how-to/connection-env) — one line, and it's validated against the `env` schema you already declared:
-
-```ts
-auth({ contract: app, collections: backend, resolveEnv: (ctx) => ctx.claims })
-```
-
-### Client: a sealed-only app (`resolveToken`)
-
-A sealed consumer has no password and no guest UI — its token is minted out-of-band (the browser proves an
-upstream credential to a mint route; the server seals a reply). Point `createAuth` at that source with
-`resolveToken`, and route it under `{ jwt }` with `tokenParam`:
-
-```ts
-const { AuthProvider, useAuth } = createAuth<typeof app, 'user'>({
-  authedRole: 'user',
-  tokenParam: 'jwt',                                          // → params:{ jwt } → authMethod:'jwt-sealed'
-  resolveToken: async () => ({ token: await mintSealed() }), // your HTTP/tRPC mint route; return null to stay guest
-  connect: ({ role, params }) => createSuperLineClient(app, { transport, role, params }),
-})
-```
-
-`createAuth` boots as `guest`, `await`s the first `resolveToken()` before `ready` resolves, then swaps to
-`user` — so downstream code is just `await auth.ready; auth.client`, with no hand-rolled "client not ready yet"
-deferred. `resolveToken`'s token is never persisted (the source owns re-acquisition). A rejected token — or a
-`rejectUnauthenticated` refusal — drops back to guest and sets `state.error`:
-
-```tsx
-const { state } = useAuth()
-if (state.error) return <ReconnectBanner reason={state.error.reason} />
-```
-
-### Algorithms
-
-`jwt: { secret }` means HS256 signing plus an HKDF-derived `dir` + `A256GCM` encryption key. Override either
-side, with a raw secret or a JWK:
-
-```ts
-jwt: {
-  signed: { alg: 'EdDSA', key: signingJwk },        // third parties verify with the public half only
-  sealed: { alg: 'dir', enc: 'A256GCM', key: cek },
-  claims: z.object({ workspace: z.string() }),      // any Standard Schema — validated at mint and verify
-  sealedClaims: z.object({ upstreamKey: z.string() }),
-}
-```
-
-Verification always uses the algorithms **you configured**; the token's own header never selects a key, which
-is what closes the alg-confusion attack.
-
-### Behaviours to design around
-
-- **`ctx.claims` is server-authored.** With no client-facing mint, both `claims` (signed) and `sealed`
-  (sealed) are written by the server at mint. The difference is reach, not trust: a signed assertion's
-  `claims` are *readable* by its holder (a JWS hides nothing), a sealed one's payload is not.
-- **A role is required.** Connecting without one is a `BAD_REQUEST`; asking for a role the assertion doesn't
-  grant is `FORBIDDEN`.
-- **A bad token degrades to `guest` by default — or set `rejectUnauthenticated`.** An expired, forged, or
-  schema-drifted assertion resolves to the guest role and the connection is *accepted* there, so a client built
-  for `user` would `NOT_FOUND` on every call. Either confirm with `whoami()` (on `shared`, returns `null` for a
-  guest) before trusting the connection — as `authClient` does — or set `rejectUnauthenticated: true` on
-  `auth(...)` so a *presented*-but-invalid credential throws `UNAUTHORIZED` at connect instead (a
-  credential-less connect, and an explicit `role: 'guest'`, still resolve guest).
-- **You cannot revoke one.** `revoke(userId)` flushes access tokens, ends sessions and disconnects live
-  connections — but an outstanding assertion is in no table, so it keeps working until `exp`. Keep `ttlMs` short.
-  The escape hatch is `users.deactivate(id)`: connect performs one user read (the deliberate dent in
-  statelessness), so deactivation closes even a validly-signed door.
-- **Assertions ride in the URL query string.** A large `sealed` payload can approach browser URL limits (~2k).
-
-Both kinds are demonstrated end to end — the CLI narrative in [`examples/auth`](https://github.com/mertdogar/super-line/tree/main/examples/auth),
-and a browser panel with a separate verifier service in
-[`examples/react-chat-transports`](https://github.com/mertdogar/super-line/tree/main/examples/react-chat-transports).
-The design is recorded in [ADR-0015](https://github.com/mertdogar/super-line/blob/main/docs/adr/0015-bearer-assertions-are-signed-or-sealed.md).
-
-## Revocation
-
-`authKit.revoke(userId)` revokes a user's access tokens, ends their active sessions, and disconnects their live
-connections cluster-wide. This supports an admin ban or "sign out of all devices."
-
-## Password reset
-
-Provide a `sendPasswordReset({ user, token })` callback (email/SMS is yours to deliver). `requestPasswordReset` returns
-a constant response — it never reveals whether an email exists — and `confirmPasswordReset` resets the password and
-revokes existing access tokens and ends their active sessions.
-
-## Server-side management (`authKit`)
-
-Beyond the three wiring members (`authenticate` / `identify` / `plugin`) and `revoke(userId)`, the kit
-exposes imperative surfaces for back-office code and provisioning — including AI-agent users. They need the
-running server (the co-writer binds at plugin setup):
-
-```ts
-// authKit.users — the directory, back-office edits, and provisioning
-authKit.users.get(id)                                         // → AuthUser | undefined
-authKit.users.find({ filter?, limit?, offset?, includeDeactivated? }) // → AuthUser[] (active-only by default)
-authKit.users.create({ displayName, roles?, metadata? })
-authKit.users.update(id, { displayName?, metadata? })
-authKit.users.setRoles(id, roles)                             // validated against contract roles (connect-time)
-authKit.users.deactivate(id)   // soft-delete: stamp deletedAt, flush sessions/keys/resets, kick connections
-authKit.users.reactivate(id)   // lift the deactivation
-// authKit.credentials — attach email/password authentication only when needed
-authKit.credentials.create(userId, { email, password? })     // omit password → invite flow
-authKit.credentials.setPassword(userId, newPassword)         // rotation; revokes access + reset tokens
-
-// authKit.apiKeys — provision agents & services
-authKit.apiKeys.create(userId, { role, label, expiresInMs? }) // → { …info, key } — raw slp_… returned ONCE
-authKit.apiKeys.listFor(userId)                              // → ApiKeyInfo[]
-authKit.apiKeys.revoke(id)
-```
-
-Users **soft-delete** rather than vanish (`deactivate` / `reactivate`), so old rows keep rendering author
-names; the `credentials` row stays (the email is reserved) and all three auth paths degrade to guest.
-
-## Extending auth with hooks
-
-Every **server-invoked** auth operation takes a before/after hook (ADR-0017): `authenticate` and the
-imperative kit. They are the seam for connection admission, agent-provisioning policy, and audit — an
-extension a host can't bypass because it wraps the operation itself:
-
-```ts
-const authKit = auth({
-  contract: app,
-  collections: backend,
-  hooks: {
-    // authenticate — before/after the connection identity resolves
-    authenticate: {
-      before: (handshake) => { if (blocked(handshake.headers['x-forwarded-for'])) throw new SuperLineError('FORBIDDEN', 'blocked') },
-      after: (result) => ({ ...result, ctx: { ...result.ctx, tenant: tenantOf(result.ctx.userId) } }), // enrich / override / reject
-    },
-    // the imperative kit — nested to mirror authKit.<surface>.<method>
-    users: {
-      create: { before: (i) => ({ ...i, displayName: i.displayName.trim() }), after: (u) => audit('user.create', u.id) },
-      deactivate: { after: () => notifySecurity() },
-    },
-    credentials: { setPassword: { before: (i) => assertStrong(i.newPassword) } }, // policy on the provisioning path
-    apiKeys: { create: { after: (r) => vault.store(r.key) } },
-  },
-})
-```
-
-Semantics:
-
-- **`before` transforms or vetoes.** Return a new input to transform; throw to veto (nothing is written).
-  `authenticate.before` rewrites the `Handshake`; a throw rejects the connection.
-- **`after` observes.** A throw propagates to the caller, but the write already committed and **stays**.
-  `authenticate.after` is the exception — it may *transform* the resolved result (enrich `ctx`, override
-  `env`, change `role`) or reject, because `authenticate` commits nothing.
-- **`users.deactivate.before` cannot veto.** It's the emergency stop for a compromised account — a throw is
-  routed to `onHookError` (default `console.error`) and the deactivation proceeds. Host code must never be
-  able to block incident response.
-- **Cascades are silent.** `users.deactivate` and `credentials.setPassword` internally revoke keys/tokens/
-  sessions; those internal writes fire **no** `apiKeys.revoke`/`tokens.*` hooks. Audit the composite, not the
-  leaves.
-
-::: warning Hook payloads carry raw secrets
-`authenticate.before` sees the handshake's bearer tokens (`query.jwt` / `query.apiKey`); `credentials.*.before`
-sees the plaintext password; `apiKeys.create.after` sees the raw `slp_…` key; `tokens.*.after` sees the minted
-token. **Never log a payload wholesale** (`after: (r) => log(r)` writes a live credential to disk).
-:::
-
-**Client requests are not hooked.** `signIn`/`signUp`/… run over the wire and already have a veto seam — the
-server's `use:` middleware chain sees each by name (`info.name`) and rejects by throwing (it cannot read the
-request body, so a password-policy check belongs on the hooked `authKit.credentials.create` path). Disconnect
-logic is `createSuperLineServer({ onDisconnect: (conn, ctx, code) => … })`, with `ctx` typed as the resolved
-`AuthContext`.
+For the model — the connection lifecycle and why sealed tokens are server-minted — see [the auth lifecycle](/concepts/auth-lifecycle-sealed-tokens).
 
 ## Examples
 
 - **`examples/auth`** — a runnable CLI walkthrough of the whole flow.
 - **`examples/collections-chat`** — a Slack-like app with real login, on top of collections.
+
+Next: [Sessions, roles & API keys](/how-to/auth-sessions-roles-keys) · back to [Choose an auth strategy](/how-to/choose-an-auth-strategy).

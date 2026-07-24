@@ -206,11 +206,11 @@ And the guard is **deny-by-default** — this demo opened `read`/`write` to ever
 ## Next
 
 <div class="sl-result">
-  <p class="sl-result__h">One lesson left</p>
-  <p>A typed round-trip, a live row collection, and a merging document — the three shapes of state super-line moves. Now assemble them into a real feature with a reusable plugin.</p>
+  <p class="sl-result__h">Give it a real identity</p>
+  <p>A typed round-trip, a live row collection, and a merging document — the three shapes of state super-line moves. Next, put a real logged-in user behind the policies that guard them.</p>
 </div>
 
-- **[Tutorial 4 · Assemble a chat backbone →](/tutorials/chat-backbone)** — merge the auth and chat plugins into one contract and watch two users talk over a model you never wrote a policy or handler for.
+- **[Tutorial 4 · Add auth to your app →](/tutorials/add-auth-to-your-app)** — merge `@super-line/plugin-auth` into the same contract for sign-up, sessions, and roles, and make `principal` a real user.
 - [Collections overview](/collections/) — rows and documents side by side, and when to reach for each.
 - [CRDT document collections](/collections/crdt-documents) — validate-before-commit, schema tolerance, and the server co-writer in depth.
 - [`examples/ai-canvas`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas) — this tutorial's ideas as a real browser app: a collaborative canvas with a **server-side AI agent** as a co-writer (`srv.collection('scene').open(id)`) — open two tabs, keep editing while the agent drives, and the edits merge.

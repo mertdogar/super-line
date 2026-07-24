@@ -21,13 +21,24 @@ The pluggable client↔server wire. Pick one, then wire it on both ends.
 - [libp2p transport](/how-to/transport-libp2p) — bring your own libp2p node for peer-to-peer reach.
 - [Loopback transport](/how-to/transport-loopback) — in-memory client↔server for fast tests.
 
+## Authentication
+
+Prove who's on a connection — the connect-time primitive, or the batteries-included plugin.
+
+- [Choose an auth strategy](/how-to/choose-an-auth-strategy) — hand-rolled `authenticate` vs. `@super-line/plugin-auth`.
+- [Authenticate & assign roles](/how-to/roles-auth) — freeze a role at connect with `authenticate(handshake)`.
+- [Add authentication (plugin)](/how-to/plugin-auth) — first-party identity, sessions, roles, keys, and JWT in three touch-points.
+- [Sessions, roles & API keys](/how-to/auth-sessions-roles-keys) — durable sessions, roles-as-data, and `slp_` service keys.
+- [JWT & sealed tokens](/how-to/auth-jwt-sealed-tokens) — server-minted bearer assertions for stateless and cross-service connect.
+- [Server-side hooks](/how-to/auth-hooks) — before/after connection admission, provisioning policy, and audit.
+- [Provision an agent identity](/how-to/auth-agent-identity) — run an AI agent as an ordinary API-key user.
+- [Reset a password](/how-to/auth-password-reset) — logged-out recovery through a host callback.
+
 ## Server
 
 Authorize, extend, and observe the server-authoritative core.
 
-- [Roles & auth](/how-to/roles-auth) — freeze a role at connect with `authenticate(handshake)`.
 - [Connection env](/how-to/connection-env) — vend typed, server-owned per-connection state the client reads live.
-- [Plugin auth](/how-to/plugin-auth) — drop in first-party sessions, API keys, and JWT via `@super-line/plugin-auth`.
 - [Chat backbone](/how-to/plugin-chat) — add channels, membership control, and messages via `@super-line/plugin-chat`.
 - [Plugin-chat 0.5 migration](/how-to/plugin-chat-0-5-migration) — move from assembled feeds and bot helpers to durable per-message parts and host-owned automation policy.
 - [Chat streaming](/how-to/chat-streaming) — store an agent's whole turn as typed parts that stream live and survive reloads.

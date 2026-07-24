@@ -2,6 +2,10 @@
 
 A connection's **role** is resolved once, when the connection is established, and fixed for its lifetime. It decides which surface and which `ctx` the connection gets. This page is the recipe — resolve a role in `authenticate`, give each role its own `ctx`, verify the client's claim, and lean on `NOT_FOUND` to enforce the boundary. For *why* the role is the security boundary and how server-authority makes it un-bypassable, see [Server-authoritative](/concepts/server-authoritative).
 
+::: tip This is the hand-rolled primitive
+Most apps want [`@super-line/plugin-auth`](/how-to/plugin-auth) — email/password, sessions, roles-as-data, API keys, and JWT out of the box — which is built on this same `authenticate` seam. Reach for the hand-rolled recipe below when you're bringing your own identity store. See [Choose an auth strategy](/how-to/choose-an-auth-strategy).
+:::
+
 ## Return `{ role, ctx }` from `authenticate`
 
 `authenticate` runs as the connection opens. It receives the **handshake** (`{ transport, headers, query, peer?, raw }`) — read query params via `h.query.X` and headers via `h.headers`, regardless of which transport carried the connection. Return `{ role, ctx }`, or `throw` to reject (no connection is opened):
@@ -84,4 +88,4 @@ The [chat example](https://github.com/mertdogar/super-line/tree/main/examples/ch
 
 This page is the primitive. For a batteries-included identity system — email/password sign-up, server-issued sessions, data-driven roles, API keys, and JWT — reach for [`@super-line/plugin-auth`](/how-to/plugin-auth), which builds on this same connect-time `authenticate` model.
 
-Next: [Middleware & lifecycle](/how-to/middleware-lifecycle).
+Next: [Add authentication (plugin)](/how-to/plugin-auth) · back to [Choose an auth strategy](/how-to/choose-an-auth-strategy).

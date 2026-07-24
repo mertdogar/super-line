@@ -1,16 +1,16 @@
-# Tutorial 4 · Assemble a chat backbone (a plugin)
+# Tutorial 5 · Assemble a chat backbone (a plugin)
 
-<p class="sl-qs-crumb"><a href="/tutorials/">Tutorials</a> → <a href="/tutorials/first-collection">2 · Your first collection</a> → <a href="/tutorials/go-collaborative">3 · Go collaborative</a> → <strong>4 · Assemble a chat backbone</strong></p>
+<p class="sl-qs-crumb"><a href="/tutorials/">Tutorials</a> → <a href="/tutorials/go-collaborative">3 · Go collaborative</a> → <a href="/tutorials/add-auth-to-your-app">4 · Add auth to your app</a> → <strong>5 · Assemble a chat backbone</strong></p>
 
 <div class="sl-qs-hero">
 
 <p class="sl-qs-hero__lede">
-In <a href="/tutorials/first-collection">Tutorial 2</a> you hand-wrote a collection, an <code>identify</code>, and a row policy for a single <code>messages</code> table. A real chat app is a <em>lot</em> of that — channels, membership, owner/member roles, per-channel message security. <strong><code>@super-line/plugin-chat</code></strong> ships that whole model as one plugin you merge into your contract; <strong><code>@super-line/plugin-auth</code></strong> gives it identity. By the end, two users will talk over a channel you never wrote a single policy or handler for.
+In <a href="/tutorials/add-auth-to-your-app">Tutorial 4</a> you gave your app real identity with <strong><code>@super-line/plugin-auth</code></strong>. A real chat app is a <em>lot</em> more model on top of that — channels, membership, owner/member roles, per-channel message security. <strong><code>@super-line/plugin-chat</code></strong> ships that whole model as one plugin you merge onto the same contract, right beside the auth plugin you already know. By the end, two users will talk over a channel you never wrote a single policy or handler for.
 </p>
 
 <p class="sl-qs-meta">
   <span>~10 minutes</span>
-  <span>Builds on Tutorials 1–2</span>
+  <span>Builds on Tutorial 4</span>
   <span>TypeScript · zero codegen</span>
 </p>
 
@@ -204,7 +204,7 @@ The membership model is the part worth internalising: a **private** channel is i
 
 You drove the plugin headlessly. The obvious next step: because an agent is just a provisioned user with an API key, that same `chatClient` becomes a live LLM participant.
 
-- **[Tutorial 5 · Put a live AI agent in the chat](/tutorials/ai-agent-chat)** — provision a bot, run its message loop, and stream its answer into the channel. The natural sequel to this lesson.
+- **[Tutorial 6 · Put a live AI agent in the chat](/tutorials/ai-agent-chat)** — provision a bot, run its message loop, and stream its answer into the channel. The natural sequel to this lesson.
 - [Add a chat backbone (how-to)](/how-to/plugin-chat) — the full surface: structured message bodies, the imperative `chatKit` (`channels` / `members` / `messages`), the hooks, and the React bindings (`useChannels` / `useMembers` / `useMessages`).
 - [Stream an agent's turn (how-to)](/how-to/chat-streaming) — the streamed-message model: one message that accumulates typed parts (text · tool calls · subagent trees) live and survives reloads.
 - [Run an automated chat client](/how-to/chat-bots) — standard-user provisioning, host-owned triggers and memory, AI SDK tools, and the Mastra runner.

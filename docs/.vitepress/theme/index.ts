@@ -31,6 +31,9 @@ function redirectAliases() {
   if (path === '/guide/getting-started') return location.replace('/tutorials/first-round-trip')
   if (path === '/guide/the-contract') return location.replace('/concepts/the-contract')
   if (path === '/guide/why') return location.replace('/concepts/why-super-line')
+  // Auth docs relocated into the first-class Authentication section (2026-07-24).
+  if (path === '/tutorial-minting-sealed-tokens') return location.replace('/how-to/auth-jwt-sealed-tokens')
+  if (path === '/explanation-auth-lifecycle-sealed-tokens') return location.replace('/concepts/auth-lifecycle-sealed-tokens')
   const m = path.match(/^\/reference\/([\w-]+)$/)
   if (!m) return
   if (EXTRACTED.has(m[1])) location.replace(`/reference/@super-line/${m[1]}/`)

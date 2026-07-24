@@ -129,10 +129,16 @@ the first (single global registry), and fight a host app that configures LogTape
   app-side `unhandledRejection` backstop recipe (a library must not own process-global handlers). Deps:
   `transport-websocket` += `@logtape/logtape`.
 
+- **`adapter-libp2p`** instrumented (the decentralized mesh is the hardest thing to debug): node ready/close
+  (`node`, info/debug), peer connect/disconnect (`peer`, debug), peer discovery + dial result and relay-dial
+  retries (`discovery`, debug), subscribe/unsubscribe + per-message + dropped-publish (`gossip`, debug/trace).
+  Deps: `adapter-libp2p` += `@logtape/logtape`. The ephemeral-identity `console.warn` stays (loud-by-default
+  safety net).
+
 ## Explicitly out of scope
 
 - `logLevel` on the constructors (impossible under LogTape's global model — ADR-0018).
-- the rest of transports, adapters, collection backends, react (follow later, same pattern).
+- the rest of the transports, adapters, collection backends, react (follow later, same pattern).
 - Bridging LogTape ↔ the inspector/Tap system — they stay complementary (internal diagnostics vs
   wire-traffic observability). No adapter between them.
 - `withContext`/`AsyncLocalStorage` implicit request tracing (not available in browsers; revisit if needed

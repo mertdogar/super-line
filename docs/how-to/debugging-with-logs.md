@@ -60,6 +60,8 @@ The subsystems:
 | `client` | `conn` · `reconnect` · `sub` · `env` |
 | `plugin-auth` | `authn` · `session` |
 | `plugin-chat` | `stream` |
+| `transport-websocket` | `auth` |
+| `adapter-libp2p` | `node` · `peer` · `discovery` · `gossip` |
 
 ## If your app already uses LogTape
 

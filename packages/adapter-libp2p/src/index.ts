@@ -1,3 +1,4 @@
+import { getLogger } from '@logtape/logtape'
 import { createLibp2p, type Libp2pOptions } from 'libp2p'
 import { tcp } from '@libp2p/tcp'
 import { noise } from '@chainsafe/libp2p-noise'
@@ -91,6 +92,11 @@ export interface Libp2pAdapterOptions {
 }
 
 const DEFAULT_TOPIC = 'super-line/v1'
+const logNode = getLogger(['super-line', 'adapter-libp2p', 'node'])
+const logPeer = getLogger(['super-line', 'adapter-libp2p', 'peer'])
+const logGossip = getLogger(['super-line', 'adapter-libp2p', 'gossip'])
+const logDiscovery = getLogger(['super-line', 'adapter-libp2p', 'discovery'])
+
 // reserved internal channel for presence gossip; can't collide with r:/t:/c:/u:/reply:/s2s
 const PRESENCE_CHANNEL = '\x00sl:presence'
 const enc = new TextEncoder()
@@ -182,7 +188,12 @@ async function buildNode(opts: Libp2pAdapterOptions, strategies: Discovery[], to
   // uses the peer store + transport fallbacks, which the bare direct addrs a relay advertises
   // (no /p2p/ suffix) don't survive as a raw array-dial. Re-dials to a live peer are no-ops.
   node.addEventListener('peer:discovery', (e) => {
-    void node.dial(e.detail.id).catch(() => {})
+    const peer = e.detail.id.toString()
+    logDiscovery.debug('discovered {peer} — dialing to form the mesh', { peer })
+    void node.dial(e.detail.id).then(
+      () => logDiscovery.debug('dialed {peer}', { peer }),
+      (err) => logDiscovery.debug('dial to {peer} failed {error}', { peer, error: err }),
+    )
   })
   // gossipsub implements PubSub; libp2p's service generics are invariant, so widen explicitly.
   return node as unknown as PubSubLibp2p
@@ -197,9 +208,11 @@ async function dialRelays(node: PubSubLibp2p, relays: string[]): Promise<void> {
     for (let i = 1; ; i++) {
       try {
         await node.dial(ma, { signal: AbortSignal.timeout(5_000) })
+        logDiscovery.debug('reached relay {addr} (attempt {attempt})', { addr, attempt: i })
         return
       } catch (err) {
         if (i >= 15) throw err
+        logDiscovery.debug('relay {addr} unreachable, retrying (attempt {attempt})', { addr, attempt: i })
         await new Promise((r) => setTimeout(r, 1_000))
       }
     }
@@ -258,6 +271,17 @@ export async function createLibp2pAdapter(
     if (relays.length > 0) await dialRelays(node, relays)
   }
   const selfPeer = node.peerId.toString()
+  logNode.info('adapter node ready {peer} on {addrs}', {
+    peer: selfPeer,
+    addrs: node.getMultiaddrs().map(String),
+    topic,
+  })
+  const onPeerConnect = (e: CustomEvent<{ toString(): string }>) =>
+    logPeer.debug('peer connected {peer}', { peer: e.detail.toString() })
+  const onPeerDisconnect = (e: CustomEvent<{ toString(): string }>) =>
+    logPeer.debug('peer disconnected {peer}', { peer: e.detail.toString() })
+  node.addEventListener('peer:connect', onPeerConnect as EventListener)
+  node.addEventListener('peer:disconnect', onPeerDisconnect as EventListener)
   const subscribed = new Set<string>()
   let handler: ((channel: string, payload: string | Uint8Array) => void) | undefined
   let closed = false
@@ -268,8 +292,9 @@ export async function createLibp2pAdapter(
     if (channel !== PRESENCE_CHANNEL && subscribed.has(channel)) handler?.(channel, payload)
     try {
       await pubsub.publish(topic, frame(channel, payload))
-    } catch {
+    } catch (err) {
       // at-most-once: a publish lost (e.g. before the mesh forms) is acceptable
+      logGossip.trace('publish dropped on {channel} (mesh not ready?) {error}', { channel, error: err })
     }
   }
 
@@ -290,7 +315,13 @@ export async function createLibp2pAdapter(
       presence?.receive(JSON.parse(payload as string) as PresenceMsg)
       return
     }
-    if (subscribed.has(channel)) handler?.(channel, payload)
+    if (subscribed.has(channel)) {
+      logGossip.trace('message on {channel} from {from}', {
+        channel,
+        from: m.type === 'signed' ? m.from.toString() : 'unsigned',
+      })
+      handler?.(channel, payload)
+    }
   }
   pubsub.addEventListener('message', onMessage)
   pubsub.subscribe(topic)
@@ -303,9 +334,11 @@ export async function createLibp2pAdapter(
   return {
     node, // exposed so callers can read peerId / multiaddrs (e.g. to build bootstrap lists)
     subscribe(channel) {
+      logGossip.debug('subscribe {channel}', { channel })
       subscribed.add(channel)
     },
     unsubscribe(channel) {
+      logGossip.debug('unsubscribe {channel}', { channel })
       subscribed.delete(channel)
     },
     publish: publishFramed,
@@ -316,9 +349,12 @@ export async function createLibp2pAdapter(
     async close() {
       if (closed) return
       closed = true
+      logNode.debug('adapter node closing {peer}', { peer: selfPeer })
       presence?.stop()
       for (const stop of stopDnsDiscovery) stop()
       pubsub.removeEventListener('message', onMessage)
+      node.removeEventListener('peer:connect', onPeerConnect as EventListener)
+      node.removeEventListener('peer:disconnect', onPeerDisconnect as EventListener)
       if (ownsNode) await node.stop()
     },
   }

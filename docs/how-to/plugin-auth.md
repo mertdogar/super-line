@@ -193,6 +193,31 @@ Nothing is client-visible automatically. The public half reaches the browser thr
 auth({ contract: app, collections: backend, resolveEnv: (ctx) => ctx.claims })
 ```
 
+### Client: a sealed-only app (`resolveToken`)
+
+A sealed consumer has no password and no guest UI — its token is minted out-of-band (the browser proves an
+upstream credential to a mint route; the server seals a reply). Point `createAuth` at that source with
+`resolveToken`, and route it under `{ jwt }` with `tokenParam`:
+
+```ts
+const { AuthProvider, useAuth } = createAuth<typeof app, 'user'>({
+  authedRole: 'user',
+  tokenParam: 'jwt',                                          // → params:{ jwt } → authMethod:'jwt-sealed'
+  resolveToken: async () => ({ token: await mintSealed() }), // your HTTP/tRPC mint route; return null to stay guest
+  connect: ({ role, params }) => createSuperLineClient(app, { transport, role, params }),
+})
+```
+
+`createAuth` boots as `guest`, `await`s the first `resolveToken()` before `ready` resolves, then swaps to
+`user` — so downstream code is just `await auth.ready; auth.client`, with no hand-rolled "client not ready yet"
+deferred. `resolveToken`'s token is never persisted (the source owns re-acquisition). A rejected token — or a
+`rejectUnauthenticated` refusal — drops back to guest and sets `state.error`:
+
+```tsx
+const { state } = useAuth()
+if (state.error) return <ReconnectBanner reason={state.error.reason} />
+```
+
 ### Algorithms
 
 `jwt: { secret }` means HS256 signing plus an HKDF-derived `dir` + `A256GCM` encryption key. Override either
@@ -217,11 +242,12 @@ is what closes the alg-confusion attack.
   `claims` are *readable* by its holder (a JWS hides nothing), a sealed one's payload is not.
 - **A role is required.** Connecting without one is a `BAD_REQUEST`; asking for a role the assertion doesn't
   grant is `FORBIDDEN`.
-- **A bad token degrades to `guest`, it does not throw.** An expired, forged, or schema-drifted assertion
-  resolves to the guest role and the connection is *accepted* there — so a client built for `user` will get
-  `NOT_FOUND` on every call rather than a connect error. Confirm with `whoami()` (it's on `shared`, and returns
-  `null` for a guest) before trusting the connection, exactly as `authClient` does when it restores a stored
-  access token.
+- **A bad token degrades to `guest` by default — or set `rejectUnauthenticated`.** An expired, forged, or
+  schema-drifted assertion resolves to the guest role and the connection is *accepted* there, so a client built
+  for `user` would `NOT_FOUND` on every call. Either confirm with `whoami()` (on `shared`, returns `null` for a
+  guest) before trusting the connection — as `authClient` does — or set `rejectUnauthenticated: true` on
+  `auth(...)` so a *presented*-but-invalid credential throws `UNAUTHORIZED` at connect instead (a
+  credential-less connect, and an explicit `role: 'guest'`, still resolve guest).
 - **You cannot revoke one.** `revoke(userId)` flushes access tokens, ends sessions and disconnects live
   connections — but an outstanding assertion is in no table, so it keeps working until `exp`. Keep `ttlMs` short.
   The escape hatch is `users.deactivate(id)`: connect performs one user read (the deliberate dent in

@@ -5,6 +5,12 @@ import type { SuperLineClient } from '@super-line/client'
 /** The auth lifecycle state the helper exposes. */
 export interface AuthState {
   status: 'guest' | 'authed'
+  /**
+   * Set when a PRESENTED token was rejected — a bad `resolveToken` result, or a refused connect under the
+   * server's `rejectUnauthenticated`. `null`/absent otherwise. Lets the UI render a reconnect banner instead of
+   * silently `NOT_FOUND`ing every call. (A `resolveToken` that returns `null` stays guest with no error.)
+   */
+  error?: { reason: string } | null
   userId: string | null
   displayName: string | null
   roles: string[]
@@ -31,6 +37,14 @@ export interface AuthClientOptions<C extends Contract, R extends RoleOf<C>> {
    * `'jwt'` to connect with a server-minted signed/sealed assertion (→ `authMethod: 'jwt'` / `'jwt-sealed'`).
    */
   tokenParam?: string
+  /**
+   * Async token source, for tokens minted out-of-band (e.g. a server-sealed assertion fetched over HTTP). When
+   * set it REPLACES the persisted-`storage` restore as the boot source: the helper starts as `guest`, awaits the
+   * first `resolveToken()` before resolving `ready`, and swaps to `authedRole` if it yields a token — so a
+   * consumer just `await auth.ready` instead of hand-rolling a "client not ready yet" deferred. Return `null` to
+   * stay unauthenticated (no error). Its result is NOT persisted to `storage` — the source owns re-acquisition.
+   */
+  resolveToken?: () => Promise<{ token: string } | null>
 }
 
 export interface AuthClient<C extends Contract, R extends RoleOf<C>> {
@@ -38,7 +52,7 @@ export interface AuthClient<C extends Contract, R extends RoleOf<C>> {
   readonly client: SuperLineClient<C, R>
   /** The current auth state. */
   readonly state: AuthState
-  /** Resolves once any persisted token has been confirmed (or discarded) — await before reading `state` on load. */
+  /** Resolves once the boot token — persisted or from `resolveToken` — has been confirmed or discarded. Await before reading `state` on load. */
   readonly ready: Promise<void>
   /** Subscribe to auth-state changes; returns an unsubscribe. */
   subscribe(cb: (state: AuthState) => void): () => void
@@ -96,18 +110,50 @@ export function authClient<C extends Contract, R extends RoleOf<C>>(options: Aut
     swap(authedClient(id.token), { status: 'authed', userId: id.userId, displayName: id.displayName, roles: id.roles })
   }
 
-  const saved = storage.get()
-  current = saved ? authedClient(saved) : guestClient()
-  // Restore path: confirm the persisted token with a whoami; drop to guest if it's expired/revoked.
-  const ready: Promise<void> = saved
-    ? dyn(current)
-        .whoami()
-        .then((me) => {
-          if (me) setState({ status: 'authed', userId: me.userId, displayName: me.displayName, roles: me.roles })
-          else toGuest()
-        })
-        .catch(() => toGuest())
-    : Promise.resolve()
+  const reasonOf = (err: unknown): string => (err instanceof Error && err.message ? err.message : 'the token was rejected')
+
+  let ready: Promise<void>
+  if (options.resolveToken) {
+    // Guest-first: an async source can't be awaited synchronously, so start as `guest` and swap on the first
+    // token. A rejected token (whoami `null`, or a `rejectUnauthenticated` connect throw) drops back to guest and
+    // surfaces `state.error`; a `null` result stays guest silently. resolveToken's result is never persisted.
+    current = guestClient()
+    ready = options
+      .resolveToken()
+      .then(async (acquired) => {
+        if (!acquired) return
+        const authed = authedClient(acquired.token)
+        const rejected = (reason: string): void => {
+          dyn(authed).close()
+          setState({ status: 'guest', error: { reason }, userId: null, displayName: null, roles: [] })
+        }
+        try {
+          const me = await dyn(authed).whoami()
+          if (me) {
+            swap(authed, { status: 'authed', error: null, userId: me.userId, displayName: me.displayName, roles: me.roles })
+            return
+          }
+        } catch (err) {
+          rejected(reasonOf(err))
+          return
+        }
+        rejected('the token was rejected')
+      })
+      .catch((err) => setState({ status: 'guest', error: { reason: reasonOf(err) }, userId: null, displayName: null, roles: [] }))
+  } else {
+    const saved = storage.get()
+    current = saved ? authedClient(saved) : guestClient()
+    // Restore path: confirm the persisted token with a whoami; drop to guest if it's expired/revoked.
+    ready = saved
+      ? dyn(current)
+          .whoami()
+          .then((me) => {
+            if (me) setState({ status: 'authed', userId: me.userId, displayName: me.displayName, roles: me.roles })
+            else toGuest()
+          })
+          .catch(() => toGuest())
+      : Promise.resolve()
+  }
 
   return {
     get client() {

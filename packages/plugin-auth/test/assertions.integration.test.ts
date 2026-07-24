@@ -276,3 +276,86 @@ describe('plugin-auth — tokenParam + rejectUnauthenticated (Phase 1)', () => {
     client.close()
   })
 })
+
+describe('plugin-auth — resolveToken + AuthState.error (Phase 2)', () => {
+  it('boots guest-first and swaps to authed on a server-minted token, without persisting it', async () => {
+    const { url, authKit } = await boot()
+    const { userId } = await signUp(url, 'rt@x.com')
+    const { token: sealed } = await authKit.tokens.mintSealed(userId)
+    const setCalls: (string | null)[] = []
+    const ac = authClient<typeof app, 'user'>({
+      authedRole: 'user',
+      tokenParam: 'jwt',
+      storage: { get: () => null, set: (t) => setCalls.push(t) },
+      resolveToken: async () => ({ token: sealed }),
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params }),
+    })
+    await ac.ready
+    expect(ac.state.status).toBe('authed')
+    expect(ac.state.userId).toBe(userId)
+    expect(ac.state.error ?? null).toBeNull()
+    expect(setCalls).toHaveLength(0) // the source owns re-acquisition — its token is never stashed in storage
+    ac.client.close()
+  })
+
+  it('a null resolveToken result stays guest with no error', async () => {
+    const { url } = await boot()
+    const ac = authClient<typeof app, 'user'>({
+      authedRole: 'user',
+      tokenParam: 'jwt',
+      resolveToken: async () => null,
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params }),
+    })
+    await ac.ready
+    expect(ac.state.status).toBe('guest')
+    expect(ac.state.error ?? null).toBeNull()
+    ac.client.close()
+  })
+
+  it('a rejected token surfaces state.error (whoami-null path) and drops to guest', async () => {
+    const { url } = await boot() // default server: a bad token degrades to guest, whoami returns null
+    const ac = authClient<typeof app, 'user'>({
+      authedRole: 'user',
+      tokenParam: 'jwt',
+      resolveToken: async () => ({ token: 'not.a.real.assertion' }),
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params }),
+    })
+    await ac.ready
+    expect(ac.state.status).toBe('guest')
+    expect(ac.state.error).toMatchObject({ reason: expect.any(String) })
+    ac.client.close()
+  })
+
+  it('surfaces state.error (connect-throw path) when a rejectUnauthenticated server refuses the token', async () => {
+    const backend = memoryCollections()
+    const authKit = auth({
+      contract: app,
+      collections: backend,
+      defaultRoles: ['user'],
+      jwt: { secret: SECRET },
+      rejectUnauthenticated: true,
+    })
+    const { srv, url } = await h.server(app, {
+      nodeKey: 'strict-rt',
+      authenticate: authKit.authenticate,
+      identify: authKit.identify,
+      collections: backend,
+      plugins: [authKit.plugin],
+    })
+    srv.implement({
+      user: { peek: async (_i: unknown, ctx: AuthContext) => ({ ...ctx }) },
+      admin: { adminOnly: async () => ({ ok: true }) },
+    } as never)
+    const ac = authClient<typeof app, 'user'>({
+      authedRole: 'user',
+      tokenParam: 'jwt',
+      resolveToken: async () => ({ token: 'not.a.real.assertion' }),
+      // reconnect:false so the refused authed upgrade surfaces at once instead of retrying forever
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params, reconnect: false }),
+    })
+    await ac.ready
+    expect(ac.state.status).toBe('guest')
+    expect(ac.state.error).toMatchObject({ reason: expect.any(String) })
+    ac.client.close()
+  })
+})

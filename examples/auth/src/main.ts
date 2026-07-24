@@ -2,7 +2,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { jwtVerify } from 'jose'
 import { z } from 'zod'
-import { defineContract, eq } from '@super-line/core'
+import { defineContract, eq, SuperLineError } from '@super-line/core'
 import { createSuperLineServer } from '@super-line/server'
 import { createSuperLineClient } from '@super-line/client'
 import { memoryCollections } from '@super-line/collections-memory'
@@ -57,6 +57,51 @@ async function main(): Promise<void> {
     // The public half of an assertion is NOT client-visible by default. This one line vends it as `env`
     // (ADR-0012) — the sealed half stays server-side because nothing here ever puts it on the wire.
     resolveEnv: (ctx) => ({ workspace: (ctx.claims?.workspace as string | undefined) ?? undefined }),
+    // ── Server-side hooks (ADR-0017): before/after around `authenticate` + the imperative kit. They wrap
+    //    the operation itself, so a host extension here is impossible to bypass. Client requests
+    //    (signIn/signUp/…) are NOT hooked — those already have a veto seam in `use:` middleware. ──
+    hooks: {
+      authenticate: {
+        // before: inspect/rewrite the raw handshake, or throw to REJECT the connection. The transport
+        // swallows a rejected authentication into a bare 401 (no server-side log, no onError), so a record
+        // of blocked connections must be logged HERE, before the throw. NB: the WS client may re-attempt a
+        // rejected handshake, so `authenticate` can run more than once per connect — keep it idempotent
+        // (this is a pure check, so it is). That's why the audit line below can appear more than once.
+        before: (handshake) => {
+          if (handshake.query.banned) {
+            console.log('  ⛔ authenticate rejected a banned handshake')
+            throw new SuperLineError('FORBIDDEN', 'connection blocked by policy')
+          }
+        },
+        // after: fires for EVERY resolution (guests included) — a connection audit trail. It can also
+        // transform the result (enrich ctx, override env); here it only observes.
+        after: (result) => console.log('  → connect:', result.role, 'via', result.ctx.authMethod ?? 'guest'),
+      },
+      users: {
+        // before TRANSFORMS: stamp provenance onto every server-provisioned identity (a returned input).
+        create: {
+          before: (input) => ({ ...input, metadata: { ...input.metadata, provisionedVia: 'agent-kit' } }),
+          after: (user) => console.log('  audit: user.create →', user.displayName),
+        },
+        // `deactivate.before` is NON-vetoable: a throw here is routed to `onHookError` and the
+        // deactivation proceeds anyway — the emergency stop must never be blockable by host code.
+        deactivate: { before: ({ id }) => console.log('  ⚠ security: deactivating', id, '— revoking everything') },
+      },
+      apiKeys: {
+        create: {
+          after: (key) =>
+            // ⚠ the RAW `slp_…` key is right here. Audit the id; NEVER log the whole key —
+            // `after: (k) => log(k)` would write a live credential to disk. Mirror it to a vault, at most.
+            console.log('  minted api key', key.id, 'ending …' + key.key.slice(-4)),
+        },
+      },
+      tokens: {
+        mintSealed: {
+          after: (token) =>
+            console.log('  audit: sealed assertion minted, expires', new Date(token.expiresAt).toISOString()),
+        },
+      },
+    },
   })
 
   const srv = createSuperLineServer(app, {
@@ -138,6 +183,33 @@ async function main(): Promise<void> {
   console.log('  admin stats →', await adminAlice.stats()) // { users: 2 } — the same token now authorizes 'admin'
   adminAlice.close()
 
+  // ── A hook can REJECT a connection. `authenticate.before` throws for a blocklisted handshake, so the
+  //    upgrade is refused and the first request drops. (A refused upgrade doesn't carry the server's
+  //    reason, so the client just sees the connection close — DISCONNECTED. `reconnect: false` surfaces it
+  //    at once instead of retrying forever.) ──
+  console.log('\n— A blocked connection (authenticate.before veto) —')
+  const banned = createSuperLineClient(app, { transport: transport(), role: 'guest', params: { banned: '1' }, reconnect: false })
+  await banned.whoami().then(
+    () => console.log('  connected?! — the hook should have refused this'),
+    (err) => console.log('  refused →', (err as SuperLineError).code), // DISCONNECTED — authenticate.before threw
+  )
+  banned.close()
+
+  // ── Provision an AI agent, server-side. The imperative kit trips its hooks: `users.create.before`
+  //    STAMPS provenance (a transform), `apiKeys.create.after` sees the raw key (audit it, never log it).
+  //    Agents are API-key-only — no password, so no credential row is created. ──
+  console.log('\n— Provision an agent (server-side kit hooks) —')
+  const scoutUser = await authKit.users.create({ displayName: 'scout', roles: ['user'], metadata: { kind: 'agent' } })
+  console.log('  scout metadata →', scoutUser.metadata) // { kind:'agent', provisionedVia:'agent-kit' } — the transform landed
+  const { key: scoutKey } = await authKit.apiKeys.create(scoutUser.id, { role: 'user', label: 'scout-agent' })
+
+  // The minted key authenticates: scout connects with `params: { apiKey }` and acts as itself.
+  const scout = createSuperLineClient(app, { transport: transport(), role: 'user', params: { apiKey: scoutKey } })
+  console.log('  scout whoami →', await scout.whoami()) // { userId, displayName:'scout', roles:['user'] }
+  await scout.collection('notes').insert({ id: 'n3', ownerId: scoutUser.id, text: 'recon complete', createdAt: Date.now() })
+  console.log('  scout wrote a note as itself')
+  scout.close()
+
   // ── A bearer assertion is a CLAIM, not a stored credential. `getToken()` mints one from the live
   //    session; nothing about it is written down, so verifying it needs the secret and nothing else. ──
   console.log('\n— Bob mints a signed assertion —')
@@ -167,12 +239,19 @@ async function main(): Promise<void> {
   })
   console.log('  parts →', sealedToken.split('.').length, '(a JWE has 5; a JWS has 3)')
   console.log('  the secret is not in the token →', !sealedToken.includes('sk-live'))
+  console.log('  sealed token →', sealedToken)
   // Bob holds the token, and the shared secret is not even what decrypts it — the CEK is derived separately.
   const bobCanRead = await jwtVerify(sealedToken, new TextEncoder().encode(JWT_SECRET)).then(
     () => true,
     () => false,
   )
+
+
   console.log('  Bob can decode it →', bobCanRead) // false
+
+
+  const verifiedToken = await authKit.tokens.verify(sealedToken)
+  console.log('  verifiedToken →', verifiedToken)
 
   // Connect with it. The server sees BOTH bags on ctx; Bob receives only what a handler chooses to return.
   const viaSealed = createSuperLineClient(app, { transport: transport(), role: 'user', params: { jwt: sealedToken } })
@@ -180,6 +259,7 @@ async function main(): Promise<void> {
   await viaSealed.env.ready // the first env frame lands at accept; awaiting it kills the connect-time race
   console.log('  Bob’s client.env →', viaSealed.env.current) // the PUBLIC half only, via resolveEnv
   const sealedSession = (await srv.collection('sessions').snapshot()).find((s) => s.authMethod === 'jwt-sealed')
+  
   console.log('  session row →', { authMethod: sealedSession?.authMethod, userId: sealedSession?.userId })
   viaSealed.close()
 

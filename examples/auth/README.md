@@ -33,6 +33,13 @@ pnpm --filter @super-line/example-auth start
 - **The cost of both, stated honestly:** `revoke()` ends Bob's sessions and disconnects him everywhere, but an
   outstanding assertion is in no table to revoke and **keeps working until it expires**. `deactivate()` stops
   even that — the one user read at connect is the emergency stop.
+- **Server-side hooks (ADR-0017):** before/after around the operations a host controls — `authenticate`
+  (reject a blocklisted connection; audit every connect, guests included) and the imperative kit. A short
+  **agent-provisioning** scene mints `scout` via `authKit.users.create` (whose `before` stamps provenance —
+  a transform) and `authKit.apiKeys.create` (whose `after` receives the raw `slp_` key — audit the id, never
+  log it), then connects the agent with its key. The `users.deactivate` hook shows the one **non-vetoable**
+  `before`: the emergency stop can't be blocked by host code. Client requests (`signIn`/`signUp`/…) are
+  deliberately unhooked — those use `use:` middleware.
 - **Sign-out revokes** the session and drops the client back to `guest`.
 
 The Slack-style [`collections-chat`](../collections-chat) example is the larger, UI-driven counterpart.

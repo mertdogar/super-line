@@ -13,12 +13,75 @@ export type { AssertionKey, AssertionKind, AssertionOptions, VerifiedAssertion }
  * The discriminated auth result — a member per contract role, all sharing the uniform {@link AuthContext}. Assignable
  * to the server's `AuthResult<C>` (whose per-role ctx is `unknown`), so `authenticate:` infers `A` on the proven path.
  */
-type AuthResultOf<C extends Contract> = {
+export type AuthResultOf<C extends Contract> = {
   // `env` is per-role, NOT the union: a role that declares no `env` schema has `EnvOf<C, R> = null`, so a
   // contract mixing env-having and env-less roles (guest never has one) stays assignable to the server's
   // own AuthResult. Using AnyEnv here would claim a guest result could carry the user role's env.
   [R in RoleOf<C>]: { role: R; ctx: AuthContext; env?: EnvOf<C, R>; connectionId?: string }
 }[RoleOf<C>]
+
+/**
+ * A before/after pair around one imperative-kit auth operation (ADR-0017). `before` may **transform**
+ * (return a new input) or **veto** (throw → nothing is written); returning nothing keeps the input. `after`
+ * **observes** the committed result — a throw propagates to the caller, but the write already committed and
+ * STAYS. One op breaks this: `users.deactivate.before` cannot veto (a throw is routed to `onHookError` and
+ * the deactivation proceeds — a safety op must never be blockable).
+ *
+ * ⚠️ Payloads carry RAW secrets — plaintext passwords into `credentials.*.before`, the raw `slp_…` key out
+ * of `apiKeys.create.after`, minted tokens out of `tokens.*.after`. Never log a result wholesale.
+ */
+export interface AuthOpHook<In, Out> {
+  before?: (input: In) => In | undefined | void | Promise<In | undefined | void>
+  after?: (result: Out) => void | Promise<void>
+}
+
+/**
+ * The hook around `authenticate` — the connection identity op (ADR-0017). Unlike {@link AuthOpHook}, its
+ * `after` may **transform** the resolved result (enrich `ctx`, override `env`, change `role`) as well as
+ * observe it, because `authenticate` commits nothing — it *produces* identity. Both directions veto by
+ * throwing, which rejects the connection (authenticate's native contract). Fires for every resolution,
+ * including guests. ⚠️ `handshake.query` carries the bearer tokens (`jwt` / `apiKey`).
+ */
+export interface AuthenticateHook<C extends Contract> {
+  before?: (handshake: Handshake) => Handshake | undefined | void | Promise<Handshake | undefined | void>
+  after?: (
+    result: AuthResultOf<C>,
+    handshake: Handshake,
+  ) => AuthResultOf<C> | undefined | void | Promise<AuthResultOf<C> | undefined | void>
+}
+
+/**
+ * Host extensions around plugin-auth's **server-invoked** operations (ADR-0017): `authenticate` and the
+ * imperative kit, nested to mirror the `authKit` surface (`hooks.apiKeys.create` wraps
+ * `authKit.apiKeys.create`). The client request handlers (`signIn`/`signUp`/…) are deliberately not here —
+ * they already have a veto seam in `use:` middleware. Every field is optional.
+ */
+export interface AuthHooks<C extends Contract> {
+  authenticate?: AuthenticateHook<C>
+  users?: {
+    create?: AuthOpHook<{ displayName: string; roles?: string[]; metadata?: Record<string, unknown> }, AuthUser>
+    update?: AuthOpHook<{ id: string; displayName?: string; metadata?: Record<string, unknown> }, AuthUser>
+    setRoles?: AuthOpHook<{ id: string; roles: string[] }, void>
+    /** `before` cannot veto — a throw routes to `onHookError` and the deactivation proceeds. */
+    deactivate?: AuthOpHook<{ id: string }, void>
+    reactivate?: AuthOpHook<{ id: string }, void>
+  }
+  credentials?: {
+    create?: AuthOpHook<{ userId: string; email: string; password?: string }, AuthCredential>
+    setPassword?: AuthOpHook<{ userId: string; newPassword: string }, void>
+  }
+  apiKeys?: {
+    create?: AuthOpHook<{ userId: string; role: string; label: string; expiresInMs?: number }, ApiKeyInfo & { key: string }>
+    revoke?: AuthOpHook<{ id: string }, void>
+  }
+  tokens?: {
+    mintSigned?: AuthOpHook<{ userId: string; claims?: unknown; expiresInMs?: number }, { token: string; expiresAt: number }>
+    mintSealed?: AuthOpHook<
+      { userId: string; claims?: unknown; sealed?: unknown; expiresInMs?: number },
+      { token: string; expiresAt: number }
+    >
+  }
+}
 
 export interface AuthServerOptions<C extends Contract> {
   /** The app contract — types the resolved role and validates a requested role against the contract's roles. */
@@ -47,6 +110,10 @@ export interface AuthServerOptions<C extends Contract> {
    * Since `authKit` owns `authenticate`, this is where the host's identity-keyed env business logic lives.
    */
   resolveEnv?: (ctx: AuthContext) => AnyEnv<C> | undefined | Promise<AnyEnv<C> | undefined>
+  /** Before/after extensions around the server-side auth operations (ADR-0017). ⚠️ payloads carry raw secrets. */
+  hooks?: AuthHooks<C>
+  /** Sink for a swallowed non-vetoable hook throw (currently only `users.deactivate.before`). Default: `console.error`. */
+  onHookError?: (error: unknown, op: string) => void
 }
 
 /** An API key's public shape — everything but the raw `slp_…` key, which only `create` ever returns. */
@@ -160,6 +227,26 @@ const isDeactivated = (u: AuthUser): boolean => u.deletedAt != null
 const activeOnly = (): Expr => not(gt('deletedAt', 0))
 
 /**
+ * Run a transform-or-veto hook (a `before`, or `authenticate`'s transforming `after`): return the value the
+ * hook produced, or the original when it returns nothing. A throw vetoes — unless `swallow` is given, in
+ * which case the throw is routed there and the original value is kept (the non-vetoable path).
+ */
+const applyHook = async <T>(
+  run: ((value: T) => T | undefined | void | Promise<T | undefined | void>) | undefined,
+  value: T,
+  swallow?: (error: unknown) => void,
+): Promise<T> => {
+  if (!run) return value
+  try {
+    return ((await run(value)) as T | undefined) ?? value
+  } catch (error) {
+    if (!swallow) throw error
+    swallow(error)
+    return value
+  }
+}
+
+/**
  * Build the server half of the auth plugin. Pass the same `CollectionStore` the server uses. Wire the returned
  * `authenticate` + `identify` at the top level and register `plugin`:
  *
@@ -180,6 +267,11 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
   const assertions = createAssertions(opts.jwt)
   const sendPasswordReset = opts.sendPasswordReset
   const passwordResetTtlMs = opts.passwordResetTtlMs ?? 60 * 60_000
+  const hooks = opts.hooks
+  const onHookError =
+    opts.onHookError ??
+    ((error: unknown, op: string) =>
+      console.error(`[plugin-auth] ${op}.before threw (ignored — this op cannot be vetoed):`, error))
 
   const readAccessToken = (token: string) => collections.read('accessTokens', tokenHash(token)) as Promise<AuthAccessToken | undefined>
   const readUser = (id: string) => collections.read('users', id) as Promise<AuthUser | undefined>
@@ -271,43 +363,52 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
   // Resolve identity (above), then seed the client-visible env (ADR-0012) from it via the host's resolveEnv.
   // Tracking the whole attempt closes the shutdown race: the disposer blocks new attempts, drains accepted
   // in-flight work, then sweeps every session that work could have inserted.
-  const authenticate = (handshake: Handshake): Promise<AuthResultOf<C>> => {
+  const authenticate = (rawHandshake: Handshake): Promise<AuthResultOf<C>> => {
     if (stopping) return Promise.reject(new Error('plugin-auth is shutting down'))
     return track(
       (async () => {
-        const base = await resolveBase(handshake)
-        const authCtx = base.ctx as AuthContext
-        if (!authCtx.userId) return base
-        await initialization
-        if (stopping) throw new Error('plugin-auth is shutting down')
-        const ctx = pluginCtx
-        if (!ctx?.nodeKey) throw new Error('plugin-auth requires createSuperLineServer({ nodeKey })')
-        const now = Date.now()
-        const sessionId = newId()
-        await ctx.collection('sessions').insert({
-          id: sessionId,
-          userId: authCtx.userId,
-          nodeId: ctx.nodeId,
-          nodeKey: ctx.nodeKey,
-          role: base.role,
-          transport: handshake.transport,
-          authMethod: authCtx.authMethod!,
-          authId: authCtx.authId,
-          connectedAt: now,
-          lastSeenAt: now,
-          endedAt: null,
-        } satisfies AuthSession)
-        await refreshPresence(authCtx.userId)
-        const connectionCtx = { ...authCtx, sessionId }
-        const env = opts.resolveEnv ? await opts.resolveEnv(connectionCtx) : undefined
-        return {
-          ...base,
-          ctx: connectionCtx,
-          connectionId: sessionId,
-          ...(env == null ? {} : { env }),
-        } as AuthResultOf<C>
+        // before: inspect/rewrite the raw handshake, or throw to reject the connection.
+        const handshake = await applyHook(hooks?.authenticate?.before, rawHandshake)
+        const result = await resolveIdentity(handshake)
+        // after: observe, enrich (ctx/env/role), or reject (throw). Fires for guests too.
+        const afterHook = hooks?.authenticate?.after
+        return afterHook ? ((await afterHook(result, handshake)) as AuthResultOf<C> | undefined) ?? result : result
       })(),
     )
+  }
+
+  const resolveIdentity = async (handshake: Handshake): Promise<AuthResultOf<C>> => {
+    const base = await resolveBase(handshake)
+    const authCtx = base.ctx as AuthContext
+    if (!authCtx.userId) return base
+    await initialization
+    if (stopping) throw new Error('plugin-auth is shutting down')
+    const ctx = pluginCtx
+    if (!ctx?.nodeKey) throw new Error('plugin-auth requires createSuperLineServer({ nodeKey })')
+    const now = Date.now()
+    const sessionId = newId()
+    await ctx.collection('sessions').insert({
+      id: sessionId,
+      userId: authCtx.userId,
+      nodeId: ctx.nodeId,
+      nodeKey: ctx.nodeKey,
+      role: base.role,
+      transport: handshake.transport,
+      authMethod: authCtx.authMethod!,
+      authId: authCtx.authId,
+      connectedAt: now,
+      lastSeenAt: now,
+      endedAt: null,
+    } satisfies AuthSession)
+    await refreshPresence(authCtx.userId)
+    const connectionCtx = { ...authCtx, sessionId }
+    const env = opts.resolveEnv ? await opts.resolveEnv(connectionCtx) : undefined
+    return {
+      ...base,
+      ctx: connectionCtx,
+      connectionId: sessionId,
+      ...(env == null ? {} : { env }),
+    } as AuthResultOf<C>
   }
 
   const identify = (conn: { ctx: unknown }): string | undefined => (conn.ctx as AuthContext).userId ?? undefined
@@ -651,8 +752,9 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
         ...(opts.offset !== undefined ? { offset: opts.offset } : {}),
       })) as AuthUser[]
     },
-    create: async (input) => {
+    create: async (rawInput) => {
       requireCtx() // fail fast before any store traffic
+      const input = await applyHook(hooks?.users?.create?.before, rawInput)
       const roles = input.roles ?? [...defaultRoles]
       assertContractRoles(roles)
       const userId = newId()
@@ -664,96 +766,124 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
         ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
       }
       await col('users').insert(row)
+      await hooks?.users?.create?.after?.(row)
       return row
     },
     update: (id, patch) =>
       withUserLock(id, async () => {
-        const user = await mustRead(id)
+        const input = await applyHook(hooks?.users?.update?.before, { id, ...patch })
+        const user = await mustRead(input.id)
         const next: AuthUser = {
           ...user,
-          ...(patch.displayName !== undefined ? { displayName: patch.displayName } : {}),
-          ...(patch.metadata !== undefined ? { metadata: patch.metadata } : {}),
+          ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
+          ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
         }
         await col('users').update(next)
+        await hooks?.users?.update?.after?.(next)
         return next
       }),
     setRoles: (id, roles) =>
       withUserLock(id, async () => {
-        assertContractRoles(roles)
-        const user = await mustRead(id)
-        await col('users').update({ ...user, roles })
+        const input = await applyHook(hooks?.users?.setRoles?.before, { id, roles })
+        assertContractRoles(input.roles)
+        const user = await mustRead(input.id)
+        await col('users').update({ ...user, roles: input.roles })
+        await hooks?.users?.setRoles?.after?.(undefined)
       }),
     deactivate: (id) =>
       withUserLock(id, async () => {
-        const user = await mustRead(id)
+        // NON-vetoable before: a throw is routed to onHookError and the deactivation proceeds (ADR-0017).
+        const input = await applyHook(hooks?.users?.deactivate?.before, { id }, (error) => onHookError(error, 'users.deactivate'))
+        const user = await mustRead(input.id)
         await col('users').update({ ...user, deletedAt: Date.now() })
-        await Promise.all([flushAccessTokens(id), deleteApiKeys(id), deleteResets(id), endSessions(id)])
-        requireCtx().toUser(id).disconnect()
+        await Promise.all([flushAccessTokens(input.id), deleteApiKeys(input.id), deleteResets(input.id), endSessions(input.id)])
+        requireCtx().toUser(input.id).disconnect()
+        await hooks?.users?.deactivate?.after?.(undefined)
       }),
     reactivate: (id) =>
       withUserLock(id, async () => {
-        const user = await mustRead(id)
+        const input = await applyHook(hooks?.users?.reactivate?.before, { id })
+        const user = await mustRead(input.id)
         // purge anything that slipped past deactivate's point-in-time flushes — leftovers must never revive
-        await Promise.all([flushAccessTokens(id), deleteApiKeys(id), deleteResets(id), endSessions(id)])
+        await Promise.all([flushAccessTokens(input.id), deleteApiKeys(input.id), deleteResets(input.id), endSessions(input.id)])
         await col('users').update({ ...user, deletedAt: null })
+        await hooks?.users?.reactivate?.after?.(undefined)
       }),
   }
 
   const credentials: AuthCredentialsApi = {
     create: async (userId, input) => {
-      await mustRead(userId)
-      const email = input.email.toLowerCase()
+      const merged = await applyHook(hooks?.credentials?.create?.before, {
+        userId,
+        email: input.email,
+        ...(input.password !== undefined ? { password: input.password } : {}),
+      })
+      await mustRead(merged.userId)
+      const email = merged.email.toLowerCase()
       if (await col('credentials').read(email)) throw new SuperLineError('CONFLICT', 'email already registered')
-      const row: AuthCredential = { email, userId, passwordHash: input.password ? await hashPassword(input.password) : '' }
+      const row: AuthCredential = { email, userId: merged.userId, passwordHash: merged.password ? await hashPassword(merged.password) : '' }
       await col('credentials').insert(row)
+      await hooks?.credentials?.create?.after?.(row)
       return row
     },
     setPassword: (userId, newPassword) =>
       withUserLock(userId, async () => {
-        await mustRead(userId)
-        const [credential] = (await col('credentials').snapshot({ filter: eq('userId', userId) })) as AuthCredential[]
-        if (!credential) throw new SuperLineError('NOT_FOUND', `no credential for user '${userId}'`)
-        await col('credentials').update({ ...credential, passwordHash: await hashPassword(newPassword) })
+        const input = await applyHook(hooks?.credentials?.setPassword?.before, { userId, newPassword })
+        await mustRead(input.userId)
+        const [credential] = (await col('credentials').snapshot({ filter: eq('userId', input.userId) })) as AuthCredential[]
+        if (!credential) throw new SuperLineError('NOT_FOUND', `no credential for user '${input.userId}'`)
+        await col('credentials').update({ ...credential, passwordHash: await hashPassword(input.newPassword) })
         await Promise.all([
-          flushAccessTokens(userId),
-          deleteResets(userId),
-          endSessions(userId, undefined, 'access-token'),
+          flushAccessTokens(input.userId),
+          deleteResets(input.userId),
+          endSessions(input.userId, undefined, 'access-token'),
         ])
+        await hooks?.credentials?.setPassword?.after?.(undefined)
       }),
   }
 
   const apiKeys: AuthApiKeysApi = {
     create: async (userId, opts) => {
-      assertContractRoles([opts.role])
+      const input = await applyHook(hooks?.apiKeys?.create?.before, {
+        userId,
+        role: opts.role,
+        label: opts.label,
+        ...(opts.expiresInMs !== undefined ? { expiresInMs: opts.expiresInMs } : {}),
+      })
+      assertContractRoles([input.role])
       // the wire counterpart enforces .positive() via zod; the imperative path must match — a falsy check
       // would invert expiresInMs: 0 into an IMMORTAL key
-      if (opts.expiresInMs !== undefined && !(opts.expiresInMs > 0))
+      if (input.expiresInMs !== undefined && !(input.expiresInMs > 0))
         throw new SuperLineError('BAD_REQUEST', 'expiresInMs must be positive')
-      const user = await mustRead(userId)
-      if (isDeactivated(user)) throw new SuperLineError('CONFLICT', `user '${userId}' is deactivated`)
+      const user = await mustRead(input.userId)
+      if (isDeactivated(user)) throw new SuperLineError('CONFLICT', `user '${input.userId}' is deactivated`)
       const raw = apiKeyToken()
       const now = Date.now()
       const row = {
         id: tokenHash(raw),
-        userId,
-        role: opts.role,
-        label: opts.label,
+        userId: input.userId,
+        role: input.role,
+        label: input.label,
         createdAt: now,
-        expiresAt: opts.expiresInMs !== undefined ? now + opts.expiresInMs : null,
+        expiresAt: input.expiresInMs !== undefined ? now + input.expiresInMs : null,
       } satisfies AuthApiKey
       await col('apiKeys').insert(row)
       const { id, role, label, createdAt, expiresAt } = row
-      return { id, role, label, createdAt, expiresAt, key: raw }
+      const result = { id, role, label, createdAt, expiresAt, key: raw }
+      await hooks?.apiKeys?.create?.after?.(result)
+      return result
     },
     listFor: async (userId) => {
       const rows = (await col('apiKeys').snapshot({ filter: eq('userId', userId) })) as AuthApiKey[]
       return rows.map(({ id, role, label, createdAt, expiresAt }) => ({ id, role, label, createdAt, expiresAt }))
     },
     revoke: async (id) => {
-      const key = (await col('apiKeys').read(id)) as AuthApiKey | undefined
+      const input = await applyHook(hooks?.apiKeys?.revoke?.before, { id })
+      const key = (await col('apiKeys').read(input.id)) as AuthApiKey | undefined
       if (!key) throw new SuperLineError('NOT_FOUND', 'no such API key')
-      await col('apiKeys').delete(id)
-      await endSessions(key.userId, id, 'api-key')
+      await col('apiKeys').delete(input.id)
+      await endSessions(key.userId, input.id, 'api-key')
+      await hooks?.apiKeys?.revoke?.after?.(undefined)
     },
   }
 
@@ -765,15 +895,21 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
   const tokens: AuthTokensApi = {
     mintSigned: async (userId, opts = {}) => {
       const kit = requireAssertions()
-      const user = await mustRead(userId)
-      if (isDeactivated(user)) throw new SuperLineError('CONFLICT', `user '${userId}' is deactivated`)
-      return kit.mintSigned(userId, { roles: user.roles, ...opts })
+      const { userId: uid, ...mintOpts } = await applyHook(hooks?.tokens?.mintSigned?.before, { userId, ...opts })
+      const user = await mustRead(uid)
+      if (isDeactivated(user)) throw new SuperLineError('CONFLICT', `user '${uid}' is deactivated`)
+      const result = await kit.mintSigned(uid, { roles: user.roles, ...mintOpts })
+      await hooks?.tokens?.mintSigned?.after?.(result)
+      return result
     },
     mintSealed: async (userId, opts = {}) => {
       const kit = requireAssertions()
-      const user = await mustRead(userId)
-      if (isDeactivated(user)) throw new SuperLineError('CONFLICT', `user '${userId}' is deactivated`)
-      return kit.mintSealed(userId, opts)
+      const { userId: uid, ...mintOpts } = await applyHook(hooks?.tokens?.mintSealed?.before, { userId, ...opts })
+      const user = await mustRead(uid)
+      if (isDeactivated(user)) throw new SuperLineError('CONFLICT', `user '${uid}' is deactivated`)
+      const result = await kit.mintSealed(uid, mintOpts)
+      await hooks?.tokens?.mintSealed?.after?.(result)
+      return result
     },
     verify: async (token) => {
       const verified = await requireAssertions().verify(token)

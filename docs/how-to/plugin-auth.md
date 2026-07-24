@@ -272,6 +272,59 @@ authKit.apiKeys.revoke(id)
 Users **soft-delete** rather than vanish (`deactivate` / `reactivate`), so old rows keep rendering author
 names; the `credentials` row stays (the email is reserved) and all three auth paths degrade to guest.
 
+## Extending auth with hooks
+
+Every **server-invoked** auth operation takes a before/after hook (ADR-0017): `authenticate` and the
+imperative kit. They are the seam for connection admission, agent-provisioning policy, and audit — an
+extension a host can't bypass because it wraps the operation itself:
+
+```ts
+const authKit = auth({
+  contract: app,
+  collections: backend,
+  hooks: {
+    // authenticate — before/after the connection identity resolves
+    authenticate: {
+      before: (handshake) => { if (blocked(handshake.headers['x-forwarded-for'])) throw new SuperLineError('FORBIDDEN', 'blocked') },
+      after: (result) => ({ ...result, ctx: { ...result.ctx, tenant: tenantOf(result.ctx.userId) } }), // enrich / override / reject
+    },
+    // the imperative kit — nested to mirror authKit.<surface>.<method>
+    users: {
+      create: { before: (i) => ({ ...i, displayName: i.displayName.trim() }), after: (u) => audit('user.create', u.id) },
+      deactivate: { after: () => notifySecurity() },
+    },
+    credentials: { setPassword: { before: (i) => assertStrong(i.newPassword) } }, // policy on the provisioning path
+    apiKeys: { create: { after: (r) => vault.store(r.key) } },
+  },
+})
+```
+
+Semantics:
+
+- **`before` transforms or vetoes.** Return a new input to transform; throw to veto (nothing is written).
+  `authenticate.before` rewrites the `Handshake`; a throw rejects the connection.
+- **`after` observes.** A throw propagates to the caller, but the write already committed and **stays**.
+  `authenticate.after` is the exception — it may *transform* the resolved result (enrich `ctx`, override
+  `env`, change `role`) or reject, because `authenticate` commits nothing.
+- **`users.deactivate.before` cannot veto.** It's the emergency stop for a compromised account — a throw is
+  routed to `onHookError` (default `console.error`) and the deactivation proceeds. Host code must never be
+  able to block incident response.
+- **Cascades are silent.** `users.deactivate` and `credentials.setPassword` internally revoke keys/tokens/
+  sessions; those internal writes fire **no** `apiKeys.revoke`/`tokens.*` hooks. Audit the composite, not the
+  leaves.
+
+::: warning Hook payloads carry raw secrets
+`authenticate.before` sees the handshake's bearer tokens (`query.jwt` / `query.apiKey`); `credentials.*.before`
+sees the plaintext password; `apiKeys.create.after` sees the raw `slp_…` key; `tokens.*.after` sees the minted
+token. **Never log a payload wholesale** (`after: (r) => log(r)` writes a live credential to disk).
+:::
+
+**Client requests are not hooked.** `signIn`/`signUp`/… run over the wire and already have a veto seam — the
+server's `use:` middleware chain sees each by name (`info.name`) and rejects by throwing (it cannot read the
+request body, so a password-policy check belongs on the hooked `authKit.credentials.create` path). Disconnect
+logic is `createSuperLineServer({ onDisconnect: (conn, ctx, code) => … })`, with `ctx` typed as the resolved
+`AuthContext`.
+
 ## Examples
 
 - **`examples/auth`** — a runnable CLI walkthrough of the whole flow.

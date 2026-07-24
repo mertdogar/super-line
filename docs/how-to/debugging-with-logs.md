@@ -70,6 +70,22 @@ redaction is what keeps secrets out of them. `@super-line/core` re-exports `SUPE
 sensible default (plaintext passwords, minted tokens/keys, JWTs, credentials, PII email — while letting
 identifiers like `authMethod`/`nodeKey` through).
 
+## A global backstop for unhandled errors
+
+super-line is a library, so it deliberately does **not** install `process.on('uncaughtException' | 'unhandledRejection')` — those are process-global and belong to your application (a library grabbing them would fight your own error handling, Sentry, or the test runner). If you want a catch-all for errors that escape your own `try`/`catch` — a rejected `authKit.users.create(...)` you forgot to await, say — add one in **your** app and correlate it with super-line's logs:
+
+```ts
+import { enableSuperLineLogging } from '@super-line/core'
+
+enableSuperLineLogging({ level: 'debug' })
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[app] unhandled rejection', reason)
+})
+```
+
+Note this only catches errors that reach the top with no handler. Most super-line throws are already handled — a request handler's throw becomes an error frame to the client, and a rejected `authenticate` is turned into a `401`. That `401` is otherwise silent (the reason never reaches the client), so the WebSocket transport logs a *thrown* auth error at `warning` under `['super-line', 'transport-websocket', 'auth']` — enable logging and a config bug, a nodeKey mistake, or a rejecting `authenticate` hook shows up as `authenticate threw — rejecting connection with 401` instead of a mystery drop. So a global `unhandledRejection` handler is a backstop for **your** code; seeing super-line's internals is what enabling the logs above is for.
+
 ## Structured, not stringified
 
 Every super-line log is structured — named placeholders plus a properties object — so a JSON sink

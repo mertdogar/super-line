@@ -1,5 +1,6 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http'
 import type { Duplex } from 'node:stream'
+import { getLogger } from '@logtape/logtape'
 import { WebSocketServer, type RawData, type WebSocket as WsServerSocket } from 'ws'
 import {
   type RawConn,
@@ -9,6 +10,8 @@ import {
   type AuthOutcome,
   type ReservedConnection,
 } from '@super-line/core'
+
+const logAuth = getLogger(['super-line', 'transport-websocket', 'auth'])
 
 /** Backpressure policy for the WS server: what to do when a connection's send buffer grows too large. */
 export interface Backpressure {
@@ -87,7 +90,13 @@ export function webSocketServerTransport(opts: WebSocketServerTransportOptions =
     let auth: AuthOutcome
     try {
       auth = await hooks!.authenticate(buildHandshake(req))
-    } catch {
+    } catch (err) {
+      // A rejected authentication becomes a bare 401 on the wire — the reason never reaches the client. Log
+      // it (via LogTape, off by default) so a THROWN auth error (a config bug, a nodeKey mistake, a rejecting
+      // authenticate hook) is visible WHEN the operator enables logging, rather than silently discarded. Not
+      // console — an app whose authenticate throws per-attempt would otherwise flood stderr. Routine rejections
+      // (bad password, expired token) return a guest and never throw, so this is quiet under normal logins.
+      logAuth.warning('authenticate threw — rejecting connection with 401 {error}', { error: err })
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
       socket.destroy()
       return

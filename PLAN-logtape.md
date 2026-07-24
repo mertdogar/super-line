@@ -118,10 +118,21 @@ the first (single global registry), and fight a host app that configures LogTape
 - **Phase 4 — release.** Minor bumps for the five packages (additive) — deferred to a separate `chore(release)`
   commit per repo convention.
 
+## Follow-up (post-plan additions)
+
+- **`nodeKey` clarity + the swallowed-auth-throw fix.** Sharpened both plugin-auth `nodeKey` error messages to
+  explain the session-reconciliation consequence (it throws at construction — a missing `nodeKey` was never
+  silent, but a non-stable one leaks sessions). And gave `transport-websocket` **one** log site ahead of the
+  broader transport rollout: its `authenticate` `catch` swallows a thrown auth error into a bare 401 — it now
+  logs that at `warning` under `['super-line','transport-websocket','auth']` (LogTape, not `console`, so an app
+  whose `authenticate` throws per-attempt doesn't flood stderr). `docs/how-to/debugging-with-logs.md` gains an
+  app-side `unhandledRejection` backstop recipe (a library must not own process-global handlers). Deps:
+  `transport-websocket` += `@logtape/logtape`.
+
 ## Explicitly out of scope
 
 - `logLevel` on the constructors (impossible under LogTape's global model — ADR-0018).
-- transports, adapters, collection backends, react (follow later, same pattern).
+- the rest of transports, adapters, collection backends, react (follow later, same pattern).
 - Bridging LogTape ↔ the inspector/Tap system — they stay complementary (internal diagnostics vs
   wire-traffic observability). No adapter between them.
 - `withContext`/`AsyncLocalStorage` implicit request tracing (not available in browsers; revisit if needed

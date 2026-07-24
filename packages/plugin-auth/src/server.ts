@@ -400,7 +400,12 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
     await initialization
     if (stopping) throw new Error('plugin-auth is shutting down')
     const ctx = pluginCtx
-    if (!ctx?.nodeKey) throw new Error('plugin-auth requires createSuperLineServer({ nodeKey })')
+    if (!ctx?.nodeKey) throw new Error(
+        'plugin-auth requires a stable createSuperLineServer({ nodeKey }): it keys per-node session ' +
+          'reconciliation, so without it sessions and presence cannot be managed. Use a value that is ' +
+          'stable across restarts (e.g. a replica name), NOT a random id — a nodeKey that changes each ' +
+          'boot leaks the previous boot’s sessions (they never get reconciled).',
+      )
     const now = Date.now()
     const sessionId = newId()
     await ctx.collection('sessions').insert({
@@ -443,7 +448,12 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
       if (userId) void track(refreshPresence(userId))
     },
     setup: (ctx) => {
-      if (!ctx.nodeKey) throw new Error('plugin-auth requires createSuperLineServer({ nodeKey })')
+      if (!ctx.nodeKey) throw new Error(
+        'plugin-auth requires a stable createSuperLineServer({ nodeKey }): it keys per-node session ' +
+          'reconciliation, so without it sessions and presence cannot be managed. Use a value that is ' +
+          'stable across restarts (e.g. a replica name), NOT a random id — a nodeKey that changes each ' +
+          'boot leaks the previous boot’s sessions (they never get reconciled).',
+      )
       pluginCtx = ctx
       initialization = (async () => {
         const now = Date.now()

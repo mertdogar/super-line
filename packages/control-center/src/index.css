@@ -109,3 +109,17 @@ body {
   border-color: var(--border);
   color: var(--foreground);
 }
+
+/* topology nodes are clickable: pointer + a subtle lift on hover (calmed under reduced-motion) */
+.react-flow__node {
+  cursor: pointer;
+  transition: filter 120ms ease-out;
+}
+.react-flow__node:hover {
+  filter: brightness(1.12);
+}
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__node {
+    transition: none;
+  }
+}

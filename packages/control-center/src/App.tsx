@@ -14,6 +14,7 @@ import { TopologyGraph } from '@/components/topology-graph'
 import { RoomLens } from '@/components/room-lens'
 import { ConnectionsTable } from '@/components/connections-table'
 import { ConnDetail } from '@/components/conn-detail'
+import { NodeDetail } from '@/components/node-detail'
 import { ContractExplorer } from '@/components/contract-explorer'
 import { LiveFeed } from '@/components/live-feed'
 import { CollectionsExplorer } from '@/components/collections-explorer'
@@ -99,6 +100,7 @@ export default function App(): React.JSX.Element {
   const [feed, setFeed] = React.useState<InspectorEnvelope[]>([])
   const [highlight, setHighlight] = React.useState<Highlight | null>(null)
   const [selectedConnId, setSelectedConnId] = React.useState<string | null>(null)
+  const [selectedNodeId, setSelectedNodeId] = React.useState<string | null>(null)
 
   const connect = React.useCallback((next: string) => {
     setUrl(next)
@@ -106,6 +108,23 @@ export default function App(): React.JSX.Element {
       localStorage.setItem(STORAGE_KEY, next)
     } catch {
       /* ignore */
+    }
+  }, [])
+
+  // Topology node selection: a conn opens the shared ConnDetail panel; a server opens NodeDetail. Only one
+  // detail is ever open, and the bus node (clusters only) has nothing to inspect.
+  const onTopoSelect = React.useCallback((sel: { id: string; kind: 'bus' | 'server' | 'conn' } | null) => {
+    if (!sel || sel.kind === 'bus') {
+      setSelectedConnId(null)
+      setSelectedNodeId(null)
+      return
+    }
+    if (sel.kind === 'conn') {
+      setSelectedNodeId(null)
+      setSelectedConnId(sel.id)
+    } else {
+      setSelectedConnId(null)
+      setSelectedNodeId(sel.id)
     }
   }, [])
 
@@ -207,6 +226,8 @@ export default function App(): React.JSX.Element {
                   node={nodeView}
                   highlight={highlight}
                   directory={directory}
+                  selectedId={selectedConnId ?? selectedNodeId}
+                  onSelect={onTopoSelect}
                 />
               </div>
               <RoomLens
@@ -242,12 +263,26 @@ export default function App(): React.JSX.Element {
               {view === 'resources' && <ResourcesPage />}
             </div>
           )}
-          {view === 'connections' && (
+          {(view === 'connections' || view === 'topology') && (
             <ConnDetail
               client={client}
               connId={selectedConnId}
               directory={directory}
               onClose={() => setSelectedConnId(null)}
+            />
+          )}
+          {view === 'topology' && (
+            <NodeDetail
+              nodeId={selectedNodeId}
+              topology={topology}
+              node={nodeView}
+              connections={connections}
+              directory={directory}
+              onClose={() => setSelectedNodeId(null)}
+              onSelectConn={(id) => {
+                setSelectedNodeId(null)
+                setSelectedConnId(id)
+              }}
             />
           )}
         </main>

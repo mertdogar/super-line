@@ -51,14 +51,19 @@ function styleFor(n: GraphNode, highlight: Highlight | null): React.CSSPropertie
     }
   }
   if (n.kind === 'server') {
+    // The hub: a distinct anchor that reads as "live" via a soft cyan signal glow when the node is alive.
     return {
       ...base,
       background: 'var(--color-card)',
-      border: '1px solid var(--color-border)',
+      border: `1px solid ${n.alive ? 'color-mix(in oklch, var(--color-primary) 45%, var(--color-border))' : 'var(--color-border)'}`,
       color: 'var(--color-foreground)',
       borderRadius: 12,
-      padding: '8px 12px',
-      minWidth: 96,
+      padding: '10px 14px',
+      minWidth: 108,
+      fontWeight: 500,
+      boxShadow: n.alive
+        ? '0 0 0 1px color-mix(in oklch, var(--color-primary) 20%, transparent), 0 0 26px -6px color-mix(in oklch, var(--color-primary) 55%, transparent)'
+        : 'none',
     }
   }
   const color = transportColor(n.transport)
@@ -69,8 +74,8 @@ function styleFor(n: GraphNode, highlight: Highlight | null): React.CSSPropertie
     border: `1px solid ${color}`,
     color: 'var(--color-foreground)',
     borderRadius: 8,
-    padding: '4px 9px',
-    boxShadow: highlighted ? `0 0 0 2px ${color}` : 'none',
+    padding: '5px 10px',
+    boxShadow: highlighted ? `0 0 0 1.5px ${color}, 0 0 16px -4px ${color}` : 'none',
   }
 }
 
@@ -80,36 +85,66 @@ export function TopologyGraph({
   node,
   highlight,
   directory,
+  selectedId,
+  onSelect,
 }: {
   topology: NodeStat[]
   connections: ConnDescriptor[]
   node: NodeView | null
   highlight: Highlight | null
   directory: Directory
+  selectedId: string | null
+  onSelect: (sel: { id: string; kind: GraphNode['kind'] } | null) => void
 }): React.JSX.Element {
+  const prefersReduced = React.useSyncExternalStore(
+    (cb) => {
+      const m = window.matchMedia('(prefers-reduced-motion: reduce)')
+      m.addEventListener('change', cb)
+      return () => m.removeEventListener('change', cb)
+    },
+    () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    () => false,
+  )
+
   const { nodes, edges, truncated } = React.useMemo(() => {
     const g = buildGraph(topology, connections, node)
-    const nodes: Node[] = g.nodes.map((n) => ({
-      id: n.id,
-      position: { x: n.x, y: n.y },
-      data: { label: labelFor(n, directory) },
-      style: styleFor(n, highlight),
-      draggable: true,
-      connectable: false,
-      selectable: false,
-    }))
-    const edges: Edge[] = g.edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      animated: e.kind === 'bus',
-      style: {
-        stroke: e.kind === 'bus' ? 'var(--color-primary)' : 'var(--color-border)',
-        strokeWidth: e.kind === 'bus' ? 1.5 : 1,
-      },
-    }))
+    const nodes: Node[] = g.nodes.map((n) => {
+      const base = styleFor(n, highlight)
+      return {
+        id: n.id,
+        position: { x: n.x, y: n.y },
+        data: { label: labelFor(n, directory), kind: n.kind },
+        style:
+          n.id === selectedId
+            ? {
+                ...base,
+                boxShadow:
+                  '0 0 0 2px var(--color-primary), 0 0 20px -4px color-mix(in oklch, var(--color-primary) 60%, transparent)',
+              }
+            : base,
+        draggable: true,
+        connectable: false,
+        selectable: false,
+      }
+    })
+    // Edges are the wire: a faint cyan signal converging on the hub. Gently animated (the "realtime made
+    // visible" motif), held static under reduced-motion. The bus link is brighter — it carries every node.
+    const edges: Edge[] = g.edges.map((e) => {
+      const isBus = e.kind === 'bus'
+      return {
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        animated: !prefersReduced,
+        style: {
+          stroke: 'var(--color-primary)',
+          strokeOpacity: isBus ? 0.6 : 0.3,
+          strokeWidth: isBus ? 1.5 : 1.25,
+        },
+      }
+    })
     return { nodes, edges, truncated: g.truncated }
-  }, [topology, connections, node, highlight, directory])
+  }, [topology, connections, node, highlight, directory, prefersReduced, selectedId])
 
   return (
     <div className="relative h-full w-full">
@@ -117,9 +152,12 @@ export function TopologyGraph({
         nodes={nodes}
         edges={edges}
         fitView
+        fitViewOptions={{ padding: 0.28 }}
         nodesConnectable={false}
         edgesFocusable={false}
         minZoom={0.2}
+        onNodeClick={(_, n) => onSelect({ id: n.id, kind: (n.data as { kind: GraphNode['kind'] }).kind })}
+        onPaneClick={() => onSelect(null)}
       >
         <Background color="#2b2b35" gap={20} />
         <Controls showInteractive={false} />

@@ -4,6 +4,8 @@
 - Date: 2026-06-23
 - Supersedes: [ADR-0001](./0001-automerge-over-yjs-for-synced-scene-state.md)
 
+> **Vocabulary note (2026-07-24).** This ADR predates the collections redesign: the `Store`/`CrdtStore` seam it names became `CrdtCollectionStore` when CRDT documents were folded into collections ([ADR-0007](./0007-crdt-docs-are-typed-collections.md)), and the store packages it anticipates shipped and were later relocated to `collections-crdt-*`. The decision itself stands — Yjs via `super-store` (`@super-store/store`) is still the CRDT engine behind every CRDT collection backend.
+
 ## Context
 
 ADR-0001 chose **Automerge (3.x)** as super-line's first CRDT binding for the OMMA Scene, primarily for its plain-JSON `change(doc, fn)` ergonomics, and accepted Automerge's Rust→WASM weight (hundreds of KB + async init + cold-start) as the main downside.
@@ -20,7 +22,7 @@ Rationale:
 1. **The plain-JSON argument that favored Automerge is neutralized.** ADR-0001's decisive point was that Automerge merges plain objects for free while "Yjs requires explicitly constructed shared types (or a third-party plain-object layer like `syncedStore`)." `super-store` *is* that plain-object layer — already written, tested, and production-shaped — so Yjs now offers the same plain-object ergonomics that tipped the original decision.
 2. **Yjs avoids ADR-0001's main accepted downside.** Yjs is ~18 kB of pure JS with no WASM core, async init, or cold-start penalty — directly removing the cost ADR-0001 flagged as its primary consequence (relevant for browser bundle size and serverless/edge cold-start).
 3. **It reflects reality.** The engine is built. Keeping ADR-0001 Accepted would document a decision the codebase has already moved past.
-4. **The Store layer stays CRDT-agnostic regardless.** super-line relays opaque [[Change]] bytes (see ADR-0003 / `docs/guide/synced-state.md`); the binding choice lives entirely inside the `CrdtStore` implementation, so an Automerge-backed `CrdtStore` remains possible later without touching core. This decision is about the *first* binding, not an exclusive one.
+4. **The Store layer stays CRDT-agnostic regardless.** super-line relays opaque [[Change]] bytes (see ADR-0003 / `docs/guide/synced-state.md`, now `docs/collections/crdt-documents.md`); the binding choice lives entirely inside the `CrdtStore` implementation, so an Automerge-backed `CrdtStore` remains possible later without touching core. This decision is about the *first* binding, not an exclusive one.
 
 ## Consequences
 

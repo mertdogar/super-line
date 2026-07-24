@@ -10,8 +10,10 @@
 ## Context
 
 ADR-0006 introduced collections as the relational successor to the LWW store family, but
-explicitly walled off CRDT documents: "collaborative documents are a different animal — opaque
-deltas, unvalidatable, unfilterable." That inherited ADR-0003's load-bearing claim that **CRDT
+explicitly walled off CRDT documents — in its plan's words, "collaborative documents are a
+different animal (opaque deltas — unvalidatable, unfilterable)" (`PLAN-collections.md`; the
+ADR itself kept docs as the family "whose payloads are unvalidatable by construction").
+That inherited ADR-0003's load-bearing claim that **CRDT
 deltas are unvalidatable in principle**, which is why stores were kept off-contract and untyped.
 
 The result was two parallel persisted-state concepts — `collection(n)` (typed rows) and `store(n)`

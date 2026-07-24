@@ -1,4 +1,8 @@
-# Merged contracts retain their plugin fragments
+# ADR-0016: Merged contracts retain their plugin fragments
+
+- Status: Accepted
+- Date: 2026-07-23
+- Amends: [ADR-0019](0019-plugins-grow-a-contract-time-half.md) (contract-time plugin fragments; recorded retroactively, hence the later number — the merge as originally shipped discarded the plugin list, this ADR keeps it)
 
 `defineContract({ plugins: [...] })` merged each fragment's collections and surface keys into one flat contract and then **discarded the plugin list**, so nothing downstream could tell which plugin contributed what — the inspector's `getContract` returned two dozen `shared` requests from two different plugins as an undifferentiated wall, and the Control Center had to guess at a plugin's presence by sniffing collection names. The merged contract now keeps `plugins` (the `ContractPlugin[]` it was given), `ResolveContract` no longer omits it from the resulting type, and the inspector projects it onto the wire as per-plugin key lists.
 

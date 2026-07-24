@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-04
+- Amended by: [ADR-0019](0019-plugins-grow-a-contract-time-half.md) — the "runtime-only" boundary below gained a contract-time half (`defineContract({ plugins })`); the server-factory half stays runtime-only exactly as decided here
 
 ## Context
 

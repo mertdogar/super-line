@@ -3,6 +3,32 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## 2026-07-24
+
+### Features
+
+- **plugin-auth:** ResolveToken + AuthState.error ([3f8a129])
+- **plugin-auth:** TokenParam + rejectUnauthenticated ([28b9798])
+- **plugin-auth:** Retire client-side token minting ([ae2f7d2])
+- **adapter-libp2p:** LogTape diagnostics for the gossipsub mesh ([38f7f14])
+- **logging:** Surface swallowed auth throws + clarify the nodeKey requirement ([0120e54])
+- **logging:** Adopt LogTape for structured internal diagnostics (ADR-0018) ([6e4b841])
+- **plugin-auth:** Server-side hooks around authenticate + the imperative kit ([4763c80])
+
+### Bug Fixes
+
+- **docs:** Boot the landing chat demo — declare the userPresence collection ([235c228])
+
+### Refactor
+
+- **example/transports:** Drive JwtSession through resolveToken ([3d1af7b])
+
+### Documentation
+
+- **auth:** Make plugin-auth a first-class Authentication section ([3d9c1a7])
+- **auth:** Add sealed-token tutorial and lifecycle explanation ([abb0897])
+- **changelog:** Refresh the root aggregate for collections-pglite 0.3.1 ([8c89d2f])
+
 ## 2026-07-23
 
 ### Bug Fixes

@@ -14,7 +14,7 @@ defineContract(<const C>): C                 // identity; preserves literal keys
   }
   roles: Record<string, {                    // at least one role
     data?: Schema                            // optional: types this role's mutable, server-only conn.data
-    env?: Schema                             // optional: types this role's server-vended, CLIENT-VISIBLE conn.env (ADR-0012)
+    env?: Schema                             // optional: types this role's server-vended, CLIENT-VISIBLE conn.env
     clientToServer?: Record<string, { input: Schema; output: Schema }>
     serverToClient?: Record<string, ServerEntry>
   }>
@@ -60,6 +60,20 @@ interface Adapter {                          // cross-node fan-out seam
 // InferIn<S>, InferOut<S>
 ```
 
+### Logging
+
+super-line logs internally through [LogTape](https://logtape.org) under the category tree `['super-line', '<pkg>', '<subsystem>']` (e.g. `['super-line','server','dispatch']`, `['super-line','plugin-auth','authn']`). There is **no per-instance `logger:` option** — logging is app-configured, so a host filters or routes it once for the whole process.
+
+```ts
+enableSuperLineLogging(opts?: { level?: LogLevel; redact?: boolean }): void   // default level 'debug', redact true
+LOG_ROOT: 'super-line'                    // the category root to filter on in your own configure()
+SUPER_LINE_REDACT_FIELDS: RegExp[]        // curated secret field-name patterns (password/token/jwt/apiKey/secret/email/…)
+```
+
+- **The one-line debug switch:** `enableSuperLineLogging({ level: 'debug' })` — a pretty console sink with field-name redaction over structured props plus JWT-pattern redaction over the formatted text.
+- **It owns the process-global LogTape config** (it calls `configureSync({ reset: true })`). Use it **or** your own `configure()`, never both — the later call replaces the earlier. An app that manages LogTape itself should add a `['super-line']` logger to its own config and wrap its sink in `redactByField(sink, SUPER_LINE_REDACT_FIELDS)`.
+- `redact: false` only for trusted local runs. Guide: `/how-to/debugging-with-logs`.
+
 ## @super-line/server
 
 ```ts
@@ -72,8 +86,12 @@ interface SuperLineServerOptions<C, A> {
   transports: ServerTransport[]               // REQUIRED. e.g. [webSocketServerTransport({ server })] from @super-line/transport-websocket
   serializer?: Serializer                     // default jsonSerializer; MUST match the client
   adapter?: Adapter                           // default: per-server in-memory; use redis for multi-node
+  nodeName?: string                           // friendly name in srv.nodeName + cluster descriptor + Control Center topology
+  nodeKey?: string                            // STABLE replica identity across restarts, for plugins that persist node-owned
+                                              // state. REQUIRED by @super-line/plugin-auth (it keys per-node session
+                                              // reconciliation on it) — a changing value leaks prior-boot sessions.
   authenticate: (h: Handshake) => A | Promise<A>   // REQUIRED. Return { role, ctx, env? }; throw -> 401. h = { transport, headers, query, peer?, raw }
-  // env (ADR-0012, optional) seeds the connection's client-visible conn.env before the connection is ready — see "Connection env" below
+  // env (optional) seeds the connection's client-visible conn.env before the connection is ready — see "Connection env" below
   authorizeSubscribe?: (topic, ctx, conn) => boolean | void | Promise<boolean | void> // false/throw -> deny
   use?: Middleware<A>[]                        // run before request/subscribe handlers
   onConnection?: (conn, ctx) => void           // runs just BEFORE the presence snapshot (seed conn.data here)
@@ -128,12 +146,12 @@ interface ConnTarget<C> {                                            // single, 
   emit<E extends keyof SharedEvents<C>>(event: E, data): void        // shared events only
   request<M extends keyof SharedServerRequests<C>>(name: M, input, opts?: { timeout?: number; signal?: AbortSignal }): Promise<output>
   close(): void                                                      // cross-node kick
-  setEnv(env: AnyEnv<C>): void                                       // vend/update this conn's client-visible env, cross-node (ADR-0012)
+  setEnv(env: AnyEnv<C>): void                                       // vend/update this conn's client-visible env, cross-node
 }
 interface UserTarget<C> {                                            // 0..N devices — NO request() (ambiguous)
   emit<E extends keyof SharedEvents<C>>(event: E, data): void
   disconnect(): void
-  setEnv(env: AnyEnv<C>): void                                       // vend/update env on EVERY one of the user's conns, cross-node (ADR-0012)
+  setEnv(env: AnyEnv<C>): void                                       // vend/update env on EVERY one of the user's conns, cross-node
 }
 // ConnDescriptor: serializable snapshot (NOT a live Conn). { id, role, nodeId, connectedAt, userId?, rooms, ...describeConn }
 // lastPongAt is node-local and NOT in the registry. Snapshot is taken at connect (seed via onConnection).
@@ -164,7 +182,7 @@ class Conn<Ev, Ctx, Role, Data = unknown, Env = unknown> {
   lastPongAt?: number                          // last heartbeat pong (liveness) — node-local
   lastPingAt?: number                          // last heartbeat ping sent
   data: Data                                   // mutable, SERVER-ONLY per-conn state, typed per role (contract `data` schema); starts {}
-  env: Env                                     // server-vended, CLIENT-VISIBLE per-conn state (contract `env` schema, ADR-0012); null if the role declares none
+  env: Env                                     // server-vended, CLIENT-VISIBLE per-conn state (contract `env` schema); null if the role declares none
   readonly channels: Set<string>
   send(frame): void                            // internal frame (you rarely call this)
   sendRaw(payload): void
@@ -220,7 +238,7 @@ type SuperLineClient<C, R> = {
   close(): void
   readonly connected: boolean
   readonly role: R
-  readonly env: EnvHandle<EnvOf<C, R> | null>   // server-vended, client-visible per-conn state (ADR-0012). See "Connection env" below.
+  readonly env: EnvHandle<EnvOf<C, R> | null>   // server-vended, client-visible per-conn state. See "Connection env" below.
 }
 
 interface EnvHandle<E> {
@@ -308,12 +326,12 @@ createSuperLineHooks<C, R extends keyof C['roles']>(): {
     update: (partial) => void                              // merge keys
     delete: (path: (string | number)[]) => void            // surgical key removal
   }
-  useEnv(): EnvOf<C, R> | null   // reactive client.env.current (ADR-0012); null until the first server push / for a role with no env
+  useEnv(): EnvOf<C, R> | null   // reactive client.env.current; null until the first server push / for a role with no env
 }
 ```
 Create the client once (e.g. `useState(() => createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user' }))`, `webSocketClientTransport` from `@super-line/transport-websocket`), wrap with `<Provider client={client}>`, then use the hooks inside.
 
-## Connection env (ADR-0012)
+## Connection env
 
 `env` is a typed, per-connection, **server-owned, client-visible**, mutable, ephemeral state bag — the visibility-mirror of `conn.data` (server-only): `data` is your server-side scratch, `env` is the same but the client sees it. It exists to hand a live connection working credentials/config (an external API key, a project id) that the CLIENT's own code — never an LLM — wires into outbound calls. Never persisted; re-seeded on every reconnect.
 
@@ -350,7 +368,7 @@ const env = useEnv()                  // EnvOf<C,R> | null; reactive, re-renders
 - **Never persisted.** Lives only in memory on the connection; re-seeded from `authenticate`/`resolveEnv` on reconnect. Any durable *authorization* is the host app's concern, not super-line's.
 - **Inspector: masked by default.** The Control Center's `ConnView` and its `env.set` live-feed event show `env`'s shape but mask every value to `•••` — the OPPOSITE of `ctx`/`data`'s deny-list `redact`. Allow-list the safe keys with `inspector({ revealEnvKeys: ['projectId'] })`.
 
-Code-only: wire `env` into tool implementations / outbound calls in your own code; never render or forward a raw value to an LLM. Design: `docs/adr/0012-connection-env-is-server-vended-client-visible-state.md`.
+Code-only: wire `env` into tool implementations / outbound calls in your own code; never render or forward a raw value to an LLM.
 
 ## Collections (typed rows)
 
@@ -399,7 +417,7 @@ const users = createCollection(superLineCollectionOptions(client, api, 'users'))
 createLiveQueryCollection((q) => q.from({ m: messages }).join({ u: users }, ({ m, u }) => teq(u.id, m.authorId), 'inner').select(({ m, u }) => ({ id: m.id, text: m.text, author: u.name })))
 ```
 
-Backends (all drop-in, one line to swap): `@super-line/collections-memory` (in-memory · relay) · `collections-sqlite` (SQLite · relay, IR→SQL snapshot pushdown) · `collections-pglite` (central Postgres + Electric→PGlite · **self**, no adapter). Inspector: `listCollections` / `queryCollection` + a Control Center **Collections** view (schema graph + row browser). Guide: `docs/collections/`; example: `examples/collections`.
+Backends (all drop-in, one line to swap): `@super-line/collections-memory` (in-memory · relay) · `collections-sqlite` (SQLite · relay, IR→SQL snapshot pushdown) · `collections-pglite` (central Postgres + Electric→PGlite · **self**, no adapter). Inspector: `listCollections` / `queryCollection` + a Control Center **Collections** view (schema graph + row browser). Guide: `/collections/`; example: `examples/collections`.
 
 ### CRDT document collections
 
@@ -427,18 +445,27 @@ await doc.ready
 - **Validate-before-commit** — CRDT deltas ARE schema-validated. The ingress node merges each delta onto a scratch copy, snapshots to plaintext, validates against the contract schema, then commits + fans out **only if valid**; relay nodes trust the already-validated relayed delta. So a CRDT doc is schema-enforced end-to-end.
 - **Reject → resync.** A rejected write (schema or write-policy) was applied optimistically, so the client re-opens and hard-**resets** its replica to authoritative, discarding the bad edit (`onStoreError` still fires). Validation runs on the **post-merge** state, so keep CRDT schemas to per-field/structural rules — an aggregate/cross-field constraint (maxItems, sum-of-fields) can reject a valid-looking concurrent write; put those in requests.
 - Access = guard-shaped `CrdtCollectionPolicy` (`read(principal,id,snapshot?)→bool`, `write(principal,id)→bool`), deny-by-default — NOT the RLS filter shape LWW rows use. Wire: per-doc channel `d:<n>:<id>`, frames `cdopen/cdwr/cdchg/cddel/cdclose`.
-- Backends: `collections-crdt-memory` (relay + the universal `crdtCollectionsClient`) · `collections-crdt-libsql` (durable · relay, `await crdtLibsqlCollections`, snapshot-per-doc) · `collections-crdt-pglite` (**self**: `await crdtPgliteCollections({ pgUrl, electricUrl?, docOptions? })` — central Postgres Yjs op-log + per-node Electric→PGlite replica, validate-before-commit at ingress, no adapter). Inspector surfaces them in `listCollections` (synthetic `id` key) + `queryCollection` synthesizes `{ id, ...snapshot }` doc-rows (browsable in the Control Center Collections view). Guide: `docs/collections/crdt-documents.md`; example: `examples/ai-canvas`.
+- Backends: `collections-crdt-memory` (relay + the universal `crdtCollectionsClient`) · `collections-crdt-libsql` (durable · relay, `await crdtLibsqlCollections`, snapshot-per-doc) · `collections-crdt-pglite` (**self**: `await crdtPgliteCollections({ pgUrl, electricUrl?, docOptions? })` — central Postgres Yjs op-log + per-node Electric→PGlite replica, validate-before-commit at ingress, no adapter). Inspector surfaces them in `listCollections` (synthetic `id` key) + `queryCollection` synthesizes `{ id, ...snapshot }` doc-rows (browsable in the Control Center Collections view). Guide: `/collections/crdt-documents`; example: `examples/ai-canvas`.
 
 ## @super-line/plugin-auth
 
-First-party authentication as a **paired plugin** — a contract fragment + a runtime server plugin + a client. Subpath exports: `.` (contract half), `/server`, `/client`, `/react`. Identity lives in collections (`users` public; `credentials`/`sessions`/`apiKeys`/`passwordResets` deny-all). Only the `guest` role is hardcoded; every other role is data-driven from the user's `roles[]`.
+First-party authentication as a **paired plugin** — a contract fragment + a runtime server plugin + a client. Subpath exports: `.` (contract half), `/server`, `/client`, `/react`. Identity lives in **seven** collections: `users` (public directory) and `userPresence` (safe public aggregate) are client-readable; `credentials`/`accessTokens`/`sessions`/`apiKeys`/`passwordResets` are deny-all. Only the `guest` role is hardcoded; every other role is data-driven from the user's `roles[]`.
 
 ```ts
 // . (contract half)
-authContract(): ContractPlugin        // merges the `guest` role + the identity collections + the shared/guest auth requests INTO the contract
+authContract(): ContractPlugin        // merges the `guest` role + the 7 identity collections + the shared/guest auth requests INTO the contract
 GUEST_ROLE = 'guest'
-// schemas + types: userSchema/credentialSchema/sessionSchema/apiKeySchema/passwordResetSchema;
-//   AuthUser, AuthCredential, AuthSession, AuthApiKey, AuthContext { userId: string|null; roles: string[]; sessionId: string|null }
+// schemas: userSchema/credentialSchema/accessTokenSchema/sessionSchema/userPresenceSchema/apiKeySchema/passwordResetSchema
+// types:   AuthUser, AuthCredential, AuthAccessToken, AuthSession, AuthUserPresence, AuthApiKey, AuthPasswordReset
+interface AuthContext<Claims = Record<string, unknown>, Sealed = Record<string, unknown>> {  // = conn.ctx, uniform across roles
+  userId: string | null; roles: string[]; sessionId: string | null
+  authMethod: string | null    // 'access-token' | 'api-key' | 'jwt' (signed) | 'jwt-sealed' | null (guest)
+  authId: string | null        // the access-token / api-key row id backing this connection
+  claims?: Claims              // a bearer assertion's PUBLIC payload — assertion connections only
+  sealed?: Sealed              // a sealed assertion's ENCRYPTED payload, decrypted server-side; never readable by the holder
+}
+// userPresence row: { userId, connectedAt: number|null, lastSeenAt: number|null } (key 'userId') — client-readable
+//   when usersReadable; the safe aggregate of a user's sessions (drives online dots without exposing session rows).
 
 // /server — the factory is `auth`; bind the result to `authKit`
 auth<C>(opts: AuthServerOptions<C>): AuthServer<C>
@@ -447,18 +474,44 @@ interface AuthServerOptions<C> {
   collections: CollectionStore          // MUST be the SAME store instance passed to createSuperLineServer
   defaultRoles?: string[]               // default ['user']; must be contract roles
   accessTokenTtlMs?: number             // default 30 days
-  usersReadable?: boolean               // default true (open read on `users`)
-  jwt?: { secret: string; ttlMs?: number }   // enables server-side minting (authKit.tokens.*) + stateless ?jwt= connect; ttl default 15 min
+  usersReadable?: boolean               // default true (open read on `users` + `userPresence`)
+  jwt?: AssertionOptions                // enables server-side minting (authKit.tokens.*) + stateless params:{ jwt } connect. See "Bearer assertions"
+  rejectUnauthenticated?: boolean       // default false. true ⇒ a PRESENTED-but-invalid credential throws UNAUTHORIZED at
+                                        // connect instead of silently resolving to guest. A credential-LESS connect (and an
+                                        // explicit role:'guest') still resolves guest either way.
   sendPasswordReset?: (a: { user: AuthUser; token: string }) => void | Promise<void>
   passwordResetTtlMs?: number           // default 1 hour
-  resolveEnv?: (ctx: AuthContext) => AnyEnv<C> | undefined | Promise<AnyEnv<C> | undefined>   // ADR-0012: seeds client.env at connect from the resolved identity; undefined = none
+  resolveEnv?: (ctx: AuthContext) => AnyEnv<C> | undefined | Promise<AnyEnv<C> | undefined>   // seeds client.env at connect from the resolved identity; undefined = none
+  hooks?: AuthHooks<C>                  // before/after around authenticate + the imperative kit. ⚠️ payloads carry RAW secrets
+  onHookError?: (error: unknown, op: string) => void   // sink for a swallowed non-vetoable hook throw. Default console.error
 }
 interface AuthServer<C> {
-  authenticate: (h: Handshake) => Promise<AuthResult<C>>   // → { role, ctx: { userId, roles, sessionId }, env? }
+  authenticate: (h: Handshake) => Promise<AuthResult<C>>   // → { role, ctx: AuthContext, env? }
   identify: (conn) => string | undefined                   // principal = ctx.userId
   plugin: SuperLinePlugin                                  // runtime half: auth handlers + row policies for the identity collections
-  revoke: (userId: string) => Promise<void>               // delete the user's sessions + toUser(userId).disconnect() cluster-wide
-  pushEnv: (userId: string, env: AnyEnv<C>) => void        // ADR-0012: update client.env live, cluster-wide (rotation/re-scope) — wraps srv.toUser(userId).setEnv
+  revoke: (userId: string) => Promise<void>               // revoke access tokens + end sessions + toUser(userId).disconnect() cluster-wide
+  pushEnv: (userId: string, env: AnyEnv<C>) => void        // update client.env live, cluster-wide (rotation/re-scope) — wraps srv.toUser(userId).setEnv
+  users: AuthUsersApi                                      // get/find/create/update/setRoles/deactivate/reactivate
+  credentials: AuthCredentialsApi                          // create/setPassword
+  apiKeys: AuthApiKeysApi                                  // create/listFor/revoke
+  tokens: AuthTokensApi                                    // mintSigned/mintSealed/verify — needs auth({ jwt })
+}
+
+// hooks — nested to MIRROR the authKit surface; every field optional. Server-invoked ops only:
+// the client request handlers (signIn/signUp/…) are deliberately absent — they already have a veto seam in `use:` middleware.
+interface AuthOpHook<In, Out> {
+  before?: (input: In) => In | undefined | void | Promise<…>   // return a value to TRANSFORM, throw to VETO
+  after?: (result: Out) => void | Promise<void>                // a throw propagates; the write already happened
+}
+interface AuthHooks<C> {
+  authenticate?: {                                          // fires for EVERY resolution, guests included
+    before?: (h: Handshake) => Handshake | undefined | void | Promise<…>          // ⚠️ h.query carries jwt / apiKey
+    after?: (r: AuthResultOf<C>, h: Handshake) => AuthResultOf<C> | undefined | void | Promise<…>  // may TRANSFORM (enrich ctx, override env, change role)
+  }
+  users?: { create?; update?; setRoles?; deactivate?; reactivate? }   // deactivate.before CANNOT veto → throw routes to onHookError
+  credentials?: { create?; setPassword? }
+  apiKeys?: { create?; revoke? }                             // apiKeys.create.after receives the raw `slp_…` key
+  tokens?: { mintSigned?; mintSealed? }
 }
 
 // /client
@@ -467,11 +520,24 @@ interface AuthClientOptions<C, R> {
   authedRole: R
   connect: (a: { role: string; params: Record<string, string> }) => SuperLineClient<C, R>   // build a client for the given role + params
   storage?: TokenStorage                // default localStorage key 'superline.auth.token'
+  tokenParam?: string                   // handshake param the token rides under. Default 'token' (password access token);
+                                        // set 'jwt' to connect with a server-minted assertion (→ authMethod 'jwt'/'jwt-sealed')
+  resolveToken?: () => Promise<{ token: string } | null>
+  // Async token source for an out-of-band mint. REPLACES the persisted-storage restore as the boot source: start as
+  // `guest`, await the first resolveToken() before `ready` resolves, swap to authedRole if it yields a token.
+  // `null` ⇒ stay guest, no error. Its result is NEVER persisted (the source owns re-acquisition).
+}
+interface AuthState {
+  status: 'guest' | 'authed'
+  error?: { reason: string } | null    // set when a PRESENTED token was rejected (bad resolveToken result, or a
+                                       // rejectUnauthenticated refusal) — render a reconnect banner instead of
+                                       // NOT_FOUND-ing every call. A resolveToken returning null stays guest with NO error.
+  userId: string | null; displayName: string | null; roles: string[]
 }
 interface AuthClient<C, R> {
   readonly client: SuperLineClient<C, R>   // swaps guest↔authed under the hood
-  readonly state: AuthState                // { status: 'guest' | 'authed'; userId; displayName; roles }
-  readonly ready: Promise<void>            // await before reading state on load (confirms a persisted token via whoami)
+  readonly state: AuthState
+  readonly ready: Promise<void>            // await before reading state on load (confirms the boot token — persisted or resolveToken'd)
   subscribe(cb: (s: AuthState) => void): () => void
   signUp(i: { email; password; displayName }): Promise<void>
   signIn(i: { email; password }): Promise<void>
@@ -483,23 +549,65 @@ createAuth<C, R>(opts: AuthClientOptions<C, R>): { AuthProvider, useAuth, auth }
 //   useAuth() → { client, state, ready: boolean, signUp, signIn, signOut }
 ```
 
-Shared requests (every role): `signOut` / `whoami` / `createApiKey` / `listApiKeys` / `revokeApiKey`. Guest-only: `signIn` / `signUp` / `requestPasswordReset` / `confirmPasswordReset`. Bearer assertions are minted server-side (`authKit.tokens.mintSigned` / `mintSealed`) — there is no client-facing mint.
+Shared requests (every role): `signOut` / `whoami` / `createApiKey` / `listApiKeys` / `revokeApiKey`. Guest-only: `signIn` / `signUp` / `requestPasswordReset` / `confirmPasswordReset`.
+
+### Bearer assertions — signed vs sealed
+
+Both kinds are JWTs, both connect through the same `params: { jwt }` (super-line tells them apart by shape: a compact JWS has 2 dots, a JWE has 4), and both are **server-minted only** — there is no client-facing mint, which is exactly what makes `ctx.claims`/`ctx.sealed` trustworthy as server-authored data.
+
+|  | **signed** (JWS) | **sealed** (JWE) |
+|---|---|---|
+| payload | **public** — any holder can read it | **opaque even to its own holder** |
+| roles from | the token's own claims | the **user row at connect** (a later grant is live on the next connection) |
+| `authMethod` | `'jwt'` | `'jwt-sealed'` |
+| use it to | hand identity to a service that can't call home (verifies offline with `jose`) | route a secret **through** an untrusted client |
+
+```ts
+interface AssertionOptions {              // = the `jwt` option
+  secret?: string                         // zero-config: HS256 signing + an HKDF-SHA256-derived `dir` content-encryption key
+  ttlMs?: number                          // default 15 minutes
+  signed?: { alg?: string; key?: string | JWK }          // alg defaults to the JWK's own, else HS256
+  sealed?: { alg?: string; enc?: string; key?: string | JWK }   // defaults alg 'dir', enc 'A256GCM'
+  claims?: Schema                         // any Standard Schema — validates the PUBLIC bag at mint AND verify
+  sealedClaims?: Schema                   // same for the sealed bag
+}
+interface AuthTokensApi {
+  mintSigned(userId, opts?: { claims?: unknown; expiresInMs?: number }): Promise<{ token: string; expiresAt: number }>
+  mintSealed(userId, opts?: { claims?: unknown; sealed?: unknown; expiresInMs?: number }): Promise<{ token: string; expiresAt: number }>
+  verify(token: string): Promise<VerifiedAssertion | null>   // null for anything that would NOT authenticate:
+  //   bad signature, wrong alg, expired, undecryptable, or a DEACTIVATED subject. Returns the subject's CURRENT roles.
+}
+interface VerifiedAssertion { kind: 'signed'|'sealed'; userId; jti: string|null; issuedAt; expiresAt
+                              roles: string[]   // asserted by a `signed` token; always [] for `sealed`
+                              claims: Record<string, unknown>; sealed?: Record<string, unknown> }
+```
+
+- **Verification always uses the algorithms YOU configured** — the token's own header never selects a key, which closes the alg-confusion attack.
+- **You cannot revoke an assertion.** `authKit.revoke(userId)` flushes access tokens, ends sessions and disconnects live connections, but an outstanding assertion is in no table and works until `exp` — keep `ttlMs` short. The escape hatch is `authKit.users.deactivate(id)`: connect performs one user read (the deliberate dent in statelessness), so deactivation closes even a validly-signed door.
 
 Notes:
+- **A stable `nodeKey` is REQUIRED.** `createSuperLineServer({ nodeKey: 'app-replica-1', … })` — the plugin keys per-node session reconciliation on it and **throws at boot without one**. Use a stable replica name, never a random id: a value that changes each restart leaks prior-boot sessions.
 - **The factory is `auth()`**, not `createAuthKit`. Pass the **same `CollectionStore`** to `auth({ collections })` and `createSuperLineServer({ collections })` — `authenticate` reads sessions/users/apiKeys directly off it.
 - **Login is a reconnect, not an upgrade.** A connection's role is frozen at connect, so `signIn`/`signUp` tear down the guest socket and reconnect as `authedRole` with `params: { token }`. Token persisted at `superline.auth.token`; `authClient` hides the guest↔authed swap.
-- **Handshake precedence in `authenticate`:** `role === 'guest'` → guest; else `params.apiKey` (`slp_…`, one fixed role, stateful + revocable); else `params.jwt` (only if `jwt.secret` set — stateless, unrevocable pre-expiry); else `params.token` (session). Token/JWT paths throw `BAD_REQUEST` if no role requested, `FORBIDDEN` if the role isn't granted.
+- **Handshake precedence in `authenticate`:** `role === 'guest'` → guest; else `params.apiKey` (`slp_…`, one fixed role, stateful + revocable); else `params.jwt` (only if `jwt` is configured — stateless, unrevocable pre-expiry); else `params.token` (access token). Token/JWT paths throw `BAD_REQUEST` if no role requested, `FORBIDDEN` if the role isn't granted.
+- **A bad credential DEGRADES TO GUEST by default** — an expired/forged/deactivated credential resolves to `guest` and the connection is *accepted* there, so a client built for `user` then `NOT_FOUND`s on every call rather than seeing a connect error. Either confirm with `whoami()` (shared; `null` for a guest — this is what `authClient` does) or set `rejectUnauthenticated: true` to make a presented-but-invalid credential throw `UNAUTHORIZED` at connect. A credential-*less* connect still resolves guest either way.
+- **`userPresence` is the client-readable presence surface.** The plugin maintains one row per user (`connectedAt`/`lastSeenAt`, `null` when offline) as a safe aggregate of the deny-all `sessions` rows — subscribe to it for online dots instead of exposing session rows. Readable when `usersReadable` (the default); a contract that hand-declares the auth collections instead of merging `authContract()` must declare it too, or `chat()` and presence break.
 - `createApiKey` returns the raw `slp_…` value **once** and requires you already hold the requested role. `revoke(userId)` deletes sessions + disconnects cluster-wide but does NOT revoke API keys (do those per-key). `requestPasswordReset` is a silent no-op without `sendPasswordReset` and always returns `{ ok: true }` (never leaks email existence); `confirmPasswordReset` flushes all the user's sessions.
 - **Imperative server management** (on `AuthServer`, for provisioning users + agents from server code — all require the running server): `authKit.users.get/find/create/update/setRoles/deactivate/reactivate`, `authKit.credentials.create/setPassword`, and `authKit.apiKeys.create/listFor/revoke`. `users.create({ displayName, roles?, metadata? })` creates only a profile. Attach email/password authentication with `credentials.create(userId, { email, password? })`; omit `password` for the invite flow. API-key-only agents have no credential row. Users **soft-delete**: `deactivate(id)` stamps `deletedAt`, revokes access tokens and API keys, ends sessions, clears reset tokens, and kicks live connections. `apiKeys.create(userId, { role, label, expiresInMs? })` mints an agent's key server-side (raw `slp_…` returned once).
-- **`env` (ADR-0012):** since `authKit` owns `authenticate` on the host's behalf, `resolveEnv(ctx)` is where identity-keyed `client.env` business logic lives — it runs right after identity resolves and seeds the connection's initial `env`. `pushEnv(userId, env)` updates it later (a key rotation/re-scope), cluster-wide. See REFERENCE.md → Connection env.
+- **`env`:** since `authKit` owns `authenticate` on the host's behalf, `resolveEnv(ctx)` is where identity-keyed `client.env` business logic lives — it runs right after identity resolves and seeds the connection's initial `env`. `pushEnv(userId, env)` updates it later (a key rotation/re-scope), cluster-wide. See REFERENCE.md → Connection env.
 
 ## @super-line/plugin-chat
 
-A reusable **chat backbone** as a paired plugin — channels (public/private), owner/member membership control, and messages (send/edit/delete) as typed collections. Subpaths: `.` (contract) · `/server` · `/client` · `/react` · `/ai` (AI SDK agent toolset). **Requires `@super-line/plugin-auth`** (identity + the `users` directory the FKs reference). Design: every mutation is a server-authoritative, hookable **request**; collections are client-read-only (ADR-0010).
+A reusable **chat backbone** as a paired plugin — channels (public/private), owner/member membership control, and messages (send/edit/delete) as typed collections. Subpaths: `.` (contract) · `/server` · `/client` · `/react` · `/ai` (AI SDK agent toolset). **Requires `@super-line/plugin-auth`** (identity + the `users` directory the FKs reference). Design: every mutation is a server-authoritative, hookable **request**; collections are client-read-only.
 
 ```ts
 // . (contract half) — generic over the message body (default z.string())
-chatContract<S>(opts?: { content?: S }): ContractPlugin   // adds SIX collections (channels/memberships/messages/messageParts/resources/resourcePresence) + 20 shared requests
+chatContract<S, D>(opts?: { content?: S; data?: D }): ContractPlugin
+//   adds SIX collections (channels/memberships/messages/messageParts/resources/resourcePresence),
+//   20 shared requests (every mutation — collections are client-READ-ONLY), and 2 shared events
+//   (chat.streamDelta / chat.streamCancelled — the ephemeral token-smooth streaming transport).
+//   content = the message body schema (default z.string()); data = the CUSTOM DATA PART schema
+//   (default z.never()) — declare it to type what `mapDataPart` emits on the producer side.
 // plugins: [authContract(), chatContract()]  OR  chatContract({ content: myZodSchema })
 // schemas/types: channelSchema/membershipSchema/messageSchema, ChatChannel/ChatMembership/ChatMessage, memId(channelId,userId)
 
@@ -513,36 +621,63 @@ chat<C>(opts: { contract: C; hooks?: ChatHooks; streaming?: { checkpointMs?; max
 interface ChatServer {
   plugin: SuperLinePlugin            // read-RLS/write-deny policies + the 20 request handlers
   channels: { create({name,visibility?,owner?,metadata?}) / get / find({filter?,limit?,offset?}) / update / delete(cascades) }
-  members:  { add(channelId,userId,{role?}) / remove / setRole / of(channelId) / channelsOf(userId) }
+  members:  { add(channelId,userId,{role?}) / remove / setRole / get(channelId,userId) (point-read; undefined = not a member, role comes free)
+              / of(channelId) / channelsOf(userId) }
   messages: { send({channelId,authorId,content,metadata?}) / edit / delete / find({filter?,orderBy?,limit?,offset?})
               / stream({channelId,authorId})→ChatStreamWriter{push,finalize,abort} / abort(id,error?) (kill-switch)
               / partsOf(messageId) / sweepStale({olderThanMs}) (crashed-node repair — host-invoked, never automatic) }
+  resources:{ create({channelId,kind,title?,id?,params?}) / detach(channelId,kind,docId) / of(channelId)
+              / find({filter?,limit?,offset?}) (bulk read across channels, for host RLS + audits)
+              / sweepPresence({olderThanMs})
+              // THE access resolvers for resource docs — shared VERBATIM with the auto-contributed kind guards, so a
+              // host's own policies can never drift from the plugin's. Scope-first, principal-last. A collection no
+              // registered kind points at throws NOT_FOUND (a typo must not read as a denial); they answer for *now*.
+              / channelsOfDoc(collection,docId)→string[]          (the channels granting access to a doc)
+              / canAccessDoc(collection,docId,userId)→boolean     (member of any granting channel?)
+              / docIdsOf(collection,userId)→string[]              (one-hop input for a host RLS filter) }
 }
 
 // /client — NO TanStack/React dependency; owns the membership-driven re-subscribe mechanic. Agents use this too.
 chatClient<C,R>(client, opts?: { userId?: string|null; messageLimit?: number; partsLimit?: number }): ChatClient<C>
 //   request methods: createChannel/updateChannel/deleteChannel/join/leave/addMember/removeMember/setMemberRole/send/editMessage/deleteMessage
 //   live stores: channels() / members(channelId) / messages(channelId,{limit?,partsLimit?,streaming?})  → each { rows(), subscribe(cb), ready, close() }
-//   STREAMING (ADR-0011): messages() serves ONE ASSEMBLED feed — a streamed message gains `status` ('streaming'|'complete'|'aborted'|'error')
+//   STREAMING: messages() serves ONE ASSEMBLED feed — a streamed message gains `status` ('streaming'|'complete'|'aborted'|'error')
 //   and live tree-ordered `parts` (text/reasoning/tool; subagent lanes nest via `parent`); plain messages untouched. Producer:
 //   stream(channelId)→ChatStreamHandle{ push(...events) (sync, micro-batched), flush(), finalize(), abort() } — settle in a `finally`.
 //   Events: part_start{key,partType,toolName?,parent?} · delta{key,text} · part_patch{key,args?,result?,isError?,state?} · part_end{key,text?}
 //   (tool part key === toolCallId). Old turns whose parts left the partsLimit recency window render via `content` (parts absent).
 
-// /react
-createChatHooks<C>(): { ChatProvider, useChat, useChannels, useMembers, useMessages }
-//   <ChatProvider chat={chatClient(client,{userId})}>…</ChatProvider>
+// /react — ELEVEN hooks; each owns its store's lifecycle (closed on unmount / channel switch).
+createChatHooks<C>(): ChatBinding<C>
+//   <ChatProvider chat={chatClient(client,{userId})}>…</ChatProvider>   (rebuild the ChatClient when the auth client swaps)
+//   useChat(): ChatClient                               — request methods (send, join, …)
+//   useChannels(): Channel[]                            — live directory; re-subscribes on membership change
+//   useMembers(channelId): ChatMember[]                 — live member list
+//   useMessages(channelId, { limit? }): Message[]       — live chronological newest-N envelopes
+//   useMessageParts(channelId, messageId): Part[]       — live durable parts of ONE message; mount only while it needs detailed rendering
+//   useMe(): { userId: string|null; ready: boolean }    — signed-in user (null for guests / until resolved)
+//   useChannelBusy(channelId): boolean                  — true while ANY message in the channel is still `streaming` (the turn-in-flight signal)
+//   useChatHistory(channelId, { liveLimit?, pageSize? }): { messages, loadOlder(), hasOlder, loading, error }  — live window + keyset pagination
+//   useChannelResources(channelId): ChatResource[]      — live registry rows
+//   useResourcePresence({ kind, collection, docId }): ResourcePresence[]  — announces open/heartbeat/close, returns live rows
+//   EVERY channel/message-scoped hook is NULL-TOLERANT: a null/undefined id is the idle state → [] and NO subscription
+//   (so a "no channel selected" render needs no conditional-hook gymnastics). useChatHistory takes a required channelId.
 
 // /ai — Vercel AI SDK toolset for an LLM bot; `ai` is an OPTIONAL peer dep. Takes the RAW SuperLineClient (needs `users` for author names).
 chatAgentTools<C,R,S>(client, opts?: { content?: S; management?: boolean }): ToolSet   // spread into ToolLoopAgent({tools}) / generateText({tools})
 //   CLIENT-SIDE by design: every tool rides the bot's own connection, so the server re-authorizes it (RLS reads, membership sends, owner management) — the model can't exceed the bot's permissions. STATELESS (one-shot subscribe→rows→close reads, typed-request writes; nothing to close). snake_case names; content host-parametrized (opts.content, default z.string()); failures return structured { error: code, message } so the model adapts instead of aborting.
 //   core (default): list_channels(+member flag) · list_members · read_messages · send_message · join_channel · leave_channel
 //   { management: true } adds: create_channel/update_channel/delete_channel · add_member/remove_member/set_member_role · edit_message/delete_message · list_users
-pipeUIMessageStream(writer, stream): Promise<{ error?: string }>   // AI SDK v6 bridge: streamText(...).toUIMessageStream() / agent.stream(...) → a streamed chat message
-//   maps text/reasoning/tool chunks onto parts (tool-input-delta + step framing + files/sources dropped); NEVER settles — finalize/abort stay yours; a turn-level error chunk is RETURNED, not thrown
+pipeUIMessageStream<Data>(writer, stream, opts?: { mapDataPart?; onUnsupported? }): Promise<{ error?: string }>
+//   AI SDK v6 bridge: streamText(...).toUIMessageStream() / agent.stream(...) → a streamed chat message. Maps
+//   text/reasoning/tool chunks onto parts (tool-input-delta + step framing dropped); NEVER settles — finalize/abort
+//   stay yours; a turn-level error chunk is RETURNED, not thrown.
+//   mapDataPart(chunk) → { data, key? } | undefined  — turn a host-defined data / file / source / approval chunk into ONE
+//     complete custom data part. It gets FIRST REFUSAL on every chunk; unmapped framing drops silently without reaching
+//     onUnsupported. onUnsupported(chunk) observes what is neither transcript content nor known framing.
 
 // /mastra — plain Mastra Agents → streamed messages (the harness hookup, chat-scoped); `@mastra/core` OPTIONAL peer dep.
-mastraEngine({ agent, subagents?: [{agent, delegatesTo?}], delegatesTo?, maxDepth? (3), suppressTools? }): MastraEngine
+mastraEngine({ agent, subagents?: [{agent, delegatesTo?}], delegatesTo?, maxDepth? (3), suppressTools?, mapDataPart? }): MastraEngine
 //   Agents arrive FULLY CONFIGURED — per-agent knobs (maxSteps, thinking, memory) are the host Agent's `defaultOptions` (may be a function
 //   of the forwarded requestContext, e.g. root-only per-channel memory { thread: channelId }; with memory on, pass ONLY the new turn as
 //   input — Mastra saves stream input to the thread + recalls the past itself). The engine's stream calls carry ONLY abortSignal +
@@ -554,7 +689,7 @@ mastraEngine({ agent, subagents?: [{agent, delegatesTo?}], delegatesTo?, maxDept
 //     (flush checked at each step-finish: kill-switch/cap/disconnect ⇒ ~1 LLM step of waste, not a whole tree).
 //   respond(chat, channelId, input, opts?): Promise<MessageRowOf|undefined>  — open→run→settle: error-finalize on turn error, DELETES
 //     never-pushed empty turns (returns undefined), abort+rethrow on throw.
-pipeMastraStream(sink, fullStream, { lane?, suppressTools? }): Promise<{ text, error? }>   // single-lane escape hatch, sibling of pipeUIMessageStream
+pipeMastraStream<Data>(sink, fullStream, { lane?, suppressTools?, mapDataPart?, onUnsupported? }): Promise<{ text, error? }>   // single-lane escape hatch, sibling of pipeUIMessageStream
 //   Reasoning tokens stream as `reasoning` parts automatically ONCE THE MODEL EMITS THEM — enable thinking on the user's Agent, not the engine:
 //   `defaultOptions: { providerOptions: { anthropic: { thinking: { type: 'enabled', budgetTokens: N≥1024 } } } }` (Mastra deep-merges it under
 //   the engine's per-lane options, so it applies at every delegation depth). AI-SDK path: same providerOptions on ToolLoopAgent/streamText
@@ -569,7 +704,7 @@ onChatMessage(chat, handler: ({channelId, message, history}) => …, { channels?
 //   turns SERIALIZED per channel (queued msg's history sees the finished answer), channels concurrent; failed join retries next directory tick.
 //   chatClient also exposes `userId` (resolved own id, read after `ready`). onChatMessage SKIPS resource cards (they never trigger a turn).
 
-// ── Channel resources (PLAN-chat-resources) — your CRDT documents, attached to channels ─────────────
+// ── Channel resources — your CRDT documents, attached to channels ─────────────
 // A resource = one CRDT document (a `collections: { n: { schema, crdt } }` collection YOU declare) + a
 // registry row linking it to a channel. Access is membership-gated through the registry. Needs the
 // server's `crdtCollections:` backend + the client's `crdtCollections: crdtCollectionsClient()`.
@@ -620,7 +755,7 @@ useResourcePresence(row: { kind, collection, docId }): ResourcePresence[]       
 //   presence liveness = heartbeatAt recency (PRESENCE_LIVE_MS 45s; useResourcePresence heartbeats every 20s)
 ```
 
-Rules: **public** channels are self-service join/leave; **private** are add-by-owner and answer `NOT_FOUND` to a non-member's `joinChannel` (anti-probing). Creator is the first `owner`; owners manage membership + rename/delete. **Last-owner protection**: leave/remove/demote throws `CONFLICT` if it would leave members with zero owners. Messages **hard-delete**; edit stamps `editedAt`. Membership is required for EVERY send (server included) — add an agent to a channel before it posts. **AI agents = regular users**: provision via `authKit.users.create` (no password) + `authKit.apiKeys.create`, add to a channel, connect with `params: { apiKey }` and the same `chatClient`. Known v1 caveat: per-channel serialization is in-process, so under relay clustering requests on other nodes can still interleave (no cross-node CAS).
+Rules: **public** channels are self-service join/leave; **private** are add-by-owner and answer `NOT_FOUND` to a non-member's `joinChannel` (anti-probing). Creator is the first `owner`; owners manage membership + rename/delete. **Last-owner protection**: leave/remove/demote throws `CONFLICT` if it would leave members with zero owners. Messages **hard-delete**; edit stamps `editedAt`. **A streamed message always settles before it vanishes** — deleting one that is still `streaming` settles it first, so a viewer never sees a turn blink out mid-flight and a producer writing behind the settle gets `CONFLICT` instead of resurrecting the row. Membership is required for EVERY send (server included) — add an agent to a channel before it posts. **AI agents = regular users**: provision via `authKit.users.create` (no password) + `authKit.apiKeys.create`, add to a channel, connect with `params: { apiKey }` and the same `chatClient`. Known v1 caveat: per-channel serialization is in-process, so under relay clustering requests on other nodes can still interleave (no cross-node CAS).
 
 ## Contract plugins (compile-time contract merge)
 
@@ -655,4 +790,4 @@ mergeSurfaces<A, B>(a: A, b: B): MergedSurface<A, B>         // merges per direc
 
 ## Control Center inspector (plugin)
 
-`inspector(opts?: { redact?: string[]; revealEnvKeys?: string[] }): SuperLinePlugin` from `@super-line/plugin-inspector` is the **only** way to enable the Control Center — pass it in `plugins: [inspector()]`. The server no longer takes an `inspector` option and the WS transport no longer takes an `inspector` field. It taps every event (safe-snapshot + field-redact), publishes cluster-wide on its plugin channel, and serves the `InspectorContract` (`getContract` / `getTopology` / `listConnections` / `getNode` / `getConn` / `listCollections` / `queryCollection` + an `events` topic) over a reserved connection class. `redact` is a DENY-list masking named fields in `ctx`/`data`/payload snapshots; `revealEnvKeys` is the OPPOSITE — an ALLOW-list, because `env` (ADR-0012) is masked (`•••`) by default. Dev / trusted-network only.
+`inspector(opts?: { redact?: string[]; revealEnvKeys?: string[] }): SuperLinePlugin` from `@super-line/plugin-inspector` is the **only** way to enable the Control Center — pass it in `plugins: [inspector()]`. The server no longer takes an `inspector` option and the WS transport no longer takes an `inspector` field. It taps every event (safe-snapshot + field-redact), publishes cluster-wide on its plugin channel, and serves the `InspectorContract` (`getContract` / `getTopology` / `listConnections` / `getNode` / `getConn` / `listCollections` / `queryCollection` + an `events` topic) over a reserved connection class. `redact` is a DENY-list masking named fields in `ctx`/`data`/payload snapshots; `revealEnvKeys` is the OPPOSITE — an ALLOW-list, because `env` is masked (`•••`) by default. Dev / trusted-network only.

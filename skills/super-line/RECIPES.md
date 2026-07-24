@@ -222,7 +222,7 @@ onConnection: (conn) => { conn.data.lastSeenMsgId = 0 }
 
 ## Show the signed-in user's entitlements live (`env`)
 
-`env` (ADR-0012) is the client-visible sibling of `conn.data` — typed, per-connection, mutable, but PUSHED to the client and never persisted. Use it to hand a connection working credentials/config; the client's OWN code wires them into outbound calls, never an LLM.
+`env` is the client-visible sibling of `conn.data` — typed, per-connection, mutable, but PUSHED to the client and never persisted. Use it to hand a connection working credentials/config; the client's OWN code wires them into outbound calls, never an LLM.
 
 ```ts
 // contract: roles.user.env = z.object({ plan: z.enum(['free', 'pro']), apiKey: z.string() })
@@ -450,19 +450,27 @@ export const app = defineContract({
 ```
 
 ```ts
-// 2 · server.ts — build the kit over the SAME collection backend, then wire 3 fields
+// 2 · server.ts — build the kit over the SAME collection backend, then wire 4 fields
 import { auth } from '@super-line/plugin-auth/server'
 import { sqliteCollections } from '@super-line/collections-sqlite'
 const backend = sqliteCollections({ file: 'app.db', collections: app.collections })
-const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'], jwt: { secret: process.env.JWT_SECRET! } })
+const authKit = auth({
+  contract: app,
+  collections: backend,
+  defaultRoles: ['user'],
+  jwt: { secret: process.env.JWT_SECRET! },   // opt-in: enables authKit.tokens.* + params:{ jwt } connect
+  rejectUnauthenticated: true,                // a PRESENTED-but-invalid credential throws UNAUTHORIZED instead of
+})                                            // silently becoming a guest (see the notes below — this is the sharp edge)
 const srv = createSuperLineServer(app, {
   transports: [webSocketServerTransport({ server })],
+  nodeKey: 'app-replica-1',             // REQUIRED by plugin-auth: a STABLE per-replica name that survives restarts
+                                        // (it keys per-node session reconciliation). Omit it and the plugin throws at boot.
   collections: backend,                 // SAME instance passed to auth()
-  authenticate: authKit.authenticate,   // resolves guest / access token / API key / JWT
+  authenticate: authKit.authenticate,   // resolves guest / access token / API key / bearer assertion
   identify: authKit.identify,           // principal = userId
   plugins: [authKit.plugin],            // the runtime half: auth handlers + identity-collection policies
 })
-// later, from anywhere: await authKit.revoke(userId)   // delete sessions + kick every device cluster-wide
+// later, from anywhere: await authKit.revoke(userId)   // revoke tokens + end sessions + kick every device cluster-wide
 ```
 
 ```ts
@@ -486,13 +494,127 @@ export const { AuthProvider, useAuth } = createAuth({ authedRole: 'user', connec
 function Gate() {
   const { ready, state, signIn, signOut } = useAuth()
   if (!ready) return <Spinner />
+  if (state.error) return <ReconnectBanner reason={state.error.reason} />   // a PRESENTED token was rejected
   return state.status === 'authed' ? <App onSignOut={signOut} /> : <Login onSubmit={signIn} />
 }
 ```
 
-- Pass the **same `CollectionStore`** to `auth({ collections })` and `createSuperLineServer({ collections })` — `authenticate` reads sessions/users off it directly.
-- `jwt` is opt-in: without it there are no bearer assertions and only access tokens / API keys connect. Assertions are minted server-side (`authKit.tokens.mintSigned` / `mintSealed`) — no client-facing mint. An API key (`slp_…`) carries one fixed role and is revocable; a JWT is stateless and unrevocable until it expires. Every accepted authenticated connection still creates a durable session row.
+- **A stable `nodeKey` is required** and the **same `CollectionStore`** goes to both `auth({ collections })` and `createSuperLineServer({ collections })` — `authenticate` reads sessions/users off it directly.
+- **A bad credential degrades to `guest` by default.** The connection is *accepted* as a guest, so a client built for `user` never sees a connect error — it just `NOT_FOUND`s on every call. Either confirm with `whoami()` (what `authClient` does) or set `rejectUnauthenticated: true` as above. A credential-*less* connect still resolves guest either way.
+- `jwt` is opt-in: without it there are no bearer assertions and only access tokens / API keys connect. Assertions are **server-minted only** (`authKit.tokens.mintSigned` / `mintSealed`) — there is no client-facing mint. An API key (`slp_…`) carries one fixed role and is revocable; an assertion is stateless and unrevocable until it expires (`authKit.users.deactivate(id)` is the escape hatch — connect performs one user read). Every accepted authenticated connection still creates a durable session row, aggregated into the client-readable `userPresence` collection.
+- **Online dots come from `userPresence`**, not the deny-all `sessions` rows: `client.collection('userPresence').subscribe({ filter: isIn('userId', ids) })` → `{ userId, connectedAt, lastSeenAt }` (`null` when offline).
 - `sendPasswordReset` is a host callback; without it `requestPasswordReset` is a silent no-op (never leaks whether an email exists). Runnable: `examples/auth` (CLI) · `examples/collections-chat` (real login).
+
+## Route a secret *through* an untrusted client (sealed assertions)
+
+The headline use of a **sealed** assertion (a JWE): the server mints a token whose payload the browser holding it **cannot read**, the browser connects with it, and handlers read the decrypted payload off `ctx.sealed`. That closes the loop — the client handed you a key it never had access to. A **signed** assertion (a JWS) is the same handshake with a *public* payload: reach for it when a service with none of your infrastructure must verify identity offline.
+
+```ts
+// 1 · SERVER — mint inside an ALREADY-AUTHENTICATED route/RPC. There is no `req.user` in super-line and no
+//     client-side mint: the caller proves who they are first, then you mint for that subject.
+const { token } = await authKit.tokens.mintSealed(userId, {
+  claims: { workspace: 'acme' },            // PUBLIC half — safe to show the user
+  sealed: { upstreamKey: 'sk-live-…' },     // ENCRYPTED — the browser holding this cannot read it
+})
+// signed sibling, for a third party that verifies offline with `jose` and no database:
+const { token: signed } = await authKit.tokens.mintSigned(userId, { claims: { workspace: 'acme' } })
+```
+
+```ts
+// 2 · CLIENT — connect with it under `jwt` (authMethod becomes 'jwt-sealed'). For an app that is ONLY ever
+//     sealed (no password, no guest UI), let createAuth own the lifecycle instead of building a client by hand:
+const { AuthProvider, useAuth } = createAuth<typeof app, 'user'>({
+  authedRole: 'user',
+  tokenParam: 'jwt',                                          // → params:{ jwt }
+  resolveToken: async () => ({ token: await fetchSealedToken() }),  // your mint route; return null to stay guest
+  connect: ({ role, params }) => createSuperLineClient(app, { transport, role: role as 'user', params }),
+})
+// createAuth boots as `guest`, awaits the first resolveToken() before `ready` resolves, then swaps to `user` —
+// so downstream code is just `await auth.ready; auth.client`, with no hand-rolled "not ready yet" deferred.
+// resolveToken's token is NEVER persisted (the source owns re-acquisition).
+```
+
+```ts
+// 3 · SERVER — both bags are on the connection context; the handler returns only what it chooses to
+srv.implement({
+  user: {
+    useUpstream: async (_input, ctx) => {
+      const key = ctx.sealed?.upstreamKey as string | undefined   // decrypted server-side; opaque to its holder
+      const workspace = ctx.claims?.workspace as string | undefined
+      return { workspace: workspace ?? null, tail: key ? `…${key.slice(-4)}` : null }
+    },
+  },
+})
+```
+
+- **Roles come from different places.** A signed assertion carries roles in its own claims; a sealed one does not — connect reads them from the user row, so a grant made after minting is live on the very next connection and the mint site cannot escalate anyone.
+- **Verification uses the algorithms YOU configured** — the token's header never selects a key, which closes the alg-confusion attack. Go asymmetric with `jwt: { signed: { alg: 'EdDSA', key: jwk } }`; validate the bags with `claims`/`sealedClaims` schemas.
+- **Keep `ttlMs` short** (default 15 min). An assertion is in no table, so `authKit.revoke()` cannot touch it.
+- Show the public half to the client with `auth({ resolveEnv: (ctx) => ctx.claims })` — it arrives as `client.env`. The sealed half never leaves the server.
+- **Don't confuse the two credential families:** an **access token** (`params: { token }`) is a long-lived (~30-day) reusable lookup key — whoever validates it needs your database. A **bearer assertion** (`params: { jwt }`) is short-lived and self-proving.
+
+## Extend auth with server-side hooks (audit, provisioning policy, enrichment)
+
+`hooks` wrap plugin-auth's **server-invoked** operations — `authenticate` plus the imperative kit. (The client request handlers `signIn`/`signUp`/… are deliberately not hookable: they already have a veto seam in `use:` middleware.) A `before` **transforms or vetoes**; an `after` observes. ⚠️ Payloads carry raw secrets — never log one wholesale.
+
+```ts
+const authKit = auth({
+  contract: app,
+  collections: backend,
+  hooks: {
+    authenticate: {
+      // `after` may TRANSFORM the resolved identity — enrich ctx, override env, even change the role.
+      // Fires for EVERY resolution, guests included.
+      after: (result, handshake) => {
+        audit('connect', { role: result.role, userId: result.ctx.userId, method: result.ctx.authMethod })
+        if (result.ctx.userId && bannedIps.has(handshake.headers['x-real-ip'] ?? '')) throw new SuperLineError('FORBIDDEN')
+        return { ...result, ctx: { ...result.ctx, tenant: tenantOf(result.ctx.userId) } }
+      },
+    },
+    users: {
+      create: {
+        before: (input) => ({ ...input, displayName: input.displayName.trim() }),   // transform
+        after: (user) => provisionWorkspace(user.id),                                // observe (a throw propagates)
+      },
+    },
+    apiKeys: {
+      // ⚠️ `after` receives the RAW slp_… key — this is the one place to deliver it out-of-band, never to log it
+      create: { after: ({ id, role, label }) => audit('apikey.mint', { id, role, label }) },
+    },
+  },
+  onHookError: (error, op) => logger.error({ error, op }),   // sink for a swallowed non-vetoable throw
+})
+```
+
+- **`before` throws veto** the operation — except `users.deactivate.before`, which cannot veto (a throw routes to `onHookError` and the deactivation proceeds; a ban must not be blockable by a broken hook).
+- **`after` throws propagate**, but the write already happened — treat it as "the op succeeded, the follow-up failed".
+- Hook keys mirror the `authKit` surface exactly: `authenticate` · `users.{create,update,setRoles,deactivate,reactivate}` · `credentials.{create,setPassword}` · `apiKeys.{create,revoke}` · `tokens.{mintSigned,mintSealed}`.
+
+## Debug what super-line is doing (structured logs)
+
+super-line logs internally through LogTape under `['super-line', '<pkg>', '<subsystem>']`. There is **no per-instance `logger:` option** — logging is configured once for the process.
+
+```ts
+import { enableSuperLineLogging } from '@super-line/core'
+enableSuperLineLogging({ level: 'debug' })   // pretty, SECRET-REDACTING console. Call it before creating the server.
+// → super-line.server.conn / .dispatch, super-line.plugin-auth.authn ("degraded to guest: api key invalid or expired"),
+//   .session, adapter mesh diagnostics — the fastest way to answer "why did this connection resolve as a guest?"
+```
+
+```ts
+// An app that runs its OWN LogTape configure() must NOT also call enableSuperLineLogging (one process-global
+// config; the later call replaces the earlier). Add a super-line logger to your own config instead:
+import { configure, getConsoleSink } from '@logtape/logtape'
+import { redactByField } from '@logtape/redaction'
+import { LOG_ROOT, SUPER_LINE_REDACT_FIELDS } from '@super-line/core'
+await configure({
+  sinks: { console: redactByField(getConsoleSink(), SUPER_LINE_REDACT_FIELDS) },   // keep the redaction
+  loggers: [{ category: [LOG_ROOT], lowestLevel: 'info', sinks: ['console'] }, /* your own */],
+})
+```
+
+- Redaction is **on by default** and covers password/token/jwt/apiKey/secret/credential/email-ish field names at any depth, plus JWT patterns in formatted text. `redact: false` only for trusted local runs.
+- Filter narrower than the root when one subsystem is noisy: `['super-line', 'plugin-auth']`.
 
 ## Chat (`@super-line/plugin-chat`)
 

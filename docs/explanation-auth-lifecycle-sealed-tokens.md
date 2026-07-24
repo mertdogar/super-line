@@ -9,18 +9,18 @@ In a Super-Line application, authentication is typically handled through a combi
 The standard lifecycle looks like this:
 1. **Sign In**: A client authenticates (e.g., email/password) and receives a short-lived `access-token`.
 2. **Session Connection**: The client connects to the Super-Line server, establishing a stateful session. The `AuthContext` tracks the user's ID, roles, and connection metadata.
-3. **Assertion Minting**: An authenticated client or the server can generate a bearer assertion (a JWT) to pass state or grant temporary access elsewhere.
+3. **Assertion Minting**: The server generates a bearer assertion (a JWT), server-side, to pass state or grant temporary access elsewhere. There is no client-facing mint (ADR-0015 update).
 4. **Stateless Connection**: A client can connect using the assertion (via `?jwt=<token>`), allowing the server to statelessly authenticate the user and read the token's payloads without needing a database session lookup.
 
 ## Signed vs. Sealed Tokens: The Deliberate Asymmetry (ADR-0015)
 
-Super-Line's auth plugin supports two distinct types of bearer assertions. This system was designed with a deliberate asymmetry (documented in ADR-0015) regarding how the tokens are minted and what they expose.
+Super-Line's auth plugin supports two distinct types of bearer assertions. Both are minted the same way — server-side only — but they differ in a deliberate asymmetry (documented in ADR-0015) regarding what they expose to their holder.
 
 ### Signed Tokens (JWS)
 - **Format**: JSON Web Signature (JWS).
 - **Visibility**: The `claims` payload is public. Anyone who intercepts or holds the token can decode it (e.g., via `jwt.io`) and read the data.
 - **Verification**: Third-party services holding your public verification key can verify the signature and trust the claims.
-- **Minting**: **Client-Mintable.** Any authenticated client can request a signed token via the `getToken` API. The client authors the public `claims`.
+- **Minting**: **Server-Minted** (`authKit.tokens.mintSigned`). Since the 2026-07-24 update there is no client-facing mint; the server authors the public `claims`.
 
 ### Sealed Tokens (JWE)
 - **Format**: JSON Web Encryption (JWE) using AEAD (Authenticated Encryption with Associated Data).
@@ -33,6 +33,8 @@ Super-Line's auth plugin supports two distinct types of bearer assertions. This 
 This restriction is a fundamental security mechanism. Because the client cannot read *or* generate the contents of a sealed token, any `sealed` payload attached to a verified connection's `AuthContext` is **guaranteed to be server-authored data**.
 
 If clients were allowed to mint sealed tokens, a malicious actor could embed arbitrary data into the token. Since the server cannot distinguish between client-authored and server-authored encrypted payloads upon receipt, trusting the `sealed` payload would become unsafe. By restricting minting strictly to the server environment, Super-Line ensures that when your connection handler reads `ctx.sealed`, that data unquestionably originated from your trusted backend logic.
+
+As of the 2026-07-24 update this same rule applies to **signed** tokens: there is no client-facing mint at all, so `ctx.claims` is server-authored too. The kinds now differ only in whether the holder can *read* the payload — not in who authors it.
 
 ## Common Use Cases
 

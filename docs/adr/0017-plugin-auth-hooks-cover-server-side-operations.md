@@ -21,7 +21,7 @@ Adding hooks, plugin-auth splits differently from chat, because its operations h
 **plugin-auth hooks cover its server-invoked operations** — `authenticate` (the connection identity op,
 wired by the host and run by the runtime per connection) and the imperative kit (`authKit.users.*`,
 `authKit.credentials.*`, `authKit.apiKeys.*`, `authKit.tokens.*`). The **client request handlers**
-(`signIn`/`signUp`/`signOut`/`createApiKey`/`revokeApiKey`/`getToken`), invoked by clients over the wire, are
+(`signIn`/`signUp`/`signOut`/`createApiKey`/`revokeApiKey`), invoked by clients over the wire, are
 **not hooked.**
 
 The line is *who invokes the operation*, and it exists because the two sides do not have the same

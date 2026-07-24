@@ -21,6 +21,12 @@
 		reverse_proxy node-1:8787
 	}
 
+	# Issue a signed assertion server-side (no client-facing mint): the node holds the access-token
+	# store to authenticate the caller and the signing key.
+	handle /signed-token {
+		reverse_proxy node-1:8787
+	}
+
 	# Exchange a signed assertion for a sealed one. On the chat node, not the verifier: only the node
 	# holds the encryption key, and only server-side code may mint a sealed assertion at all.
 	handle /sealed-handoff {

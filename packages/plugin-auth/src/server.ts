@@ -96,9 +96,9 @@ export interface AuthServerOptions<C extends Contract> {
   /** Whether the `users` directory is client-readable (open read policy). Default `true`. */
   usersReadable?: boolean
   /**
-   * Enable bearer assertions: `getToken` issuance, `authKit.tokens.*`, and stateless assertion connect. Omit to
-   * disable all three. `{ secret }` alone is the zero-config form — HS256 signing plus an HKDF-derived `dir`
-   * content-encryption key. See {@link AssertionOptions} for algorithms, JWK keys, and the payload schemas.
+   * Enable bearer assertions: server-side minting (`authKit.tokens.*`) and stateless assertion connect
+   * (`params:{ jwt }`). Omit to disable both. `{ secret }` alone is the zero-config form — HS256 signing plus an
+   * HKDF-derived `dir` content-encryption key. See {@link AssertionOptions} for algorithms, JWK keys, and schemas.
    */
   jwt?: AssertionOptions
   /** Deliver a password-reset token (email/SMS/…). Without it, `requestPasswordReset` is a silent no-op. */
@@ -169,10 +169,11 @@ export interface AuthApiKeysApi {
 }
 
 /**
- * Server-side minting + verification of bearer assertions. Both kinds identify an existing, active user; the
- * asymmetry is deliberate (ADR-0015): a **signed** assertion is also mintable by any authenticated client via
- * `getToken`, while a **sealed** one has no client-facing mint at all, which is what makes `ctx.sealed`
- * trustworthy as server-authored data.
+ * Server-side minting + verification of bearer assertions. Both kinds identify an existing, active user and are
+ * **server-minted only** — there is no client-facing mint for either (ADR-0015), which is what makes `ctx.claims`
+ * and `ctx.sealed` trustworthy as server-authored data. The kinds differ only in reach: a **signed** assertion's
+ * `claims` are public (its holder can read them, third parties can verify them with the key); a **sealed** one's
+ * payload is encrypted, readable only by a holder of the encryption key.
  */
 export interface AuthTokensApi {
   /** Mint a signed assertion (JWS) — public `claims`, third-party verifiable. Roles are read from the user row. */
@@ -597,14 +598,6 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
           await keys().delete(input.id)
           await endSessions(userId, key.id, 'api-key')
           return { ok: true }
-        },
-        getToken: async (input, connCtx) => {
-          if (!assertions) throw new SuperLineError('BAD_REQUEST', 'JWT is not enabled on this server')
-          const { userId, roles } = connCtx as AuthContext
-          if (!userId) throw new SuperLineError('UNAUTHORIZED', 'sign in to get a token')
-          const claims = (input as { claims?: unknown } | undefined)?.claims
-          const { token, expiresAt } = await assertions.mintSigned(userId, { roles, claims })
-          return { jwt: token, expiresAt }
         },
         requestPasswordReset: async (input) => {
           const email = input.email.toLowerCase()

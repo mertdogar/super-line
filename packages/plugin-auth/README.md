@@ -76,8 +76,8 @@ client half hides the dance: `signIn()` connects as `guest`, mints an access tok
 - **API keys** — long-lived `slp_…` credentials with one fixed role, for services, CI, and agents. From a
   client: `createApiKey({ label, role })` (raw key returned once) · `listApiKeys()` · `revokeApiKey({ id })`.
 - **Bearer assertions (JWT / JWE)** — enable `jwt: { secret }` and get two kinds (via `jose`), both connecting
-  through `params: { jwt }`. A **signed** assertion (JWS) has a public payload: `getToken({ claims })` issues one
-  for another backend to verify statelessly, or to connect without a DB round-trip. A **sealed** assertion (JWE)
+  through `params: { jwt }`. A **signed** assertion (JWS) has a public payload: `authKit.tokens.mintSigned(userId, { claims })`
+  issues one server-side for another backend to verify statelessly, or to connect without a DB round-trip. A **sealed** assertion (JWE)
   is **server-minted only** (`authKit.tokens.mintSealed`) and is opaque to its own holder — the way to carry a
   secret *through* a browser and read it back as `ctx.sealed`. Payloads are validated by your Standard Schemas;
   algorithms are configurable and pinned on verify. Neither can be revoked — keep the TTL short;
@@ -147,7 +147,7 @@ const { key } = await authKit.apiKeys.create(bot.id, { role: 'user', label: 'age
 
 **Client-side requests** (typed methods on a connected client): `signUp` · `signIn` · `signOut` · `whoami`
 · `createApiKey({ label, role, expiresInMs? })` (raw key once) · `listApiKeys` · `revokeApiKey({ id })` ·
-`getToken({ claims? })` (signed assertion; needs `jwt:` enabled) · `requestPasswordReset` · `confirmPasswordReset`. In React/JS they
+`requestPasswordReset` · `confirmPasswordReset`. In React/JS they
 sit behind `createAuth()` / `authClient()` as `signIn` / `signUp` / `signOut` + reactive `state`.
 
 ## Subpaths

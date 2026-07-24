@@ -46,6 +46,11 @@ function _authTypeCheck(): void {
     },
     admin: { adminOnly: async () => ({ ok: true }) },
   })
+  // getToken was retired (ADR-0015: no client-facing mint). Guard against reintroduction — a typed
+  // client must NOT expose it. Compile-time only; never invoked.
+  const _c = h.client(app, { url: '', role: 'user' })
+  // @ts-expect-error getToken removed from the contract's shared block — clients cannot self-mint
+  void _c.getToken
 }
 void _authTypeCheck
 
@@ -253,15 +258,13 @@ describe('plugin-auth — API keys', () => {
 
 describe('plugin-auth — JWT', () => {
   it('issues a JWT and accepts it for a stateless connect', async () => {
-    const { srv, url } = await boot({ secret: 'shhhh-a-very-secret-signing-key' })
+    const { srv, url, authKit } = await boot({ secret: 'shhhh-a-very-secret-signing-key' })
     const guest = h.client(app, { url, role: 'guest' })
-    const { token, userId } = await guest.signUp({ email: 'jw@x.com', password: 'passpass', displayName: 'Jw' })
+    const { userId } = await guest.signUp({ email: 'jw@x.com', password: 'passpass', displayName: 'Jw' })
     guest.close()
 
-    const user = h.client(app, { url, role: 'user', params: { token } })
-    const { jwt } = await user.getToken()
+    const { token: jwt } = await authKit.tokens.mintSigned(userId)
     expect(jwt.split('.')).toHaveLength(3) // header.payload.signature
-    user.close()
 
     // connect with only the JWT → signature verified and a connection session recorded
     const svc = h.client(app, { url, role: 'user', params: { jwt } })
@@ -270,16 +273,6 @@ describe('plugin-auth — JWT', () => {
     const jwtSession = sessions.find((row) => row.authMethod === 'jwt')
     expect(jwtSession).toMatchObject({ userId, authId: decodeJwt(jwt).jti, endedAt: null })
     svc.close()
-  })
-
-  it('rejects getToken when JWT is disabled on the server', async () => {
-    const { url } = await boot() // no jwt config
-    const guest = h.client(app, { url, role: 'guest' })
-    const { token } = await guest.signUp({ email: 'jx@x.com', password: 'passpass', displayName: 'Jx' })
-    guest.close()
-    const user = h.client(app, { url, role: 'user', params: { token } })
-    await expect(user.getToken()).rejects.toMatchObject({ code: 'BAD_REQUEST' })
-    user.close()
   })
 })
 

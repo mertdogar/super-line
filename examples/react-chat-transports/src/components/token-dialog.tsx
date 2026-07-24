@@ -9,7 +9,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { useClient } from '@/lib/superline'
 import { handoffUrl, readClaims, useExpiry, type Claims } from '@/lib/jwt'
 import { TRANSPORT_LABELS, type TransportKind } from '@/lib/transport'
 import { cn } from '@/lib/utils'
@@ -26,7 +25,6 @@ interface Minted {
  * knows nothing about super-line verify it, and hand it to another tab on another wire.
  */
 export function TokenDialog(): React.JSX.Element {
-  const client = useClient()
   const [open, setOpen] = useState(false)
   const [minted, setMinted] = useState<Minted | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -36,14 +34,17 @@ export function TokenDialog(): React.JSX.Element {
     setBusy(true)
     setError(null)
     try {
-      // `getToken` is on the contract's `shared` block, so any authenticated connection can mint —
-      // over whichever wire this tab dialed. The server signs it (HS256) from the live session.
-      const { jwt } = await client.getToken()
-      const claims = readClaims(jwt)
+      // No client-facing mint anymore (ADR-0015): the browser presents the access token it already holds
+      // and the SERVER signs a short-lived assertion for it, over `/signed-token`.
+      const accessToken = localStorage.getItem('superline.auth.token') ?? ''
+      const res = await fetch('/signed-token', { headers: { authorization: `Bearer ${accessToken}` } })
+      const body = (await res.json()) as { jwt?: string; error?: string }
+      if (!res.ok || !body.jwt) throw new Error(body.error ?? 'could not get a token')
+      const claims = readClaims(body.jwt)
       if (!claims) throw new Error('could not read the minted token')
-      setMinted({ jwt, claims })
+      setMinted({ jwt: body.jwt, claims })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not mint a token')
+      setError(err instanceof Error ? err.message : 'Could not get a token')
     } finally {
       setBusy(false)
     }
@@ -71,7 +72,7 @@ export function TokenDialog(): React.JSX.Element {
         <DialogHeader>
           <DialogTitle>Bearer token</DialogTitle>
           <DialogDescription>
-            A short-lived signed JWT minted from this session. Unlike the access token in{' '}
+            A short-lived signed JWT the server issues for this session. Unlike the access token in{' '}
             <code className="font-mono text-xs">localStorage</code>, it is not stored anywhere — anyone with the
             signing secret can verify it without a database.
           </DialogDescription>
@@ -212,8 +213,8 @@ function Handoff({ token, sealed = false }: { token: string; sealed?: boolean })
 /**
  * The other kind. A sealed assertion is a JWE: same handshake param, but its payload is encrypted, so
  * the browser holding it cannot read it — which is exactly what makes it safe to route a server secret
- * *through* a client. There is no client-side mint by design, so this trades the signed token we just
- * minted for a sealed one at `/sealed-handoff`, and back-office code picks what to seal in.
+ * *through* a client. Neither kind is client-minted, so this trades the signed token we just fetched
+ * for a sealed one at `/sealed-handoff`, and back-office code picks what to seal in.
  */
 function SealedExchange({ signed }: { signed: string }): React.JSX.Element {
   const [sealed, setSealed] = useState<string | null>(null)

@@ -201,12 +201,7 @@ describe('plugin-auth — imperative users management', () => {
   it('a deactivated user’s still-valid JWT no longer authenticates', async () => {
     const { url, authKit } = await boot({ secret: 'shhhh-a-very-secret-signing-key' })
     const u = await createUser(authKit, { email: 'jd@x.com', password: 'passpass', displayName: 'Jd' })
-    const g = h.client(app, { url, role: 'guest' })
-    const { token } = await g.signIn({ email: 'jd@x.com', password: 'passpass' })
-    g.close()
-    const user = h.client(app, { url, role: 'user', params: { token } })
-    const { jwt } = await user.getToken()
-    user.close()
+    const { token: jwt } = await authKit.tokens.mintSigned(u.id)
 
     await authKit.users.deactivate(u.id)
     const stale = h.client(app, { url, role: 'user', params: { jwt } })

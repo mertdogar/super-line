@@ -491,7 +491,7 @@ function Gate() {
 ```
 
 - Pass the **same `CollectionStore`** to `auth({ collections })` and `createSuperLineServer({ collections })` — `authenticate` reads sessions/users off it directly.
-- `jwt` is opt-in: without it `getToken()` throws and only access tokens / API keys connect. An API key (`slp_…`) carries one fixed role and is revocable; a JWT is stateless and unrevocable until it expires. Every accepted authenticated connection still creates a durable session row.
+- `jwt` is opt-in: without it there are no bearer assertions and only access tokens / API keys connect. Assertions are minted server-side (`authKit.tokens.mintSigned` / `mintSealed`) — no client-facing mint. An API key (`slp_…`) carries one fixed role and is revocable; a JWT is stateless and unrevocable until it expires. Every accepted authenticated connection still creates a durable session row.
 - `sendPasswordReset` is a host callback; without it `requestPasswordReset` is a silent no-op (never leaks whether an email exists). Runnable: `examples/auth` (CLI) · `examples/collections-chat` (real login).
 
 ## Chat (`@super-line/plugin-chat`)

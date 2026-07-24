@@ -26,7 +26,7 @@ const authKit = auth({
 To mint a sealed token, you must execute the code in a server environment (e.g., an Express route, an RPC endpoint, or a serverless function) where the `authKit` instance is available. 
 
 > [!WARNING]
-> You cannot mint a sealed token from the client. There is deliberately no client-facing method for this (like `getToken`). It must be done server-side.
+> You cannot mint a token from the client at all — signed or sealed. There is deliberately no client-facing mint; all minting is server-side (`authKit.tokens.mintSigned` / `mintSealed`).
 
 ```typescript
 // Example Express route

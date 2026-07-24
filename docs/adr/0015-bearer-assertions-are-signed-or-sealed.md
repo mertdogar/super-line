@@ -3,6 +3,12 @@
 **Status:** accepted (2026-07-23) · **Builds on:** ADR-0012 (connection `env`), ADR-0013 (Standard
 Schema slots) · **Prompted by:** a `/grill-with-docs` session on carrying host payloads through JWT auth
 
+> **Update (2026-07-24):** client-side minting has since been **retired** — the `getToken` request is
+> gone, so **both** kinds are now server-minted only (`authKit.tokens.mintSigned` / `mintSealed`). This
+> resolves the "third problem" below at the root: `ctx.claims` is now **server-authored**, and a signed
+> assertion differs from a sealed one only in that its holder can *read* the public `claims`. The
+> signed/sealed split stands; the client-mint half does not.
+
 ## Context
 
 `plugin-auth` shipped JWT support as a single thing: `getToken()` mints an HS256 **JWS** carrying
@@ -25,9 +31,9 @@ tokens carry a payload the server later reads back.
 Split the credential into two kinds, both JWTs (RFC 7519 admits a claims set in JWS *or* JWE form),
 both arriving on the same `params: { jwt }`, dispatched on the compact dot count (2 = JWS, 4 = JWE).
 
-- A **signed assertion** (JWS) carries a public `claims` bag. Mintable by a client
-  (`getToken({ claims })`) or the server (`authKit.tokens.mintSigned`). Third parties holding the
-  verification key can check it — that is its purpose.
+- A **signed assertion** (JWS) carries a public `claims` bag. Server-minted
+  (`authKit.tokens.mintSigned`; the client mint was retired in the 2026-07-24 update above). Third
+  parties holding the verification key can check it — that is its purpose.
 - A **sealed assertion** (JWE) carries `claims` *and* a `sealed` bag, and is **server-minted only**
   (`authKit.tokens.mintSealed`). It is opaque to its own holder; only a party with the encryption key
   can read either bag.
@@ -82,8 +88,9 @@ confidentiality boundary rather than a documented convention. Algorithm agility 
 asymmetric or symmetric encryption) without alg-confusion exposure. `authMethod` now records payload
 provenance, so the `sessions` collection and the Control Center show it for free.
 
-**Given up / accepted.** `ctx.claims` on a *signed* assertion is **client-authored** — the docs say
-plainly never to authorize on it without checking `authMethod === 'jwt-sealed'`. Sealed assertions
+**Given up / accepted.** `ctx.claims` on a *signed* assertion was **client-authored** — until the
+2026-07-24 update retired client minting; it is now server-authored like `ctx.sealed`, and the two
+differ only in whether the holder can read the payload. Sealed assertions
 inherit the JWT bargain: stored nowhere, so `revoke()` cannot reach them and `users.deactivate()`
 remains the emergency stop. Assertions travel in a URL query string, so a large payload can approach
 browser URL limits (~2k); with `dir` there is no key-wrapping overhead, so that is a cap on payload

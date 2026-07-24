@@ -119,7 +119,7 @@ cd examples/react-chat-transports && docker compose up --build
 
 Chat at `http://localhost:8100` (seeded demo logins `ada@example.com` / `grace@example.com`, password `superline`), Control Center at `http://localhost:8101`.
 
-It also carries the browser-side **JWT** demo: a bearer-token panel that mints a short-lived token with `getToken()`, has a third service verify it with the shared secret alone — no super-line, no database — and hands it to another tab on another wire, which connects with `params: { jwt }` and no stored access token.
+It also carries the browser-side **JWT** demo: a bearer-token panel where the server issues a short-lived signed token over an authenticated route, has a third service verify it with the shared secret alone — no super-line, no database — and hands it to another tab on another wire, which connects with `params: { jwt }` and no stored access token.
 
 Demonstrates: [transports](/how-to/choose-a-transport), [plugin-auth](/how-to/plugin-auth), [plugin-chat](/how-to/plugin-chat), [the HTTP transport](/how-to/transport-http).
 

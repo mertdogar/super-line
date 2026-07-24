@@ -448,7 +448,7 @@ interface AuthServerOptions<C> {
   defaultRoles?: string[]               // default ['user']; must be contract roles
   accessTokenTtlMs?: number             // default 30 days
   usersReadable?: boolean               // default true (open read on `users`)
-  jwt?: { secret: string; ttlMs?: number }   // enables getToken + stateless ?jwt= connect; ttl default 15 min
+  jwt?: { secret: string; ttlMs?: number }   // enables server-side minting (authKit.tokens.*) + stateless ?jwt= connect; ttl default 15 min
   sendPasswordReset?: (a: { user: AuthUser; token: string }) => void | Promise<void>
   passwordResetTtlMs?: number           // default 1 hour
   resolveEnv?: (ctx: AuthContext) => AnyEnv<C> | undefined | Promise<AnyEnv<C> | undefined>   // ADR-0012: seeds client.env at connect from the resolved identity; undefined = none
@@ -483,13 +483,13 @@ createAuth<C, R>(opts: AuthClientOptions<C, R>): { AuthProvider, useAuth, auth }
 //   useAuth() → { client, state, ready: boolean, signUp, signIn, signOut }
 ```
 
-Shared requests (every role): `signOut` / `whoami` / `createApiKey` / `listApiKeys` / `revokeApiKey` / `getToken`. Guest-only: `signIn` / `signUp` / `requestPasswordReset` / `confirmPasswordReset`.
+Shared requests (every role): `signOut` / `whoami` / `createApiKey` / `listApiKeys` / `revokeApiKey`. Guest-only: `signIn` / `signUp` / `requestPasswordReset` / `confirmPasswordReset`. Bearer assertions are minted server-side (`authKit.tokens.mintSigned` / `mintSealed`) — there is no client-facing mint.
 
 Notes:
 - **The factory is `auth()`**, not `createAuthKit`. Pass the **same `CollectionStore`** to `auth({ collections })` and `createSuperLineServer({ collections })` — `authenticate` reads sessions/users/apiKeys directly off it.
 - **Login is a reconnect, not an upgrade.** A connection's role is frozen at connect, so `signIn`/`signUp` tear down the guest socket and reconnect as `authedRole` with `params: { token }`. Token persisted at `superline.auth.token`; `authClient` hides the guest↔authed swap.
 - **Handshake precedence in `authenticate`:** `role === 'guest'` → guest; else `params.apiKey` (`slp_…`, one fixed role, stateful + revocable); else `params.jwt` (only if `jwt.secret` set — stateless, unrevocable pre-expiry); else `params.token` (session). Token/JWT paths throw `BAD_REQUEST` if no role requested, `FORBIDDEN` if the role isn't granted.
-- `getToken()` throws `BAD_REQUEST` unless the server enabled `jwt`. `createApiKey` returns the raw `slp_…` value **once** and requires you already hold the requested role. `revoke(userId)` deletes sessions + disconnects cluster-wide but does NOT revoke API keys (do those per-key). `requestPasswordReset` is a silent no-op without `sendPasswordReset` and always returns `{ ok: true }` (never leaks email existence); `confirmPasswordReset` flushes all the user's sessions.
+- `createApiKey` returns the raw `slp_…` value **once** and requires you already hold the requested role. `revoke(userId)` deletes sessions + disconnects cluster-wide but does NOT revoke API keys (do those per-key). `requestPasswordReset` is a silent no-op without `sendPasswordReset` and always returns `{ ok: true }` (never leaks email existence); `confirmPasswordReset` flushes all the user's sessions.
 - **Imperative server management** (on `AuthServer`, for provisioning users + agents from server code — all require the running server): `authKit.users.get/find/create/update/setRoles/deactivate/reactivate`, `authKit.credentials.create/setPassword`, and `authKit.apiKeys.create/listFor/revoke`. `users.create({ displayName, roles?, metadata? })` creates only a profile. Attach email/password authentication with `credentials.create(userId, { email, password? })`; omit `password` for the invite flow. API-key-only agents have no credential row. Users **soft-delete**: `deactivate(id)` stamps `deletedAt`, revokes access tokens and API keys, ends sessions, clears reset tokens, and kicks live connections. `apiKeys.create(userId, { role, label, expiresInMs? })` mints an agent's key server-side (raw `slp_…` returned once).
 - **`env` (ADR-0012):** since `authKit` owns `authenticate` on the host's behalf, `resolveEnv(ctx)` is where identity-keyed `client.env` business logic lives — it runs right after identity resolves and seeds the connection's initial `env`. `pushEnv(userId, env)` updates it later (a key rotation/re-scope), cluster-wide. See REFERENCE.md → Connection env.
 

@@ -20,11 +20,11 @@ pnpm --filter @super-line/example-auth start
   and Bob each see only their own; the `users` directory is public.
 - **Roles are just data:** granting Alice `admin` (a co-write to her user row) lets her existing access token
   open an `admin` connection.
-- **A signed assertion — a claim, not a stored credential.** `getToken({ claims })` mints a short-lived HS256
-  token from a live session. Another backend verifies it with the secret **alone** — no super-line, no database
-  — and a client can connect with `params: { jwt }` and still get a real connection session
-  (`authMethod: 'jwt'`). The example prints the decoded payload to make the trade-off visible: a JWS hides
-  nothing from its holder, and since `getToken` is a *client* request, Bob wrote those claims himself.
+- **A signed assertion — a claim, not a stored credential.** `authKit.tokens.mintSigned(userId, { claims })`
+  issues a short-lived HS256 token server-side. Another backend verifies it with the secret **alone** — no
+  super-line, no database — and a client can connect with `params: { jwt }` and still get a real connection
+  session (`authMethod: 'jwt'`). The example prints the decoded payload to make the trade-off visible: a JWS
+  hides nothing from its holder, but the server authored it — there is no client-facing mint (ADR-0015).
 - **A sealed assertion — a secret routed *through* the client.** `authKit.tokens.mintSealed()` (server-only)
   issues a JWE carrying a public `claims` bag and an encrypted `sealed` one. Bob holds the token, connects with
   it, and **cannot decode it**; the server reads `ctx.sealed.upstreamKey` in a handler and returns only a

@@ -83,9 +83,9 @@ export type AuthPasswordReset = z.infer<typeof passwordResetSchema>
  * The per-connection auth context (`conn.ctx`) the plugin resolves — uniform across roles, `null` fields for a guest.
  *
  * `claims`/`sealed` are present only on a connection that authenticated with a bearer assertion, and carry the
- * payloads it was minted with. **`claims` on a `signed` assertion is client-authored** (any authenticated client can
- * call `getToken({ claims })`), so never authorize on it without checking `authMethod === 'jwt-sealed'` — only a
- * sealed assertion's payloads are server-minted. See ADR-0015.
+ * payloads it was minted with. Both are **server-authored** — there is no client-facing mint (ADR-0015); a `signed`
+ * assertion differs from a `sealed` one only in that its holder can *read* the public `claims` (a JWS hides nothing)
+ * but can forge neither. The `sealed` payload is additionally encrypted, so its own holder cannot read it at all.
  */
 export interface AuthContext<Claims = Record<string, unknown>, Sealed = Record<string, unknown>> {
   userId: string | null
@@ -126,16 +126,6 @@ const createApiKeyDef = {
 }
 const listApiKeysDef = { input: z.void(), output: z.array(apiKeyInfo) }
 const revokeApiKeyDef = { input: z.object({ id: z.string() }), output: z.object({ ok: z.boolean() }) }
-// A short-lived SIGNED assertion (JWS) derived from the current session — for stateless verification by other
-// backends, or to connect super-line without a DB round-trip. Only issued when the server enables `jwt`.
-// `claims` is an optional public payload; it is client-authored, so the server validates it against the host's
-// `jwt.claims` schema and surfaces it as `ctx.claims` — never as authority. Sealed assertions are server-only
-// (`authKit.tokens.mintSealed`) and deliberately have no client-facing mint. The input is a `void` union so that
-// existing `getToken()` callers keep compiling (a `X | undefined` parameter cannot be omitted; `void | X` can).
-const getTokenDef = {
-  input: z.union([z.void(), z.object({ claims: z.record(z.string(), z.unknown()).optional() })]),
-  output: z.object({ jwt: z.string(), expiresAt: z.number() }),
-}
 // Logged-out password recovery. `requestPasswordReset` always returns { ok: true } (never leaks whether the
 // email exists); the server delivers the token via a host `sendPasswordReset` callback.
 const requestResetDef = { input: z.object({ email: z.string().email() }), output: z.object({ ok: z.boolean() }) }
@@ -157,7 +147,6 @@ export const authSurface = defineSurface({
     createApiKey: createApiKeyDef,
     listApiKeys: listApiKeysDef,
     revokeApiKey: revokeApiKeyDef,
-    getToken: getTokenDef,
     requestPasswordReset: requestResetDef,
     confirmPasswordReset: confirmResetDef,
   },
@@ -198,7 +187,6 @@ export function authContract() {
         createApiKey: createApiKeyDef,
         listApiKeys: listApiKeysDef,
         revokeApiKey: revokeApiKeyDef,
-        getToken: getTokenDef,
       },
     },
   })

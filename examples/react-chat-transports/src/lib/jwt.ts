@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { decodeJwt } from 'jose'
 import { kind, TRANSPORT_LABELS, type TransportKind } from '@/lib/transport'
 
-// The bearer-assertion half of the demo. plugin-auth mints a short-lived SIGNED assertion from a live
-// session (`getToken`), the server can mint a SEALED one (`tokens.mintSealed`), and either connects via
-// `params: { jwt }`. This module is the browser's side of all of it.
+// The bearer-assertion half of the demo. The server mints a short-lived SIGNED assertion (over the
+// `/signed-token` route) or a SEALED one (`tokens.mintSealed`); neither is client-minted, and either
+// connects via `params: { jwt }`. This module is the browser's side of all of it.
 
 export interface Claims {
   userId: string

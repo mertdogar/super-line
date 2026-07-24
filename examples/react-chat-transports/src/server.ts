@@ -1,4 +1,5 @@
 import http from 'node:http'
+import { createHash } from 'node:crypto'
 import type { AddressInfo } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { createLibp2p } from 'libp2p'
@@ -56,13 +57,13 @@ server.on('request', (req, res) => {
 })
 
 /**
- * Exchange a SIGNED assertion for a SEALED one. There is no client-facing mint for a sealed token by
- * design (ADR-0015) — if a browser could mint one, `ctx.sealed` would be exactly as client-authored as
- * `ctx.claims`, and the whole distinction would carry no information. So the browser proves who it is
- * with a token it *can* hold, and back-office code decides what secret to seal into the reply.
+ * Exchange a SIGNED assertion for a SEALED one. Neither kind is client-mintable (ADR-0015) — both come
+ * from the server; a sealed token additionally hides its payload from its own holder, which is what lets
+ * you route a secret THROUGH a browser. So the browser proves who it is with the signed token it just
+ * fetched, and back-office code decides what secret to seal into the reply.
  *
- * This is the realistic shape: `UPSTREAM_KEY` stands in for a per-user credential to some third-party
- * API. The browser carries it to the server on the next connect and can never read it.
+ * This is the realistic shape: the sealed `upstreamKey` stands in for a per-user credential to some
+ * third-party API. The browser carries it to the server on the next connect and can never read it.
  */
 server.on('request', (req, res) => {
   if ((req.url ?? '').split('?')[0] !== '/sealed-handoff') return
@@ -82,13 +83,38 @@ server.on('request', (req, res) => {
   })().catch((err: unknown) => json(500, { error: err instanceof Error ? err.message : 'mint failed' }))
 })
 
+/**
+ * Issue a SIGNED assertion for the caller. There is no client-facing mint anymore (ADR-0015) — a browser
+ * can no longer sign its own token — so it presents the access token it already holds and the server mints
+ * one for it. This authenticated, out-of-band route is the realistic shape of "the server vends you a token".
+ */
+server.on('request', (req, res) => {
+  if ((req.url ?? '').split('?')[0] !== '/signed-token') return
+  const json = (status: number, body: unknown) => {
+    res.writeHead(status, { 'content-type': 'application/json', 'access-control-allow-origin': '*' })
+    res.end(JSON.stringify(body))
+  }
+  void (async () => {
+    const accessToken = (req.headers.authorization ?? '').replace(/^Bearer /i, '')
+    // The server looks the access token up exactly as plugin-auth does internally: its stored primary key
+    // is sha256(token) in `accessTokens` (never the raw token). No client mint is involved.
+    const hash = createHash('sha256').update(accessToken).digest('hex')
+    const row = accessToken
+      ? ((await backend.read('accessTokens', hash)) as { userId: string; expiresAt: number } | undefined)
+      : undefined
+    if (!row || row.expiresAt < Date.now()) return json(401, { error: 'sign in first' })
+    const { token, expiresAt } = await authKit.tokens.mintSigned(row.userId, { claims: { workspace: 'acme-demo' } })
+    json(200, { jwt: token, expiresAt })
+  })().catch((err: unknown) => json(500, { error: err instanceof Error ? err.message : 'mint failed' }))
+})
+
 // One CollectionStore shared by the server AND the auth kit (so authenticate reads sessions/users from it).
 const backend = sqliteCollections({ file: DB_FILE, collections: chat.collections })
 
 // plugin-auth owns identity, access tokens, connection sessions, presence and the `guest` role;
 // plugin-chat owns the whole chat model — its policies and its 20+ request handlers ship INSIDE
 // chatKit.plugin. There are no hand-rolled rooms, join/send handlers or presence topics in this file.
-// `jwt` enables BOTH halves of the feature: the `getToken` request (mint) and `params: { jwt }` at connect.
+// `jwt` enables server-side minting (`authKit.tokens.*`, used by /signed-token and /sealed-handoff) and `params: { jwt }` at connect.
 // 2 minutes instead of the 15-minute default so the countdown — and an expired token's rejection — are
 // reachable within one sitting. A JWT is only checked at connect, so a short TTL costs a demo nothing.
 const authKit = auth({

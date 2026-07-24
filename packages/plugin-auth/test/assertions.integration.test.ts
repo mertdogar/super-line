@@ -110,13 +110,11 @@ describe('plugin-auth — sealed assertions', () => {
 })
 
 describe('plugin-auth — signed assertions', () => {
-  it('carries a client-supplied claims bag into ctx, with no sealed half', async () => {
-    const { url } = await boot()
-    const { token: accessToken, userId } = await signUp(url)
+  it('carries a claims bag into ctx, with no sealed half', async () => {
+    const { url, authKit } = await boot()
+    const { userId } = await signUp(url)
 
-    const user = h.client(app, { url, role: 'user', params: { token: accessToken } })
-    const { jwt } = await user.getToken({ claims: { tab: 'left' } })
-    user.close()
+    const { token: jwt } = await authKit.tokens.mintSigned(userId, { claims: { tab: 'left' } })
 
     expect(jwt.split('.')).toHaveLength(3)
     expect(decodeJwt(jwt)).toMatchObject({ sub: userId, claims: { tab: 'left' } }) // public by construction
@@ -126,15 +124,6 @@ describe('plugin-auth — signed assertions', () => {
     expect(ctx).toMatchObject({ userId, authMethod: 'jwt', claims: { tab: 'left' } })
     expect(ctx.sealed).toBeUndefined()
     client.close()
-  })
-
-  it('keeps getToken() callable with no argument at all', async () => {
-    const { url } = await boot()
-    const { token: accessToken } = await signUp(url)
-    const user = h.client(app, { url, role: 'user', params: { token: accessToken } })
-    const { jwt } = await user.getToken()
-    expect(decodeJwt(jwt).claims).toBeUndefined()
-    user.close()
   })
 
   it('is mintable server-side too, taking roles from the row', async () => {

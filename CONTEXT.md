@@ -165,16 +165,17 @@ assertion connection still creates).
 ### Signed assertion
 Resolved 2026-07-23 (ADR-0015). The **JWS** kind: a bearer assertion whose payload is **public by
 construction** — base64, readable by anyone holding the token, checkable by anyone holding the verification
-key. That readability *is* its purpose: it is the kind another backend verifies statelessly. Mintable by any
-authenticated **client** (`getToken({ claims })`) as well as the server, which is exactly why its `claims` are
-**client-authored** and must never be authorized on. Carries its own `roles` and stamps `authMethod: 'jwt'`.
+key. That readability *is* its purpose: it is the kind another backend verifies statelessly. **Server-minted
+only** (`authKit.tokens.mintSigned`; the client mint was retired 2026-07-24), so its `claims` are
+**server-authored** — the difference from a sealed token is readability, not trust. Carries its own `roles` and stamps `authMethod: 'jwt'`.
 
 ### Sealed assertion
 Resolved 2026-07-23 (ADR-0015). The **JWE** kind: a bearer assertion that is **opaque to its own holder**.
 Carries a public `claims` bag and a `sealed` bag, both readable only by a party with the encryption key —
 so it is the only credential here that can carry a secret *through* the client that presents it.
-**Server-minted only** (`authKit.tokens.mintSealed`); the absence of a client-facing mint is the entire
-reason `ctx.sealed` is trustworthy where `ctx.claims` on a [[Signed assertion]] is not. Its roles come from
+**Server-minted only** (`authKit.tokens.mintSealed`), like every assertion since the 2026-07-24 update; what
+sets it apart is that its payload is opaque even to its own holder — letting it carry a secret *through* the
+client — whereas a [[Signed assertion]]'s `claims` are readable by whoever holds it. Its roles come from
 the user row at connect, not from the token — making it "a stateless [[Access token]] that carries a typed
 payload" — and it stamps `authMethod: 'jwt-sealed'`. Its public half reaches the client only via
 [[Connection env]], never automatically.

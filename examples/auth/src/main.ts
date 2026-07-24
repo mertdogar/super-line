@@ -10,6 +10,9 @@ import { webSocketClientTransport, webSocketServerTransport } from '@super-line/
 import { authContract } from '@super-line/plugin-auth'
 import { auth } from '@super-line/plugin-auth/server'
 import { authClient } from '@super-line/plugin-auth/client'
+import { enableSuperLineLogging } from '@super-line/core'
+
+enableSuperLineLogging({ level: 'trace' })
 
 // Proper authentication as a paired plugin. `authContract()` adds — to the contract merged on BOTH ends —
 // the `guest` role, the `users`/`credentials`/`sessions` collections, and signIn/signUp/signOut/whoami. So the
@@ -48,7 +51,7 @@ async function main(): Promise<void> {
   const server = http.createServer()
   const backend = memoryCollections()
   // The SAME backend is handed to both the auth kit (so `authenticate` can read sessions/users) and the server.
-  // `jwt` turns on both halves of the JWT feature: the `getToken` request, and `params: { jwt }` at connect.
+  // `jwt` turns on server-side minting (`authKit.tokens.*`) and `params: { jwt }` at connect.
   const authKit = auth({
     contract: app,
     collections: backend,
@@ -210,14 +213,15 @@ async function main(): Promise<void> {
   console.log('  scout wrote a note as itself')
   scout.close()
 
-  // ── A bearer assertion is a CLAIM, not a stored credential. `getToken()` mints one from the live
-  //    session; nothing about it is written down, so verifying it needs the secret and nothing else. ──
-  console.log('\n— Bob mints a signed assertion —')
-  const { jwt } = await bob.client.getToken({ claims: { workspace: 'acme' } })
+  // ── A bearer assertion is a CLAIM, not a stored credential. The server mints one for Bob with
+  //    `authKit.tokens.mintSigned`; nothing about it is written down, so verifying it needs the secret and
+  //    nothing else. There is no client-facing mint — a client never issues its own token (ADR-0015). ──
+  console.log('\n— The server mints a signed assertion for Bob —')
+  const { token: jwt } = await authKit.tokens.mintSigned(bobId, { claims: { workspace: 'acme' } })
 
   // 1 · Another backend verifies it offline. No super-line, no database, no call home — just the secret.
-  //     Note `claims` is right there in the payload: a signed assertion hides NOTHING from its holder, and
-  //     because `getToken` is a client request, Bob wrote that bag himself. Never authorize on it.
+  //     Note `claims` is right there in the payload: a signed assertion hides NOTHING from its holder — but
+  //     the server authored it, so unlike the sealed half it is safe to read as identity, just not secret.
   const { payload } = await jwtVerify(jwt, new TextEncoder().encode(JWT_SECRET))
   console.log('  verified offline →', { sub: payload.sub, roles: payload.roles, claims: payload.claims })
 
@@ -230,8 +234,8 @@ async function main(): Promise<void> {
   viaJwt.close()
 
   // ── A SEALED assertion is the other kind: a JWE. Same handshake param, but the payload is encrypted, so
-  //    its own holder cannot read it — which is what lets you route a secret THROUGH a client. Only the
-  //    server mints one; there is deliberately no client-facing equivalent of getToken for it. ──
+  //    its own holder cannot read it — which is what lets you route a secret THROUGH a client. Like the
+  //    signed kind it is server-minted; neither has a client-facing mint (ADR-0015). ──
   console.log('\n— The server mints a sealed assertion for Bob —')
   const { token: sealedToken } = await authKit.tokens.mintSealed(bobId, {
     claims: { workspace: 'acme' }, // public half — safe to show Bob

@@ -7,7 +7,7 @@ import { newId } from './crypto.js'
  * The two serializations of a bearer assertion (both are JWTs — RFC 7519 §1 admits either).
  *
  * - `signed` — a JWS. Its claims are **public**: anyone holding the token can base64-decode them, and anyone
- *   holding the verification key can check them. Mintable by a client (`getToken`) or the server.
+ *   holding the verification key can check them. Server-minted (`authKit.tokens.mintSigned`).
  * - `sealed` — a JWE. Its claims are **opaque to its own holder**; only a party with the encryption key can
  *   read them. Server-minted only (`authKit.tokens.mintSealed`).
  */

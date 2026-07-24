@@ -133,7 +133,7 @@ There are **two kinds**, and the difference is who can read the payload:
 |  | **signed** (JWS) | **sealed** (JWE) |
 |---|---|---|
 | payload | public — anyone holding the token can read it | opaque, even to its own holder |
-| minted by | a client (`getToken`) **or** the server | the **server only** |
+| minted by | the **server** (`authKit.tokens.mintSigned`) | the **server only** (`mintSealed`) |
 | verified by | anyone with the verification key | only a holder of the encryption key |
 | roles from | the token's own claims | the user row, at connect |
 | `authMethod` | `'jwt'` | `'jwt-sealed'` |
@@ -141,13 +141,13 @@ There are **two kinds**, and the difference is who can read the payload:
 Both are JWTs (RFC 7519 admits either serialization) and both connect through the same
 `params: { jwt }` — super-line tells them apart by shape.
 
-### Signed — mint, verify anywhere, connect
+### Signed — mint server-side, verify anywhere, connect
 
-`getToken()` is on `shared`, so any authenticated connection can call it:
+The server mints a signed assertion; there is no client-facing mint. Deliver it to a client out-of-band
+(e.g. an authenticated HTTP route that returns it):
 
 ```ts
-const { jwt, expiresAt } = await client.getToken()                 // sub = userId, roles, jti, exp
-const { jwt: tagged } = await client.getToken({ claims: { workspace: 'acme' } })
+const { token, expiresAt } = await authKit.tokens.mintSigned(userId, { claims: { workspace: 'acme' } })
 ```
 
 The point of the format is a service with none of your infrastructure:
@@ -212,9 +212,9 @@ is what closes the alg-confusion attack.
 
 ### Behaviours to design around
 
-- **`ctx.claims` on a signed assertion is client-authored.** `getToken` is a client request, so a user can put
-  anything there (subject to your `claims` schema). **Never authorize on it** unless
-  `ctx.authMethod === 'jwt-sealed'` — only a sealed assertion's payloads are server-minted.
+- **`ctx.claims` is server-authored.** With no client-facing mint, both `claims` (signed) and `sealed`
+  (sealed) are written by the server at mint. The difference is reach, not trust: a signed assertion's
+  `claims` are *readable* by its holder (a JWS hides nothing), a sealed one's payload is not.
 - **A role is required.** Connecting without one is a `BAD_REQUEST`; asking for a role the assertion doesn't
   grant is `FORBIDDEN`.
 - **A bad token degrades to `guest`, it does not throw.** An expired, forged, or schema-drifted assertion

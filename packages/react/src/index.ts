@@ -9,6 +9,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react'
+import { SuperLineError } from '@super-line/core'
 import type {
   Contract,
   RoleOf,
@@ -29,6 +30,14 @@ import type { SuperLineClient, CollectionHandle, DocHandle, CrdtCollectionHandle
 
 /** Identity-stable empty snapshot — a fresh `[]` per read would spin `useSyncExternalStore`. */
 const EMPTY: never[] = []
+
+/**
+ * Idle-hook write failure. A hook with no live client goes idle for READS (`[]` / `undefined` is a truthful
+ * "nothing yet"), but a write must never silently succeed — a swallowed `insert` is indistinguishable from a
+ * landed one, so the caller loses data with no signal (ADR-0020).
+ */
+const noClient = (): SuperLineError =>
+  new SuperLineError('UNAUTHORIZED', 'not authenticated — there is no live super-line client')
 
 /** State returned by `useRequest`. */
 export interface RequestState<T> {
@@ -57,38 +66,51 @@ export interface RequestState<T> {
 export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() {
   const Context = createContext<SuperLineClient<C, R> | null>(null)
 
-  /** Provides a connected client to the hooks below. */
-  function Provider(props: { client: SuperLineClient<C, R>; children?: ReactNode }): ReactNode {
+  /**
+   * Provides a client to the hooks below. `null` is legal and means "not connected yet" — the hooks go idle
+   * rather than throwing, which is what lets an auth-owned binding render a login screen above them.
+   */
+  function Provider(props: { client: SuperLineClient<C, R> | null; children?: ReactNode }): ReactNode {
     return createElement(Context.Provider, { value: props.client }, props.children)
   }
 
-  /** Access the client from context (throws outside a `<Provider>`). */
+  /** Access the client from context (throws outside a `<Provider>`, or while it holds no client). */
   function useClient(): SuperLineClient<C, R> {
-    const client = useContext(Context)
-    if (!client) throw new Error('useClient must be used within a <Provider>')
+    const client = useMaybeClient()
+    if (!client) throw new Error('useClient must be used within a <Provider> that has a client')
     return client
   }
 
-  /** Subscribe to a server-pushed event for the component's lifetime. */
+  /** The client, or `null` — what every hook below reads, so a client-less provider idles instead of throwing. */
+  function useMaybeClient(): SuperLineClient<C, R> | null {
+    return useContext(Context)
+  }
+
+  /** Subscribe to a server-pushed event for the component's lifetime. Idle (never bound) with no client. */
   function useEvent<E extends keyof Events<C, R>>(
     event: E,
     handler: (data: EventData<Events<C, R>[E]>) => void,
   ): void {
-    const client = useClient()
+    const client = useMaybeClient()
     const ref = useRef(handler)
     useEffect(() => {
       ref.current = handler
     })
-    useEffect(() => client.on(event, (data) => ref.current(data)), [client, event])
+    useEffect(() => (client ? client.on(event, (data) => ref.current(data)) : undefined), [client, event])
   }
 
-  /** Subscribe to a topic and return its latest value (or `undefined` before the first message). */
+  /** Subscribe to a topic and return its latest value (or `undefined` before the first message / with no client). */
   function useSubscription<T extends keyof Topics<C, R>>(
     topic: T,
   ): EventData<Topics<C, R>[T]> | undefined {
-    const client = useClient()
+    const client = useMaybeClient()
     const [data, setData] = useState<EventData<Topics<C, R>[T]>>()
     useEffect(() => {
+      // Clear on the way down: a value pushed to the PREVIOUS client's session must not survive into the next.
+      if (!client) {
+        setData(undefined)
+        return
+      }
       const sub = client.subscribe(topic, setData)
       return () => sub.unsubscribe()
     }, [client, topic])
@@ -101,7 +123,7 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
   ): RequestState<Output<Requests<C, R>[M]>> & {
     call: (input: ClientInput<Requests<C, R>[M]>) => Promise<Output<Requests<C, R>[M]>>
   } {
-    const client = useClient()
+    const client = useMaybeClient()
     const [state, setState] = useState<RequestState<Output<Requests<C, R>[M]>>>({
       isLoading: false,
     })
@@ -112,6 +134,11 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     const call = useCallback(
       async (input: ClientInput<Requests<C, R>[M]>) => {
         const seq = ++latest.current
+        if (!client) {
+          const error = noClient()
+          if (seq === latest.current) setState({ error, isLoading: false })
+          throw error
+        }
         setState({ isLoading: true })
         try {
           const fn = client[method] as (
@@ -146,7 +173,7 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     delete: (path: (string | number)[]) => void
   } {
     type Doc = DocOf<C, N>
-    const client = useClient()
+    const client = useMaybeClient()
     const handleRef = useRef<DocHandle<Doc> | undefined>(undefined)
     // `handle.getSnapshot()` is already identity-stable between merges (the CRDT store caches it), but
     // this hook exposes two fields, so the pair is memoised too — a fresh object per read would spin
@@ -154,6 +181,11 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     const pairRef = useRef<{ data: Doc | undefined; deleted: boolean }>({ data: undefined, deleted: false })
     const subscribe = useCallback(
       (onChange: () => void) => {
+        if (!client) {
+          handleRef.current = undefined
+          onChange() // fall back to the idle snapshot
+          return () => {}
+        }
         const handle = (client.collection(name) as CrdtCollectionHandle<Doc>).open(id)
         handleRef.current = handle
         onChange()
@@ -174,9 +206,15 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
       return (pairRef.current = next)
     }, [])
     const { data, deleted } = useSyncExternalStore(subscribe, getPair, getPair)
-    const set = useCallback((value: Doc) => handleRef.current?.set(value), [])
-    const update = useCallback((partial: Partial<Doc>) => handleRef.current?.update(partial), [])
-    const del = useCallback((path: (string | number)[]) => handleRef.current?.delete(path), [])
+    // These return `void`, so an idle write throws synchronously rather than resolving a promise nobody awaits.
+    const doc = useCallback((): DocHandle<Doc> => {
+      const handle = handleRef.current
+      if (!handle) throw noClient()
+      return handle
+    }, [])
+    const set = useCallback((value: Doc) => doc().set(value), [doc])
+    const update = useCallback((partial: Partial<Doc>) => doc().update(partial), [doc])
+    const del = useCallback((path: (string | number)[]) => doc().delete(path), [doc])
     return { data, deleted, set, update, delete: del }
   }
 
@@ -196,7 +234,7 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     update: (row: RowOf<C, N>) => Promise<void>
     delete: (id: string) => Promise<void>
   } {
-    const client = useClient()
+    const client = useMaybeClient()
     const queryKey = JSON.stringify(query ?? {}) // stabilize an inline-literal query across renders
     const [error, setError] = useState<unknown>()
     const handleRef = useRef<CollectionHandle<RowOf<C, N>> | undefined>(undefined)
@@ -207,6 +245,13 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     // subscription here has the same timing as the effect it replaces.
     const subscribe = useCallback(
       (onChange: () => void) => {
+        if (!client) {
+          handleRef.current = undefined
+          subRef.current = undefined
+          setError(undefined)
+          onChange() // fall back to the idle empty rows
+          return () => {}
+        }
         const handle = client.collection(name) as CollectionHandle<RowOf<C, N>> // useCollection is the LWW row surface
         handleRef.current = handle
         setError(undefined)
@@ -226,9 +271,9 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     )
     const getRows = useCallback(() => (subRef.current?.rows() as RowOf<C, N>[] | undefined) ?? EMPTY, [])
     const rows = useSyncExternalStore(subscribe, getRows, () => EMPTY as RowOf<C, N>[])
-    const insert = useCallback((row: RowOf<C, N>) => handleRef.current?.insert(row) ?? Promise.resolve(), [])
-    const update = useCallback((row: RowOf<C, N>) => handleRef.current?.update(row) ?? Promise.resolve(), [])
-    const del = useCallback((id: string) => handleRef.current?.delete(id) ?? Promise.resolve(), [])
+    const insert = useCallback((row: RowOf<C, N>) => handleRef.current?.insert(row) ?? Promise.reject(noClient()), [])
+    const update = useCallback((row: RowOf<C, N>) => handleRef.current?.update(row) ?? Promise.reject(noClient()), [])
+    const del = useCallback((id: string) => handleRef.current?.delete(id) ?? Promise.reject(noClient()), [])
     return { rows, error, insert, update, delete: del }
   }
 
@@ -238,13 +283,16 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
    * on every update. Code-only — wire the creds into effects/calls; never render a raw secret.
    */
   function useEnv(): EnvOf<C, R> | null {
-    const client = useClient()
+    const client = useMaybeClient()
     // Both callbacks must be identity-stable: React resubscribes whenever `subscribe` changes,
     // so an inline arrow here would tear down and re-add the env listener on every render.
-    const subscribe = useCallback((onChange: () => void) => client.env.subscribe(() => onChange()), [client])
-    const snapshot = useCallback(() => client.env.current, [client])
-    return useSyncExternalStore(subscribe, snapshot, snapshot)
+    const subscribe = useCallback(
+      (onChange: () => void) => (client ? client.env.subscribe(() => onChange()) : () => {}),
+      [client],
+    )
+    const snapshot = useCallback(() => client?.env.current ?? null, [client])
+    return useSyncExternalStore(subscribe, snapshot, snapshot) as EnvOf<C, R> | null
   }
 
-  return { Provider, useClient, useEvent, useSubscription, useRequest, useDoc, useCollection, useEnv }
+  return { Provider, useClient, useMaybeClient, useEvent, useSubscription, useRequest, useDoc, useCollection, useEnv }
 }

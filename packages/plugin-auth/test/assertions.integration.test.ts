@@ -6,7 +6,7 @@ import { memoryCollections } from '@super-line/collections-memory'
 import { authContract, type AuthContext } from '@super-line/plugin-auth'
 import { auth, type AssertionOptions } from '@super-line/plugin-auth/server'
 import { authClient } from '@super-line/plugin-auth/client'
-import { createHarness } from '../../server/test/harness.js'
+import { createHarness, tick } from '../../server/test/harness.js'
 
 // `peek` echoes the whole auth context back, so a test can assert exactly what a handler sees.
 const app = defineContract({
@@ -356,6 +356,198 @@ describe('plugin-auth — resolveToken + AuthState.error (Phase 2)', () => {
     await ac.ready
     expect(ac.state.status).toBe('guest')
     expect(ac.state.error).toMatchObject({ reason: expect.any(String) })
+    ac.client.close()
+  })
+})
+
+// ADR-0020 — a session replacement never destroys a session it could not replace, and only one
+// transition runs at a time. `reauthenticate()` re-consults the credential source; boot is merely its
+// first consultation, so both go through one code path.
+describe('plugin-auth — session replacement (ADR-0020)', () => {
+  it('reauthenticate() swaps to the identity the source now yields', async () => {
+    const { url, authKit } = await boot()
+    const a = await signUp(url, 'switch-a@x.com')
+    const b = await signUp(url, 'switch-b@x.com')
+    let mint = (await authKit.tokens.mintSealed(a.userId)).token
+    const ac = authClient<typeof app, 'user'>({
+      authedRole: 'user',
+      tokenParam: 'jwt',
+      resolveToken: async () => ({ token: mint }),
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params }),
+    })
+    await ac.ready
+    expect(ac.state.userId).toBe(a.userId)
+
+    mint = (await authKit.tokens.mintSealed(b.userId)).token
+    const settled = await ac.reauthenticate()
+    expect(settled.status).toBe('authed')
+    expect(settled.userId).toBe(b.userId)
+    expect(ac.state.userId).toBe(b.userId)
+    expect(ac.state.pending).toBe(false)
+    // the new connection is live and answers as B
+    expect(await (ac.client as unknown as { peek(): Promise<{ userId: string }> }).peek()).toMatchObject({ userId: b.userId })
+    ac.client.close()
+  })
+
+  it('keeps the live session when the source throws, and surfaces the error', async () => {
+    const { url, authKit } = await boot()
+    const a = await signUp(url, 'keep-a@x.com')
+    const token = (await authKit.tokens.mintSealed(a.userId)).token
+    let fail = false
+    const ac = authClient<typeof app, 'user'>({
+      authedRole: 'user',
+      tokenParam: 'jwt',
+      resolveToken: async () => {
+        if (fail) throw new Error('mint route is down')
+        return { token }
+      },
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params }),
+    })
+    await ac.ready
+    const before = ac.client
+
+    fail = true
+    const settled = await ac.reauthenticate()
+    expect(settled.status).toBe('authed') // NOT dropped to guest
+    expect(settled.userId).toBe(a.userId)
+    expect(settled.error).toMatchObject({ reason: expect.stringContaining('mint route is down') })
+    expect(ac.client).toBe(before) // the incumbent connection was never closed
+    expect(await (ac.client as unknown as { peek(): Promise<{ userId: string }> }).peek()).toMatchObject({ userId: a.userId })
+    ac.client.close()
+  })
+
+  it('keeps the live session when the new credential is refused', async () => {
+    const { url, authKit } = await boot()
+    const a = await signUp(url, 'refused-a@x.com')
+    let token = (await authKit.tokens.mintSealed(a.userId)).token
+    const ac = authClient<typeof app, 'user'>({
+      authedRole: 'user',
+      tokenParam: 'jwt',
+      resolveToken: async () => ({ token }),
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params }),
+    })
+    await ac.ready
+    const before = ac.client
+
+    token = 'not.a.real.assertion'
+    const settled = await ac.reauthenticate()
+    expect(settled.status).toBe('authed')
+    expect(settled.userId).toBe(a.userId)
+    expect(settled.error).toMatchObject({ reason: expect.any(String) })
+    expect(ac.client).toBe(before)
+    ac.client.close()
+  })
+
+  it('drops to guest when the source deliberately answers null', async () => {
+    const { url, authKit } = await boot()
+    const a = await signUp(url, 'null-a@x.com')
+    const token = (await authKit.tokens.mintSealed(a.userId)).token
+    let signedOutUpstream = false
+    const ac = authClient<typeof app, 'user'>({
+      authedRole: 'user',
+      tokenParam: 'jwt',
+      resolveToken: async () => (signedOutUpstream ? null : { token }),
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params }),
+    })
+    await ac.ready
+    expect(ac.state.status).toBe('authed')
+
+    signedOutUpstream = true
+    const settled = await ac.reauthenticate()
+    expect(settled.status).toBe('guest')
+    expect(settled.userId).toBeNull()
+    expect(settled.error ?? null).toBeNull() // a deliberate answer, not a failure
+    ac.client.close()
+  })
+
+  it('reports `pending` for the duration of a transition', async () => {
+    const { url, authKit } = await boot()
+    const a = await signUp(url, 'pending-a@x.com')
+    const token = (await authKit.tokens.mintSealed(a.userId)).token
+    const ac = authClient<typeof app, 'user'>({
+      authedRole: 'user',
+      tokenParam: 'jwt',
+      resolveToken: async () => ({ token }),
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params }),
+    })
+    await ac.ready
+    expect(ac.state.pending).toBe(false)
+
+    const seen: boolean[] = []
+    const off = ac.subscribe((s) => seen.push(s.pending))
+    const p = ac.reauthenticate()
+    expect(ac.state.pending).toBe(true) // set synchronously, before the first await
+    expect(ac.state.status).toBe('authed') // the incumbent still describes the session
+    expect(ac.state.userId).toBe(a.userId)
+    await p
+    off()
+    expect(seen).toEqual([true, false])
+    ac.client.close()
+  })
+
+  it('refuses a second transition while one is in flight', async () => {
+    const { url, authKit } = await boot()
+    const a = await signUp(url, 'busy-a@x.com')
+    const token = (await authKit.tokens.mintSealed(a.userId)).token
+    const ac = authClient<typeof app, 'user'>({
+      authedRole: 'user',
+      tokenParam: 'jwt',
+      resolveToken: async () => ({ token }),
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params }),
+    })
+    await ac.ready
+
+    const first = ac.reauthenticate()
+    await expect(ac.reauthenticate()).rejects.toThrow(/in flight/i)
+    await expect(ac.signOut()).rejects.toThrow(/in flight/i)
+    await first
+    ac.client.close()
+  })
+
+  // The shipping bug this guard fixes: boot's resolveToken used to swap unconditionally, so a slow mint
+  // landing AFTER an interactive signIn silently overwrote the signed-in session with the boot token.
+  it('refuses signIn while boot is still resolving, instead of letting boot clobber it later', async () => {
+    const { url, authKit } = await boot()
+    const a = await signUp(url, 'race-a@x.com')
+    await signUp(url, 'race-b@x.com')
+    const token = (await authKit.tokens.mintSealed(a.userId)).token
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    const ac = authClient<typeof app, 'user'>({
+      authedRole: 'user',
+      tokenParam: 'jwt',
+      resolveToken: async () => {
+        await gate
+        return { token }
+      },
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params }),
+    })
+    await tick()
+    expect(ac.state.pending).toBe(true)
+    await expect(ac.signIn({ email: 'race-b@x.com', password: 'passpass' })).rejects.toThrow(/in flight/i)
+
+    release()
+    await ac.ready
+    expect(ac.state.userId).toBe(a.userId) // boot won, and said so at the time
+    ac.client.close()
+  })
+
+  it('re-consults storage when there is no resolveToken (password app revalidate)', async () => {
+    const { url } = await boot()
+    const a = await signUp(url, 'pw-a@x.com')
+    const ac = authClient<typeof app, 'user'>({
+      authedRole: 'user',
+      storage: { get: () => a.token, set: () => {} },
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params }),
+    })
+    await ac.ready
+    expect(ac.state.status).toBe('authed')
+    const before = ac.client
+
+    const settled = await ac.reauthenticate()
+    expect(settled.status).toBe('authed')
+    expect(settled.userId).toBe(a.userId)
+    expect(ac.client).not.toBe(before) // a genuine replacement, not a no-op
     ac.client.close()
   })
 })

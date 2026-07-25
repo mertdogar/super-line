@@ -46,11 +46,13 @@
   "peerDependencies": {
     "@super-line/client": ">=0.12.0 <1.0.0",
     "@super-line/core": ">=0.14.0 <1.0.0",
+    "@super-line/react": ">=0.11.0 <1.0.0",
     "@super-line/server": ">=0.15.0 <1.0.0",
     "react": ">=18"
   },
   "peerDependenciesMeta": {
     "@super-line/client": { "optional": true },
+    "@super-line/react": { "optional": true },
     "@super-line/server": { "optional": true },
     "react": { "optional": true }
   },
@@ -58,6 +60,7 @@
     "@super-line/client": "workspace:^",
     "@super-line/collections-memory": "workspace:*",
     "@super-line/core": "workspace:^",
+    "@super-line/react": "workspace:^",
     "@super-line/server": "workspace:^",
     "@super-line/transport-websocket": "workspace:*",
     "@types/react": "^18.3.0",

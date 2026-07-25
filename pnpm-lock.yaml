@@ -1616,6 +1616,9 @@ importers:
       '@super-line/core':
         specifier: workspace:^
         version: link:../core
+      '@super-line/react':
+        specifier: workspace:^
+        version: link:../react
       '@super-line/server':
         specifier: workspace:^
         version: link:../server

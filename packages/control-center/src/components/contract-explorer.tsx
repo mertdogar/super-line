@@ -110,21 +110,20 @@ function Block({
   ownerOf: (dir: DirectionKey, name: string) => string | undefined
 }): React.JSX.Element | null {
   if (dir.clientToServer.length === 0 && dir.serverToClient.length === 0) return null
+  // A titled section, NOT a card — the message rows are the only cards, so nothing nests.
   return (
-    <div className="rounded-lg border bg-card/40 p-3">
-      <div className="mb-2 text-sm font-semibold">{title}</div>
-      <div className="flex flex-col gap-3">
-        <Direction label="client → server" dir="clientToServer" messages={dir.clientToServer} ownerOf={ownerOf} />
-        <Direction label="server → client" dir="serverToClient" messages={dir.serverToClient} ownerOf={ownerOf} />
-      </div>
-    </div>
+    <section className="flex flex-col gap-3">
+      <h2 className="border-b pb-1.5 text-sm font-semibold">{title}</h2>
+      <Direction label="client → server" dir="clientToServer" messages={dir.clientToServer} ownerOf={ownerOf} />
+      <Direction label="server → client" dir="serverToClient" messages={dir.serverToClient} ownerOf={ownerOf} />
+    </section>
   )
 }
 
 export function ContractExplorer({ contract }: { contract: InspectedContract }): React.JSX.Element {
   const owners = React.useMemo(() => buildOwnerIndex(contract.plugins), [contract.plugins])
   return (
-    <div className="flex max-w-3xl flex-col gap-3">
+    <div className="flex max-w-3xl flex-col gap-6">
       <Block
         title="shared"
         dir={contract.shared}

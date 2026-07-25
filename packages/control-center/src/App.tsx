@@ -28,7 +28,7 @@ import { version } from '../package.json'
 import { roomsOf, type Highlight } from '@/lib/topology'
 import { connectedUsers } from '@/lib/identity'
 import { transportsOf } from '@/lib/transport'
-import { cn } from '@/lib/utils'
+import { cn, plural } from '@/lib/utils'
 
 type View = 'topology' | 'connections' | 'contract' | 'plugins' | 'collections' | 'feed' | 'settings' | 'resources'
 type NavItem = { id: View; label: string; icon: typeof Network }
@@ -224,9 +224,9 @@ export default function App(): React.JSX.Element {
   const active = [...NAV, ...NAV_BOTTOM].find((n) => n.id === view)
   const count =
     view === 'connections'
-      ? `${connections.length} connections`
+      ? plural(connections.length, 'connection')
       : view === 'feed'
-        ? `${feed.length} events`
+        ? plural(feed.length, 'event')
         : ''
 
   // Settings/Resources need no connection; the data views show a diagnostic state until a node reports.
@@ -269,8 +269,8 @@ export default function App(): React.JSX.Element {
           </div>
           <div className="flex items-center gap-3">
             <StatusDot status={status} />
-            <Badge variant="muted">{topology.length} nodes</Badge>
-            <Badge variant="muted">{totalConns} conns</Badge>
+            <Badge variant="muted">{plural(topology.length, 'node')}</Badge>
+            <Badge variant="muted">{plural(totalConns, 'conn')}</Badge>
           </div>
         </header>
 
@@ -383,14 +383,50 @@ const SHORTCUTS: { keys: string; label: string }[] = [
 ]
 
 function ShortcutsSheet({ onClose }: { onClose: () => void }): React.JSX.Element {
+  // This one IS modal — trap Tab inside it and restore focus to the opener on close (Esc closes it via App).
+  const ref = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null
+    ref.current?.focus()
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Tab') return
+      const els = [
+        ...(ref.current?.querySelectorAll<HTMLElement>(
+          'a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"])',
+        ) ?? []),
+      ].filter((el) => el.offsetParent !== null)
+      if (els.length === 0) {
+        e.preventDefault()
+        ref.current?.focus()
+        return
+      }
+      const first = els[0]!
+      const last = els[els.length - 1]!
+      const active = document.activeElement as HTMLElement
+      if (e.shiftKey && (active === first || !ref.current?.contains(active))) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      opener?.focus?.()
+    }
+  }, [])
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
+        ref={ref}
         role="dialog"
         aria-modal="true"
         aria-label="Keyboard shortcuts"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm rounded-lg border bg-card p-4 shadow-lg"
+        className="w-full max-w-sm rounded-lg border bg-card p-4 shadow-lg outline-none"
       >
         <div className="mb-3 flex items-center gap-2">
           <Keyboard className="h-4 w-4 text-primary" />

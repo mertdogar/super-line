@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Json } from '@/components/json-view'
 import { formatDuration, formatTime } from '@/lib/events'
 import { buildOwnerIndex, ownerOfCollection } from '@/lib/plugins'
-import { clickable, cn } from '@/lib/utils'
+import { clickable, cn, plural } from '@/lib/utils'
 
 const PAGE = 100
 type Row = Record<string, unknown>
@@ -240,10 +240,12 @@ export function CollectionsExplorer({
   )
 
   // Reload on collection / filter / sort change, debounced so typing a filter value doesn't fire a query per keystroke.
+  // Mark the query pending up front so the definitive "No rows." verdict can't flash during the debounce/in-flight gap.
   React.useEffect(() => {
+    if (client && name) setLoading(true)
     const t = setTimeout(() => load(true), 200)
     return () => clearTimeout(t)
-  }, [load])
+  }, [load, client, name])
 
   const pick = (n: string): void => {
     const col = collections.find((c) => c.name === n)
@@ -389,7 +391,7 @@ export function CollectionsExplorer({
                   <RefreshCw className={cn('h-3 w-3', loading && 'animate-spin')} />
                   Refresh
                 </button>
-                <span className="text-xs text-muted-foreground">{shown.length} rows</span>
+                <span className="text-xs text-muted-foreground">{plural(shown.length, 'row')}</span>
               </div>
             </div>
 
@@ -438,10 +440,14 @@ export function CollectionsExplorer({
                       </td>
                     </tr>
                   ))}
-                  {shown.length === 0 && !loading ? (
+                  {shown.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="px-3 py-3 text-sm text-muted-foreground">
-                        {text || conditions.length > 0 || idFilter ? 'No rows match the filter.' : 'No rows.'}
+                        {loading
+                          ? 'Loading…'
+                          : text || conditions.length > 0 || idFilter
+                            ? 'No rows match the filter.'
+                            : 'No rows.'}
                       </td>
                     </tr>
                   ) : null}

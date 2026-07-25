@@ -18,6 +18,8 @@ export function ConnectionState({
   url: string
   onRetry: () => void
 }): React.JSX.Element {
+  // `status` is already de-strobed upstream (useInspector holds a failed connect at a steady 'closed'
+  // through the silent auto-retries), so this state can render it straight.
   const copy =
     status === 'connecting'
       ? { title: 'Connecting…', detail: `Reaching the inspector at ${url}.`, hint: null as string | null }
@@ -25,7 +27,7 @@ export function ConnectionState({
         ? {
             title: 'Can’t reach the inspector',
             detail: `No inspector answered at ${url}. The server may be down, on another port, or not exposing the inspector.`,
-            hint: 'Make sure the server mounts inspector() in its plugins, then set the right URL under Settings. Auto-retrying every second.',
+            hint: 'Make sure the server mounts inspector() in its plugins, then set the right URL under Settings. Retrying automatically every second.',
           }
         : {
             title: 'Connected · no nodes reporting',

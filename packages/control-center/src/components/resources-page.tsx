@@ -11,8 +11,8 @@ const RESOURCES = [
   {
     icon: BookOpen,
     title: 'Documentation',
-    href: 'https://mertdogar.github.io/super-line/guide/getting-started',
-    blurb: 'Guides, the full API reference, and runnable examples.',
+    href: 'https://mertdogar.github.io/super-line/tutorials/',
+    blurb: 'Tutorials, how-to guides, the full API reference, and runnable examples.',
   },
   {
     icon: Github,

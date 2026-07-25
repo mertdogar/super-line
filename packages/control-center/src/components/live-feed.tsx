@@ -291,7 +291,7 @@ function FeedRow({
             <MiniBar fraction={barFraction(latency, maxLatency)} color={latencyColor(latency)} label={`${latency} ms`} />
           )}
         </td>
-        <td className="px-3 py-1.5">
+        <td className="whitespace-nowrap px-3 py-1.5">
           <WireChip event={event} resolver={resolver} />
         </td>
       </tr>
@@ -561,9 +561,11 @@ export function LiveFeed({
           <button
             type="button"
             onClick={togglePause}
+            aria-pressed={paused}
             className={cn(
               CHIP_BTN,
-              paused ? 'border-primary/50 bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent/40',
+              // paused is a held/active toggle, not "live" — cyan is reserved for the live signal
+              paused ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/40',
             )}
           >
             {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}

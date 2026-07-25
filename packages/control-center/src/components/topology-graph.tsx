@@ -21,10 +21,18 @@ function labelFor(n: GraphNode, directory: Directory): React.ReactNode {
   }
   // identity first when the auth lens has a name for this conn, otherwise the pre-lens role/id rendering
   const { title, subtitle } = connLabel({ id: n.id, role: n.role ?? '', userId: n.userId }, directory)
+  // The wire is a small colored dot, not the whole node — cyan stays reserved for live/selection.
   return (
-    <div className="leading-tight">
-      <div className="font-medium">{title}</div>
-      <div className="text-[10px] opacity-70">{subtitle}</div>
+    <div className="flex items-center gap-1.5 leading-tight">
+      <span
+        className="h-1.5 w-1.5 shrink-0 rounded-full"
+        style={{ background: transportColor(n.transport) }}
+        title={transportFamily(n.transport)}
+      />
+      <div>
+        <div className="font-medium">{title}</div>
+        <div className="text-[10px] opacity-70">{subtitle}</div>
+      </div>
     </div>
   )
 }
@@ -51,31 +59,30 @@ function styleFor(n: GraphNode, highlight: Highlight | null): React.CSSPropertie
     }
   }
   if (n.kind === 'server') {
-    // The hub: a distinct anchor that reads as "live" via a soft cyan signal glow when the node is alive.
+    // The hub: the one node that reads as "live" — a cyan border + crisp 1px ring when alive. Flat by
+    // doctrine (lift, not a blurred glow), so the live signal stays legible without shouting.
     return {
       ...base,
       background: 'var(--color-card)',
-      border: `1px solid ${n.alive ? 'color-mix(in oklch, var(--color-primary) 45%, var(--color-border))' : 'var(--color-border)'}`,
+      border: `1px solid ${n.alive ? 'color-mix(in oklch, var(--color-primary) 55%, var(--color-border))' : 'var(--color-border)'}`,
       color: 'var(--color-foreground)',
       borderRadius: 12,
       padding: '10px 14px',
       minWidth: 108,
       fontWeight: 500,
-      boxShadow: n.alive
-        ? '0 0 0 1px color-mix(in oklch, var(--color-primary) 20%, transparent), 0 0 26px -6px color-mix(in oklch, var(--color-primary) 55%, transparent)'
-        : 'none',
+      boxShadow: n.alive ? '0 0 0 1px color-mix(in oklch, var(--color-primary) 30%, transparent)' : 'none',
     }
   }
-  const color = transportColor(n.transport)
+  // conn nodes are neutral slate; the wire shows as a dot in the label. Cyan is reserved for a lens match.
   const highlighted = highlight !== null && n.kind === 'conn' && matches(n, highlight)
   return {
     ...base,
-    background: `${color}1f`,
-    border: `1px solid ${color}`,
+    background: 'var(--color-card)',
+    border: `1px solid ${highlighted ? 'var(--color-primary)' : 'var(--color-border)'}`,
     color: 'var(--color-foreground)',
     borderRadius: 8,
     padding: '5px 10px',
-    boxShadow: highlighted ? `0 0 0 1.5px ${color}, 0 0 16px -4px ${color}` : 'none',
+    boxShadow: highlighted ? '0 0 0 1px var(--color-primary)' : 'none',
   }
 }
 
@@ -116,11 +123,7 @@ export function TopologyGraph({
         data: { label: labelFor(n, directory), kind: n.kind },
         style:
           n.id === selectedId
-            ? {
-                ...base,
-                boxShadow:
-                  '0 0 0 2px var(--color-primary), 0 0 20px -4px color-mix(in oklch, var(--color-primary) 60%, transparent)',
-              }
+            ? { ...base, border: '1px solid var(--color-primary)', boxShadow: '0 0 0 2px var(--color-primary)' }
             : base,
         draggable: true,
         connectable: false,

@@ -5,6 +5,7 @@ import { breakdownLabel } from '@/lib/transport'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DetailPanel } from '@/components/detail-panel'
+import { plural } from '@/lib/utils'
 
 function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -75,7 +76,7 @@ export function NodeDetail({
         </div>
 
         <div className="mt-3 flex flex-wrap gap-1.5">
-          <Badge variant="muted">{stat?.connections ?? conns.length} connections</Badge>
+          <Badge variant="muted">{plural(stat?.connections ?? conns.length, 'connection')}</Badge>
           {breakdown ? <Badge variant="muted">{breakdown}</Badge> : null}
         </div>
 

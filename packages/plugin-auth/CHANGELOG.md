@@ -3,6 +3,16 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [plugin-auth-v0.8.0] — 2026-07-25
+
+### Features
+
+- **plugin-auth,react:** Auth owns the client — reauthenticate() + one merged React binding ([de2b59d])
+
+### Documentation
+
+- Record ADR-0020 and rewrite the auth guides onto the merged binding ([29e14ee])
+
 ## [plugin-auth-v0.7.0] — 2026-07-24
 
 ### Features

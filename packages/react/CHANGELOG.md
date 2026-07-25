@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [react-v0.11.0] — 2026-07-25
+
+### Features
+
+- **plugin-auth,react:** Auth owns the client — reauthenticate() + one merged React binding ([de2b59d])
+
 ## [react-v0.10.0] — 2026-07-23
 
 ### Features

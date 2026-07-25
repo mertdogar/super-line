@@ -3,6 +3,43 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## Unreleased
+
+### Features
+
+- **plugin-auth,react:** Auth owns the client — reauthenticate() + one merged React binding ([de2b59d])
+
+### Refactor
+
+- **examples:** Migrate the three auth examples onto SuperLineAuthProvider ([62c73cd])
+
+### Testing
+
+- **server:** Raise broker-integration waitFor budgets from 5s to 10s ([0cf6438])
+
+### Documentation
+
+- **skills:** Update the published agent guide for the merged auth binding ([8a05b07])
+- Record ADR-0020 and rewrite the auth guides onto the merged binding ([29e14ee])
+
+## 2026-07-25
+
+### Features
+
+- **control-center:** Critique fixes — failure visibility, empty state, keyboard/a11y, one-accent color ([8fd628a])
+- **control-center:** Topology graph polish + node interactivity ([87b4881])
+
+### Bug Fixes
+
+- **control-center:** De-strobe disconnect, pull cyan back to one accent, un-trap detail panel ([1448708])
+
+### Documentation
+
+- **adr:** Consolidated snapshot + retroactive ADR-0019 + cross-link repairs ([8870043])
+- **claude-md:** De-stale the repo guide against the chat/auth/logging work ([1be3fa0])
+- **skill:** Refresh the distributed agent guide for the auth/logging release ([744be4d])
+- **changelog:** Refresh the root aggregate for the auth + LogTape release ([66d40fe])
+
 ## 2026-07-24
 
 ### Features

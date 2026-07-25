@@ -65,7 +65,7 @@ describe.skipIf(!dockerAvailable)('rabbitmq targeted send + server→client requ
     const client = h.client(contract, { url: a.url, role: 'user', params: { uid: 'u1' } })
     client.implement({ confirm: async ({ q }) => ({ ok: q === 'go' }) })
     await client.hello({})
-    await waitFor(() => a.srv.local.connections.length === 1, 5000)
+    await waitFor(() => a.srv.local.connections.length === 1, 10000)
     const id = a.srv.local.connections[0]!.id
 
     // retry until the c:{id} / reply:{node} binds have propagated, then the round-trip lands

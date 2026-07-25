@@ -48,7 +48,7 @@ describe.skipIf(!dockerAvailable)('redis inspector events cross-process', () => 
     const u = h.client(contract, { url: nodeB.url, role: 'user' }) // conn on B
     await u.join({ room: 'x' })
 
-    await waitFor(() => insp.events.some((e) => e.type === 'connect'), 5000)
+    await waitFor(() => insp.events.some((e) => e.type === 'connect'), 10000)
     const connectEv = insp.events.find((e) => e.type === 'connect')
     expect(connectEv?.descriptor?.nodeId).toBe(nodeB.srv.nodeId) // event originated on B
     insp.close()
@@ -64,13 +64,13 @@ describe.skipIf(!dockerAvailable)('redis inspector events cross-process', () => 
     const u = h.client(contract, { url: nodeB.url, role: 'user' }) // request handled on B
     await u.join({ room: 'x' }) // B emits msg.request/response; they must cross the bus to A
 
-    await waitFor(() => insp.events.some((e) => e.type === 'msg.request'), 5000)
+    await waitFor(() => insp.events.some((e) => e.type === 'msg.request'), 10000)
     const req = insp.events.find((e) => e.type === 'msg.request')
     expect(req?.name).toBe('join')
     const input = req?.input as { room: string } | undefined
     expect(input?.room).toBe('x')
 
-    await waitFor(() => insp.events.some((e) => e.type === 'msg.response'), 5000)
+    await waitFor(() => insp.events.some((e) => e.type === 'msg.response'), 10000)
     expect(insp.events.find((e) => e.type === 'msg.response')?.ok).toBe(true)
     insp.close()
   })

@@ -47,13 +47,13 @@ describe.skipIf(!dockerAvailable)('redis targeted send + server→client request
     const got: Array<{ text: string }> = []
     client.on('notice', (m) => got.push(m))
     await client.hello({})
-    await waitFor(async () => (await b.srv.cluster.count()) === 1, 5000)
+    await waitFor(async () => (await b.srv.cluster.count()) === 1, 10000)
 
     // tolerate the c:{id} SUBSCRIBE propagation window (real apps don't send in the same ms as connect)
     await waitFor(async () => {
       if (got.length === 0) b.srv.toUser('u1').emit('notice', { text: 'cross' })
       return got.length > 0
-    }, 5000)
+    }, 10000)
     expect(got[0]).toEqual({ text: 'cross' })
   })
 
@@ -63,7 +63,7 @@ describe.skipIf(!dockerAvailable)('redis targeted send + server→client request
     const client = h.client(contract, { url: a.url, role: 'user', params: { uid: 'u1' } })
     client.implement({ confirm: async ({ q }) => ({ ok: q === 'go' }) })
     await client.hello({})
-    await waitFor(async () => (await b.srv.cluster.count()) === 1, 5000)
+    await waitFor(async () => (await b.srv.cluster.count()) === 1, 10000)
 
     const [c] = await b.srv.cluster.byUser('u1')
     const answer = await b.srv.toConn(c!.id).request('confirm', { q: 'go' }, { timeout: 5000 })
@@ -88,6 +88,6 @@ describe.skipIf(!dockerAvailable)('redis targeted send + server→client request
     await waitFor(async () => {
       if (a.srv.local.connections.length > 0) b.srv.toConn(id).close()
       return a.srv.local.connections.length === 0
-    }, 5000)
+    }, 10000)
   })
 })

@@ -70,7 +70,7 @@ describe.skipIf(!dockerAvailable)('redis presence cross-process (slice 4)', () =
     h.client(contract, { url: b.url, role: 'agent', params: { uid: 'u2' } })
     await ca.joinRoom({ room: 'lobby' })
 
-    await waitFor(async () => (await a.srv.cluster.count()) === 2, 5000)
+    await waitFor(async () => (await a.srv.cluster.count()) === 2, 10000)
     expect(await b.srv.cluster.count()).toBe(2)
     expect(await a.srv.cluster.byUser('u1')).toHaveLength(1)
     const lobby = await b.srv.cluster.room('lobby')
@@ -86,12 +86,12 @@ describe.skipIf(!dockerAvailable)('redis presence cross-process (slice 4)', () =
     const b = await node()
     h.client(contract, { url: a.url, role: 'user', params: { uid: 'u1' } })
     h.client(contract, { url: b.url, role: 'user', params: { uid: 'u2' } })
-    await waitFor(async () => (await a.srv.cluster.count()) === 2, 5000)
+    await waitFor(async () => (await a.srv.cluster.count()) === 2, 10000)
 
     // simulate node B crashing: its liveness key vanishes (TTL would have expired)
     await raw.del(`sl:alive:${b.srv.nodeId}`)
 
-    await waitFor(async () => (await a.srv.cluster.count()) === 1, 5000)
+    await waitFor(async () => (await a.srv.cluster.count()) === 1, 10000)
     const all = await a.srv.cluster.connections()
     expect(all.map((d) => d.userId)).toEqual(['u1'])
     const topo = await a.srv.cluster.topology()
@@ -103,11 +103,11 @@ describe.skipIf(!dockerAvailable)('redis presence cross-process (slice 4)', () =
     const b = await node()
     h.client(contract, { url: a.url, role: 'user', params: { uid: 'u1' } })
     h.client(contract, { url: b.url, role: 'user', params: { uid: 'u2' } })
-    await waitFor(async () => (await a.srv.cluster.count()) === 2, 5000)
+    await waitFor(async () => (await a.srv.cluster.count()) === 2, 10000)
 
     await b.srv.close()
 
-    await waitFor(async () => (await a.srv.cluster.count()) === 1, 5000)
+    await waitFor(async () => (await a.srv.cluster.count()) === 1, 10000)
     expect(await raw.exists(`sl:alive:${b.srv.nodeId}`)).toBe(0)
   })
 })

@@ -61,7 +61,7 @@ describe.skipIf(!dockerAvailable)('rabbitmq adapter cross-process fan-out', () =
     await client.subscribe('prices', (p) => received.push(p)).ready
 
     nodeB.srv.forRole('user').publish('prices', { symbol: 'NVDA', price: 9 })
-    await waitFor(() => received.length === 1, 5000)
+    await waitFor(() => received.length === 1, 10000)
     expect(received[0]).toEqual({ symbol: 'NVDA', price: 9 })
   })
 

@@ -3,10 +3,16 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
-## Unreleased
+## [control-center-v0.12.0] — 2026-07-25
+
+### Features
+
+- **control-center:** Critique fixes — failure visibility, empty state, keyboard/a11y, one-accent color ([8fd628a])
+- **control-center:** Topology graph polish + node interactivity ([87b4881])
 
 ### Bug Fixes
 
+- **control-center:** De-strobe disconnect, pull cyan back to one accent, un-trap detail panel ([1448708])
 - **deps:** Internal packages peer on their siblings instead of depending on them ([00375f6])
 
 ## [control-center-v0.11.0] — 2026-07-23

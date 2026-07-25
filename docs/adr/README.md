@@ -1,6 +1,6 @@
 # ADR snapshot — the consolidated position
 
-Where the 19 ADRs *net out* as of **2026-07-24**. The individual files are the reasoning
+Where the 20 ADRs *net out* as of **2026-07-25**. The individual files are the reasoning
 and the rejected alternatives; this is the standing answer plus the supersession graph, so
 nobody re-derives a path that was already walked and closed.
 
@@ -30,6 +30,7 @@ Repo-internal: `docs/.vitepress/config.ts` excludes `adr/**` from the docs site,
 | 0017 | plugin-auth hooks cover server-invoked operations, not client requests | In force |
 | 0018 | Logging is app-configured (LogTape), not a per-instance option | In force |
 | 0019 | Plugins grow a contract-time half — typed fragments merged at `defineContract` | In force (recorded retroactively 2026-07-24; decision + code date to 2026-07-06, core 0.10.1) |
+| 0020 | Auth owns the client, so it owns the session lifecycle and the React surface | In force; **supersedes D5** of `PLAN-plugin-auth-server-minted-tokens.md` (no-`refresh`) and retires `createAuth` |
 
 ## 2. The standing position, by subsystem
 

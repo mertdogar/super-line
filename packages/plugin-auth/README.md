@@ -41,19 +41,33 @@ createSuperLineServer(app, {
 })
 ```
 
+```ts
+// 3a · client (React) — type every hook once, by declaration merging.
+declare module '@super-line/plugin-auth/react' {
+  interface Register {
+    contract: typeof app
+    role: 'user'
+  }
+}
+```
+
 ```tsx
-// 3 · client (React) — createAuth() wraps the guest↔authed lifecycle behind a provider + hook.
+// 3b · one provider owns the guest↔authed lifecycle AND feeds every data hook — no client threaded anywhere.
 import { createSuperLineClient } from '@super-line/client'
 import { webSocketClientTransport } from '@super-line/transport-websocket'
-import { createAuth } from '@super-line/plugin-auth/react'
+import { SuperLineAuthProvider } from '@super-line/plugin-auth/react'
 
-export const { AuthProvider, useAuth } = createAuth({
-  authedRole: 'user',
-  connect: ({ role, params }) =>
-    createSuperLineClient(app, { transport: webSocketClientTransport({ url }), role: role as 'user', params }),
-})
+const connect = ({ role, params }) =>
+  createSuperLineClient(app, { transport: webSocketClientTransport({ url }), role: role as 'user', params })
 
-// const { ready, state, client, signIn, signUp, signOut } = useAuth()
+createRoot(el).render(
+  <SuperLineAuthProvider authedRole="user" connect={connect}>
+    <App />
+  </SuperLineAuthProvider>,
+)
+
+// const { state, signIn, signUp, signOut, reauthenticate } = useAuth()
+// const rows = useCollection('messages').rows   // idle until authenticated; writes reject rather than vanish
 ```
 
 Not using React? `authClient()` from `@super-line/plugin-auth/client` is the same logic, framework-agnostic.
@@ -148,12 +162,13 @@ const { key } = await authKit.apiKeys.create(bot.id, { role: 'user', label: 'age
 **Client-side requests** (typed methods on a connected client): `signUp` · `signIn` · `signOut` · `whoami`
 · `createApiKey({ label, role, expiresInMs? })` (raw key once) · `listApiKeys` · `revokeApiKey({ id })` ·
 `requestPasswordReset` · `confirmPasswordReset`. In React/JS they
-sit behind `createAuth()` / `authClient()` as `signIn` / `signUp` / `signOut` + reactive `state`.
+sit behind `<SuperLineAuthProvider>` / `authClient()` as `signIn` / `signUp` / `signOut` / `reauthenticate` +
+reactive `state` (`status` · `pending` · `error`).
 
 ## Subpaths
 
 `.` (contract fragment + schemas/types — `authContract`, `AuthContext`, `AuthUser`, …) · `/server`
-(`auth()` → `authKit`) · `/client` (`authClient`) · `/react` (`createAuth`).
+(`auth()` → `authKit`) · `/client` (`authClient`) · `/react` (`SuperLineAuthProvider` + the hooks).
 
 ## Learn more
 

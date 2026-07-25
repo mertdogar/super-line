@@ -59,30 +59,72 @@ A stable `nodeKey` is required — the plugin keys per-node session reconciliati
 
 ### 3 · Client (React)
 
-`createAuth()` wraps the guest↔authed lifecycle behind an `<AuthProvider>` + a `useAuth()` hook.
+`<SuperLineAuthProvider>` owns the guest↔authed lifecycle **and** feeds the live client to every hook, so there is
+no bridge to write. Type the hooks once by declaring `Register`:
+
+```ts
+// superline.d.ts — one declaration, and every hook below is typed by your contract
+import type { app } from './contract'
+
+declare module '@super-line/plugin-auth/react' {
+  interface Register {
+    contract: typeof app
+    role: 'user'
+  }
+}
+```
 
 ```tsx
 import { createSuperLineClient } from '@super-line/client'
 import { webSocketClientTransport } from '@super-line/transport-websocket'
-import { createAuth } from '@super-line/plugin-auth/react'
+import { SuperLineAuthProvider } from '@super-line/plugin-auth/react'
 
-export const { AuthProvider, useAuth } = createAuth({
-  authedRole: 'user',
-  connect: ({ role, params }) =>
-    createSuperLineClient(app, { transport: webSocketClientTransport({ url }), role: role as 'user', params }),
-})
+const connect = ({ role, params }) =>
+  createSuperLineClient(app, { transport: webSocketClientTransport({ url }), role: role as 'user', params })
+
+createRoot(el).render(
+  <SuperLineAuthProvider authedRole="user" connect={connect}>
+    <App />
+  </SuperLineAuthProvider>,
+)
 ```
 
 ```tsx
+import { useAuth, useCollection } from '@super-line/plugin-auth/react'
+
 function App() {
-  const { ready, state, client, signIn, signUp, signOut } = useAuth()
-  if (!ready) return <Splash />
-  if (state.status !== 'authed') return <LoginForm onSignIn={signIn} onSignUp={signUp} />
-  return <Workspace client={client} me={state.userId} name={state.displayName} onSignOut={signOut} />
+  const { state, signIn, signUp, signOut } = useAuth()
+  // Authed FIRST: a re-authentication keeps the current session live with `pending` set, so testing
+  // `pending` first would tear the app down mid-switch.
+  if (state.status === 'authed') return <Workspace me={state.userId} name={state.displayName} onSignOut={signOut} />
+  if (state.pending) return <Splash />
+  return <LoginForm onSignIn={signIn} onSignUp={signUp} />
 }
 ```
 
+Every data hook comes from the same import and needs no client passed in — `useClient` (`null` until
+authenticated), `useCollection`, `useDoc`, `useEvent`, `useSubscription`, `useRequest`, `useEnv`. Before there is a
+session they go **idle**: reads return empty, writes reject `UNAUTHORIZED` rather than silently succeeding.
+
+Already own an `authClient()` instance (a script driving the same session, say)? Hand it over instead:
+`<SuperLineAuthProvider client={auth}>`. The provider never closes an instance it did not build. Nesting a second
+provider gives a second independent session — that is how one app runs two.
+
 Not using React? `authClient()` from `@super-line/plugin-auth/client` is the same logic, framework-agnostic.
+
+### Switching accounts
+
+`reauthenticate()` re-consults your credential source and replaces the session in place — no remount, no lost
+component state:
+
+```tsx
+const auth = useAuth()
+await switchUpstreamAccount(next)
+await auth.reauthenticate()
+```
+
+It **never destroys a session it could not replace**: the new connection is confirmed before the old one closes, so
+a failed mint leaves you signed in with `state.error` set. Only a `null` from the source drops you to guest.
 
 ## How login works over the bus
 

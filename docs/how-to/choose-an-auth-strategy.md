@@ -22,7 +22,7 @@ Adding the plugin is the same three edits every time — the contract, the serve
 ```ts
 plugins: [authContract()]                          // 1 · contract — adds guest + the auth collections & requests
 authenticate: authKit.authenticate                 // 2 · server — plus identify + plugins:[authKit.plugin]
-export const { AuthProvider, useAuth } = createAuth({ authedRole: 'user', connect }) // 3 · client
+<SuperLineAuthProvider authedRole="user" connect={connect}>                        {/* 3 · client */}
 ```
 
 The [plugin overview](/how-to/plugin-auth) shows the full wiring; the pages after it go deep on each capability.

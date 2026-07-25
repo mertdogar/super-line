@@ -118,7 +118,7 @@ server.listen(3000, () => console.log('super-line chat server on ws://localhost:
 
 ## 4. Provision two users, then talk over the wire
 
-Identity mutations (`signUp`, `signIn`) are how a **browser** logs in — that's the [plugin-auth how-to](/how-to/plugin-auth), where `authClient()` / `createAuth()` wrap the guest↔user reconnect. For a headless tracer it's simpler to provision users **server-side** with the imperative `authKit`, mint each an API key, and connect two ordinary clients — the exact pattern an AI agent uses.
+Identity mutations (`signUp`, `signIn`) are how a **browser** logs in — that's the [plugin-auth how-to](/how-to/plugin-auth), where `authClient()` / `<SuperLineAuthProvider>` wrap the guest↔user reconnect. For a headless tracer it's simpler to provision users **server-side** with the imperative `authKit`, mint each an API key, and connect two ordinary clients — the exact pattern an AI agent uses.
 
 Append this to `src/chat-backbone.ts`, below the `listen` call:
 
@@ -208,5 +208,5 @@ You drove the plugin headlessly. The obvious next step: because an agent is just
 - [Add a chat backbone (how-to)](/how-to/plugin-chat) — the full surface: structured message bodies, the imperative `chatKit` (`channels` / `members` / `messages`), the hooks, and the React bindings (`useChannels` / `useMembers` / `useMessages`).
 - [Stream an agent's turn (how-to)](/how-to/chat-streaming) — the streamed-message model: one message that accumulates typed parts (text · tool calls · subagent trees) live and survives reloads.
 - [Run an automated chat client](/how-to/chat-bots) — standard-user provisioning, host-owned triggers and memory, AI SDK tools, and the Mastra runner.
-- [Add authentication (how-to)](/how-to/plugin-auth) — the browser sign-up / sign-in flow with `authClient()` and `createAuth()`.
+- [Add authentication (how-to)](/how-to/plugin-auth) — the browser sign-up / sign-in flow with `authClient()` and `<SuperLineAuthProvider>`.
 - [`examples/collections-chat`](https://github.com/mertdogar/super-line/tree/main/examples/collections-chat) — a Slack-like app built entirely on this plugin, with membership control, presence/typing garnish, and a live AI agent in an `#ask-ai` channel.

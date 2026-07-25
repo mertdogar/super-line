@@ -14,7 +14,7 @@ reproducible — the example checks in the `vhs` tape and the `captureSpans`-bas
 ## The point: the hooks don't care about the DOM
 
 The cockpit is deliberately **not** a second client implementation. It mounts the exact providers
-and hooks the web app uses — `createAuth` (plugin-auth), `createChatHooks` (plugin-chat),
+and hooks the web app uses — `<SuperLineAuthProvider>` (plugin-auth), `createChatHooks` (plugin-chat),
 `createSuperLineHooks` — under `@opentui/react`'s custom reconciler. `useMessages` streams the
 delegation tree into bordered cards, `useChannelResources` finds the channel's canvas and doc,
 `useResourcePresence` draws the `◉` viewer line, and the native `useDoc`-style handle writes your

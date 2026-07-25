@@ -110,23 +110,34 @@ awaiting it kills the connect-time race).
 ## Client: a sealed-only app (`resolveToken`)
 
 The connects above build a client directly with `params: { jwt }`. For a browser app that is *only* ever sealed —
-no password, no guest UI — [`createAuth`](/how-to/plugin-auth) can own the whole lifecycle. Its token is minted
-out-of-band (the browser proves an upstream credential to a mint route; the server seals a reply), so point
-`createAuth` at that source with `resolveToken`, and route it under `{ jwt }` with `tokenParam`:
+no password, no guest UI — [`<SuperLineAuthProvider>`](/how-to/plugin-auth) can own the whole lifecycle. Its token
+is minted out-of-band (the browser proves an upstream credential to a mint route; the server seals a reply), so
+point it at that source with `resolveToken`, and route it under `{ jwt }` with `tokenParam`:
 
-```ts
-const { AuthProvider, useAuth } = createAuth<typeof app, 'user'>({
-  authedRole: 'user',
-  tokenParam: 'jwt',                                          // → params:{ jwt } → authMethod:'jwt-sealed'
-  resolveToken: async () => ({ token: await mintSealed() }), // your HTTP/tRPC mint route; return null to stay guest
-  connect: ({ role, params }) => createSuperLineClient(app, { transport, role, params }),
-})
+```tsx
+<SuperLineAuthProvider
+  authedRole="user"
+  tokenParam="jwt"                                            // → params:{ jwt } → authMethod:'jwt-sealed'
+  resolveToken={async () => ({ token: await mintSealed() })}  // your HTTP/tRPC mint route; null stays guest
+  connect={({ role, params }) => createSuperLineClient(app, { transport, role, params })}
+>
+  <App />
+</SuperLineAuthProvider>
 ```
 
-`createAuth` boots as `guest`, `await`s the first `resolveToken()` before `ready` resolves, then swaps to `user` —
-so downstream code is just `await auth.ready; auth.client`, with no hand-rolled "client not ready yet" deferred.
-`resolveToken`'s token is never persisted (the source owns re-acquisition). A rejected token — or a
-`rejectUnauthenticated` refusal (below) — drops back to guest and sets `state.error`:
+`resolveToken` is the **credential source**, not a boot hook: boot is merely its first consultation, and every
+`reauthenticate()` is another. The provider boots as `guest`, `await`s the first call before `ready` resolves, then
+swaps to `user` — so downstream code is just `await auth.ready; auth.client`, with no hand-rolled "client not ready
+yet" deferred. Its token is never persisted (the source owns re-acquisition).
+
+Switching the upstream account is one call — no remount:
+
+```ts
+await auth.reauthenticate() // re-mints via resolveToken, swaps the session in place
+```
+
+A rejected token — or a `rejectUnauthenticated` refusal (below) — sets `state.error`. At boot that leaves you guest;
+on a later `reauthenticate()` the **live session survives** (a failed re-mint never signs you out):
 
 ```tsx
 const { state } = useAuth()

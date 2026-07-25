@@ -158,7 +158,7 @@ bob.client.close()
 :::
 
 ::: tip Not using React?
-`authClient` is the framework-agnostic core. In React, [`createAuth`](/how-to/plugin-auth) wraps the identical lifecycle behind an `<AuthProvider>` + a `useAuth()` hook — `{ ready, state, client, signIn, signUp, signOut }`.
+`authClient` is the framework-agnostic core. In React, [`<SuperLineAuthProvider>`](/how-to/plugin-auth) mounts the identical lifecycle and also feeds every data hook, so `useAuth()` gives you `{ state, client, ready, signIn, signUp, signOut, reauthenticate }` and `useCollection`/`useDoc`/`useClient` need no client passed in.
 :::
 
 ## 5. Run it

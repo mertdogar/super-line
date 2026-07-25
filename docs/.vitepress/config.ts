@@ -112,6 +112,7 @@ export default defineConfig({
             { text: 'Choose an auth strategy', link: '/how-to/choose-an-auth-strategy' },
             { text: 'Authenticate & assign roles', link: '/how-to/roles-auth' },
             { text: 'Add authentication (plugin)', link: '/how-to/plugin-auth' },
+            { text: 'Migrate auth to 0.8 (React)', link: '/how-to/plugin-auth-0-8-migration' },
             { text: 'Sessions, roles & API keys', link: '/how-to/auth-sessions-roles-keys' },
             { text: 'JWT & sealed tokens', link: '/how-to/auth-jwt-sealed-tokens' },
             { text: 'Server-side hooks', link: '/how-to/auth-hooks' },
@@ -204,6 +205,7 @@ export default defineConfig({
           items: [
             { text: 'Plugin catalog', link: '/plugins/' },
             { text: 'Authentication', link: '/how-to/plugin-auth' },
+            { text: 'Auth · migrate to 0.8 (React)', link: '/how-to/plugin-auth-0-8-migration' },
             { text: 'Auth · sessions, roles & API keys', link: '/how-to/auth-sessions-roles-keys' },
             { text: 'Auth · JWT & sealed tokens', link: '/how-to/auth-jwt-sealed-tokens' },
             { text: 'Auth · server-side hooks', link: '/how-to/auth-hooks' },

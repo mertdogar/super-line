@@ -488,15 +488,29 @@ await a.signOut()
 ```
 
 ```tsx
-// React — createAuth wraps the same client
-import { createAuth } from '@super-line/plugin-auth/react'
-export const { AuthProvider, useAuth } = createAuth({ authedRole: 'user', connect })
+// React — one provider owns the session AND feeds every data hook. Type them once:
+//   declare module '@super-line/plugin-auth/react' { interface Register { contract: typeof app; role: 'user' } }
+import { SuperLineAuthProvider, useAuth, useCollection } from '@super-line/plugin-auth/react'
+createRoot(el).render(<SuperLineAuthProvider authedRole="user" connect={connect}><Gate /></SuperLineAuthProvider>)
 function Gate() {
-  const { ready, state, signIn, signOut } = useAuth()
-  if (!ready) return <Spinner />
+  const { state, signIn, signOut } = useAuth()
+  // Authed FIRST: a re-authentication keeps the current session live with `pending` set, so testing `pending`
+  // first would tear the app down mid-switch.
+  if (state.status === 'authed') return <App onSignOut={signOut} />
+  if (state.pending) return <Spinner />
   if (state.error) return <ReconnectBanner reason={state.error.reason} />   // a PRESENTED token was rejected
-  return state.status === 'authed' ? <App onSignOut={signOut} /> : <Login onSubmit={signIn} />
+  return <Login onSubmit={signIn} />
 }
+// Inside, no client is threaded anywhere: useCollection('messages') / useDoc / useClient() just work.
+// Before there is a session the hooks go IDLE — reads empty, writes reject UNAUTHORIZED (never silently drop).
+```
+
+```tsx
+// Switch accounts in place — no remount, no lost component state
+const auth = useAuth()               // the STABLE instance: safe as a useMemo dep, .state/.client are live
+await switchUpstreamAccount(next)
+await auth.reauthenticate()          // re-consults resolveToken (or storage), swaps the session
+// A failed re-mint leaves the CURRENT session live with state.error set — it never signs you out.
 ```
 
 - **A stable `nodeKey` is required** and the **same `CollectionStore`** goes to both `auth({ collections })` and `createSuperLineServer({ collections })` — `authenticate` reads sessions/users off it directly.
@@ -522,16 +536,16 @@ const { token: signed } = await authKit.tokens.mintSigned(userId, { claims: { wo
 
 ```ts
 // 2 · CLIENT — connect with it under `jwt` (authMethod becomes 'jwt-sealed'). For an app that is ONLY ever
-//     sealed (no password, no guest UI), let createAuth own the lifecycle instead of building a client by hand:
-const { AuthProvider, useAuth } = createAuth<typeof app, 'user'>({
-  authedRole: 'user',
-  tokenParam: 'jwt',                                          // → params:{ jwt }
-  resolveToken: async () => ({ token: await fetchSealedToken() }),  // your mint route; return null to stay guest
-  connect: ({ role, params }) => createSuperLineClient(app, { transport, role: role as 'user', params }),
-})
-// createAuth boots as `guest`, awaits the first resolveToken() before `ready` resolves, then swaps to `user` —
-// so downstream code is just `await auth.ready; auth.client`, with no hand-rolled "not ready yet" deferred.
-// resolveToken's token is NEVER persisted (the source owns re-acquisition).
+//     sealed (no password, no guest UI), let the provider own the lifecycle instead of building a client by hand:
+<SuperLineAuthProvider
+  authedRole="user"
+  tokenParam="jwt"                                            // → params:{ jwt }
+  resolveToken={async () => ({ token: await fetchSealedToken() })}   // your mint route; null stays guest
+  connect={({ role, params }) => createSuperLineClient(app, { transport, role: role as 'user', params })}
+/>
+// It boots as `guest`, awaits the first resolveToken() before `ready` resolves, then swaps to `user` — so
+// downstream code is just `await auth.ready; auth.client`, with no hand-rolled "not ready yet" deferred.
+// resolveToken's token is NEVER persisted (the source owns re-acquisition); reauthenticate() re-mints.
 ```
 
 ```ts

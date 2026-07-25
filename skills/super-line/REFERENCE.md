@@ -523,30 +523,41 @@ interface AuthClientOptions<C, R> {
   tokenParam?: string                   // handshake param the token rides under. Default 'token' (password access token);
                                         // set 'jwt' to connect with a server-minted assertion (→ authMethod 'jwt'/'jwt-sealed')
   resolveToken?: () => Promise<{ token: string } | null>
-  // Async token source for an out-of-band mint. REPLACES the persisted-storage restore as the boot source: start as
-  // `guest`, await the first resolveToken() before `ready` resolves, swap to authedRole if it yields a token.
-  // `null` ⇒ stay guest, no error. Its result is NEVER persisted (the source owns re-acquisition).
+  // The CREDENTIAL SOURCE, not a boot hook — boot is its first consultation, every reauthenticate() another.
+  // REPLACES the persisted-storage restore: start as `guest`, await the first call before `ready` resolves, swap
+  // to authedRole if it yields a token. `null` ⇒ a deliberate "no credential" (guest, no error). NEVER persisted.
 }
 interface AuthState {
-  status: 'guest' | 'authed'
-  error?: { reason: string } | null    // set when a PRESENTED token was rejected (bad resolveToken result, or a
+  status: 'guest' | 'authed'           // the CURRENT session; unchanged while a replacement is in flight
+  pending: boolean                     // a session replacement is running (boot, signIn/Out, reauthenticate)
+  error: { reason: string } | null     // set when a PRESENTED token was rejected (bad source result, or a
                                        // rejectUnauthenticated refusal) — render a reconnect banner instead of
-                                       // NOT_FOUND-ing every call. A resolveToken returning null stays guest with NO error.
+                                       // NOT_FOUND-ing every call. A source returning null stays guest with NO error.
   userId: string | null; displayName: string | null; roles: string[]
 }
 interface AuthClient<C, R> {
   readonly client: SuperLineClient<C, R>   // swaps guest↔authed under the hood
   readonly state: AuthState
-  readonly ready: Promise<void>            // await before reading state on load (confirms the boot token — persisted or resolveToken'd)
+  readonly ready: Promise<void>            // BOOT-only, one-shot: await before reading state on load
   subscribe(cb: (s: AuthState) => void): () => void
   signUp(i: { email; password; displayName }): Promise<void>
   signIn(i: { email; password }): Promise<void>
   signOut(): Promise<void>
+  reauthenticate(): Promise<AuthState>     // re-consult the source, replace the session; resolves SETTLED state
 }
+// Every transition throws CONFLICT if another is already in flight (state.pending) — one at a time.
+// A replacement NEVER destroys a session it could not replace: the candidate is confirmed before the incumbent
+// closes, so a source that throws / a refused credential leaves you signed in with `error` set.
 
-// /react
-createAuth<C, R>(opts: AuthClientOptions<C, R>): { AuthProvider, useAuth, auth }
-//   useAuth() → { client, state, ready: boolean, signUp, signIn, signOut }
+// /react — the app's single provider; it owns the session AND feeds every data hook.
+declare module '@super-line/plugin-auth/react' {   // ONE declaration types them all
+  interface Register { contract: typeof app; role: 'user' }
+}
+<SuperLineAuthProvider authedRole="user" connect={connect} tokenParam? resolveToken? storage?>
+<SuperLineAuthProvider client={existingAuthClientInstance}>   // adopt form; never closed by the provider
+useAuth(): AuthClient<C, R>                  // the STABLE instance — live .state/.client getters, re-renders
+useClient(): SuperLineClient<C, R> | null    // null until authed
+useCollection · useDoc · useEvent · useSubscription · useRequest · useEnv   // idle before auth; writes REJECT
 ```
 
 Shared requests (every role): `signOut` / `whoami` / `createApiKey` / `listApiKeys` / `revokeApiKey`. Guest-only: `signIn` / `signUp` / `requestPasswordReset` / `confirmPasswordReset`.

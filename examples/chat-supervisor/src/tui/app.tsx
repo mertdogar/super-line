@@ -15,14 +15,12 @@ import { ChannelPicker, Login, SessionInfo } from './pickers'
 import { ResourcePane } from './resources'
 import { COMMANDS } from './commands'
 import { config } from './config'
-import { useAuth } from './auth'
+import { useAuth, useClient, useCollection } from '@super-line/plugin-auth/react'
 import {
   ChatProvider,
-  LineProvider,
   chatClient,
   useChannels,
   useChat,
-  useCollection,
   useMembers,
   useMessageParts,
   useMessages,
@@ -33,26 +31,27 @@ type Modal = { kind: 'channels' } | { kind: 'session' }
 type Client = SuperLineClient<typeof app, 'user'>
 
 export function App({ quit }: { quit: () => void }) {
-  const { ready, state, client, signIn, signUp, signOut } = useAuth()
+  const { state, signIn, signUp, signOut } = useAuth()
 
-  if (!ready) {
-    return <Centered text="Connecting…" />
-  }
-  if (state.status !== 'authed') {
+  // Authed first: a session REPLACEMENT keeps the incumbent live with `pending` set, so checking
+  // `pending` first would drop the cockpit back to the login dialog mid-switch.
+  if (state.status === 'authed') {
     return (
-      <Dialog title="Sign in to chat-supervisor" footer="an account is created automatically if none exists">
-        <Login onSignIn={signIn} onSignUp={signUp} />
-      </Dialog>
+      <Authed
+        me={state.userId ?? ''}
+        name={state.displayName ?? state.userId ?? 'you'}
+        onSwitchAccount={() => void signOut()}
+        quit={quit}
+      />
     )
   }
+  if (state.pending) {
+    return <Centered text="Connecting…" />
+  }
   return (
-    <Authed
-      client={client as Client}
-      me={state.userId ?? ''}
-      name={state.displayName ?? state.userId ?? 'you'}
-      onSwitchAccount={() => void signOut()}
-      quit={quit}
-    />
+    <Dialog title="Sign in to chat-supervisor" footer="an account is created automatically if none exists">
+      <Login onSignIn={signIn} onSignUp={signUp} />
+    </Dialog>
   )
 }
 
@@ -66,26 +65,24 @@ function Centered({ text }: { text: string }) {
 }
 
 function Authed({
-  client,
   me,
   name,
   onSwitchAccount,
   quit,
 }: {
-  client: Client
   me: string
   name: string
   onSwitchAccount: () => void
   quit: () => void
 }) {
+  // Non-null exactly while `status === 'authed'` — the provider gates it.
+  const client = useClient() as Client
   const chat = useMemo(() => chatClient<typeof app, 'user'>(client, { userId: me }), [client, me])
   useEffect(() => () => chat.close(), [chat])
   return (
-    <LineProvider client={client}>
-      <ChatProvider chat={chat}>
-        <Cockpit client={client} me={me} name={name} onSwitchAccount={onSwitchAccount} quit={quit} />
-      </ChatProvider>
-    </LineProvider>
+    <ChatProvider chat={chat}>
+      <Cockpit client={client} me={me} name={name} onSwitchAccount={onSwitchAccount} quit={quit} />
+    </ChatProvider>
   )
 }
 

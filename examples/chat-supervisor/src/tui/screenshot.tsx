@@ -16,7 +16,8 @@ process.env.CHAT_SUPERVISOR_URL ??= 'ws://localhost:8792/super-line'
 const { createTestRenderer } = await import('@opentui/core/testing')
 const { createRoot } = await import('@opentui/react')
 const { chatClient } = await import('@super-line/plugin-chat/client')
-const { auth, AuthProvider } = await import('./auth')
+const { SuperLineAuthProvider } = await import('@super-line/plugin-auth/react')
+const { auth } = await import('./auth')
 const { App } = await import('./app')
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -42,9 +43,9 @@ await chat.join(channel.id).catch(() => {})
 
 const t = await createTestRenderer({ width: 150, height: 44 })
 createRoot(t.renderer).render(
-  <AuthProvider>
+  <SuperLineAuthProvider client={auth}>
     <App quit={() => {}} />
-  </AuthProvider>,
+  </SuperLineAuthProvider>,
 )
 
 const frame = async (): Promise<string> => {

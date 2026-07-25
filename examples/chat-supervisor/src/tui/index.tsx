@@ -14,7 +14,8 @@ if (config.headless) {
 } else {
   const { createCliRenderer } = await import('@opentui/core')
   const { createRoot } = await import('@opentui/react')
-  const { AuthProvider } = await import('./auth')
+  const { SuperLineAuthProvider } = await import('@super-line/plugin-auth/react')
+  const { auth } = await import('./auth')
   const { App } = await import('./app')
 
   const renderer = await createCliRenderer({ exitOnCtrlC: true, screenMode: 'alternate-screen' })
@@ -23,8 +24,8 @@ if (config.headless) {
     process.exit(0)
   }
   createRoot(renderer).render(
-    <AuthProvider>
+    <SuperLineAuthProvider client={auth}>
       <App quit={quit} />
-    </AuthProvider>,
+    </SuperLineAuthProvider>,
   )
 }

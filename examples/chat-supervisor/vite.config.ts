@@ -15,6 +15,7 @@ export default defineConfig({
       '@super-line/core': src('../../packages/core/src/index.ts'),
       '@super-line/client': src('../../packages/client/src/index.ts'),
       '@super-line/transport-websocket': src('../../packages/transport-websocket/src/index.ts'),
+      '@super-line/react': src('../../packages/react/src/index.ts'),
       // subpaths before the bare alias — vite matches string aliases by prefix, in order
       '@super-line/plugin-auth/client': src('../../packages/plugin-auth/src/client.ts'),
       '@super-line/plugin-auth/react': src('../../packages/plugin-auth/src/react.tsx'),

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { MessageSquare } from 'lucide-react'
 import { SuperLineError } from '@super-line/core'
-import { useAuth } from '@/lib/auth'
+import { useAuth } from '@super-line/plugin-auth/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 

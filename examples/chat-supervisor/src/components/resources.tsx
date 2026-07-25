@@ -5,7 +5,8 @@
 
 import { useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { Bot, FileText, StickyNote, Trash2, ArrowDown, ArrowUp, Plus } from 'lucide-react'
-import { useChannelResources, useResourcePresence, useDoc, useCollection } from '@/App'
+import { useChannelResources, useResourcePresence } from '@/App'
+import { useCollection, useDoc } from '@super-line/plugin-auth/react'
 import type { CanvasDoc, ResourceRow, TextDoc } from '@/contract'
 
 const PALETTE = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8']

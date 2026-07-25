@@ -1,27 +1,24 @@
-import type { SuperLineClient } from '@super-line/client'
-import { Provider } from '@/lib/superline'
+import { useClient } from '@super-line/plugin-auth/react'
 import { ChatProvider } from '@/lib/chat'
 import { Shell } from '@/components/shell'
-import type { chat } from '@/contract'
 
 // The authenticated workspace. The live client comes from @super-line/plugin-auth (its lifecycle — connect,
-// reconnect, close on sign-out — is owned there); here we wire it into the super-line + chat providers.
+// reconnect, close on sign-out — is owned there, and it feeds the hooks directly); here we only wire the
+// chat provider, which wraps ONE connection and so takes the client explicitly.
 export function Workspace({
-  client,
   me,
   name,
   onSignOut,
 }: {
-  client: SuperLineClient<typeof chat, 'user'>
   me: string
   name: string
   onSignOut: () => void
 }): React.JSX.Element {
+  // Non-null exactly while `status === 'authed'` — the provider gates it.
+  const client = useClient()!
   return (
-    <Provider client={client}>
-      <ChatProvider client={client} me={me}>
-        <Shell myName={name} onSignOut={onSignOut} />
-      </ChatProvider>
-    </Provider>
+    <ChatProvider client={client} me={me}>
+      <Shell myName={name} onSignOut={onSignOut} />
+    </ChatProvider>
   )
 }

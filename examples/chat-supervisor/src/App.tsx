@@ -1,8 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { chatClient } from '@super-line/plugin-chat/client'
 import { createChatHooks } from '@super-line/plugin-chat/react'
-import { createSuperLineHooks } from '@super-line/react'
-import { useAuth } from '@/lib/auth'
+import { useAuth, useClient } from '@super-line/plugin-auth/react'
 import { Login } from '@/components/login'
 import { Chat } from '@/components/chat'
 import { app } from '@/contract'
@@ -17,38 +16,29 @@ export const {
   useChannelResources,
   useResourcePresence,
 } = createChatHooks<typeof app>()
-// The generic super-line hooks carry the CRDT doc surface (useDoc) + the users directory
-// (useCollection) — the chat hooks handle the registry/presence rows above.
-export const { Provider: LineProvider, useDoc, useCollection } = createSuperLineHooks<typeof app, 'user'>()
 
 export function App(): React.JSX.Element {
-  const { ready, state, client, signOut } = useAuth()
+  const { state, signOut } = useAuth()
 
-  if (!ready) {
+  // Authed first: a session REPLACEMENT (reauthenticate) keeps the incumbent live with `pending` set, so
+  // checking `pending` before `status` would tear the whole cockpit down mid-switch.
+  if (state.status === 'authed') {
+    return <Authed me={state.userId!} name={state.displayName ?? state.userId!} onSignOut={signOut} />
+  }
+  if (state.pending) {
     return <div className="flex h-full items-center justify-center bg-sidebar text-muted-foreground">Connecting…</div>
   }
-  if (state.status !== 'authed') return <Login />
-  return <Authed client={client} me={state.userId!} name={state.displayName ?? state.userId!} onSignOut={signOut} />
+  return <Login />
 }
 
-function Authed({
-  client,
-  me,
-  name,
-  onSignOut,
-}: {
-  client: Parameters<typeof chatClient<typeof app, 'user'>>[0]
-  me: string
-  name: string
-  onSignOut: () => void
-}): React.JSX.Element {
+function Authed({ me, name, onSignOut }: { me: string; name: string; onSignOut: () => void }): React.JSX.Element {
+  // Non-null exactly while `status === 'authed'` — the provider gates it, so there is no null branch here.
+  const client = useClient()!
   const chat = useMemo(() => chatClient<typeof app, 'user'>(client, { userId: me }), [client, me])
   useEffect(() => () => chat.close(), [chat])
   return (
-    <LineProvider client={client}>
-      <ChatProvider chat={chat}>
-        <Chat me={me} myName={name} onSignOut={onSignOut} />
-      </ChatProvider>
-    </LineProvider>
+    <ChatProvider chat={chat}>
+      <Chat me={me} myName={name} onSignOut={onSignOut} />
+    </ChatProvider>
   )
 }

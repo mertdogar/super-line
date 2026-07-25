@@ -99,8 +99,8 @@ libp2pClientTransport({ node, multiaddr })   // libp2p over a browser libp2p nod
 ```
 
 It resolves the transport with a **top-level await** (libp2p needs an awaited node plus a fetched multiaddr),
-which is what lets `lib/auth.ts` keep the ordinary module-scope `createAuth({ connect })` shape: ESM settles
-this module before its importer runs.
+which is what lets `lib/auth.ts` keep the ordinary module-scope `connect` shape it hands
+`<SuperLineAuthProvider>`: ESM settles this module before its importer runs.
 
 ## The dial
 

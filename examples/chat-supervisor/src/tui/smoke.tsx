@@ -20,9 +20,10 @@ process.env.CHAT_SUPERVISOR_URL ??= 'ws://localhost:8792/super-line'
 const { createTestRenderer } = await import('@opentui/core/testing')
 const { createRoot } = await import('@opentui/react')
 const { chatClient } = await import('@super-line/plugin-chat/client')
-const { auth, AuthProvider, createTuiAuth } = await import('./auth')
+const { SuperLineAuthProvider } = await import('@super-line/plugin-auth/react')
+const { auth, createTuiAuth } = await import('./auth')
 const { App } = await import('./app')
-const { LineProvider, ChatProvider, useMessages } = await import('./hooks')
+const { ChatProvider, useMessages } = await import('./hooks')
 const { MessageView } = await import('./messages')
 const { ResourcePane } = await import('./resources')
 
@@ -66,11 +67,11 @@ console.log(`created #${ch.name} (${ch.id}); sent probe "${PROBE}"`)
 // 3. render the REAL transcript for that channel and poll until the probe text appears
 const t = await createTestRenderer({ width: 100, height: 24 })
 createRoot(t.renderer).render(
-  <LineProvider client={auth.client}>
+  <SuperLineAuthProvider client={auth}>
     <ChatProvider chat={chat}>
       <Probe channelId={ch.id} me={me!} />
     </ChatProvider>
-  </LineProvider>,
+  </SuperLineAuthProvider>,
 )
 let rendered = false
 for (let i = 0; i < 60; i++) {
@@ -93,9 +94,9 @@ if (!cached.token) fail('session cache file has no token')
 console.log(`OK — session cached to ${cachePath}`)
 
 const boot2 = createTuiAuth()
-await boot2.auth.ready
-if (boot2.auth.state.status !== 'authed') fail('second boot did not restore the session from cache')
-if (boot2.auth.state.userId !== me) fail('second boot restored a different user')
+await boot2.ready
+if (boot2.state.status !== 'authed') fail('second boot did not restore the session from cache')
+if (boot2.state.userId !== me) fail('second boot restored a different user')
 console.log('OK — a second boot skipped login (session restored from the cache file).')
 
 // 5. the resource pane, live: the server auto-seeds every channel with a canvas + doc, so render the
@@ -159,7 +160,7 @@ console.log(`OK — agent writeResource note "${noteText}" rendered live in the 
 // human edit path — a SECOND connection (boot2) edits the same doc via the native DocHandle (the
 // exact useDoc.update deep-merge the pane writes through). A second handle on the pane's OWN
 // connection would be echo-broken; a second connection is the real cross-client co-edit.
-const handle = boot2.auth.client.collection('canvases').open(canvasDocId!)
+const handle = boot2.client.collection('canvases').open(canvasDocId!)
 await handle.ready.catch(() => {})
 const editText = `EDT-${rid}`
 handle.update(merge({ items: { [noteId]: { text: editText } } }))
@@ -182,9 +183,9 @@ resStore.close()
 // 6. capture one full cockpit-with-pane frame (App auto-selects #agents; the pane shows its canvas)
 const c = await createTestRenderer({ width: 120, height: 34 })
 createRoot(c.renderer).render(
-  <AuthProvider>
+  <SuperLineAuthProvider client={auth}>
     <App quit={() => {}} />
-  </AuthProvider>,
+  </SuperLineAuthProvider>,
 )
 for (let i = 0; i < 14; i++) {
   await c.renderOnce()

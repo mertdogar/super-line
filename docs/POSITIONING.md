@@ -1,6 +1,6 @@
 # super-line — positioning brief
 
-Outcome of a grilling session (2026-06-20). Replaces the "typesafe WebSocket library" framing across **README**, **docs home** (`docs/index.md`), and **introduction** (`docs/guide/introduction.md`). Write the positioning **once**, express it at **three depths**.
+Outcome of a grilling session (2026-06-20), since shipped. Replaced the "typesafe WebSocket library" framing across **README**, the **docs home** (`docs/index.md`, the `SuperHome` component), and **[Why super-line](/concepts/why-super-line)**. Write the positioning **once**, express it at **three depths**.
 
 ## Identity (what it is — the honest scope line)
 

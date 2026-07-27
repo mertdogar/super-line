@@ -10,8 +10,8 @@ export default defineConfig({
   base: '/',
   cleanUrls: true,
   lastUpdated: true,
-  // PRODUCT.md and the ADRs are internal notes — keep the files, don't publish them.
-  srcExclude: ['PRODUCT.md', 'adr/**'],
+  // The briefs, ADRs and design plans are internal notes — keep the files, don't publish them.
+  srcExclude: ['PRODUCT.md', 'POSITIONING.md', 'adr/**', 'plans/**'],
   head: [
     ['link', { rel: 'icon', href: '/mark.svg' }],
     [

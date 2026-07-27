@@ -436,7 +436,7 @@ export function CollectionsExplorer({
                         {tsOf(r, ROW_UPDATED_AT) != null ? `${formatDuration(tsOf(r, ROW_UPDATED_AT)!)} ago` : '—'}
                       </td>
                       <td className="px-3 py-1.5 text-xs text-muted-foreground">
-                        <span className="block max-w-[38rem] truncate font-mono">{JSON.stringify(r)}</span>
+                        <span className="block max-w-152 truncate font-mono">{JSON.stringify(r)}</span>
                       </td>
                     </tr>
                   ))}

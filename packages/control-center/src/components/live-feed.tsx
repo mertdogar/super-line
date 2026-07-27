@@ -260,14 +260,14 @@ function FeedRow({
                 className={cn('h-3 w-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')}
               />
             ) : (
-              <span className="w-3 shrink-0" />
+              <span className="w-3 shrink-0"></span>
             )}
             <span className={cn('h-2 w-2 shrink-0 rounded-full', eventColor(event))} />
             <span className="font-mono text-xs text-muted-foreground">{event.type}</span>
           </span>
         </td>
         <td className="px-3 py-1.5 font-mono text-xs">
-          <span className="block max-w-[22rem] truncate">{summary}</span>
+          <span className="block max-w-88 truncate">{summary}</span>
         </td>
         <td className="px-3 py-1.5 text-xs text-muted-foreground">{resolver.nodeName(env.originNodeId)}</td>
         <td className="whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground">

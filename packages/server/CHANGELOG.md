@@ -5,6 +5,14 @@ run `pnpm changelog` rather than editing by hand.
 
 ## Unreleased
 
+### Bug Fixes
+
+- **core:** Derive column layout from Standard JSON Schema, not bundled zod classes ([02d182f])
+
+### Refactor
+
+- Use zod 4's namespace import form everywhere ([faebe1c])
+
 ### Testing
 
 - **server:** Raise broker-integration waitFor budgets from 5s to 10s ([0cf6438])

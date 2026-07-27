@@ -5,6 +5,21 @@ run `pnpm changelog` rather than editing by hand.
 
 ## Unreleased
 
+### Bug Fixes
+
+- **core:** Derive column layout from Standard JSON Schema, not bundled zod classes ([02d182f])
+- **docs:** Build @super-line/react before plugin-auth in docs:packages ([db3dac6])
+
+### Refactor
+
+- Use zod 4's namespace import form everywhere ([faebe1c])
+
+### Documentation
+
+- Add the plugin-auth 0.8 React migration guide ([4512854])
+
+## 2026-07-25
+
 ### Features
 
 - **plugin-auth,react:** Auth owns the client — reauthenticate() + one merged React binding ([de2b59d])

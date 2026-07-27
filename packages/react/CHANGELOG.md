@@ -3,6 +3,16 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## Unreleased
+
+### Bug Fixes
+
+- **core:** Derive column layout from Standard JSON Schema, not bundled zod classes ([02d182f])
+
+### Refactor
+
+- Use zod 4's namespace import form everywhere ([faebe1c])
+
 ## [react-v0.11.0] — 2026-07-25
 
 ### Features

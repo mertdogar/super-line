@@ -3,6 +3,16 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [plugin-chat-v0.10.0] — 2026-07-27
+
+### Bug Fixes
+
+- **core:** Derive column layout from Standard JSON Schema, not bundled zod classes ([02d182f])
+
+### Refactor
+
+- Use zod 4's namespace import form everywhere ([faebe1c])
+
 ## [plugin-chat-v0.9.0] — 2026-07-24
 
 ### Features

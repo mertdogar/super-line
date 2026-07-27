@@ -20,7 +20,7 @@
 
 <br />
 
-**super-line** is a strictly-typed realtime data bus for TypeScript. You write **one contract**; the server implements it and the client calls it with full end-to-end type inference — no codegen. The contract is split by **direction** (`clientToServer` / `serverToClient`) and scoped by **role** — a `user` and an `agent` connect to the same server and each get their own typed surface, with a `shared` base in common. Requests, events, topics, rooms, synced state, and a cluster-wide event bus share one connection — over a **pluggable transport** (WebSocket by default; HTTP/SSE, libp2p and loopback also ship) — and everything fans out across processes through a pluggable **adapter** (in-memory for one node; Redis, RabbitMQ, ZeroMQ or libp2p for many).
+**super-line** is a strictly-typed realtime data bus for TypeScript. You write **one contract**; the server implements it and the client calls it with full end-to-end type inference — no codegen. The contract is split by **direction** (`clientToServer` / `serverToClient`) and scoped by **role** — a `user` and an `agent` connect to the same server and each get their own typed surface, with a `shared` base in common. Requests, events, topics, rooms, synced state, durable background jobs, and a cluster-wide event bus share one connection — over a **pluggable transport** (WebSocket by default; HTTP/SSE, libp2p and loopback also ship) — and everything fans out across processes through a pluggable **adapter** (in-memory for one node; Redis, RabbitMQ, ZeroMQ or libp2p for many).
 
 > 📖 **Full documentation: [super-line.dogar.biz](https://super-line.dogar.biz/)** — guides, the complete API reference, and runnable examples.
 
@@ -48,6 +48,7 @@
 | 📣 **Events & rooms** | Server-pushed events; server-controlled room broadcasts. |
 | 📡 **Topics** | Client-subscribed pub/sub streams, authorized server-side. |
 | 🧩 **Collections** | Typed persisted state declared on the contract, validated on every write. Two kinds: relational **rows** — row-level security + live subsets, with [TanStack DB](https://tanstack.com/db) joins & optimistic mutations via the first-party adapter — and CRDT **documents** — a single doc opened by id whose concurrent edits merge (validate-before-commit; keep schemas presence-tolerant, ADR-0008). **Backends:** in-memory · SQLite/libSQL · self-clustering (Postgres + Electric). The typed successor to the retired Store family. |
+| ⏱️ **Queues & cron** | `queue({ queues })` (from `@super-line/plugin-queue`) — durable, at-least-once jobs with typed `input`/`result`, retries, leases, declarative per-queue concurrency, and cluster-wide cron schedules. Backed by collections, so no Redis and no separate worker service; point it at Postgres and every node coordinates. |
 | 🧹 **Cluster-wide delete** | Deleting a CRDT document fans out across every node (wire `cddel`); observe it via the client `collection(n).open(id)` `deleted` flag and React `useDoc().deleted` — until then a deleted doc reads as a silent empty snapshot. |
 | 🚌 **Cluster event bus** | `server.publish` / `server.subscribe` on a shared topic — cluster-wide pub/sub to server listeners (every node, local echo) and subscribed clients at once. |
 | 📨 **Server→client req/res** | `await srv.toConn(id).request(...)` — ask a client and await a typed reply, across nodes. |
@@ -80,9 +81,9 @@ pnpm add @super-line/collections-sqlite  # durable (better-sqlite3) · relay
 pnpm add @super-line/collections-pglite  # self-clustering (Postgres + Electric)
 pnpm add @super-line/tanstack-db         # the TanStack DB adapter (joins, live queries)
 
-# durable server-side jobs and cron schedules
+# durable server-side jobs and cron schedules (runs on a collections backend above —
+# memory/sqlite for one node, pglite for a cluster)
 pnpm add @super-line/plugin-queue
-
 
 pnpm add @super-line/react             # React hooks
 ```
@@ -208,11 +209,11 @@ See [Introspection & presence](https://super-line.dogar.biz/how-to/introspection
 
 The full docs live at **[super-line.dogar.biz](https://super-line.dogar.biz/)**:
 
-- **Learn** — [Your first typed round-trip](https://super-line.dogar.biz/tutorials/first-round-trip) · [Your first collection](https://super-line.dogar.biz/tutorials/first-collection) · [Go collaborative (CRDT)](https://super-line.dogar.biz/tutorials/go-collaborative) · [Assemble a chat backbone](https://super-line.dogar.biz/tutorials/chat-backbone) · [Put a live AI agent in the chat](https://super-line.dogar.biz/tutorials/ai-agent-chat) · [Co-edit a canvas with an agent](https://super-line.dogar.biz/tutorials/collaborative-canvas-with-agent)
+- **Learn** — [Your first typed round-trip](https://super-line.dogar.biz/tutorials/first-round-trip) · [Your first collection](https://super-line.dogar.biz/tutorials/first-collection) · [Go collaborative (CRDT)](https://super-line.dogar.biz/tutorials/go-collaborative) · [Assemble a chat backbone](https://super-line.dogar.biz/tutorials/chat-backbone) · [Put a live AI agent in the chat](https://super-line.dogar.biz/tutorials/ai-agent-chat) · [Co-edit a canvas with an agent](https://super-line.dogar.biz/tutorials/collaborative-canvas-with-agent) · [Run your first durable job](https://super-line.dogar.biz/tutorials/first-queue)
 - **How-to** — [Requests](https://super-line.dogar.biz/how-to/requests) · [Events & rooms](https://super-line.dogar.biz/how-to/events-rooms) · [Topics](https://super-line.dogar.biz/how-to/topics) · [Roles & auth](https://super-line.dogar.biz/how-to/roles-auth) · [Connection env](https://super-line.dogar.biz/how-to/connection-env) · [Middleware & lifecycle](https://super-line.dogar.biz/how-to/middleware-lifecycle) · [Errors](https://super-line.dogar.biz/how-to/errors) · [Serialization](https://super-line.dogar.biz/how-to/serialization) · [React](https://super-line.dogar.biz/how-to/react) · [Choose an adapter](https://super-line.dogar.biz/how-to/choose-an-adapter) · [Testing](https://super-line.dogar.biz/how-to/testing)
-- **Plugins** — [Authentication](https://super-line.dogar.biz/how-to/plugin-auth) · [Queues & workers](https://super-line.dogar.biz/how-to/plugin-queue) · [Chat backbone](https://super-line.dogar.biz/how-to/plugin-chat) · [Stream an agent's turn](https://super-line.dogar.biz/how-to/chat-streaming) · [Run an AI chat bot](https://super-line.dogar.biz/how-to/chat-bots) · [Channel resources](https://super-line.dogar.biz/how-to/chat-resources) · [Drive a channel from scripts](https://super-line.dogar.biz/how-to/chat-headless)
+- **Plugins** — [Authentication](https://super-line.dogar.biz/how-to/plugin-auth) · [Queues & workers](https://super-line.dogar.biz/how-to/plugin-queue) · [Enqueue & observe jobs](https://super-line.dogar.biz/how-to/queue-jobs) · [Schedule periodic work](https://super-line.dogar.biz/how-to/queue-schedules) · [Run queues across a cluster](https://super-line.dogar.biz/how-to/queue-clusters) · [Chat backbone](https://super-line.dogar.biz/how-to/plugin-chat) · [Stream an agent's turn](https://super-line.dogar.biz/how-to/chat-streaming) · [Run an AI chat bot](https://super-line.dogar.biz/how-to/chat-bots) · [Channel resources](https://super-line.dogar.biz/how-to/chat-resources) · [Drive a channel from scripts](https://super-line.dogar.biz/how-to/chat-headless)
 - **Collections** — [Overview](https://super-line.dogar.biz/collections/) · [Row collections](https://super-line.dogar.biz/collections/row-collections) · [CRDT documents](https://super-line.dogar.biz/collections/crdt-documents) · [Policies](https://super-line.dogar.biz/collections/policies) · [TanStack DB](https://super-line.dogar.biz/collections/tanstack-db) · [Backends](https://super-line.dogar.biz/collections/backends)
-- **Concepts** — [Why super-line](https://super-line.dogar.biz/concepts/why-super-line) · [The contract](https://super-line.dogar.biz/concepts/the-contract) (roles, direction & the five flavors) · [Server-authoritative](https://super-line.dogar.biz/concepts/server-authoritative) · [Transports vs. adapters](https://super-line.dogar.biz/concepts/transports-and-adapters) · [Reconnection & delivery](https://super-line.dogar.biz/concepts/reconnection-delivery)
+- **Concepts** — [Why super-line](https://super-line.dogar.biz/concepts/why-super-line) · [The contract](https://super-line.dogar.biz/concepts/the-contract) (roles, direction & the five flavors) · [Server-authoritative](https://super-line.dogar.biz/concepts/server-authoritative) · [Transports vs. adapters](https://super-line.dogar.biz/concepts/transports-and-adapters) · [Reconnection & delivery](https://super-line.dogar.biz/concepts/reconnection-delivery) · [Queues and workers](https://super-line.dogar.biz/concepts/queues-and-workers)
 - **[API reference](https://super-line.dogar.biz/reference/)** — generated from source: every export, option, and type.
 
 ## Examples
@@ -302,6 +303,10 @@ cd examples/ai-canvas-pglite && docker compose up   # set AI_GATEWAY_API_KEY
 
 # Bus across a cluster: Redis + Caddy + 3 nodes converge a shared tally over the event bus (needs Docker):
 cd examples/bus-cluster && docker compose up
+
+# Durable queues across a cluster: 2 nodes share one Postgres, cluster-wide concurrency 2 + a
+# every-minute cron, with a browser dashboard and the Control Center (needs Docker):
+cd examples/queue-cluster && docker compose up --build   # dashboard :8080 · Control Center :8081
 ```
 
 More on each: [examples on the docs site](https://super-line.dogar.biz/examples/).
@@ -330,12 +335,15 @@ For **Cursor, GitHub Copilot, and other agents** (one condensed file + where to 
 | Cluster event bus | ✅ | ✅ | ❌ | ❌ |
 | Server→client req/res | ✅ | ⚠️ ack-less | ❌ | ❌ |
 | Presence / introspection | ✅ cluster-wide | ⚠️ rooms only | ❌ | ❌ |
+| Durable jobs & cron | ✅ | ❌ | ❌ | ❌ |
 | Multi-node | ✅ adapter | ✅ adapter | ❌ | ❌ |
 | Zero codegen | ✅ | ✅ | ✅ | n/a |
 
 **Why not Socket.IO?** Socket.IO splits its types into `ClientToServerEvents` / `ServerToClientEvents` / `InterServerEvents` interfaces you maintain by hand as **positional generics** (easy to swap), with no runtime validation. super-line keeps the same directional split but in **one shared object** (can't misorder, can't drift), validates inbound automatically, and adds something Socket.IO doesn't have: **per-role contracts**. More in the [comparison & FAQ](https://super-line.dogar.biz/concepts/comparison-faq).
 
-**Do I need Redis?** No — a single node uses the in-memory adapter. Add Redis only when you run more than one process.
+**Do I need Redis?** No — a single node uses the in-memory adapter. Add Redis only when you run more than one process. Background jobs don't need it either: queues live in collections, so memory/SQLite covers one node and a shared Postgres backend makes claims, cancellation and cron cluster-wide.
+
+**Why not BullMQ or pg-boss?** Use one when background work is the whole job. `plugin-queue` is for the app that already has a contract: `input`/`result` are validated schema entries, jobs share the transaction domain and the Control Center with the rest of your state, and there's no second datastore or worker deployment. It ships retries, leases, concurrency, retention and cron — not priorities, rate limiters or flows. More in the [comparison & FAQ](https://super-line.dogar.biz/concepts/comparison-faq).
 
 **Does the client work in the browser?** Yes (and Node 22+). It uses the global `WebSocket`; pass `{ WebSocket }` on older runtimes.
 

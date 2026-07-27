@@ -5,6 +5,10 @@ run `pnpm changelog` rather than editing by hand.
 
 ## Unreleased
 
+### Features
+
+- Add clustered queue plugin and dashboard example ([e00dc23])
+
 ### Bug Fixes
 
 - **core:** Derive column layout from Standard JSON Schema, not bundled zod classes ([02d182f])

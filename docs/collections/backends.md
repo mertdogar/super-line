@@ -71,5 +71,6 @@ For strict referential integrity, use a **`self` backend** (a central Postgres s
 ## Next
 
 - [Row-level security & policies](/collections/policies) — how routing respects `read` filters per backend.
+- [Run queues across a cluster](/how-to/queue-clusters) — [`plugin-queue`](/how-to/plugin-queue) stores jobs, schedules and concurrency slots in collections, so the backend you pick here is what decides whether a queue coordinates one node (memory · sqlite) or the whole cluster (pglite).
 - [Choose an adapter](/how-to/choose-an-adapter) — the server↔server fan-out that `relay` backends ride.
 - [Transports vs. adapters](/concepts/transports-and-adapters) — where the `self` tier sits relative to both.

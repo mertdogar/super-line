@@ -256,7 +256,6 @@ export default defineConfig({
           text: 'Examples',
           items: [
             { text: 'The catalog', link: '/examples/' },
-            { text: 'queue-cluster · dashboard and workers', link: '/examples/#queue-cluster-durable-workers-across-two-nodes' },
             { text: 'chat-supervisor · terminal cockpit', link: '/examples/chat-supervisor-tui' },
           ],
         },

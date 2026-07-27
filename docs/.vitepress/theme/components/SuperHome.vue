@@ -72,6 +72,33 @@ const collectionsCode = `<span class="c">// the SAME contract declares state: ro
 <span class="k">const</span> doc = client.<span class="f">collection</span>(<span class="s">'canvas'</span>).<span class="f">open</span>(<span class="s">'board'</span>)
 doc.<span class="f">update</span>({ title: <span class="s">'hi'</span> }) <span class="c">// converges across tabs + nodes</span>`
 
+/* ── queues: work that outlives the connection ───────────────────────
+   Declarative worker + concurrency, durable at-least-once jobs and cron.
+   Real super-line surface (verified against plugin-queue's kit). */
+const queueCode = `<span class="c">// the work and its worker, declared once</span>
+<span class="k">const</span> jobs = <span class="f">queue</span>({
+  queues: {
+    sendEmail: {
+      input:  z.<span class="f">object</span>({ to: z.<span class="f">email</span>() }),
+      result: z.<span class="f">object</span>({ messageId: z.<span class="f">string</span>() }),
+      concurrency: <span class="n">3</span>, <span class="c">// enforced by durable slot rows</span>
+      worker: <span class="k">async</span> ({ to }, { signal }) => ({
+        messageId: <span class="k">await</span> <span class="f">sendEmail</span>(to, { signal }),
+      }),
+    },
+  },
+})
+
+<span class="c">// durable: survives a restart, retries, at least once</span>
+<span class="k">await</span> jobs.<span class="f">enqueue</span>(<span class="s">'sendEmail'</span>, { to: <span class="s">'ada@example.com'</span> })
+
+<span class="c">// …or every morning at 09:00, cluster-wide</span>
+<span class="k">await</span> jobs.schedules.<span class="f">create</span>({
+  queue: <span class="s">'sendEmail'</span>,
+  cron: <span class="s">'0 9 * * *'</span>,
+  input: { to: <span class="s">'ada@example.com'</span> },
+})`
+
 /* ── transports: same code, any wire ─────────────────────────────────
    One client, one call — only the `transport:` line changes between wires.
    Each wire animates with its own texture (full-duplex line, marching SSE
@@ -170,6 +197,7 @@ const rows: { label: string; cells: Cell[] }[] = [
   { label: 'Per-role contracts', cells: [{ kind: 'yes' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }] },
   { label: 'Presence / introspection', cells: [{ kind: 'yes', t: 'cluster' }, { kind: 'mid', t: 'rooms' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }] },
   { label: 'Typed persisted state (rows + CRDT)', cells: [{ kind: 'yes' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }] },
+  { label: 'Durable background jobs & cron', cells: [{ kind: 'yes' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }] },
   { label: 'Server-authoritative', cells: [{ kind: 'yes' }, { kind: 'mid' }, { kind: 'no' }, { kind: 'no' }, { kind: 'no' }] },
 ]
 
@@ -277,8 +305,9 @@ onBeforeUnmount(() => {
             A connection from <code>ws</code>. An <code>EventEmitter</code> for
             local events. Redis pub/sub, hand-wired, when it has to cross
             processes. Correlation IDs and ack callbacks for request/response.
-            Four moving parts, none of them typed across the wire — re-assembled
-            on every project.
+            A job runner and its own datastore the moment work has to outlive
+            the connection that asked for it. Five moving parts, none of them
+            typed across the wire — re-assembled on every project.
           </p>
         </div>
         <div class="sl-swap reveal">
@@ -287,6 +316,7 @@ onBeforeUnmount(() => {
             <li><code>EventEmitter</code><span>local events</span></li>
             <li><code>redis</code><span>pub/sub fan-out</span></li>
             <li><code>ack glue</code><span>req/res by hand</span></li>
+            <li><code>bullmq</code><span>background jobs &amp; cron</span></li>
           </ul>
           <div class="sl-swap__arrow" aria-hidden="true">
             <svg viewBox="0 0 80 24" fill="none"><path d="M2 12h70m0 0-10-7m10 7-10 7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -358,6 +388,43 @@ onBeforeUnmount(() => {
               <span class="sl-win__name">contract.ts + client.ts</span>
             </div>
             <pre class="sl-pre"><code v-html="collectionsCode" /></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ░░ QUEUES — WORK THAT OUTLIVES THE CONNECTION ░░ -->
+    <section class="sl-sec sl-sec--alt">
+      <div class="sl-shell sl-split">
+        <div class="sl-split__copy reveal">
+          <p class="sl-kicker"><span class="sl-new">New</span> Queue plugin</p>
+          <h2>Work that outlives the connection.</h2>
+          <p>
+            Some work can't finish inside a request. Declare a
+            <strong>queue and its worker</strong> and it becomes a durable,
+            at-least-once job: typed <code>input</code> and <code>result</code>,
+            retries, leases, declarative concurrency — and cron, when it should
+            just happen every morning.
+          </p>
+          <p>
+            Jobs are rows in the same collections as the rest of your state, so
+            a job and the row that caused it commit together — no second
+            datastore, no separate worker deployment.
+            <span class="sl-hl">Point it at Postgres and the whole cluster
+            coordinates.</span>
+          </p>
+          <p class="sl-real">
+            <code>@super-line/plugin-queue</code>
+            <a :href="withBase('/how-to/plugin-queue')">Queues &amp; workers →</a>
+          </p>
+        </div>
+        <div class="sl-split__code reveal">
+          <div class="sl-win">
+            <div class="sl-win__bar">
+              <span class="sl-win__dot" /><span class="sl-win__dot" /><span class="sl-win__dot" />
+              <span class="sl-win__name">queue.ts</span>
+            </div>
+            <pre class="sl-pre"><code v-html="queueCode" /></pre>
           </div>
         </div>
       </div>
@@ -731,10 +798,10 @@ onBeforeUnmount(() => {
           <p class="sl-status">
             Pre-1.0 — role-scoped contracts, req/res, events, rooms, topics, the
             cluster event bus, presence, reconnect, collections (typed rows +
-            CRDT documents), and plugins (auth, chat, inspector) are implemented
-            and tested — over pluggable transports (WebSocket, HTTP, libp2p,
-            loopback) and pluggable adapters (in-memory, Redis, libp2p,
-            RabbitMQ, ZeroMQ).
+            CRDT documents), durable queues with cluster-wide cron, and plugins
+            (auth, queue, chat, inspector) are implemented and tested — over
+            pluggable transports (WebSocket, HTTP, libp2p, loopback) and
+            pluggable adapters (in-memory, Redis, libp2p, RabbitMQ, ZeroMQ).
           </p>
         </div>
       </div>

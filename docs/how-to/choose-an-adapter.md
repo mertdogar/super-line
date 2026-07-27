@@ -38,6 +38,10 @@ You don't need an adapter for one process — the default in-memory adapter hand
 
 All four implement the same `Adapter` seam, so switching is a one-line change. **Redis** is the default; the three broker-less options trade central presence for one fewer service to run.
 
+::: warning An adapter does not make queues cluster-safe
+[`plugin-queue`](/how-to/plugin-queue) coordinates through its **collection backend**, not the adapter: a shared Postgres backend (`@super-line/collections-pglite`) is what makes claims, cancellation, cron and concurrency cluster-wide. The adapter only shortens wake-up latency and feeds topology — durable polling stays the correctness path. On a single-node backend (memory · sqlite) each node keeps its own private jobs, slots and cron ticks no matter which adapter you add. See [Run queues across a cluster](/how-to/queue-clusters).
+:::
+
 ## Running it
 
 The [`scaling` example](https://github.com/mertdogar/super-line/tree/main/examples/scaling) boots a real cluster with Docker Compose — Redis, a Caddy load balancer, three server nodes, and six client containers — so you can watch a publish, a room broadcast, and a shared `stats` topic gossiped over the bus fan out across separate processes:

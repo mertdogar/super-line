@@ -3,6 +3,21 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## Unreleased
+
+### Features
+
+- Add clustered queue plugin and dashboard example ([e00dc23])
+
+### Chores
+
+- Add logtape skill ([7fa84d7])
+
+### Documentation
+
+- Document queue plugin ([51b45ba])
+- **changelog:** Refresh the root aggregate for the 0.16 release ([31a13b5])
+
 ## 2026-07-27
 
 ### Bug Fixes

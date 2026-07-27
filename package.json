@@ -13,6 +13,9 @@
     "rooms",
     "pubsub",
     "rpc",
+    "queue",
+    "jobs",
+    "cron",
     "typescript"
   ],
   "repository": {
@@ -33,7 +36,7 @@
     "changelog": "node scripts/changelog.mjs",
     "docs:packages": "pnpm --filter @super-line/core --filter @super-line/client --filter @super-line/server --filter @super-line/react --filter @super-line/transport-loopback --filter @super-line/collections-memory --filter @super-line/plugin-auth --filter @super-line/plugin-chat --filter @super-line/plugin-queue build",
     "docs:dev": "pnpm --filter @super-line/docs dev",
-    "docs:build": "pnpm docs:packages && pnpm --filter @super-line/docs build"
+    "docs:build": "pnpm --filter @super-line/docs build"
   },
   "devDependencies": {
     "@logtape/testing": "^2.2.4",

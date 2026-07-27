@@ -122,8 +122,10 @@ The type system holds both ends honest: forgetting the plugin (while its surface
 
 The merge **keeps the fragments that formed it** ([ADR-0016](https://github.com/mertdogar/super-line/blob/main/docs/adr/0016-merged-contracts-retain-their-plugin-fragments.md)): `contract.plugins` survives on the merged contract, so every collection and message stays attributable to the plugin that contributed it. The inspector reports that provenance alongside the **runtime** plugin list on `getContract`, which is what lets the [Control Center](/how-to/control-center) badge plugin-owned contract entries and flag a fragment whose server half was never registered.
 
-::: tip Two full contract-fragment plugins ship today
+::: tip Three full contract-fragment plugins ship today
 [`@super-line/plugin-auth`](/how-to/plugin-auth) merges identity (users/sessions collections + `signIn`/`signUp`/… requests) and [`@super-line/plugin-chat`](/how-to/plugin-chat) merges a whole chat model (six collections — channels/memberships/messages/messageParts/resources/resourcePresence — plus 20 mutation requests). plugin-chat is the reference for the **requests-first plugin idiom**: its collections are client-**read-only** (RLS `read`, `write` denied), and every mutation flows through a server-authoritative handler wrapped in a before/after **domain hook** a host can't bypass — the trade-off recorded in [ADR-0010](https://github.com/mertdogar/super-line/blob/main/docs/adr/0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md).
+
+[`@super-line/plugin-queue`](/how-to/plugin-queue) is the third shape: **server-only**. It merges three collections (`queueJobs`, `queueSchedules`, `queueSlots`) whose policies are deny-**all** — no client reads them, let alone writes — and contributes no client surface at all. Its whole API is the trusted server kit `queue()` hands back (`enqueue`, `get`, `list`, `cancel`, `retry`, `schedules`), so a browser UI reaches jobs only through host-owned requests that return job ids and sanitized summaries. A plugin's contract fragment is how it gets a validated, cluster-visible place to keep state — it does not have to hand any of that to a client.
 :::
 
 ## The client half

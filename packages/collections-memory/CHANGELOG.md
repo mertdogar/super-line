@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## Unreleased
+
+### Features
+
+- Add clustered queue plugin and dashboard example ([e00dc23])
+
 ## [collections-memory-v0.2.0] — 2026-07-23
 
 ### Features

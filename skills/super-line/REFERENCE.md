@@ -28,6 +28,11 @@ defineContract(<const C>): C                 // identity; preserves literal keys
 // Schema = any StandardSchemaV1 validator (Zod, Valibot, ArkType…). Zod in examples.
 
 validate(schema, value): Promise<Output>     // async-capable; throws SuperLineError('VALIDATION')
+jsonSchemaOf(schema): Record<string, unknown> | undefined
+//   The schema's OUTPUT shape as JSON Schema, via the Standard JSON Schema companion spec
+//   (`~standard.jsonSchema`). undefined when the validator's library hasn't implemented it, or
+//   when the shape is unrepresentable. This is how typed tables learn a column layout without
+//   super-line depending on any schema library.
 validateSync(schema, value): Output          // sync; throws on async schemas
 
 class SuperLineError<Data> extends Error { code: ErrorCode; data?: Data
@@ -387,6 +392,12 @@ defineContract({
 // SERVER — ONE backend serves all collections (single tx domain → atomic cross-collection batches) + row policies:
 createSuperLineServer(api, {
   collections: memoryCollections(),            // or sqliteCollections({ file, collections: api.collections }) (relay) · await pgliteCollections({ pgUrl, electricUrl?, collections: api.collections }) (self)
+  // SQL backends derive one typed table per collection by reading the schema's Standard JSON Schema
+  // — works with Zod 4.2+, Zod Mini 4.2+, ArkType 2.1.28+, VineJS 4.3+, Sury 11+, stnl 2.1+, and
+  // Valibot 1.2+ via toStandardJsonSchema() from @valibot/to-json-schema. A validator whose library
+  // lacks the companion spec still works: that collection falls back to key + one _sl_data JSON
+  // column (correct, just no SQL column typing or pushdown). Same per-field fallback for anything
+  // JSON Schema can't express, e.g. a .transform().
   checkReferences: true,                        // opt-in advisory FK existence check (no cascades)
   policies: {                                   // DENY-BY-DEFAULT: omit read/write ⇒ that op is server-only
     messages: {

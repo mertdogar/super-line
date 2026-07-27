@@ -54,6 +54,45 @@ for (const pkg of pkgs) {
   }
 }
 
+// A VALUE import of a bare specifier must be declared in dependencies or peerDependencies.
+// tsup externalises exactly those two blocks and BUNDLES everything else, so an undeclared
+// import silently inlines a whole library into dist — which is how a private copy of zod ended
+// up inside core, making `instanceof` false for every consumer. Type-only imports are erased
+// at build and never reach the bundler, so they are exempt.
+const FROM = /^[ \t]*(?:import|export)\s+([\s\S]*?)\s*from\s*['"]([^'"]+)['"]/gm
+const bare = (spec) => !spec.startsWith('.') && !spec.startsWith('node:')
+const pkgRoot = (spec) => (spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0])
+const typeOnly = (clause) => {
+  const c = clause.trim()
+  if (/^type\b/.test(c)) return true
+  const named = /^\{([\s\S]*)\}$/.exec(c)
+  if (!named) return false
+  const parts = named[1].split(',').map((s) => s.trim()).filter(Boolean)
+  return parts.length > 0 && parts.every((p) => /^type\b/.test(p))
+}
+
+for (const pkg of pkgs) {
+  const dir = resolve(root, dirname(pkg.rel))
+  // Only tsup-built libraries: control-center is a Vite SPA that is *meant* to bundle everything.
+  if (!globSync('tsup.config.ts', { cwd: dir }).length) continue
+  const declared = new Set([...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.peerDependencies ?? {})])
+  for (const file of globSync(['src/**/*.ts', 'src/**/*.tsx'], { cwd: dir })) {
+    // strip comments first — JSDoc examples are full of `import … from '…'` that never runs
+    const src = readFileSync(resolve(dir, file), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^[ \t]*\/\/.*$/gm, '')
+    for (const [, clause, spec] of src.matchAll(FROM)) {
+      if (!bare(spec) || typeOnly(clause)) continue
+      const name = pkgRoot(spec)
+      if (!declared.has(name)) {
+        errors.push(
+          `${pkg.name}: ${file} value-imports "${name}" but it is not in dependencies/peerDependencies — tsup will BUNDLE it into dist.`,
+        )
+      }
+    }
+  }
+}
+
 const core = pkgs.find((p) => p.name === '@super-line/core')
 const declared = /VERSION = '([^']+)'/.exec(readFileSync(resolve(root, 'packages/core/src/version.ts'), 'utf8'))?.[1]
 if (declared !== core.version) {

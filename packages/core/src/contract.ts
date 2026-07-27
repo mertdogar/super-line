@@ -1,8 +1,8 @@
-import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec'
 import { SuperLineError } from './errors.js'
 
 /** Any [Standard Schema](https://standardschema.dev) validator (Zod, Valibot, ArkType…). */
-export type Schema = StandardSchemaV1
+export type Schema<In = unknown, Out = In> = StandardSchemaV1<In, Out>
 
 /**
  * A client→server request (request/response). The client sends `input`; the
@@ -451,6 +451,41 @@ export async function validate<S extends Schema>(
     throw new SuperLineError('VALIDATION', 'Validation failed', result.issues)
   }
   return result.value
+}
+
+/**
+ * How super-line asks any schema for its shape. `unrepresentable: 'any'` is policy, not a
+ * workaround: a field the converter can't express (a transform, a custom type) must come back as
+ * `{}` and become one opaque column, never abort the whole conversion — without it a single
+ * transform anywhere in a schema throws and the entire shape is lost. Unknown `libraryOptions`
+ * keys are ignored by vendors that don't recognise them.
+ */
+const JSON_SCHEMA_OPTIONS = {
+  target: 'draft-2020-12',
+  libraryOptions: { unrepresentable: 'any' },
+} as const
+
+/**
+ * Read a schema's shape as JSON Schema via the
+ * [Standard JSON Schema](https://standardschema.dev/json-schema) companion spec — the vendor-neutral
+ * way to introspect a validator, implemented by Zod 4.2+, ArkType, VineJS, Sury and (via
+ * `toStandardJsonSchema`) Valibot.
+ *
+ * Returns `undefined` when the shape is unavailable: either the schema's library has not implemented
+ * the companion spec, or the conversion threw (the spec permits that for unrepresentable schemas).
+ * Callers treat both the same way — no shape, so fall back rather than fail.
+ *
+ * @param schema - any Standard Schema validator.
+ * @returns the validated OUTPUT shape as JSON Schema, or `undefined` if it cannot be produced.
+ */
+export function jsonSchemaOf(schema: unknown): Record<string, unknown> | undefined {
+  const std = (schema as Partial<StandardJSONSchemaV1> | undefined)?.['~standard']
+  if (!std || typeof std !== 'object' || !('jsonSchema' in std)) return undefined
+  try {
+    return std.jsonSchema.output(JSON_SCHEMA_OPTIONS) as Record<string, unknown>
+  } catch {
+    return undefined
+  }
 }
 
 /**

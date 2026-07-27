@@ -11,7 +11,7 @@ export type { Serializer } from './serializer.js'
 
 export type { Adapter, PresenceStore, ConnDescriptor, NodeStat } from './adapter.js'
 
-export { defineContract, defineContractPlugin, defineSurface, mergeSurfaces, validate, validateSync, isCrdtCollection } from './contract.js'
+export { defineContract, defineContractPlugin, defineSurface, mergeSurfaces, validate, validateSync, isCrdtCollection, jsonSchemaOf } from './contract.js'
 export type {
   Contract,
   ContractFragment,

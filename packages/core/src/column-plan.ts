@@ -1,32 +1,24 @@
 /**
- * planColumns — Zod→column introspection for typed per-collection tables
+ * planColumns — schema→column introspection for typed per-collection tables
  * (PLAN-collections-typed-tables.md, Phase 0). Core owns the schema walk so the SQL
- * backends (collections-sqlite / collections-pglite) never import zod; they render
- * dialect DDL/statements from the abstract plan. A non-introspectable schema (Valibot/
- * ArkType/any non-ZodObject) degrades to the key column plus one `_sl_data` JSON column —
- * still one table per collection, still conformant.
+ * backends (collections-sqlite / collections-pglite) never import a schema library; they
+ * render dialect DDL/statements from the abstract plan.
+ *
+ * The walk reads **Standard JSON Schema** (`~standard.jsonSchema`, the companion spec to
+ * Standard Schema), never a vendor's classes — so core depends on no schema library at all
+ * and zod / ArkType / Valibot / VineJS / Sury all plan identically. A schema whose library
+ * hasn't implemented the companion spec degrades to the key column plus one `_sl_data` JSON
+ * column — still one table per collection, still conformant.
  *
  * The plan describes the validated OUTPUT row (what `validate()` returns and backends
- * store): a `.default()`/`.catch()` field is always present post-validation, so it is not
- * `optional` here. `optional` (field may be absent) and `nullable` (field may be `null`)
- * are tracked separately because the query evaluator distinguishes missing from null —
- * backends store SQL NULL for both and use these flags to reconstruct the right one.
+ * store), which is why the walk asks for `.output()`: a `.default()`/`.catch()` field is
+ * always present post-validation, and the converter reports it as required. `optional`
+ * (field may be absent) and `nullable` (field may be `null`) are tracked separately because
+ * the query evaluator distinguishes missing from null — backends store SQL NULL for both
+ * and use these flags to reconstruct the right one.
  */
 
-import {
-  ZodBoolean,
-  ZodCatch,
-  ZodDefault,
-  ZodEffects,
-  ZodEnum,
-  ZodLiteral,
-  ZodNullable,
-  ZodNumber,
-  ZodObject,
-  ZodOptional,
-  ZodString,
-  type ZodTypeAny,
-} from 'zod'
+import { jsonSchemaOf } from './contract.js'
 import type { LwwCollectionDef } from './contract.js'
 
 /** Storage class of a planned column; backends map it to their dialect's type. */
@@ -71,35 +63,50 @@ function checkIdent(name: string): void {
   }
 }
 
-function unwrap(t: ZodTypeAny): { leaf: ZodTypeAny; optional: boolean; nullable: boolean } {
-  if (t instanceof ZodOptional) return { ...unwrap(t.unwrap()), optional: true }
-  if (t instanceof ZodNullable) return { ...unwrap(t.unwrap()), nullable: true }
-  // default/catch fill absence at this layer: the validated output always carries the field,
-  // erasing inner optionality; inner nullability survives (null is a value, not absence).
-  if (t instanceof ZodDefault) return { ...unwrap(t.removeDefault()), optional: false }
-  if (t instanceof ZodCatch) return { ...unwrap(t.removeCatch()), optional: false }
-  // refine keeps the output type; transform/preprocess don't — those fall through to 'json'.
-  if (t instanceof ZodEffects && t._def.effect.type === 'refinement') return unwrap(t.innerType())
-  return { leaf: t, optional: false, nullable: false }
+/** The slice of a JSON Schema node the planner reads. */
+type Node = Record<string, unknown>
+
+/** Flatten anyOf/oneOf so `string | null` reads the same however a vendor spells it. */
+function branches(node: Node): Node[] {
+  const union = (node.anyOf ?? node.oneOf) as Node[] | undefined
+  return Array.isArray(union) ? union.flatMap(branches) : [node]
 }
 
-function kindOf(leaf: ZodTypeAny): ColumnKind {
-  if (leaf instanceof ZodString || leaf instanceof ZodEnum) return 'text'
-  if (leaf instanceof ZodNumber) return 'real'
-  if (leaf instanceof ZodBoolean) return 'integer-bool'
-  if (leaf instanceof ZodLiteral) {
-    const v = leaf.value
-    if (typeof v === 'string') return 'text'
-    if (typeof v === 'number') return 'real'
-    if (typeof v === 'boolean') return 'integer-bool'
+/** Every JSON type keyword a node admits — `type`, `type[]`, `const` and `enum` all normalise here. */
+function typesOf(node: Node): Set<string> {
+  const out = new Set<string>()
+  for (const b of branches(node)) {
+    const t = b.type
+    if (typeof t === 'string') {
+      out.add(t)
+    } else if (Array.isArray(t)) {
+      for (const x of t) out.add(String(x))
+    } else if ('const' in b) {
+      out.add(b.const === null ? 'null' : typeof b.const)
+    } else if (Array.isArray(b.enum)) {
+      for (const v of b.enum) out.add(v === null ? 'null' : typeof v)
+    }
   }
+  return out
+}
+
+function kindOf(node: Node): ColumnKind {
+  const types = typesOf(node)
+  // nullability is a separate flag, not a storage class
+  types.delete('null')
+  // a real union (or a node with no type at all — `{}` from an unrepresentable field) can't be one scalar column
+  if (types.size !== 1) return 'json'
+  const [only] = types
+  if (only === 'string') return 'text'
+  if (only === 'number' || only === 'integer') return 'real'
+  if (only === 'boolean') return 'integer-bool'
   return 'json'
 }
 
 function finish(key: string, degenerate: boolean, columns: ColumnSpec[]): ColumnPlan {
   const sorted = [...columns].sort((a, b) => (a.name < b.name ? -1 : 1))
   const fingerprint = [
-    degenerate ? 'v1:degenerate' : 'v1',
+    degenerate ? 'v2:degenerate' : 'v2',
     `key=${key}`,
     ...sorted.map((c) => `${c.name}:${c.kind}${c.optional ? ':o' : ''}${c.nullable ? ':n' : ''}`),
   ].join(';')
@@ -112,21 +119,24 @@ export function planColumns(def: LwwCollectionDef): ColumnPlan {
     throw new Error('planColumns: CRDT collections have no column plan (opened by id, not queried)')
   }
   checkIdent(def.key)
-  const schema: unknown = def.schema
-  if (!(schema instanceof ZodObject)) {
+  const js = jsonSchemaOf(def.schema)
+  const properties = js?.type === 'object' ? (js.properties as Record<string, Node> | undefined) : undefined
+  if (!properties) {
     return finish(def.key, true, [
       { name: def.key, kind: 'text', optional: false, nullable: false },
       { name: DEGENERATE_DATA_COLUMN, kind: 'json', optional: false, nullable: false },
     ])
   }
+  const required = new Set((js?.required as string[] | undefined) ?? [])
   const columns: ColumnSpec[] = []
-  for (const [name, field] of Object.entries(schema.shape as Record<string, ZodTypeAny>)) {
+  for (const [name, node] of Object.entries(properties)) {
     checkIdent(name)
-    const { leaf, optional, nullable } = unwrap(field)
+    const optional = !required.has(name)
+    const nullable = typesOf(node).has('null')
     // A scalar column stores both "absent" and "null" as SQL NULL — fine when only one is possible,
     // ambiguous when a field is optional AND nullable. Demote those to json: absent ⇒ SQL NULL,
     // null ⇒ the JSON text 'null', so the evaluator's missing ≠ null distinction survives storage.
-    const kind = optional && nullable ? 'json' : kindOf(leaf)
+    const kind = optional && nullable ? 'json' : kindOf(node)
     columns.push({ name, kind, optional, nullable })
   }
   const key = columns.find((c) => c.name === def.key)

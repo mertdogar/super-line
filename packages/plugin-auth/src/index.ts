@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContractPlugin, defineSurface } from '@super-line/core'
 
 /** The unauthenticated role the auth plugin adds to the contract. The only role name the plugin hardcodes. */
@@ -104,10 +104,10 @@ export interface AuthContext<Claims = Record<string, unknown>, Sealed = Record<s
 
 const identityOut = z.object({ token: z.string(), userId: z.string(), roles: z.array(z.string()), displayName: z.string() })
 const signUpDef = {
-  input: z.object({ email: z.string().email(), password: z.string().min(6), displayName: z.string().min(1) }),
+  input: z.object({ email: z.email(), password: z.string().min(6), displayName: z.string().min(1) }),
   output: identityOut,
 }
-const signInDef = { input: z.object({ email: z.string().email(), password: z.string() }), output: identityOut }
+const signInDef = { input: z.object({ email: z.email(), password: z.string() }), output: identityOut }
 const signOutDef = { input: z.void(), output: z.object({ ok: z.boolean() }) }
 const whoamiDef = {
   input: z.void(),
@@ -128,7 +128,7 @@ const listApiKeysDef = { input: z.void(), output: z.array(apiKeyInfo) }
 const revokeApiKeyDef = { input: z.object({ id: z.string() }), output: z.object({ ok: z.boolean() }) }
 // Logged-out password recovery. `requestPasswordReset` always returns { ok: true } (never leaks whether the
 // email exists); the server delivers the token via a host `sendPasswordReset` callback.
-const requestResetDef = { input: z.object({ email: z.string().email() }), output: z.object({ ok: z.boolean() }) }
+const requestResetDef = { input: z.object({ email: z.email() }), output: z.object({ ok: z.boolean() }) }
 const confirmResetDef = {
   input: z.object({ token: z.string(), newPassword: z.string().min(6) }),
   output: z.object({ ok: z.boolean() }),

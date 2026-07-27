@@ -6,7 +6,7 @@ End-to-end patterns. All code uses the real, verified API. Start from the **Star
 
 ```ts
 // contract.ts  — shared by server and client
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 
 export const api = defineContract({
@@ -968,7 +968,7 @@ export async function waitFor(pred: () => boolean, timeout = 2000) {
 A shared contract for the examples below:
 
 ```ts
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 export const api = defineContract({
   shared: { serverToClient: { ping: { payload: z.object({ n: z.number() }) } } },

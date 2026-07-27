@@ -14,7 +14,7 @@
     "@super-line/tanstack-db": "workspace:*",
     "@super-line/transport-websocket": "workspace:*",
     "@tanstack/db": "^0.5.0",
-    "zod": "^3.24.1"
+    "zod": "^4.2.0"
   },
   "devDependencies": {
     "tsx": "^4.19.2"

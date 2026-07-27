@@ -1,7 +1,9 @@
 # ADR-0013: plugin-chat host schemas bridge through Standard Schema
 
 **Status:** accepted (2026-07-19) · **Builds on:** ADR-0011 · **Prompted by:** the OMMA 0.5.0
-adoption findings (finding 2)
+adoption findings (finding 2) · **Amended by:**
+[ADR-0021](0021-column-layout-is-derived-from-standard-json-schema.md) (the two typed-table/AI-guidance
+consequences below; the decision itself stands)
 
 ## Context
 
@@ -41,8 +43,13 @@ wrapped by `hostSchema()`:
   plugin-chat. Hosts on zod 4, Valibot, or ArkType work with no pin.
 - Typed-table planning is unaffected: the parts schema is a top-level discriminated union (already
   `_sl_data`-degenerate), and the messages envelope remains a real ZodObject.
+  *(Amended by ADR-0021: planning no longer depends on the envelope being a ZodObject — it reads
+  `~standard.jsonSchema` and only needs the envelope to report a shape.)*
 - A *foreign* validator embedded in `chatAgentTools` renders as an opaque slot in the model-facing
   JSON schema (the server still validates every send); a plugin-chat-zod schema keeps rich guidance.
+  *(Amended by ADR-0021: `hostSchema` now carries the host's Standard JSON Schema through as
+  `.meta()`, so a foreign validator gives the model — and the column planner — the same guidance as
+  a plugin-chat-zod one.)*
 - Rejected: documenting the same-instance pin (leaves the promise broken, breaks on every zod
   version drift) and making zod a peerDependency (cannot serve a zod-4 host and a `^3` peer range
   simultaneously).

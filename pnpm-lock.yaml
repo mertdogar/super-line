@@ -104,7 +104,7 @@ importers:
         version: link:../../packages/transport-websocket
       ai:
         specifier: ^6.0.0
-        version: 6.0.209(zod@3.25.76)
+        version: 6.0.209(zod@4.4.3)
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -112,8 +112,8 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@types/react':
         specifier: ^18.3.18
@@ -165,7 +165,7 @@ importers:
         version: link:../../packages/transport-websocket
       ai:
         specifier: ^6.0.0
-        version: 6.0.209(zod@3.25.76)
+        version: 6.0.209(zod@4.4.3)
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -173,8 +173,8 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@types/react':
         specifier: ^18.3.18
@@ -216,8 +216,8 @@ importers:
         specifier: ^6.2.4
         version: 6.2.4
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -244,8 +244,8 @@ importers:
         specifier: ^5.4.2
         version: 5.11.1
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -266,8 +266,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/transport-websocket
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -301,10 +301,10 @@ importers:
         version: link:../../packages/transport-websocket
       ai:
         specifier: ^6.0.0
-        version: 6.0.209(zod@3.25.76)
+        version: 6.0.209(zod@4.4.3)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -314,10 +314,10 @@ importers:
     dependencies:
       '@ai-sdk/gateway':
         specifier: ^4.0.16
-        version: 4.0.21(zod@3.25.76)
+        version: 4.0.21(zod@4.4.3)
       '@mastra/core':
         specifier: 1.50.1
-        version: 1.50.1(@grpc/grpc-js@1.14.4)(ai@6.0.209(zod@3.25.76))(express@5.2.1)(rxjs@7.8.2)(zod@3.25.76)
+        version: 1.50.1(@grpc/grpc-js@1.14.4)(ai@6.0.209(zod@4.4.3))(express@5.2.1)(rxjs@7.8.2)(zod@4.4.3)
       '@opentui/core':
         specifier: ^0.4.5
         version: 0.4.5(typescript@5.9.3)(web-tree-sitter@0.25.10)
@@ -356,7 +356,7 @@ importers:
         version: link:../../packages/transport-websocket
       ai:
         specifier: ^6.0.0
-        version: 6.0.209(zod@3.25.76)
+        version: 6.0.209(zod@4.4.3)
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@19.2.7)
@@ -367,8 +367,8 @@ importers:
         specifier: ^19.0.0
         version: 19.2.7(react@19.2.7)
       zod:
-        specifier: ^3.25.0
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.0.0
@@ -422,8 +422,8 @@ importers:
         specifier: ^0.5.0
         version: 0.5.33(typescript@5.9.3)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -463,7 +463,7 @@ importers:
         version: link:../../packages/transport-websocket
       ai:
         specifier: ^6.0.209
-        version: 6.0.209(zod@3.25.76)
+        version: 6.0.209(zod@4.4.3)
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -483,8 +483,8 @@ importers:
         specifier: ^2.6.0
         version: 2.6.1
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.0.0
@@ -532,8 +532,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/transport-websocket
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -560,8 +560,8 @@ importers:
         specifier: ^4.6.14
         version: 4.12.26
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       concurrently:
         specifier: ^9.1.0
@@ -645,8 +645,8 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@types/react':
         specifier: ^18.3.18
@@ -682,8 +682,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/transport-websocket
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -713,8 +713,8 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@types/react':
         specifier: ^18.3.18
@@ -768,8 +768,8 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@types/react':
         specifier: ^18.3.18
@@ -823,8 +823,8 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@types/react':
         specifier: ^18.3.18
@@ -875,8 +875,8 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@types/react':
         specifier: ^18.3.18
@@ -924,8 +924,8 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@types/react':
         specifier: ^18.3.18
@@ -1024,8 +1024,8 @@ importers:
         specifier: ^2.6.0
         version: 2.6.1
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.0.0
@@ -1076,8 +1076,8 @@ importers:
         specifier: ^5.4.2
         version: 5.11.1
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -1110,8 +1110,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/transport-websocket
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -1138,8 +1138,8 @@ importers:
         specifier: ^5.0.0
         version: 5.0.8
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -1163,8 +1163,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/transport-websocket
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -1197,8 +1197,8 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@types/react':
         specifier: ^18.3.18
@@ -1252,8 +1252,8 @@ importers:
         specifier: ^13.6.20
         version: 13.6.31
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@types/react':
         specifier: ^18.3.18
@@ -1310,8 +1310,8 @@ importers:
         specifier: ^3.3.4
         version: 3.3.4
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -1491,8 +1491,8 @@ importers:
         specifier: workspace:^
         version: link:../core
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
 
   packages/collections-sqlite:
     dependencies:
@@ -1507,8 +1507,8 @@ importers:
         specifier: ^7.6.12
         version: 7.6.13
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
 
   packages/control-center:
     devDependencies:
@@ -1573,8 +1573,8 @@ importers:
         specifier: ^6.0.7
         version: 6.4.3(@types/node@22.19.21)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
 
   packages/core:
     dependencies:
@@ -1588,12 +1588,21 @@ importers:
         specifier: ^2.2.4
         version: 2.2.4(@logtape/logtape@2.2.4)
       '@standard-schema/spec':
-        specifier: ^1.0.0
+        specifier: ^1.1.0
         version: 1.1.0
     devDependencies:
+      '@valibot/to-json-schema':
+        specifier: ^1.7.1
+        version: 1.7.1(valibot@1.4.2(typescript@5.9.3))
+      arktype:
+        specifier: ^2.2.3
+        version: 2.2.3
+      valibot:
+        specifier: ^1.4.2
+        version: 1.4.2(typescript@5.9.3)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
 
   packages/plugin-auth:
     dependencies:
@@ -1604,8 +1613,8 @@ importers:
         specifier: ^6.2.4
         version: 6.2.4
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@super-line/client':
         specifier: workspace:^
@@ -1638,12 +1647,12 @@ importers:
         specifier: ^2.2.4
         version: 2.2.4
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
     devDependencies:
       '@mastra/core':
         specifier: 1.50.1
-        version: 1.50.1(@grpc/grpc-js@1.14.4)(ai@6.0.209(zod@3.25.76))(express@5.2.1)(rxjs@7.8.2)(zod@3.25.76)
+        version: 1.50.1(@grpc/grpc-js@1.14.4)(ai@6.0.209(zod@4.4.3))(express@5.2.1)(rxjs@7.8.2)(zod@4.4.3)
       '@super-line/client':
         specifier: workspace:^
         version: link:../client
@@ -1673,7 +1682,7 @@ importers:
         version: 18.3.7(@types/react@18.3.31)
       ai:
         specifier: ^6.0.209
-        version: 6.0.209(zod@3.25.76)
+        version: 6.0.209(zod@4.4.3)
       jsdom:
         specifier: ^25.0.1
         version: 25.0.1
@@ -1688,7 +1697,7 @@ importers:
     dependencies:
       '@standard-community/standard-json':
         specifier: ^0.3.5
-        version: 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(zod-to-json-schema@3.25.2(zod@4.4.3))(zod@4.4.3)
+        version: 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.7.1(valibot@1.4.2(typescript@5.9.3)))(arktype@2.2.3)(quansync@0.2.11)(valibot@1.4.2(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.4.3))(zod@4.4.3)
     devDependencies:
       '@super-line/core':
         specifier: workspace:^
@@ -1733,8 +1742,8 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
 
   packages/server:
     dependencies:
@@ -1821,15 +1830,15 @@ importers:
         specifier: ^6.0.0
         version: 6.5.0
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
       zod-to-json-schema:
         specifier: ^3.25.2
-        version: 3.25.2(zod@3.25.76)
+        version: 3.25.2(zod@4.4.3)
     optionalDependencies:
       '@standard-community/standard-json':
         specifier: ^0.3.5
-        version: 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76)
+        version: 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.7.1(valibot@1.4.2(typescript@5.9.3)))(arktype@2.2.3)(quansync@0.2.11)(valibot@1.4.2(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.4.3))(zod@4.4.3)
 
   packages/tanstack-db:
     devDependencies:
@@ -1855,8 +1864,8 @@ importers:
         specifier: ^8.18.0
         version: 8.21.0
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
 
   packages/transport-http:
     devDependencies:
@@ -1901,8 +1910,8 @@ importers:
         specifier: ^3.3.4
         version: 3.3.4
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.2.0
+        version: 4.4.3
 
   packages/transport-loopback:
     devDependencies:
@@ -2092,6 +2101,12 @@ packages:
   '@algolia/requester-node-http@5.54.0':
     resolution: {integrity: sha512-zyZDJ4WS5TnjZZ5pqywTBFO9olW7QMtY2kf2dbLnu+UTzfc9ri/HGf27jRN2NTbX9FcRPxSqPqzUhF/BZIx0VA==}
     engines: {node: '>= 14.0.0'}
+
+  '@ark/schema@0.56.2':
+    resolution: {integrity: sha512-Qx4D2JFbBWpntiHZaTv7bGG4H/M2rigiknezKg/WVyDSaLdE4YCcWAOoFB7pjjDqHbbV2OqRfntm1nnXvwMexg==}
+
+  '@ark/util@0.56.2':
+    resolution: {integrity: sha512-9kU2sUE38FZEGG7l3hamYMBieLYEJh2L1mrYD2eXpT+78EnQSV1bhjxJhnxGBMSTbtwpBSDNSK+K60WvaI/DTQ==}
 
   '@asamuzakjp/css-color@3.2.0':
     resolution: {integrity: sha512-K1A6z8tS3XsmCMM86xoWdn7Fkdn9m6RSVtocUrJYIwZnFVkng/PvkEoWtOWmP+Scc6saYWHWZYbndEEXxl24jw==}
@@ -4314,6 +4329,11 @@ packages:
   '@ungap/structured-clone@1.3.1':
     resolution: {integrity: sha512-mUFwbeTqrVgDQxFveS+df2yfap6iuP20NAKAsBt5jDEoOTDew+zwLAOilHCeQJOVSvmgCX4ogqIrA0mnyr08yQ==}
 
+  '@valibot/to-json-schema@1.7.1':
+    resolution: {integrity: sha512-3qkmU6KXWh8GIThEAW3kuRHPQBMjWkKy+Ppz3WkUucx53DTpOa6siMn4xDGSOhlVyMrDaJTCTMLYPZVAIk1P0A==}
+    peerDependencies:
+      valibot: ^1.4.0
+
   '@vercel/oidc@3.2.0':
     resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
     engines: {node: '>= 20'}
@@ -4561,6 +4581,12 @@ packages:
 
   aria-query@5.3.0:
     resolution: {integrity: sha512-b0P0sZPKtyu8HkeRAfCq0IfURZK+SuwMjY1UXGBU27wpAiTwQAIlq56IbIO+ytk/JjS1fMR14ee5WBBfKi5J6A==}
+
+  arkregex@0.0.8:
+    resolution: {integrity: sha512-PJcx6G1kQTgLKPUbeYlYecDRaKq15AMSGVajlKFYWlPeJRQL+j3dKE6tyMs40HZ99djS1l9Vhl3ezAHy9JBIqQ==}
+
+  arktype@2.2.3:
+    resolution: {integrity: sha512-7W+0RLTUNJiBFIIZXwOQxSR8Z273IAd6IvqBeG9+gHnQKFsIx2C0iOtGTmMrPnlX4qLXyc5+ll7A0BIj9WrbTg==}
 
   asap@2.0.6:
     resolution: {integrity: sha512-BSHWgDSAiKs50o2Re8ppvp3seVHXSRM44cdSsT9FfNEUUZLOGWVCsiWaRPWM1Znn+mqZ1OfVZ3z3DWEzSp7hRA==}
@@ -7512,6 +7538,14 @@ packages:
     deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
+  valibot@1.4.2:
+    resolution: {integrity: sha512-gjdCvJ6d3RyHAneqxMYMW9QMCwYMb3jpOO0IyHZV1bnRHFBHrX3VkIILt5XYR0WhwHiH7Mty8ovuPZ/O3gamrg==}
+    peerDependencies:
+      typescript: '>=5'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
   vary@1.1.2:
     resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
     engines: {node: '>= 0.8'}
@@ -7844,63 +7878,63 @@ snapshots:
       '@grpc/grpc-js': 1.14.4
       express: 5.2.1
 
-  '@ai-sdk/gateway@3.0.134(zod@3.25.76)':
+  '@ai-sdk/gateway@3.0.134(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
+      '@ai-sdk/provider-utils': 4.0.30(zod@4.4.3)
       '@vercel/oidc': 3.2.0
-      zod: 3.25.76
+      zod: 4.4.3
 
-  '@ai-sdk/gateway@4.0.21(zod@3.25.76)':
+  '@ai-sdk/gateway@4.0.21(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.3
-      '@ai-sdk/provider-utils': 5.0.10(zod@3.25.76)
+      '@ai-sdk/provider-utils': 5.0.10(zod@4.4.3)
       '@vercel/oidc': 3.2.0
-      zod: 3.25.76
+      zod: 4.4.3
 
-  '@ai-sdk/provider-utils@2.2.8(zod@3.25.76)':
+  '@ai-sdk/provider-utils@2.2.8(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 1.1.3
       nanoid: 3.3.12
       secure-json-parse: 2.7.0
-      zod: 3.25.76
+      zod: 4.4.3
 
-  '@ai-sdk/provider-utils@3.0.25(zod@3.25.76)':
+  '@ai-sdk/provider-utils@3.0.25(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 2.0.3
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.1.0
-      zod: 3.25.76
+      zod: 4.4.3
 
-  '@ai-sdk/provider-utils@4.0.27(zod@3.25.76)':
+  '@ai-sdk/provider-utils@4.0.27(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 3.0.10
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.1.0
-      zod: 3.25.76
+      zod: 4.4.3
 
-  '@ai-sdk/provider-utils@4.0.30(zod@3.25.76)':
+  '@ai-sdk/provider-utils@4.0.30(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 3.0.10
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.1.0
-      zod: 3.25.76
+      zod: 4.4.3
 
-  '@ai-sdk/provider-utils@5.0.0(zod@3.25.76)':
+  '@ai-sdk/provider-utils@5.0.0(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.0
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.0
-      zod: 3.25.76
+      zod: 4.4.3
 
-  '@ai-sdk/provider-utils@5.0.10(zod@3.25.76)':
+  '@ai-sdk/provider-utils@5.0.10(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.3
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.0
-      zod: 3.25.76
+      zod: 4.4.3
 
   '@ai-sdk/provider@1.1.3':
     dependencies:
@@ -7922,12 +7956,12 @@ snapshots:
     dependencies:
       json-schema: 0.4.0
 
-  '@ai-sdk/ui-utils@1.2.11(zod@3.25.76)':
+  '@ai-sdk/ui-utils@1.2.11(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 1.1.3
-      '@ai-sdk/provider-utils': 2.2.8(zod@3.25.76)
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      '@ai-sdk/provider-utils': 2.2.8(zod@4.4.3)
+      zod: 4.4.3
+      zod-to-json-schema: 3.25.2(zod@4.4.3)
 
   '@algolia/abtesting@1.20.0':
     dependencies:
@@ -8040,6 +8074,12 @@ snapshots:
   '@algolia/requester-node-http@5.54.0':
     dependencies:
       '@algolia/client-common': 5.54.0
+
+  '@ark/schema@0.56.2':
+    dependencies:
+      '@ark/util': 0.56.2
+
+  '@ark/util@0.56.2': {}
 
   '@asamuzakjp/css-color@3.2.0':
     dependencies:
@@ -9104,24 +9144,24 @@ snapshots:
     dependencies:
       '@lukeed/csprng': 1.1.0
 
-  '@mastra/core@1.50.1(@grpc/grpc-js@1.14.4)(ai@6.0.209(zod@3.25.76))(express@5.2.1)(rxjs@7.8.2)(zod@3.25.76)':
+  '@mastra/core@1.50.1(@grpc/grpc-js@1.14.4)(ai@6.0.209(zod@4.4.3))(express@5.2.1)(rxjs@7.8.2)(zod@4.4.3)':
     dependencies:
       '@a2a-js/sdk': 0.3.14(@grpc/grpc-js@1.14.4)(express@5.2.1)
-      '@ai-sdk/provider-utils-v5': '@ai-sdk/provider-utils@3.0.25(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.27(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.0(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v5': '@ai-sdk/provider-utils@3.0.25(zod@4.4.3)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.27(zod@4.4.3)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.0(zod@4.4.3)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.10'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.0'
-      '@ai-sdk/ui-utils-v5': '@ai-sdk/ui-utils@1.2.11(zod@3.25.76)'
+      '@ai-sdk/ui-utils-v5': '@ai-sdk/ui-utils@1.2.11(zod@4.4.3)'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.3(zod@3.25.76)
-      '@modelcontextprotocol/sdk': 1.29.0(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.3(zod@4.4.3)
+      '@modelcontextprotocol/sdk': 1.29.0(zod@4.4.3)
       '@sindresorhus/slugify': 2.2.1
       '@standard-schema/spec': 1.1.0
       ajv: 8.20.0
-      chat: 4.34.0(ai@6.0.209(zod@3.25.76))(zod@3.25.76)
+      chat: 4.34.0(ai@6.0.209(zod@4.4.3))(zod@4.4.3)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
@@ -9138,7 +9178,7 @@ snapshots:
       tokenx: 1.3.0
       ws: 8.21.0
       xxhash-wasm: 1.1.0
-      zod: 3.25.76
+      zod: 4.4.3
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@cfworker/json-schema'
@@ -9150,17 +9190,17 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@mastra/schema-compat@1.3.3(zod@3.25.76)':
+  '@mastra/schema-compat@1.3.3(zod@4.4.3)':
     dependencies:
       json-schema-to-zod: 2.8.1
-      zod: 3.25.76
+      zod: 4.4.3
       zod-from-json-schema: 0.5.5
       zod-from-json-schema-v3: zod-from-json-schema@0.0.5
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod-to-json-schema: 3.25.2(zod@4.4.3)
 
   '@microsoft/fetch-event-source@2.0.1': {}
 
-  '@modelcontextprotocol/sdk@1.29.0(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.29.0(zod@4.4.3)':
     dependencies:
       '@hono/node-server': 1.19.14(hono@4.12.26)
       ajv: 8.20.0
@@ -9177,8 +9217,8 @@ snapshots:
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod: 4.4.3
+      zod-to-json-schema: 3.25.2(zod@4.4.3)
     transitivePeerDependencies:
       - supports-color
 
@@ -9912,22 +9952,15 @@ snapshots:
     dependencies:
       escape-string-regexp: 5.0.0
 
-  '@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76)':
+  '@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.7.1(valibot@1.4.2(typescript@5.9.3)))(arktype@2.2.3)(quansync@0.2.11)(valibot@1.4.2(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.4.3))(zod@4.4.3)':
     dependencies:
       '@standard-schema/spec': 1.1.0
       '@types/json-schema': 7.0.15
       quansync: 0.2.11
     optionalDependencies:
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
-    optional: true
-
-  '@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(zod-to-json-schema@3.25.2(zod@4.4.3))(zod@4.4.3)':
-    dependencies:
-      '@standard-schema/spec': 1.1.0
-      '@types/json-schema': 7.0.15
-      quansync: 0.2.11
-    optionalDependencies:
+      '@valibot/to-json-schema': 1.7.1(valibot@1.4.2(typescript@5.9.3))
+      arktype: 2.2.3
+      valibot: 1.4.2(typescript@5.9.3)
       zod: 4.4.3
       zod-to-json-schema: 3.25.2(zod@4.4.3)
 
@@ -10270,6 +10303,10 @@ snapshots:
 
   '@ungap/structured-clone@1.3.1': {}
 
+  '@valibot/to-json-schema@1.7.1(valibot@1.4.2(typescript@5.9.3))':
+    dependencies:
+      valibot: 1.4.2(typescript@5.9.3)
+
   '@vercel/oidc@3.2.0': {}
 
   '@vitejs/plugin-react@4.7.0(vite@5.4.21(@types/node@22.19.21)(lightningcss@1.32.0)(terser@5.48.0))':
@@ -10484,13 +10521,13 @@ snapshots:
 
   agent-base@7.1.4: {}
 
-  ai@6.0.209(zod@3.25.76):
+  ai@6.0.209(zod@4.4.3):
     dependencies:
-      '@ai-sdk/gateway': 3.0.134(zod@3.25.76)
+      '@ai-sdk/gateway': 3.0.134(zod@4.4.3)
       '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
+      '@ai-sdk/provider-utils': 4.0.30(zod@4.4.3)
       '@opentelemetry/api': 1.9.1
-      zod: 3.25.76
+      zod: 4.4.3
 
   ajv-formats@3.0.1(ajv@8.20.0):
     optionalDependencies:
@@ -10575,6 +10612,16 @@ snapshots:
   aria-query@5.3.0:
     dependencies:
       dequal: 2.0.3
+
+  arkregex@0.0.8:
+    dependencies:
+      '@ark/util': 0.56.2
+
+  arktype@2.2.3:
+    dependencies:
+      '@ark/schema': 0.56.2
+      '@ark/util': 0.56.2
+      arkregex: 0.0.8
 
   asap@2.0.6: {}
 
@@ -10775,7 +10822,7 @@ snapshots:
 
   character-entities@2.0.2: {}
 
-  chat@4.34.0(ai@6.0.209(zod@3.25.76))(zod@3.25.76):
+  chat@4.34.0(ai@6.0.209(zod@4.4.3))(zod@4.4.3):
     dependencies:
       '@workflow/serde': 4.1.0-beta.2
       mdast-util-to-string: 4.0.0
@@ -10785,8 +10832,8 @@ snapshots:
       remend: 1.3.0
       unified: 11.0.5
     optionalDependencies:
-      ai: 6.0.209(zod@3.25.76)
-      zod: 3.25.76
+      ai: 6.0.209(zod@4.4.3)
+      zod: 4.4.3
     transitivePeerDependencies:
       - supports-color
 
@@ -14041,6 +14088,10 @@ snapshots:
 
   uuid@9.0.1: {}
 
+  valibot@1.4.2(typescript@5.9.3):
+    optionalDependencies:
+      typescript: 5.9.3
+
   vary@1.1.2: {}
 
   vfile-message@4.0.3:
@@ -14350,14 +14401,9 @@ snapshots:
     dependencies:
       zod: 4.4.3
 
-  zod-to-json-schema@3.25.2(zod@3.25.76):
-    dependencies:
-      zod: 3.25.76
-
   zod-to-json-schema@3.25.2(zod@4.4.3):
     dependencies:
       zod: 4.4.3
-    optional: true
 
   zod@3.25.76: {}
 

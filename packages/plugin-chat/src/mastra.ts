@@ -11,7 +11,7 @@
 // anchor. Renderers wanting a distinct card special-case `toolName === 'delegate'` client-side.
 
 import { createTool } from '@mastra/core/tools'
-import { z } from 'zod'
+import * as z from 'zod'
 import type { ChatStreamEvent, StreamEventSink } from './index.js'
 
 // ── the chunk mapper (a direct port of super-harness's chunk-adapter) ───────────────────────────

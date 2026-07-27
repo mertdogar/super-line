@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
+import * as v from 'valibot'
+import { toStandardJsonSchema } from '@valibot/to-json-schema'
+import { type } from 'arktype'
 import { planColumns, DEGENERATE_DATA_COLUMN } from '@super-line/core'
 import type { LwwCollectionDef, Schema } from '@super-line/core'
 
@@ -186,5 +189,92 @@ describe('planColumns — rejections', () => {
   it('rejects CRDT defs', () => {
     const crdtDef = { schema: z.object({}), crdt: { mode: 'shallow' } } as unknown as LwwCollectionDef
     expect(() => planColumns(crdtDef)).toThrow(/CRDT/)
+  })
+})
+
+describe('planColumns — vendor neutrality (Standard JSON Schema)', () => {
+  // The whole point of reading `~standard.jsonSchema` rather than a vendor's classes: core
+  // depends on no schema library, so every implementer of the companion spec plans identically.
+  it('derives the same layout from zod, valibot and arktype', () => {
+    const zodPlan = planColumns({
+      schema: z.object({ id: z.string(), name: z.string(), age: z.number().optional(), active: z.boolean() }),
+      key: 'id',
+    })
+    const valibotPlan = planColumns({
+      schema: toStandardJsonSchema(
+        v.object({ id: v.string(), name: v.string(), age: v.optional(v.number()), active: v.boolean() }),
+      ) as unknown as Schema,
+      key: 'id',
+    })
+    const arkPlan = planColumns({
+      schema: type({ id: 'string', name: 'string', 'age?': 'number', active: 'boolean' }) as unknown as Schema,
+      key: 'id',
+    })
+
+    expect(zodPlan.degenerate).toBe(false)
+    expect(valibotPlan.degenerate).toBe(false)
+    expect(arkPlan.degenerate).toBe(false)
+    // fingerprints are order-insensitive, so a vendor emitting properties in another order still matches
+    expect(valibotPlan.fingerprint).toBe(zodPlan.fingerprint)
+    expect(arkPlan.fingerprint).toBe(zodPlan.fingerprint)
+  })
+
+  it('keeps a foreign vendor nullable/optional distinction', () => {
+    const plan = planColumns({
+      schema: type({ id: 'string', nick: 'string | null' }) as unknown as Schema,
+      key: 'id',
+    })
+    expect(col('nick')(plan)).toEqual({ name: 'nick', kind: 'text', optional: false, nullable: true })
+  })
+})
+
+describe('planColumns — unrepresentable fields', () => {
+  // Regression: without `unrepresentable: 'any'` the converter THROWS on the first transform,
+  // which used to take the whole table down to a single _sl_data blob.
+  it('demotes only the transform field, leaving the rest typed', () => {
+    const plan = planColumns({
+      schema: z.object({
+        id: z.string(),
+        name: z.string(),
+        slug: z.string().transform((s) => s.toLowerCase()),
+      }),
+      key: 'id',
+    })
+    expect(plan.degenerate).toBe(false)
+    expect(col('name')(plan).kind).toBe('text')
+    expect(col('slug')(plan).kind).toBe('json')
+  })
+})
+
+describe('planColumns — degenerate (no introspectable shape)', () => {
+  it('degrades when the library has no jsonSchema converter', () => {
+    const validateOnly = {
+      '~standard': { version: 1, vendor: 'test', validate: (value: unknown) => ({ value }) },
+    } as unknown as Schema
+    const plan = planColumns({ schema: validateOnly, key: 'id' })
+    expect(plan.degenerate).toBe(true)
+    expect(plan.columns).toEqual([
+      { name: 'id', kind: 'text', optional: false, nullable: false },
+      { name: DEGENERATE_DATA_COLUMN, kind: 'json', optional: false, nullable: false },
+    ])
+  })
+
+  it('degrades when the converter itself throws', () => {
+    const throws = {
+      '~standard': {
+        version: 1,
+        vendor: 'test',
+        validate: (value: unknown) => ({ value }),
+        jsonSchema: {
+          input: () => {
+            throw new Error('unrepresentable')
+          },
+          output: () => {
+            throw new Error('unrepresentable')
+          },
+        },
+      },
+    } as unknown as Schema
+    expect(planColumns({ schema: throws, key: 'id' }).degenerate).toBe(true)
   })
 })

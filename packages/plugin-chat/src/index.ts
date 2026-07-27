@@ -1,35 +1,40 @@
-import { z } from 'zod'
-import { defineContractPlugin, defineSurface } from '@super-line/core'
+import * as z from 'zod'
+import { defineContractPlugin, defineSurface, jsonSchemaOf } from '@super-line/core'
 import type { InferOut, Schema } from '@super-line/core'
 
 /**
- * Bridge a host-supplied Standard Schema into plugin-chat's own zod tree. A schema from THIS
- * package's zod instance passes through untouched (keeps zod error detail and typed-table column
- * planning); anything else — a different zod copy, zod 4, Valibot, ArkType — is validated through
- * its `~standard` interface, so hosts never have to resolve the exact zod instance this package
- * does. Sync validators only: the surrounding zod tree parses synchronously, so an async
+ * Nest a host-supplied Standard Schema inside plugin-chat's own zod tree. Every schema takes the
+ * same path — this package never assumes the host resolved the same zod copy it did, so there is
+ * no `instanceof` to get wrong. Validation always runs through the host's own `~standard.validate`,
+ * which keeps its refinements, transforms and branded output intact whichever library it came from.
+ * The host's Standard JSON Schema rides along as metadata so the composed row schema still reports
+ * a real shape and core's `planColumns` can give the field typed columns rather than a JSON blob.
+ * Sync validators only: the surrounding zod tree parses synchronously, so an async
  * `~standard.validate` throws a descriptive error instead of silently mis-validating.
  */
 export const hostSchema = <S extends Schema>(schema: S): z.ZodType<InferOut<S>> => {
-  if (schema instanceof z.ZodType) return schema as z.ZodType<InferOut<S>>
-  return z.unknown().transform((value, ctx): InferOut<S> => {
-    const result = schema['~standard'].validate(value)
-    if (result instanceof Promise) {
-      throw new TypeError(
-        'plugin-chat: async Standard Schema validators are not supported for content/data schemas (validation runs synchronously inside the row/request schema)',
-      )
-    }
-    if (result.issues) {
-      for (const issue of result.issues) {
-        const path = (issue.path ?? [])
-          .map((seg) => (typeof seg === 'object' && seg !== null ? seg.key : seg))
-          .filter((seg): seg is string | number => typeof seg !== 'symbol')
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: issue.message, path })
+  const shape = jsonSchemaOf(schema) ?? {}
+  return z
+    .unknown()
+    .transform((value, ctx): InferOut<S> => {
+      const result = schema['~standard'].validate(value)
+      if (result instanceof Promise) {
+        throw new TypeError(
+          'plugin-chat: async Standard Schema validators are not supported for content/data schemas (validation runs synchronously inside the row/request schema)',
+        )
       }
-      return z.NEVER
-    }
-    return result.value as InferOut<S>
-  }) as unknown as z.ZodType<InferOut<S>>
+      if (result.issues) {
+        for (const issue of result.issues) {
+          const path = (issue.path ?? [])
+            .map((seg) => (typeof seg === 'object' && seg !== null ? seg.key : seg))
+            .filter((seg): seg is string | number => typeof seg !== 'symbol')
+          ctx.addIssue({ code: 'custom', message: issue.message, path })
+        }
+        return z.NEVER
+      }
+      return result.value as InferOut<S>
+    })
+    .meta(shape) as unknown as z.ZodType<InferOut<S>>
 }
 
 /** Channel visibility: `public` = discoverable + self-service join; `private` = membership-RLS'd, added by an owner. */
@@ -461,7 +466,7 @@ export type ChatSurface = typeof chatSurface
  * see `chat()` in `/server`) and is generic over the message body: `chatContract({ content:
  * myBodySchema })`, default `z.string()`.
  */
-export function chatContract<S extends Schema = z.ZodString, D extends Schema = z.ZodNever>(opts?: {
+export function chatContract<S extends Schema = Schema<string, string>, D extends Schema = Schema<never, never>>(opts?: {
   content?: S
   data?: D
 }) {

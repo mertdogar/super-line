@@ -1,6 +1,6 @@
 import { tool } from 'ai'
 import type { ToolSet, UIMessageChunk } from 'ai'
-import { z } from 'zod'
+import * as z from 'zod'
 import { and, eq, gt, ilike, isIn, not, SuperLineError } from '@super-line/core'
 import type { CollectionQuery, Contract, RoleOf } from '@super-line/core'
 import type { LiveRowSet, SuperLineClient } from '@super-line/client'
@@ -9,13 +9,13 @@ import { CHANNEL_VISIBILITIES, hostSchema, MEMBER_ROLES, resourceWriteOpSchema }
 import type { ChatChannel, ChatMembership, ChatMessage, ChatResource, ChatStreamEvent, StreamEventSink } from './index.js'
 import type { Schema } from '@super-line/core'
 
-export interface ChatAgentToolsOptions<S extends Schema = z.ZodString> {
+export interface ChatAgentToolsOptions<S extends Schema = Schema<string, string>> {
   /**
    * The message-body schema, mirroring `chatContract({ content })` — it becomes `send_message`'s (and
    * `edit_message`'s) input schema, so the model fills structured bodies and the server still validates
    * them. Default: plain text. Add `.describe()`s: the model sees them. Any Standard Schema validator
-   * works, but a schema from plugin-chat's own zod gives the model the richest JSON-schema guidance
-   * (a foreign validator renders as an opaque slot — the server still validates every send).
+   * works — a foreign validator's shape reaches the model through its Standard JSON Schema, so zod,
+   * ArkType and Valibot all give the same guidance, and the server still validates every send.
    */
   content?: S
   /**
@@ -78,12 +78,12 @@ const iso = (ms: number): string => new Date(ms).toISOString()
  * const agent = new ToolLoopAgent({ model, tools: chatAgentTools(client) })
  * ```
  */
-export function chatAgentTools<C extends Contract, R extends RoleOf<C>, S extends Schema = z.ZodString>(
+export function chatAgentTools<C extends Contract, R extends RoleOf<C>, S extends Schema = Schema<string, string>>(
   client: SuperLineClient<C, R>,
   opts?: ChatAgentToolsOptions<S>,
 ): ToolSet {
   const dyn = client as unknown as Dyn
-  const content: z.ZodTypeAny = opts?.content ? hostSchema(opts.content) : z.string().describe('The message text')
+  const content: z.ZodType = opts?.content ? hostSchema(opts.content) : z.string().describe('The message text')
 
   // one-shot read: fresh subscription → snapshot → close (server re-evaluates RLS on every subscribe,
   // so a read after joining a channel sees its backlog without any store lifecycle)

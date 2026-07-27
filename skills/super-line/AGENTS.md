@@ -11,7 +11,7 @@ There is exactly **one contract**, defined once and imported by **both** sides. 
 
 ```ts
 // contract.ts — shared by server AND client
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 
 export const api = defineContract({

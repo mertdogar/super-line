@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { configureSync, resetSync } from '@logtape/logtape'
 import { createLogRecorder } from '@logtape/testing'
 import { defineContract } from '@super-line/core'

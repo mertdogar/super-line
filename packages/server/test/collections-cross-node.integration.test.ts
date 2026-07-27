@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract, type TapEvent } from '@super-line/core'
 import { createInMemoryAdapter, createSuperLineServer, MemoryBus, type SuperLinePlugin } from '@super-line/server'
 import { createSuperLineClient, type SuperLineClient } from '@super-line/client'

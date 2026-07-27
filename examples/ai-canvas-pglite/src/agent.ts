@@ -1,5 +1,5 @@
 import { generateText, stepCountIs, tool } from 'ai'
-import { z } from 'zod'
+import * as z from 'zod'
 import { SuperLineError, type CrdtServerReplica } from '@super-line/core'
 import { COLORS, newShapeId, readShapes, topOrder, type Scene } from './scene.js'
 

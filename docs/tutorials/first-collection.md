@@ -49,7 +49,7 @@ yarn add @super-line/collections-memory
 Collections live on the contract, right alongside your roles — so both ends share the row type and **the server validates every write against the schema**. Replace `src/contract.ts` with a collection-focused version: a `messages` collection with a Zod schema and a primary `key`, plus a `user` role (its `clientToServer` block is empty here — the client writes rows directly, no request verbs needed).
 
 ```ts [src/contract.ts]
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 
 export const chat = defineContract({

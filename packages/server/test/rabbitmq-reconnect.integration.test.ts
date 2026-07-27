@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers'
 import { defineContract } from '@super-line/core'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'

@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process'
 import { afterEach, describe, expect, inject, it } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract, SuperLineError } from '@super-line/core'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
 import { createHarness, waitFor } from './harness.js'

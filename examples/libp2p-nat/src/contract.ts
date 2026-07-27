@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 
 // Same chat contract as react-chat-cluster-libp2p — the app is deliberately unchanged. Only the

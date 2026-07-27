@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process'
 import { GenericContainer, Network, Wait, type StartedNetwork, type StartedTestContainer } from 'testcontainers'
-import { z } from 'zod'
+import * as z from 'zod'
 import type { CollectionDef, RowChange, SelfCollectionStore } from '@super-line/core'
 import { pgliteCollections } from '@super-line/collections-pglite'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'

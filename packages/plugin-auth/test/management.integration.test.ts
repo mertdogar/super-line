@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract, like } from '@super-line/core'
 import { memoryCollections } from '@super-line/collections-memory'
 import { authContract } from '@super-line/plugin-auth'

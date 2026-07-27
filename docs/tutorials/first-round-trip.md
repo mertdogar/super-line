@@ -109,7 +109,7 @@ Now wire up the two config files. super-line is ESM-only, so `package.json` need
 The contract is split by **direction** (`clientToServer` / `serverToClient`) and scoped by **role** (a `shared` base plus one block per role). This one file holds every interaction in the app — a request, a pushed event, and a subscribable topic.
 
 ```ts [src/contract.ts]
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 
 export const chat = defineContract({

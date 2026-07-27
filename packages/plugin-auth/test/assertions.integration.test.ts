@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { decodeJwt, decodeProtectedHeader } from 'jose'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 import { memoryCollections } from '@super-line/collections-memory'
 import { authContract, type AuthContext } from '@super-line/plugin-auth'

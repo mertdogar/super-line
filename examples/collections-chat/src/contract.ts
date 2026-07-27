@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract, type RowOf } from '@super-line/core'
 import { authContract } from '@super-line/plugin-auth'
 import { chatContract } from '@super-line/plugin-chat'

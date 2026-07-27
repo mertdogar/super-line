@@ -7,7 +7,7 @@ import { Agent } from '@mastra/core/agent'
 import { createTool } from '@mastra/core/tools'
 import { gateway } from '@ai-sdk/gateway'
 import type { ToolSet } from 'ai'
-import { z } from 'zod'
+import * as z from 'zod'
 
 export const MODEL = process.env.MODEL ?? process.env.CHAT_MODEL ?? 'anthropic/claude-haiku-4.5'
 

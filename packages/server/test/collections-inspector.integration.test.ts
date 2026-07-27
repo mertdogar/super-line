@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract, eq, gte, ilike, and, lt, ROW_CREATED_AT } from '@super-line/core'
 import type { CollectionInfo } from '@super-line/core'
 import { memoryCollections } from '@super-line/collections-memory'

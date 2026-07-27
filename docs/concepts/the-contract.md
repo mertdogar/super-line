@@ -3,7 +3,7 @@
 The contract is the single source of truth, imported by both server and client. It has two axes — **role** (outer) and **direction** (inner) — and each entry's shape picks an interaction flavor. Understanding those two axes and the flavors they encode is most of what you need to read a super-line codebase.
 
 ```ts
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 
 export const api = defineContract({

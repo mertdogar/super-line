@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { decodeJwt } from 'jose'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 import { createSuperLineServer } from '@super-line/server'
 import { memoryCollections } from '@super-line/collections-memory'

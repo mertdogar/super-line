@@ -49,7 +49,7 @@ yarn add @super-line/plugin-auth
 `authContract()` merges its half — the `guest` role, the `users`/`credentials`/`sessions` collections, and `signIn`/`signUp`/`signOut`/`whoami` — **into your contract**. So you declare only your own surface: a private `notes` collection whose rows belong to a user.
 
 ```ts [src/contract.ts]
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 import { authContract } from '@super-line/plugin-auth'
 

@@ -51,7 +51,7 @@ Starting fresh? Grab the rest too: `@super-line/core @super-line/server @super-l
 A CRDT collection is declared with a `crdt` option instead of a `key` — it's **opened by id, not queried** (id is external, not extracted from the body). Every write is validated against this schema, so keep the concurrently-mutated fields **tolerant**:
 
 ```ts [src/contract.ts]
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 
 // Both fields get edited concurrently, so keep them tolerant: use `.catch(default)`

@@ -28,7 +28,7 @@ Collections live in `defineContract` alongside your roles, as a top-level `colle
 
 ```ts
 import { defineContract } from '@super-line/core'
-import { z } from 'zod'
+import * as z from 'zod'
 
 export const api = defineContract({
   collections: {

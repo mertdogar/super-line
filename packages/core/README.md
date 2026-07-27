@@ -7,7 +7,7 @@ pnpm add @super-line/core zod
 ```
 
 ```ts
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 
 export const api = defineContract({

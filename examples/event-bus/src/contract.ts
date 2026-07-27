@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 
 // A single shared topic. Because it is a *shared* topic, it is the cluster event bus:

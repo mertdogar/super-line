@@ -6,7 +6,7 @@
  * by `pnpm typecheck`; the `describe` block covers the runtime merge + collision throws.
  */
 import { describe, it, expect } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract, defineContractPlugin, validate } from '@super-line/core'
 import type { Contract, CollectionName, RowOf, Requests, RoleOf } from '@super-line/core'
 

@@ -3,7 +3,7 @@ import { createSuperLineClient, type SuperLineClient } from '@super-line/client'
 import { createSuperLineServer } from '@super-line/server'
 import { createLoopbackTransport } from '@super-line/transport-loopback'
 import { crdtMemoryCollections, crdtCollectionsClient } from '@super-line/collections-crdt-memory'
-import { z } from 'zod'
+import * as z from 'zod'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const contract = defineContract({

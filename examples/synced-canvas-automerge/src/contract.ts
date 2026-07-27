@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 
 // Same shape as the Yjs example's contract — super-line just relays opaque base64 blobs and

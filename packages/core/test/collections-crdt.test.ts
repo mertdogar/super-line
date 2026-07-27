@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract, isCrdtCollection } from '@super-line/core'
 import type { CollectionName, CrdtCollectionName, LwwCollectionName, DocOf, RowOf } from '@super-line/core'
 

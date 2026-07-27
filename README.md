@@ -93,7 +93,7 @@ Requirements: **Node 18+** (server). The WebSocket client uses the global `WebSo
 ### 1. Define the contract (shared)
 
 ```ts
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 
 export const chat = defineContract({

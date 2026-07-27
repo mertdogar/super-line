@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 import type { Conn } from '@super-line/server'
 import { createHarness, waitFor } from './harness.js'

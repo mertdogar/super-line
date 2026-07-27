@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 import { createHarness, waitFor } from './harness.js'
 import { adapterOn, makeNodes, type Nodes, type PubSubLibp2p } from './libp2p-cluster.js'

@@ -10,7 +10,7 @@ Each entry is a [Standard Schema](https://standardschema.dev) (Zod/Valibot/ArkTy
 
 ```ts
 import { defineContract } from '@super-line/core'
-import { z } from 'zod'
+import * as z from 'zod'
 
 export const api = defineContract({
   collections: {

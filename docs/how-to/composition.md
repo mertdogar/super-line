@@ -10,7 +10,7 @@ There is no namespace field on the wire — namespacing is a **key-prefix conven
 ## Library side: export a surface
 
 ```ts
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineSurface } from '@super-line/core'
 
 // keys hard-prefixed in source — `lib.` is yours; pick something unmistakable

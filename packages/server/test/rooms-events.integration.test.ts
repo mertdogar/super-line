@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 import type { Conn } from '@super-line/server'
 import { createHarness } from './harness.js'

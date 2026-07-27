@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 
 // One shared, server-seeded scene everybody (and the agent) edits.
 export const SCENE_ID = 'board'

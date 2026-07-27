@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { eq, jsonSerializer, type CollectionDef, type Expr, type RowChange } from '@super-line/core'
 import { memoryCollections } from '@super-line/collections-memory'
 import { crdtMemoryCollections } from '@super-line/collections-crdt-memory'

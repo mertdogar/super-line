@@ -1,6 +1,6 @@
 import { ToolLoopAgent, tool } from 'ai'
 import type { ModelMessage } from 'ai'
-import { z } from 'zod'
+import * as z from 'zod'
 import type { SuperLineClient } from '@super-line/client'
 import { eq } from '@super-line/core'
 import { createSuperLineClient } from '@super-line/client'

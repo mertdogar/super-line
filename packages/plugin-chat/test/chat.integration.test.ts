@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract, eq, SuperLineError } from '@super-line/core'
 import type { RowOf } from '@super-line/core'
 import { createSuperLineServer } from '@super-line/server'

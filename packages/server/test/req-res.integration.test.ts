@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract, SuperLineError } from '@super-line/core'
 import { createHarness } from './harness.js'
 

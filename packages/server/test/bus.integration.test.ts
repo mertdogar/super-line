@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract, jsonSerializer } from '@super-line/core'
 import { MemoryBus, createInMemoryAdapter, type MiddlewareInfo } from '@super-line/server'
 import { createHarness, tick, waitFor } from './harness.js'

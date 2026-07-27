@@ -1,7 +1,7 @@
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { jwtVerify } from 'jose'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract, eq, SuperLineError } from '@super-line/core'
 import { createSuperLineServer } from '@super-line/server'
 import { createSuperLineClient } from '@super-line/client'

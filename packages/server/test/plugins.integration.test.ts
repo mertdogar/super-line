@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { WebSocket } from 'ws'
 import { defineContract, defineContractPlugin, defineSurface, jsonSerializer, mergeSurfaces, SuperLineError, type TapEvent } from '@super-line/core'
 import { MemoryBus, createInMemoryAdapter, createSuperLineServer, type PluginContext, type SuperLinePlugin } from '@super-line/server'

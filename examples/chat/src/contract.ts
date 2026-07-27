@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 
 // Two kinds of client share one room: humans (`user`) and an AI participant (`agent`).

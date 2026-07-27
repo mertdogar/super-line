@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 
 // The headline here is SERVER subscribers reacting to each other across nodes. Every node

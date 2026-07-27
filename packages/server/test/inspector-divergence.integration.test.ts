@@ -1,7 +1,7 @@
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { WebSocket } from 'ws'
 import { defineContract, INSPECTOR_SUBPROTOCOL } from '@super-line/core'
 import { inspector } from '@super-line/plugin-inspector'

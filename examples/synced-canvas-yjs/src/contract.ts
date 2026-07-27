@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 
 // super-line carries the CRDT as opaque, base64-encoded update bytes. The bus never

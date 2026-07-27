@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 import type { Adapter } from '@super-line/core'
 import { createHarness, tick, waitFor } from './harness.js'

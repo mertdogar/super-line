@@ -108,7 +108,7 @@ To let clients *ask* for the totals, the plugin needs a request in the contract.
 ```ts
 import { defineSurface } from '@super-line/core'
 import type { SuperLinePlugin } from '@super-line/server'
-import { z } from 'zod'
+import * as z from 'zod'
 
 export const activitySurface = defineSurface({
   clientToServer: {
@@ -198,7 +198,7 @@ opens it. This is the `@super-line/plugin-auth` shape in miniature.
 
 ```ts
 import { defineContractPlugin } from '@super-line/core'
-import { z } from 'zod'
+import * as z from 'zod'
 
 // contract-time half: declare the collection (merges into the host contract)
 export const activityContract = () =>

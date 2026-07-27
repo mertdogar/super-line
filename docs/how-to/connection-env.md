@@ -22,7 +22,7 @@ keys out of prompts and traces). In the Control Center it is **masked by default
 
 ```ts
 import { defineContract } from '@super-line/core'
-import { z } from 'zod'
+import * as z from 'zod'
 
 const app = defineContract({
   roles: {

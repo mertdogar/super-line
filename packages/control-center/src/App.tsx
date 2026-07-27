@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Blocks, Boxes, FileText, Keyboard, LibraryBig, Network, Radio, Settings, Table2, TriangleAlert, X } from 'lucide-react'
+import { Blocks, Boxes, FileText, Keyboard, LibraryBig, ListTodo, Network, Radio, Settings, Table2, TriangleAlert, X } from 'lucide-react'
 import type {
   ConnDescriptor,
   InspectedContract,
@@ -24,22 +24,24 @@ import { PluginsPage } from '@/components/plugins-page'
 import { StatusDot } from '@/components/status-dot'
 import { BrandMark } from '@/components/brand-mark'
 import { ConnectionState } from '@/components/connection-state'
+import { QueuesPage } from '@/components/queues-page'
+import { queueLensActive } from '@/lib/queue'
 import { version } from '../package.json'
 import { roomsOf, type Highlight } from '@/lib/topology'
 import { connectedUsers } from '@/lib/identity'
 import { transportsOf } from '@/lib/transport'
 import { cn, plural } from '@/lib/utils'
 
-type View = 'topology' | 'connections' | 'contract' | 'plugins' | 'collections' | 'feed' | 'settings' | 'resources'
+type View = 'topology' | 'connections' | 'contract' | 'plugins' | 'collections' | 'feed' | 'settings' | 'resources' | 'queues'
 type NavItem = { id: View; label: string; icon: typeof Network }
 
 const NAV: NavItem[] = [
   { id: 'topology', label: 'Topology', icon: Network },
-  { id: 'connections', label: 'Connections', icon: Boxes },
   { id: 'contract', label: 'Contract', icon: FileText },
-  { id: 'plugins', label: 'Plugins', icon: Blocks },
   { id: 'collections', label: 'Collections', icon: Table2 },
+  { id: 'connections', label: 'Connections', icon: Boxes },
   { id: 'feed', label: 'Live feed', icon: Radio },
+  { id: 'plugins', label: 'Plugins', icon: Blocks },
 ]
 const NAV_BOTTOM: NavItem[] = [
   { id: 'settings', label: 'Settings', icon: Settings },
@@ -231,7 +233,16 @@ export default function App(): React.JSX.Element {
 
   // Settings/Resources need no connection; the data views show a diagnostic state until a node reports.
   const isDataView = view !== 'settings' && view !== 'resources'
-  const showState = isDataView && (status !== 'open' || (ready && topology.length === 0))
+  const showState = isDataView && (status !== 'open' || (ready && topology.length === 0 && !nodeView))
+
+  const activeNav = React.useMemo(() => {
+    const nav = [...NAV]
+    if (queueLensActive(contract)) {
+      const idx = nav.findIndex((n) => n.id === 'collections')
+      nav.splice(idx === -1 ? nav.length : idx + 1, 0, { id: 'queues', label: 'Queues', icon: ListTodo })
+    }
+    return nav
+  }, [contract])
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">
@@ -248,7 +259,7 @@ export default function App(): React.JSX.Element {
           </div>
         </div>
         <nav className="flex flex-col gap-1 px-2">
-          {NAV.map((item) => (
+          {activeNav.map((item) => (
             <NavButton key={item.id} item={item} active={view === item.id} onClick={() => setView(item.id)} />
           ))}
         </nav>
@@ -341,6 +352,7 @@ export default function App(): React.JSX.Element {
               {view === 'plugins' && <PluginsPage contract={contract} />}
               {view === 'collections' && <CollectionsExplorer client={client} contract={contract} />}
               {view === 'feed' && <LiveFeed events={feed} connections={connections} topology={topology} />}
+              {view === 'queues' && <QueuesPage client={client} />}
               {view === 'settings' && <SettingsPage url={url} status={status} onConnect={connect} />}
               {view === 'resources' && <ResourcesPage />}
             </div>

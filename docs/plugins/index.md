@@ -23,6 +23,26 @@ sessions, API keys, JWTs, and data-driven roles. Its contract fragment,
 server plugin, and client helpers keep authentication on the same
 server-authoritative connection as your application.
 
+### Queues and workers
+
+**First-party · Durable background work**
+
+[`@super-line/plugin-queue`](/how-to/plugin-queue) adds typed, durable,
+at-least-once jobs and cluster-wide cron schedules. Construct `queue()` once to
+get a contract fragment plus a runtime worker plugin; declare concurrency in
+the queue configuration and let durable slot rows enforce it across nodes.
+Queue collections are server-only. A browser creates or observes work through
+your narrow Super Line requests, never by reading job rows directly.
+
+Guides: [wire it in](/how-to/plugin-queue) ·
+[enqueue and observe jobs](/how-to/queue-jobs) ·
+[schedule periodic work](/how-to/queue-schedules) ·
+[run a queue cluster](/how-to/queue-clusters) ·
+[how the model works](/concepts/queues-and-workers) ·
+[tutorial: first durable job](/tutorials/first-queue).
+
+Flagship example: [`queue-cluster`](https://github.com/mertdogar/super-line/tree/main/examples/queue-cluster), a two-node Postgres-backed queue with a browser dashboard and Control Center.
+
 ### Chat backbone
 
 **First-party · Application backbone**

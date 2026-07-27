@@ -1,5 +1,9 @@
 # super-line — recipes & best practices
 
+## Durable queue workers (`@super-line/plugin-queue`)
+
+Construct `queueKit` once with queue schemas, workers, and declarative concurrency. Merge `queueKit.contract` into `defineContract({ plugins })`, mount `queueKit.plugin` on each worker server, and call `queueKit.enqueue` only from trusted server code. Browser UI should call a host request that returns `{ jobId }` and poll another host request for sanitized summaries. For a multi-node fleet, use the same definition on each node, stable `nodeKey`s, and `pgliteCollections` with shared Postgres; an adapter only improves wake latency.
+
 End-to-end patterns. All code uses the real, verified API. Start from the **Starter**, then layer the others in.
 
 ## Starter (copy-paste)

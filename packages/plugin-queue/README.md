@@ -41,8 +41,18 @@ await queueKit.schedules.create({
 })
 ```
 
-Workers are server-only and every configured queue requires one. Concurrency is declarative and enforced with durable slot rows. Claims, lease renewals, and completion use atomic conditional batches with a fencing `runId`.
+Workers are server-only and every configured queue requires one. `queue()` is constructed once and returns both the contract fragment and runtime plugin. Concurrency is declarative and enforced with durable slot rows; there is no imperative concurrency control plane. Claims, lease renewals, and completion use atomic conditional batches with a fencing `runId`.
 
 The memory and SQLite collection backends coordinate one node. Use the PGlite/Postgres collection backend for cluster-wide concurrency and cron scheduling; its conditional batches serialize on central Postgres. The adapter wake channel only reduces latency—durable polling remains the correctness path.
 
 Execution is at least once. Workers should be idempotent and honor `WorkerContext.signal`. Queue collections have deny-all client policies; server code and the privileged inspector can access them.
+
+## Guides
+
+- [Add a queue](https://super-line.dogar.biz/how-to/plugin-queue)
+- [Enqueue and observe jobs](https://super-line.dogar.biz/how-to/queue-jobs)
+- [Schedule periodic jobs](https://super-line.dogar.biz/how-to/queue-schedules)
+- [Run queues across a cluster](https://super-line.dogar.biz/how-to/queue-clusters)
+- [Queues and workers concept](https://super-line.dogar.biz/concepts/queues-and-workers)
+- [Generated API reference](https://super-line.dogar.biz/reference/)
+- [`queue-cluster` example](https://github.com/mertdogar/super-line/tree/main/examples/queue-cluster)

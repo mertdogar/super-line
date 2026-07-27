@@ -34,6 +34,13 @@ Prove who's on a connection — the connect-time primitive, or the batteries-inc
 - [Provision an agent identity](/how-to/auth-agent-identity) — run an AI agent as an ordinary API-key user.
 - [Reset a password](/how-to/auth-password-reset) — logged-out recovery through a host callback.
 
+## Queues & workers
+
+- [Add a queue (plugin)](/how-to/plugin-queue) — wire `@super-line/plugin-queue` into one contract and one server.
+- [Enqueue and observe jobs](/how-to/queue-jobs) — create jobs from a request handler and expose safe summaries to a browser.
+- [Schedule periodic jobs](/how-to/queue-schedules) — run cron schedules with timezones, catch-up, and overlap policy.
+- [Run queues across a cluster](/how-to/queue-clusters) — use durable cluster-wide concurrency, leases, and stable node keys.
+
 ## Server
 
 Authorize, extend, and observe the server-authoritative core.

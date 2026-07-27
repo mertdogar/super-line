@@ -88,3 +88,11 @@ pnpm --filter @super-line/example-queue-cluster host
 - `docker-compose.yml` runs Postgres, both nodes, the dashboard, and Control Center.
 
 Electric is intentionally absent. Queue collections are server-only, and `pgliteCollections` performs queue snapshots and conditional writes against central Postgres. The libp2p wake hint is optional; durable polling remains the correctness path.
+
+## Documentation
+
+- [Add a queue](https://super-line.dogar.biz/how-to/plugin-queue)
+- [Enqueue and observe jobs](https://super-line.dogar.biz/how-to/queue-jobs)
+- [Schedule periodic jobs](https://super-line.dogar.biz/how-to/queue-schedules)
+- [Run queues across a cluster](https://super-line.dogar.biz/how-to/queue-clusters)
+- [Queues and workers concept](https://super-line.dogar.biz/concepts/queues-and-workers)

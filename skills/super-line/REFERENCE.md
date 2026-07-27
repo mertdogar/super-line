@@ -1,5 +1,9 @@
 # super-line — API reference
 
+## @super-line/plugin-queue
+
+`queue({ queues, pollIntervalMs?, shutdownGraceMs?, maxCatchUp?, timezone? })` returns `{ contract, plugin, enqueue, get, list, cancel, retry, schedules }`. Each queue declares input/result schemas, a `worker`, and positive `concurrency`; workers receive `{ jobId, attempt, signal }`. The contract adds deny-all `queueJobs`, `queueSchedules`, and `queueSlots`. Schedules expose `create`, `update`, `pause`, `resume`, `delete`, `trigger`, `get`, and `list`. Jobs are at least once; `runId` fences leased runs. Use `pgliteCollections` with shared Postgres for cluster-wide claims and cron.
+
 Exact public surface. Signatures verified against source. `C` is the contract type, `R` a role (`keyof C['roles']`). `ctx` is whatever `authenticate` returns for that role.
 
 ## @super-line/core

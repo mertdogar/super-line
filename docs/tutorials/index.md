@@ -56,6 +56,12 @@ Attach a **CRDT document** to that channel as a [channel resource](/how-to/chat-
 
 *You'll touch:* [channel resources](/how-to/chat-resources), [`createResource` + `writeResource`](/how-to/chat-resources), the `DocHandle`, and the two co-writer doors.
 
+### 8 · [Run your first durable job](/tutorials/first-queue)
+
+Add a server-only queue as a paired plugin, enqueue a typed job, and watch a worker complete it. You will construct `queueKit` once and place its contract and runtime halves in their corresponding plugin arrays.
+
+*You'll touch:* `queue()`, `queueKit.enqueue`, declarative concurrency, retries, and durable job inspection.
+
 ## Before you start
 
 Everything runs on **Node 18+** with TypeScript and [`tsx`](https://tsx.is) — no build step while you learn. super-line is ESM-only. Each lesson is self-contained, but they share a mental model, so do them in order the first time.

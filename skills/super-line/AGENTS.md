@@ -3,6 +3,10 @@
 
 # super-line
 
+## Queue plugin
+
+Use `@super-line/plugin-queue` only for server-side work. Build `queueKit` once, merge `queueKit.contract` into the contract, mount `queueKit.plugin` on each worker server, and call the imperative kit from request handlers or trusted automation. Never expose queue collections to browsers; return job ids and sanitized summaries through host requests. Concurrency is declarative, jobs are at least once, and cluster-wide operation requires shared Postgres authority.
+
 A strictly-typed realtime data bus for TypeScript — one contract for every pattern on the wire (requests · events · subscriptions · synced state). **One contract is the single source of truth** — the server implements it, the client calls it, types flow end to end with no codegen. WebSocket is just the default transport (HTTP/SSE, libp2p, and loopback are swappable). Use this guide when working with `@super-line/*` (`core` / `server` / `client` / `react` · adapters `adapter-redis` / `-libp2p` / `-rabbitmq` / `-zeromq` · transports `transport-websocket` / `-http` / `-libp2p` / `-loopback` · collections `collections-{memory,sqlite,pglite}` (typed rows) / `collections-crdt-{memory,libsql,pglite}` (CRDT docs) · `tanstack-db` · plugins `plugin-auth` (authentication) / `plugin-chat` (chat backbone + AI agents) / `plugin-inspector` (Control Center)). Not for socket.io, ws, or tRPC.
 
 ## Mental model

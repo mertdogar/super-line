@@ -2,6 +2,16 @@
 
 Runnable examples live in [`examples/`](https://github.com/mertdogar/super-line/tree/main/examples). Clone the repo and run `pnpm install` first.
 
+## queue-cluster — durable workers across two nodes
+
+Two worker processes share a Postgres-backed `@super-line/plugin-queue`. They have one declarative concurrency limit, durable leases, and a UTC cron schedule; a libp2p mDNS adapter supplies topology, inspector connectivity, and low-latency wake hints. A browser dashboard enqueues report jobs through requests and polls sanitized job summaries — it cannot access queue collections directly. Docker brings up the dashboard, Control Center, both workers, and Postgres; host mode runs the two workers directly.
+
+```bash
+cd examples/queue-cluster && docker compose up --build
+```
+
+Open the dashboard at `http://localhost:8080` and Control Center at `http://localhost:8081`. See the [queue-cluster README](https://github.com/mertdogar/super-line/tree/main/examples/queue-cluster) and [run queues across a cluster](/how-to/queue-clusters).
+
 ## chat — roles in one room
 
 A human (`user`) and an AI participant (`agent`) join the **same room** with different surfaces. Shows a `shared` `join` + `message` event, role-specific verbs (`say` vs `announce`), and `conn.role`.

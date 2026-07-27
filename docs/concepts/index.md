@@ -10,4 +10,5 @@ The surface is small, but the ideas behind it — one contract for every wire pa
 - [Transports and adapters](/concepts/transports-and-adapters) — the two independent seams: the client↔server wire versus node↔node fan-out.
 - [Reconnection and delivery](/concepts/reconnection-delivery) — what survives a drop, how resubscription works, and what `await sub.ready` guarantees.
 - [Plugins](/concepts/plugins) — the contract-time and runtime halves of a plugin, and how they compose into a host.
+- [Queues and workers](/concepts/queues-and-workers) — durable server-only jobs, leases, cluster-wide slots, and cron schedules.
 - [Comparison and FAQ](/concepts/comparison-faq) — how super-line differs from Socket.IO, tRPC, and the alternatives.

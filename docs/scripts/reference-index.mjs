@@ -59,6 +59,13 @@ ${api('adapter-libp2p', 'broker-less gossipsub backbone')}
 ${api('adapter-zeromq', 'ZeroMQ backbone')}
 ${api('adapter-rabbitmq', 'RabbitMQ backbone')}
 
+## Plugins — contract fragments mounted on the server
+
+${api('plugin-queue', '`queue()` — durable jobs, retries, leases, cluster-wide cron')}
+${guide('plugin-auth', '/how-to/plugin-auth', 'first-party authentication — sessions, roles, API keys, JWT')}
+${guide('plugin-chat', '/how-to/plugin-chat', 'chat/messaging — channels, streaming messages, resources')}
+${guide('plugin-inspector', '/how-to/control-center', 'inspector channel behind the Control Center')}
+
 ## Tooling
 
 ${guide('control-center', '/how-to/control-center', 'debug webapp — topology, live traffic, presence (`npx @super-line/control-center`)')}

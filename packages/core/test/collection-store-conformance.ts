@@ -43,6 +43,41 @@ export function runRowConformance(name: string, opts: RowConformanceOptions): vo
 
     it('declares its clustering mode', async () => {
       expect((await fresh()).clustering).toBe(clustering)
+      expect((await fresh()).coordination).toBe(relay ? 'local' : 'cluster')
+    })
+
+    it('commits a conditional cross-collection batch only while every row predicate matches', async () => {
+      const s = await fresh()
+      await s.apply(
+        [
+          { op: 'insert', n: 'messages', id: 'j1', row: msg('j1') },
+          { op: 'insert', n: 'users', id: 'q:0', row: { id: 'q:0', name: 'slot' } },
+        ],
+        'o1',
+      )
+
+      expect(
+        await s.conditionalApply(
+          [
+            { n: 'messages', id: 'j1', filter: eq('likes', 1) },
+            { n: 'users', id: 'q:0', filter: eq('name', 'slot') },
+          ],
+          [
+            { op: 'update', n: 'messages', id: 'j1', row: msg('j1', 'general', 2) },
+            { op: 'update', n: 'users', id: 'q:0', row: { id: 'q:0', name: 'claimed' } },
+          ],
+          'o1',
+        ),
+      ).toBe(true)
+
+      expect(
+        await s.conditionalApply(
+          [{ n: 'messages', id: 'j1', filter: eq('likes', 1) }],
+          [{ op: 'update', n: 'messages', id: 'j1', row: msg('j1', 'general', 3) }],
+          'o2',
+        ),
+      ).toBe(false)
+      expect(await s.read('messages', 'j1')).toMatchObject({ likes: 2 })
     })
 
     it('persists an insert, an update and a delete', async () => {

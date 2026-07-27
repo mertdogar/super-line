@@ -1,0 +1,95 @@
+name: queue-cluster
+
+x-worker: &worker
+  build:
+    context: ../..
+    dockerfile: examples/queue-cluster/Dockerfile
+  image: super-line-queue-cluster:dev
+  command: ./examples/queue-cluster/node_modules/.bin/tsx examples/queue-cluster/src/node.ts
+  environment:
+    PG_URL: postgres://queue:queue@postgres:5432/queue
+    POLL_INTERVAL_MS: '250'
+    PORT: '8801'
+  depends_on:
+    postgres:
+      condition: service_healthy
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp
+
+services:
+  postgres:
+    image: postgres:16.9-alpine
+    environment:
+      POSTGRES_DB: queue
+      POSTGRES_USER: queue
+      POSTGRES_PASSWORD: queue
+    ports:
+      - '127.0.0.1:55432:5432'
+    volumes:
+      - queue-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U queue -d queue']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  node-1:
+    <<: *worker
+    environment:
+      PG_URL: postgres://queue:queue@postgres:5432/queue
+      POLL_INTERVAL_MS: '250'
+      PORT: '8801'
+      NODE_NAME: node-1
+      NODE_KEY: node-1
+      BOOTSTRAP: 'true'
+
+  node-2:
+    <<: *worker
+    environment:
+      PG_URL: postgres://queue:queue@postgres:5432/queue
+      POLL_INTERVAL_MS: '250'
+      PORT: '8801'
+      NODE_NAME: node-2
+      NODE_KEY: node-2
+      BOOTSTRAP: 'false'
+
+  web:
+    build:
+      context: ../..
+      dockerfile: examples/queue-cluster/Dockerfile.web
+    image: super-line-queue-cluster-web:dev
+    ports:
+      - '8080:8080'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - node-1
+      - node-2
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+
+  control-center:
+    build:
+      context: ../..
+      dockerfile: examples/queue-cluster/Dockerfile.control-center
+    image: super-line-queue-cluster-control-center:dev
+    ports:
+      - '8081:8081'
+    depends_on:
+      - web
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  queue-pgdata:

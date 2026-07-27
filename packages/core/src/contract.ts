@@ -88,6 +88,8 @@ export interface LwwCollectionDef {
    * opt-in existence check on write. No cascades in core (unsound under masterless relay clustering).
    */
   references?: Record<string, string>
+  /** Backend-created query indexes. Each inner array is one ordered composite index. */
+  indexes?: readonly (readonly string[])[]
 }
 
 /**

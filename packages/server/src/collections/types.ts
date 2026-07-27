@@ -9,6 +9,7 @@ import type {
   DocSummary,
   MessageError,
   RowTimestamps,
+  RowCondition,
   TapEvent,
 } from '@super-line/core'
 import type { Cluster } from '../cluster.js'
@@ -21,6 +22,8 @@ export type WriteOp = 'insert' | 'update' | 'delete'
 export type ServerCollectionOp =
   | { op: 'insert' | 'update'; collection: string; row: unknown }
   | { op: 'delete'; collection: string; id: string }
+
+export type ServerRowCondition = Omit<RowCondition, 'n'> & { collection: string }
 
 /**
  * Everything the Collection runtime needs from a connection — the whole of it. The server's `Conn` class

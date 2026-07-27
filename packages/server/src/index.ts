@@ -62,6 +62,7 @@ import type {
   CollectionPolicy,
   ServerCollectionHandle,
   ServerCollectionOp,
+  ServerRowCondition,
   CrdtCollectionPolicy,
   ServerCrdtCollectionHandle,
 } from './collections/index.js'
@@ -79,6 +80,7 @@ export type {
   CollectionRuntimeConfig,
   ServerCollectionHandle,
   ServerCollectionOp,
+  ServerRowCondition,
   WriteOp,
   CrdtCollectionPolicy,
   ServerCrdtCollectionHandle,
@@ -436,6 +438,10 @@ export interface PluginContext {
   collection(name: string): ServerCollectionHandle
   /** Apply one atomic, schema-validated server batch across row collections. */
   batch(ops: ServerCollectionOp[]): Promise<void>
+  /** Atomically apply a server batch only while every stored row still matches its predicate. */
+  conditionalBatch(conditions: ServerRowCondition[], ops: ServerCollectionOp[]): Promise<boolean>
+  /** Whether conditional collection writes are serialized locally or cluster-wide. */
+  readonly collectionCoordination?: 'local' | 'cluster'
   /** Declared collections (name + key + advisory references) for the schema graph. */
   collectionInfos(): { name: string; key: string; references: Record<string, string> }[]
   /** Full cluster descriptor for a local connection (identity + rooms + `describeConn` extras). */
@@ -1634,6 +1640,8 @@ export function createSuperLineServer<
       },
       collection: (name) => api.collection(name as CollectionName<C>) as ServerCollectionHandle,
       batch: collections.batch,
+      conditionalBatch: collections.conditionalBatch,
+      collectionCoordination: collections.coordination,
       collectionInfos: () => collections.infos(),
       describe: (conn) => buildDescriptor(conn),
       connectionById: (id) => Promise.resolve(presenceOrThrow().get(id)),

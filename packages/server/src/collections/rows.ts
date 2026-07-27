@@ -12,6 +12,7 @@ import {
   type CUnsubFrame,
   type Expr,
   type ResolvedRowOp,
+  type RowCondition,
   type RowChange,
 } from '@super-line/core'
 import type {
@@ -21,6 +22,7 @@ import type {
   CollectionPolicy,
   ServerCollectionHandle,
   ServerCollectionOp,
+  ServerRowCondition,
   WriteOp,
 } from './types.js'
 
@@ -48,6 +50,8 @@ export interface RowCollections {
   detach(conn: CollectionConn): void
   handle(name: string): ServerCollectionHandle
   batch(ops: ServerCollectionOp[]): Promise<void>
+  conditionalBatch(conditions: ServerRowCondition[], ops: ServerCollectionOp[]): Promise<boolean>
+  readonly coordination?: 'local' | 'cluster'
   /** True when this node must subscribe to {@link COLL_CHANNEL} (a relay backend fans batches over the Adapter). */
   readonly isRelay: boolean
 }
@@ -220,7 +224,7 @@ export function createRowCollections(config: CollectionRuntimeConfig, host: Coll
     if (relay && isRelay) host.cluster.broadcast(COLL_CHANNEL, { ops, origin } satisfies CollRelay)
   }
 
-  async function serverBatch(ops: ServerCollectionOp[]): Promise<void> {
+  async function resolveServerOps(ops: ServerCollectionOp[]): Promise<ResolvedRowOp[]> {
     const resolved: ResolvedRowOp[] = []
     for (const op of ops) {
       const def = defs[op.collection]
@@ -235,7 +239,24 @@ export function createRowCollections(config: CollectionRuntimeConfig, host: Coll
         throw new SuperLineError('VALIDATION', `Collection ${op.collection} row is missing string key '${def.key}'`)
       resolved.push({ op: op.op, n: op.collection, id, row })
     }
-    await commit(resolved, SERVER_ORIGIN, true)
+    return resolved
+  }
+
+  async function serverBatch(ops: ServerCollectionOp[]): Promise<void> {
+    await commit(await resolveServerOps(ops), SERVER_ORIGIN, true)
+  }
+
+  async function conditionalBatch(conditions: ServerRowCondition[], ops: ServerCollectionOp[]): Promise<boolean> {
+    if (!store) throw new SuperLineError('NOT_FOUND', 'No collection backend configured')
+    const resolvedConditions: RowCondition[] = conditions.map(({ collection, id, filter }) => {
+      const def = defs[collection]
+      if (!def || isCrdtCollection(def)) throw new SuperLineError('NOT_FOUND', `Collection not declared: ${collection}`)
+      return { n: collection, id, filter }
+    })
+    const resolved = await resolveServerOps(ops)
+    const applied = await store.conditionalApply(resolvedConditions, resolved, SERVER_ORIGIN)
+    if (applied && isRelay) host.cluster.broadcast(COLL_CHANNEL, { ops: resolved, origin: SERVER_ORIGIN } satisfies CollRelay)
+    return applied
   }
 
   async function onBatch(conn: CollectionConn, frame: CBatchFrame): Promise<void> {
@@ -339,5 +360,16 @@ export function createRowCollections(config: CollectionRuntimeConfig, host: Coll
 
   if (store) store.onChange(route) // one subscription drives all local delivery
 
-  return { onSub, onUnsub, onBatch, onRelay, detach, handle, batch: serverBatch, isRelay }
+  return {
+    onSub,
+    onUnsub,
+    onBatch,
+    onRelay,
+    detach,
+    handle,
+    batch: serverBatch,
+    conditionalBatch,
+    coordination: store?.coordination,
+    isRelay,
+  }
 }

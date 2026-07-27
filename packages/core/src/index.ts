@@ -126,6 +126,7 @@ export type {
   RelayCollectionStore,
   SelfCollectionStore,
   ResolvedRowOp,
+  RowCondition,
   RowChange,
   RowTimestamps,
 } from './collections.js'

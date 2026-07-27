@@ -1,0 +1,9 @@
+FROM node:24.14.0-bookworm-slim AS build
+RUN corepack enable && corepack prepare pnpm@11.5.1 --activate
+WORKDIR /app
+COPY . .
+RUN pnpm install --filter @super-line/example-queue-cluster... --frozen-lockfile
+RUN pnpm --filter @super-line/example-queue-cluster build
+
+FROM caddy:2.10.2-alpine
+COPY --from=build /app/examples/queue-cluster/dist /srv

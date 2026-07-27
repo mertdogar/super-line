@@ -1,0 +1,14 @@
+FROM node:24.14.0-bookworm-slim AS build
+RUN corepack enable && corepack prepare pnpm@11.5.1 --activate
+WORKDIR /app
+COPY . .
+RUN pnpm install --filter @super-line/control-center... --frozen-lockfile
+RUN pnpm --filter @super-line/control-center build
+
+FROM node:24.14.0-bookworm-slim
+WORKDIR /app
+COPY --from=build /app/packages/control-center/dist ./dist
+COPY --from=build /app/packages/control-center/bin ./bin
+USER node
+EXPOSE 8081
+CMD ["node", "bin/control-center.js", "--url", "ws://localhost:8080/inspect", "--port", "8081", "--no-open"]

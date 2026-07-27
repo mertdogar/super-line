@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { SuperLineError, applyQuery, planColumns, isCrdtCollection, DEGENERATE_DATA_COLUMN } from '@super-line/core'
+import { SuperLineError, applyQuery, planColumns, isCrdtCollection, DEGENERATE_DATA_COLUMN, matchesFilter } from '@super-line/core'
 import type {
   RelayCollectionStore,
   ResolvedRowOp,
@@ -282,6 +282,11 @@ export function sqliteCollections(opts: SqliteCollectionsOptions): RelayCollecti
     const name = `col_${n}`
     db.exec(createTableSql(name, plan))
     reconcile(db, n, name, plan)
+    for (const [index, fields] of (def.indexes ?? []).entries()) {
+      if (fields.length === 0 || fields.some((field) => !plan.columns.some((column) => column.name === field)))
+        throw new Error(`sqliteCollections: invalid index ${index} on '${n}'`)
+      db.exec(`CREATE INDEX IF NOT EXISTS "${name}_idx_${index}" ON "${name}" (${fields.map((field) => `"${field}"`).join(', ')})`)
+    }
     const colList = plan.columns.map((c) => `"${c.name}"`).join(', ')
     const nonKey = plan.columns.filter((c) => c.name !== plan.key)
     const setList = [...nonKey.map((c) => `"${c.name}" = ?`), `"_sl_updated_at" = ?`].join(', ')
@@ -343,10 +348,26 @@ export function sqliteCollections(opts: SqliteCollectionsOptions): RelayCollecti
 
   return {
     clustering: 'relay',
+    coordination: 'local',
     apply(ops, origin) {
       const changes = applyTx(ops, origin) // atomic; a throw persisted nothing
       for (const c of changes) for (const cb of listeners) cb(c) // fan out only after the commit
       return changes
+    },
+    conditionalApply(conditions, ops, origin) {
+      let applied = false
+      const changes = db.transaction(() => {
+        for (const condition of conditions) {
+          const t = table(condition.n)
+          const row = t ? readRow(t, condition.id) : undefined
+          if (row === undefined || !matchesFilter(condition.filter, row)) return []
+        }
+        applied = true
+        return applyTx(ops, origin)
+      })()
+      if (!applied) return false
+      for (const c of changes) for (const cb of listeners) cb(c)
+      return true
     },
     snapshot(n, query) {
       const t = table(n)

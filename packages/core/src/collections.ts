@@ -12,7 +12,7 @@
  * a filter on update is delivered too (the client removes it). See the wire `cchg` frame.
  */
 
-import type { CollectionQuery } from './query.js'
+import type { CollectionQuery, Expr } from './query.js'
 
 type Awaitable<T> = T | Promise<T>
 
@@ -21,6 +21,13 @@ export type ResolvedRowOp =
   | { op: 'insert'; n: string; id: string; row: unknown }
   | { op: 'update'; n: string; id: string; row: unknown }
   | { op: 'delete'; n: string; id: string }
+
+/** A predicate that must still match one stored row when a conditional batch commits. */
+export interface RowCondition {
+  n: string
+  id: string
+  filter: Expr
+}
 
 /** What the backend emits when a row mutates. `prev`/`next` drive enter/leave routing; `origin` echo-breaks + attributes. */
 export interface RowChange {
@@ -82,6 +89,7 @@ interface CollectionStoreBase {
  */
 export interface RelayCollectionStore extends CollectionStoreBase {
   readonly clustering: 'relay'
+  readonly coordination: 'local'
   /**
    * See {@link CollectionStore} for the shared atomicity / error / timestamp contract. In `relay` mode apply
    * also **fires `onChange` once per resulting change before returning, and returns those changes**.
@@ -98,6 +106,8 @@ export interface RelayCollectionStore extends CollectionStoreBase {
    * `onChange` persistence — back when it lived only in prose. Now the compiler holds it.)
    */
   apply(ops: ResolvedRowOp[], origin: string): RowChange[]
+  /** Atomically check every condition and apply `ops`; returns false without changing anything when one is stale. */
+  conditionalApply(conditions: RowCondition[], ops: ResolvedRowOp[], origin: string): boolean
 }
 
 /**
@@ -106,6 +116,7 @@ export interface RelayCollectionStore extends CollectionStoreBase {
  */
 export interface SelfCollectionStore extends CollectionStoreBase {
   readonly clustering: 'self'
+  readonly coordination: 'cluster'
   /**
    * See {@link CollectionStore} for the shared atomicity / error / timestamp contract. In `self` mode apply
    * persists to the central backend and returns **nothing**, and does **not** fire `onChange`: the backend's
@@ -113,6 +124,8 @@ export interface SelfCollectionStore extends CollectionStoreBase {
    * double-deliver. It may be async — nothing relays it, so the synchrony `relay` demands does not apply.
    */
   apply(ops: ResolvedRowOp[], origin: string): Awaitable<void>
+  /** Atomically check every condition and apply `ops`; returns false without changing anything when one is stale. */
+  conditionalApply(conditions: RowCondition[], ops: ResolvedRowOp[], origin: string): Awaitable<boolean>
 }
 
 /**

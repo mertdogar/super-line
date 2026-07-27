@@ -1,5 +1,5 @@
-import { SuperLineError, applyQuery } from '@super-line/core'
-import type { RelayCollectionStore, ResolvedRowOp, RowChange, RowTimestamps } from '@super-line/core'
+import { SuperLineError, applyQuery, matchesFilter } from '@super-line/core'
+import type { RelayCollectionStore, ResolvedRowOp, RowChange, RowCondition, RowTimestamps } from '@super-line/core'
 
 /** A stored row plus its creation / last-update wall-clock (epoch ms) — the timestamps are inspector-only. */
 interface Entry {
@@ -25,9 +25,7 @@ export function memoryCollections(): RelayCollectionStore {
     return t
   }
 
-  return {
-    clustering: 'relay',
-    apply(ops: ResolvedRowOp[], origin: string): RowChange[] {
+  const apply = (ops: ResolvedRowOp[], origin: string): RowChange[] => {
       // Two-phase: mutate while recording undo thunks; on any throw, unwind so the batch is all-or-nothing
       // (and intra-batch dependencies — insert then update the same id — apply against evolving state).
       const undo: Array<() => void> = []
@@ -62,6 +60,19 @@ export function memoryCollections(): RelayCollectionStore {
       // Fan out only after the whole batch committed, so subscribers never observe a partial batch.
       for (const c of changes) for (const cb of listeners) cb(c)
       return changes
+  }
+
+  return {
+    clustering: 'relay',
+    coordination: 'local',
+    apply,
+    conditionalApply(conditions: RowCondition[], ops: ResolvedRowOp[], origin: string): boolean {
+      if (conditions.some((condition) => {
+        const row = data.get(condition.n)?.get(condition.id)?.row
+        return row === undefined || !matchesFilter(condition.filter, row)
+      })) return false
+      apply(ops, origin)
+      return true
     },
     snapshot(n, query) {
       const t = data.get(n)

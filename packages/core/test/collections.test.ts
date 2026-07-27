@@ -79,13 +79,15 @@ describe('CollectionStore is discriminated on clustering', () => {
     read: () => undefined,
     onChange: () => () => {},
   }
+  const relayBase = { ...base, coordination: 'local' as const, conditionalApply: () => false }
+  const selfBase = { ...base, coordination: 'cluster' as const, conditionalApply: async () => false }
 
   it('rejects an async relay backend — this is the invariant that stops a cluster-wide echo storm', () => {
-    const good: RelayCollectionStore = { ...base, clustering: 'relay', apply: () => [] }
+    const good: RelayCollectionStore = { ...relayBase, clustering: 'relay', apply: () => [] }
     expect(good.clustering).toBe('relay')
 
     const bad: RelayCollectionStore = {
-      ...base,
+      ...relayBase,
       clustering: 'relay',
       // @ts-expect-error a relay backend MUST apply synchronously: the relay ingress fires-and-forgets and
       // clears its re-publish guard in `finally`, so an async apply clears the guard before onChange fires.
@@ -109,11 +111,11 @@ describe('CollectionStore is discriminated on clustering', () => {
   })
 
   it('lets a self backend be async, and rejects one that returns rows', () => {
-    const good: SelfCollectionStore = { ...base, clustering: 'self', apply: async () => {} }
+    const good: SelfCollectionStore = { ...selfBase, clustering: 'self', apply: async () => {} }
     expect(good.clustering).toBe('self')
 
     const bad: SelfCollectionStore = {
-      ...base,
+      ...selfBase,
       clustering: 'self',
       // @ts-expect-error a `self` backend's feed delivers the change on every node; returning rows from apply
       // implies it fires onChange too, which would double-deliver.
@@ -125,7 +127,7 @@ describe('CollectionStore is discriminated on clustering', () => {
   it('lets a read-only consumer use the union without narrowing', () => {
     // plugin-auth does exactly this: it only calls .read(), which is identical in both modes.
     const readOnly = (s: CollectionStore) => s.read('users', 'u1')
-    expect(readOnly({ ...base, clustering: 'relay', apply: () => [] })).toBeUndefined()
-    expect(readOnly({ ...base, clustering: 'self', apply: async () => {} })).toBeUndefined()
+    expect(readOnly({ ...relayBase, clustering: 'relay', apply: () => [] })).toBeUndefined()
+    expect(readOnly({ ...selfBase, clustering: 'self', apply: async () => {} })).toBeUndefined()
   })
 })

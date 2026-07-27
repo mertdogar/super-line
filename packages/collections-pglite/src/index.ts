@@ -4,7 +4,7 @@ import type { PGliteWithLive } from '@electric-sql/pglite/live'
 import { electricSync } from '@electric-sql/pglite-sync'
 import type { PGliteWithSync } from '@electric-sql/pglite-sync'
 import postgres from 'postgres'
-import { SuperLineError, applyQuery, planColumns, isCrdtCollection, DEGENERATE_DATA_COLUMN } from '@super-line/core'
+import { SuperLineError, applyQuery, planColumns, isCrdtCollection, DEGENERATE_DATA_COLUMN, matchesFilter } from '@super-line/core'
 import type {
   SelfCollectionStore,
   ResolvedRowOp,
@@ -14,6 +14,7 @@ import type {
   ColumnPlan,
   ColumnSpec,
   Expr,
+  RowCondition,
 } from '@super-line/core'
 
 // Central-Postgres wall-clock in epoch ms. Authoritative + node-consistent (self-tier writes hit central once).
@@ -231,6 +232,18 @@ export async function pgliteCollections(opts: PgliteCollectionsOptions): Promise
       }
       await tx.unsafe(`UPDATE "${metaTable}" SET fingerprint = $1 WHERE collection = $2`, [plan.fingerprint, n])
     }
+    for (const [n, plan] of plans) {
+      const def = opts.collections[n]!
+      if (isCrdtCollection(def)) continue
+      const tname = `${prefix}${n}`
+      for (const [index, fields] of (def.indexes ?? []).entries()) {
+        if (fields.length === 0 || fields.some((field) => !plan.columns.some((column) => column.name === field)))
+          throw new Error(`pgliteCollections: invalid index ${index} on '${n}'`)
+        await tx.unsafe(
+          `CREATE INDEX IF NOT EXISTS "${tname}_idx_${index}" ON "${tname}" (${fields.map((field) => `"${field}"`).join(', ')})`,
+        )
+      }
+    }
   })
 
   // Local in-memory PGlite — the reactive change feed (Electric → live.changes). Ephemeral; re-syncs on boot.
@@ -314,28 +327,47 @@ export async function pgliteCollections(opts: PgliteCollectionsOptions): Promise
     return rec
   }
 
+  const applyOps = async (tx: postgres.TransactionSql, ops: ResolvedRowOp[], origin: string): Promise<void> => {
+    for (const op of ops) {
+      const t = table(op.n)
+      if (!t) throw new SuperLineError('NOT_FOUND', `Unknown collection: ${op.n}`)
+      if (op.op === 'insert') {
+        const rec = encodeRec(t, op.id, op.row, origin)
+        const res = await tx`INSERT INTO ${tx(t.name)} ${tx(rec)} ON CONFLICT (${tx(t.plan.key)}) DO NOTHING`
+        if (res.count === 0) throw new SuperLineError('CONFLICT', `Row already exists: ${op.n}/${op.id}`)
+      } else if (op.op === 'update') {
+        const { [t.plan.key]: _key, ...rec } = encodeRec(t, op.id, op.row, origin)
+        const res = await tx`UPDATE ${tx(t.name)} SET ${tx(rec)}, "_sl_updated_at" = ${tx.unsafe(NOW_MS)} WHERE ${tx(t.plan.key)} = ${op.id}`
+        if (res.count === 0) throw new SuperLineError('NOT_FOUND', `No row: ${op.n}/${op.id}`)
+      } else {
+        await tx`DELETE FROM ${tx(t.name)} WHERE ${tx(t.plan.key)} = ${op.id}`
+      }
+    }
+  }
+
   return {
     clustering: 'self',
+    coordination: 'cluster',
     async apply(ops: ResolvedRowOp[], origin: string): Promise<void> {
       // Atomic on central Postgres. A throw rolls the whole transaction back. Changes surface via the Electric
       // feed (onChange) on every node — including this one — so apply returns nothing and fires no onChange;
       // doing either here would double-deliver. That is the `self` half of the contract (ADR-0009).
-      await sql.begin(async (tx) => {
-        for (const op of ops) {
-          const t = table(op.n)
-          if (!t) throw new SuperLineError('NOT_FOUND', `Unknown collection: ${op.n}`)
-          if (op.op === 'insert') {
-            const rec = encodeRec(t, op.id, op.row, origin)
-            const res = await tx`INSERT INTO ${tx(t.name)} ${tx(rec)} ON CONFLICT (${tx(t.plan.key)}) DO NOTHING`
-            if (res.count === 0) throw new SuperLineError('CONFLICT', `Row already exists: ${op.n}/${op.id}`)
-          } else if (op.op === 'update') {
-            const { [t.plan.key]: _key, ...rec } = encodeRec(t, op.id, op.row, origin)
-            const res = await tx`UPDATE ${tx(t.name)} SET ${tx(rec)}, "_sl_updated_at" = ${tx.unsafe(NOW_MS)} WHERE ${tx(t.plan.key)} = ${op.id}`
-            if (res.count === 0) throw new SuperLineError('NOT_FOUND', `No row: ${op.n}/${op.id}`)
-          } else {
-            await tx`DELETE FROM ${tx(t.name)} WHERE ${tx(t.plan.key)} = ${op.id}` // idempotent
-          }
+      await sql.begin((tx) => applyOps(tx, ops, origin))
+    },
+    async conditionalApply(conditions: RowCondition[], ops: ResolvedRowOp[], origin: string): Promise<boolean> {
+      return sql.begin(async (tx) => {
+        for (const condition of conditions) {
+          const t = table(condition.n)
+          if (!t) return false
+          const rows = await tx.unsafe(
+            `SELECT ${t.selectList} FROM "${t.name}" WHERE "${t.plan.key}" = $1 FOR UPDATE`,
+            [condition.id],
+          )
+          const row = rows[0] ? decodeRow(t.plan, rows[0] as Record<string, unknown>) : undefined
+          if (row === undefined || !matchesFilter(condition.filter, row)) return false
         }
+        await applyOps(tx, ops, origin)
+        return true
       })
     },
     async snapshot(n, query) {

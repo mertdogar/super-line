@@ -253,7 +253,9 @@ describe('collections — durable backend drop-in', () => {
     let fire: (c: RowChange) => void = () => {}
     const fakeSelf: CollectionStore = {
       clustering: 'self',
+      coordination: 'cluster',
       apply: () => {}, // `self`: apply returns nothing and fires no onChange — the feed does (ADR-0009)
+      conditionalApply: () => false,
       snapshot: (n) => (n === 'messages' ? [msg('m1', 'general', 'u1', 1)] : []),
       read: () => undefined,
       onChange: (cb) => {

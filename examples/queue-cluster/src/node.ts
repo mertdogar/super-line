@@ -13,8 +13,11 @@ const nodeName = process.env.NODE_NAME ?? 'node-1'
 const nodeKey = process.env.NODE_KEY ?? nodeName
 const pgUrl = process.env.PG_URL ?? 'postgres://queue:queue@127.0.0.1:55432/queue'
 
+// Electric streams the queue tables into this node's local replica — that feed is what turns a row write
+// into a live change, so the Control Center's Queues view updates instead of only loading once.
 const collections = await pgliteCollections({
   pgUrl,
+  electricUrl: process.env.ELECTRIC_URL ?? 'http://127.0.0.1:3000/v1/shape',
   collections: app.collections ?? {},
   tablePrefix: 'queue_example_',
 })

@@ -119,3 +119,21 @@ describe('pglite collections — local replica feed (live.changes → onChange)'
     expect(seen.find((c) => c.k === 'delete')).toMatchObject({ n: 'presence', id: 'u1' })
   })
 })
+
+describe('pglite collections — construction', () => {
+  // A store with no Electric and no caller-supplied replica can never fire onChange: writes reach central
+  // Postgres and snapshot() reads them, so it looks healthy while every live subscription stays silent.
+  it('refuses to build without electricUrl unless the caller owns the replica', async () => {
+    await expect(pgliteCollections({ pgUrl, collections: defs, tablePrefix: 'noelec_' })).rejects.toThrow(/electricUrl/)
+  })
+
+  it('allows omitting electricUrl when a db is supplied', async () => {
+    const db = (await PGlite.create({ extensions: { live } })) as PGliteWithLive
+    const store = await pgliteCollections({ pgUrl, db, collections: defs, tablePrefix: 'owndb_' })
+    cleanups.push(async () => {
+      await store.close?.()
+      await db.close()
+    })
+    expect(store.clustering).toBe('self')
+  })
+})

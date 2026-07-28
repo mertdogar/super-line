@@ -36,7 +36,7 @@ type MetaRow = { pk: string; collection: string; id: string }
 export interface CrdtPgliteCollectionsOptions {
   /** Connection string for the central Postgres — source of truth for the op-log + existence. */
   pgUrl: string
-  /** Electric shape endpoint (e.g. `http://localhost:3000/v1/shape`). Omit to disable sync (tests feed the replica). */
+  /** Electric shape endpoint (e.g. `http://localhost:3000/v1/shape`). Required unless you supply `db` and feed the replica yourself — without a fed replica no doc change ever reaches a subscriber. */
   electricUrl?: string
   /** Table prefix: creates `<table>` (existence + materialized snapshot) and `<table>_updates` (the op-log). Default `crdt_docs`. */
   table?: string
@@ -84,6 +84,14 @@ const dkey = (n: string, id: string): string => `${n.length}:${n}${id}`
 export async function crdtPgliteCollections(opts: CrdtPgliteCollectionsOptions): Promise<CrdtCollectionStore> {
   const meta = opts.table ?? 'crdt_docs'
   if (!IDENT.test(meta)) throw new Error(`Invalid table name: ${meta}`)
+  // See pgliteCollections: no Electric means the local replica is never fed, so the op-log feed never fires and
+  // no doc change ever reaches a subscriber — while writes and reads keep working. Refuse the half-working store.
+  if (!opts.electricUrl && !opts.db)
+    throw new Error(
+      'crdtPgliteCollections: `electricUrl` is required. Without it this node never syncs its local replica, so ' +
+        'no doc change ever reaches subscribers (reads and writes would still appear to work). Pass the Electric ' +
+        'shape endpoint, or pass your own `db` if you feed the replica yourself.',
+    )
   const ups = `${meta}_updates`
   // Postgres truncates identifiers to 63 bytes; guard the derived name so `<meta>_updates` can't collide/truncate.
   if (ups.length > 63) throw new Error(`Table name too long: "${meta}" — "${ups}" exceeds Postgres' 63-char limit`)

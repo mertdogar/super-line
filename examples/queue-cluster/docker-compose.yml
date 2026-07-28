@@ -8,11 +8,14 @@ x-worker: &worker
   command: ./examples/queue-cluster/node_modules/.bin/tsx examples/queue-cluster/src/node.ts
   environment:
     PG_URL: postgres://queue:queue@postgres:5432/queue
+    ELECTRIC_URL: http://electric:3000/v1/shape
     POLL_INTERVAL_MS: '250'
     PORT: '8801'
   depends_on:
     postgres:
       condition: service_healthy
+    electric:
+      condition: service_started
   security_opt:
     - no-new-privileges:true
   cap_drop:
@@ -28,6 +31,8 @@ services:
       POSTGRES_DB: queue
       POSTGRES_USER: queue
       POSTGRES_PASSWORD: queue
+    # wal_level=logical: Electric replicates the queue tables out to each node's local replica.
+    command: [-c, listen_addresses=*, -c, wal_level=logical]
     ports:
       - '127.0.0.1:55432:5432'
     volumes:
@@ -38,10 +43,23 @@ services:
       timeout: 3s
       retries: 15
 
+  # Electric streams the queue tables to each node's local PGlite replica — the reactive half of the
+  # `self` collection backend. Postgres stays the job authority; without this, jobs still run but no
+  # live change ever reaches a subscriber (the Control Center's Queues view would never update).
+  electric:
+    image: electricsql/electric
+    environment:
+      DATABASE_URL: postgresql://queue:queue@postgres:5432/queue?sslmode=disable
+      ELECTRIC_INSECURE: 'true'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   node-1:
     <<: *worker
     environment:
       PG_URL: postgres://queue:queue@postgres:5432/queue
+      ELECTRIC_URL: http://electric:3000/v1/shape
       POLL_INTERVAL_MS: '250'
       PORT: '8801'
       NODE_NAME: node-1
@@ -52,6 +70,7 @@ services:
     <<: *worker
     environment:
       PG_URL: postgres://queue:queue@postgres:5432/queue
+      ELECTRIC_URL: http://electric:3000/v1/shape
       POLL_INTERVAL_MS: '250'
       PORT: '8801'
       NODE_NAME: node-2

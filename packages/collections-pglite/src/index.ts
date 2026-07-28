@@ -37,7 +37,7 @@ const KEY_ALIAS = '_sl_key'
 export interface PgliteCollectionsOptions {
   /** Connection string for the central Postgres — source of truth for writes + strong reads (real Postgres or a PGLiteSocketServer). */
   pgUrl: string
-  /** Electric shape endpoint streaming each collection's central table into this node's local replica. Omit to feed the replica manually (tests). */
+  /** Electric shape endpoint streaming each collection's central table into this node's local replica. Required unless you supply `db` and feed the replica yourself — without a fed replica `onChange` never fires. */
   electricUrl?: string
   /** The contract's (post-plugin-merge) `collections` map — each LWW collection gets its own typed table. */
   collections: Record<string, CollectionDef>
@@ -188,6 +188,16 @@ export async function pgliteCollections(opts: PgliteCollectionsOptions): Promise
   const prefix = opts.tablePrefix ?? 'col_'
   if (!IDENT.test(prefix)) throw new Error(`Invalid table prefix: ${prefix}`)
   const metaTable = `${prefix}meta`
+  // Without Electric the local replica is never fed, so `live.changes` never fires and `onChange` can never
+  // emit — writes still land in central Postgres and `snapshot` still reads them, so the store looks healthy
+  // while every live subscription silently receives nothing. Refuse instead of half-working. (Supplying `db`
+  // means the caller drives the replica themselves — that's the tests' path.)
+  if (!opts.electricUrl && !opts.db)
+    throw new Error(
+      'pgliteCollections: `electricUrl` is required. Without it this node never syncs its local replica, so no ' +
+        'change ever reaches subscribers (reads and writes would still appear to work). Pass the Electric shape ' +
+        'endpoint, or pass your own `db` if you feed the replica yourself.',
+    )
 
   const plans = new Map<string, ColumnPlan>()
   for (const [n, def] of Object.entries(opts.collections)) {

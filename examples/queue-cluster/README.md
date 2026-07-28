@@ -2,7 +2,7 @@
 
 A two-node `@super-line/plugin-queue` example with a browser dashboard and Control Center. Both processes use the same declarative queue configuration and coordinate through one Postgres database. The queue has cluster-wide concurrency `2`: across both nodes, no more than two `report` jobs run at once.
 
-At startup, `node-1` inserts eight deterministic jobs and creates a UTC cron schedule that runs every minute. Both nodes compete for the same persistent slot rows, so the logs show work distributed without exceeding the global concurrency limit. A libp2p mDNS adapter connects the nodes for inspector topology, cluster presence, and queue wake hints; Postgres remains the job authority.
+At startup, `node-1` inserts eight deterministic jobs and creates a UTC cron schedule that runs every minute. Both nodes compete for the same persistent slot rows, so the logs show work distributed without exceeding the global concurrency limit. A libp2p mDNS adapter connects the nodes for inspector topology, cluster presence, and queue wake hints; Postgres remains the job authority. Electric streams the queue tables into each node's local PGlite replica: that is the **reactive** half of the `self` collection backend, and it is what lets the Control Center's Queues view update live instead of only on load. Jobs would still run without it — which is exactly why its absence is easy to miss — so `pgliteCollections` now refuses to build without an `electricUrl`.
 
 ## Run everything in Docker
 
@@ -38,10 +38,11 @@ The `queue-pgdata` volume preserves jobs between runs. To deliberately remove it
 
 ## Run the worker nodes directly on the host
 
-First start only the example Postgres service:
+First start Postgres and Electric — the nodes need both (Postgres is the job authority; Electric feeds
+each node's local replica, which is what makes row changes reactive):
 
 ```bash
-docker compose up -d postgres
+docker compose up -d postgres electric
 pnpm host
 ```
 

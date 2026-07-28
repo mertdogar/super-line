@@ -39,7 +39,39 @@ createSuperLineServer(app, {
 })
 ```
 
-Every queue has typed input/results, a worker, and declarative concurrency. There is no `setConcurrency()` API: all worker nodes must use the same queue definition. Honor the worker `AbortSignal` for cancellation, timeouts, and shutdown.
+Every queue has typed input/results and declarative concurrency. There is no `setConcurrency()` API: all worker nodes must use the same queue definition. Honor the worker `AbortSignal` for cancellation, timeouts, and shutdown.
+
+## Bind the worker where it lives
+
+`worker` is optional. Declare a queue beside your contract and bind the implementation later — the case that needs this is a contract shared with other processes, which therefore cannot import the server's own modules:
+
+```ts [queue.ts]
+export const queueKit = queue({
+  queues: {
+    sendEmail: { input: z.object({ to: z.email() }), result: z.object({ messageId: z.string() }), concurrency: 3 },
+  },
+})
+```
+
+```ts [server.ts]
+const { sendEmail } = await import('./workers/send-email.js')
+queueKit.queue('sendEmail').setWorker(sendEmail)
+```
+
+A binding takes effect immediately, so a queue already holding jobs starts draining the moment its worker arrives. The last binding wins, including over a `worker` declared inline.
+
+**A node never claims a queue it has not bound.** Those jobs stay `queued` for a node that has one instead of failing — which is what lets one process enqueue while another executes. The cost is that a *forgotten* binding looks identical: jobs accumulate with nothing logged. `queueKit.queue(name).hasWorker` reports what this node will actually run.
+
+`queue(name)` is also the queue's namespace — `enqueue`, `list`, and `schedules` all take the queue as read:
+
+```ts
+const emails = queueKit.queue('sendEmail')
+await emails.enqueue({ to: 'ada@example.com' })
+await emails.schedules.create({ cron: '0 9 * * *', input: { to: 'ada@example.com' } })
+const recent = await emails.list({ limit: 20 }) // this queue's jobs only
+```
+
+Operations keyed by job id — `get`, `cancel`, `retry` — stay on the kit.
 
 The contract fragment adds `queueJobs`, `queueSchedules`, and `queueSlots`. They have deny-all client policies. Call the kit only from trusted server code:
 

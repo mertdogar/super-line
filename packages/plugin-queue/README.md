@@ -41,7 +41,15 @@ await queueKit.schedules.create({
 })
 ```
 
-Workers are server-only and every configured queue requires one. `queue()` is constructed once and returns both the contract fragment and runtime plugin. Concurrency is declarative and enforced with durable slot rows; there is no imperative concurrency control plane. Claims, lease renewals, and completion use atomic conditional batches with a fencing `runId`.
+Workers are server-only. `queue()` is constructed once and returns both the contract fragment and runtime plugin. Concurrency is declarative and enforced with durable slot rows; there is no imperative concurrency control plane. Claims, lease renewals, and completion use atomic conditional batches with a fencing `runId`.
+
+`worker` is optional, so a queue can be declared beside the contract and bound where its implementation lives:
+
+```ts
+queueKit.queue('sendEmail').setWorker(await loadSendEmailWorker())
+```
+
+Binding is per node and takes effect immediately; the last one wins. A node never claims a queue it has not bound — those jobs stay `queued` for a node that has one rather than failing, so a process that binds nothing can enqueue and observe while its peers execute. `queue(name)` is also that queue's namespace: `hasWorker`, `enqueue`, a scoped `list`, and scoped `schedules.create`/`list`. Job-id operations (`get`, `cancel`, `retry`) stay on the kit.
 
 The memory and SQLite collection backends coordinate one node. Use the PGlite/Postgres collection backend for cluster-wide concurrency and cron scheduling; its conditional batches serialize on central Postgres. The adapter wake channel only reduces latency—durable polling remains the correctness path.
 

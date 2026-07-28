@@ -1,6 +1,6 @@
 # ADR snapshot — the consolidated position
 
-Where the 20 ADRs *net out* as of **2026-07-25**. The individual files are the reasoning
+Where the 23 ADRs *net out* as of **2026-07-28**. The individual files are the reasoning
 and the rejected alternatives; this is the standing answer plus the supersession graph, so
 nobody re-derives a path that was already walked and closed.
 
@@ -32,6 +32,8 @@ Repo-internal: `docs/.vitepress/config.ts` excludes `adr/**` from the docs site,
 | 0019 | Plugins grow a contract-time half — typed fragments merged at `defineContract` | In force (recorded retroactively 2026-07-24; decision + code date to 2026-07-06, core 0.10.1) |
 | 0020 | Auth owns the client, so it owns the session lifecycle and the React surface | In force; **supersedes D5** of `docs/plans/PLAN-plugin-auth-server-minted-tokens.md` (no-`refresh`) and retires `createAuth` |
 | 0021 | Column layout is derived from Standard JSON Schema, not a vendor's classes | In force; **amends 0013** (two consequences). Core now imports no schema library; fixes `instanceof` against a bundled zod that degenerated typed tables for *every* published consumer |
+| 0022 | A plugin authorizes admission to its own connection class | In force; **amends 0005** (phase 2 admitted reserved connections unconditionally). Closes the Control Center's total-read backdoor |
+| 0023 | A queue binds its worker late, and an unbound queue is skipped rather than failed | In force |
 
 ## 2. The standing position, by subsystem
 

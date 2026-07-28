@@ -4,6 +4,8 @@
 
 Construct `queueKit` once with queue schemas, workers, and declarative concurrency. Merge `queueKit.contract` into `defineContract({ plugins })`, mount `queueKit.plugin` on each worker server, and call `queueKit.enqueue` only from trusted server code. Browser UI should call a host request that returns `{ jobId }` and poll another host request for sanitized summaries. For a multi-node fleet, use the same definition on each node, stable `nodeKey`s, and `pgliteCollections` with shared Postgres; an adapter only improves wake latency.
 
+`worker` is optional: when the contract lives in a package that cannot import the server's modules, declare the queue there and bind the implementation at the server with `queueKit.queue('sendEmail').setWorker(fn)` — immediate, per node, last-one-wins over an inline `worker`. A node never claims a queue it has not bound; those jobs stay `queued` for a node that has one instead of failing, so a forgotten binding shows up as a growing backlog, not an error — check `queueKit.queue(name).hasWorker` if you need certainty. `queue(name)` is that queue's namespace (`enqueue`, scoped `list`, scoped `schedules.create`/`list`); `get`/`cancel`/`retry` stay on the kit because they are keyed by job id.
+
 End-to-end patterns. All code uses the real, verified API. Start from the **Starter**, then layer the others in.
 
 ## Starter (copy-paste)

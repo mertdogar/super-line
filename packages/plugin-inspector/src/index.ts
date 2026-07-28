@@ -11,6 +11,7 @@ import {
   withRowMeta,
   matchesFilter,
   andFilters,
+  safeSnapshot as snapshotValue,
   ROW_CREATED_AT,
   ROW_UPDATED_AT,
   type Contract,
@@ -238,31 +239,7 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
   }
 
   // best-effort, never-throwing snapshot of a value for display (node-local); masks redacted field names
-  function safeSnapshot(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
-    if (value === null) return null
-    const t = typeof value
-    if (t === 'bigint') return `${(value as bigint).toString()}n`
-    if (t === 'function') return '[Function]'
-    if (t === 'symbol') return (value as symbol).toString()
-    if (t !== 'object') return value // string | number | boolean | undefined
-    const obj = value as object
-    if (obj instanceof Date) return obj.toISOString()
-    if (seen.has(obj)) return '[Circular]'
-    if (depth >= 6) return '[MaxDepth]'
-    seen.add(obj)
-    try {
-      if (Array.isArray(obj)) return obj.slice(0, 1000).map((v) => safeSnapshot(v, depth + 1, seen))
-      const ctor = (Object.getPrototypeOf(obj) as { constructor?: { name?: string } } | null)?.constructor?.name
-      const out: Record<string, unknown> = {}
-      if (ctor && ctor !== 'Object') out['#type'] = ctor
-      for (const [k, v] of Object.entries(obj)) {
-        out[k] = redact.has(k) ? '[Redacted]' : safeSnapshot(v, depth + 1, seen)
-      }
-      return out
-    } finally {
-      seen.delete(obj)
-    }
-  }
+  const safeSnapshot = (value: unknown): unknown => snapshotValue(value, redact)
 
   // Replace an event's payload field(s) with a redacted safe snapshot — the display-only copy put on the wire.
   function snapshotEvent(event: InspectorEvent): InspectorEvent {

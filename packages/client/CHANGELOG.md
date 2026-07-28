@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [client-v0.14.0] — 2026-07-28
+
+### Features
+
+- **client:** Instrument the client-side tap and give plugins a setup hook ([27beebb])
+
 ## [client-v0.13.0] — 2026-07-24
 
 ### Features

@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [core-v0.19.0] — 2026-07-28
+
+### Features
+
+- **core:** Give the client its own tap vocabulary and share safeSnapshot ([16ebdb8])
+
 ## [core-v0.18.0] — 2026-07-28
 
 ### Features

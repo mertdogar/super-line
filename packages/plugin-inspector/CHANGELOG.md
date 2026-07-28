@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [plugin-inspector-v0.4.1] — 2026-07-28
+
+### Refactor
+
+- **plugin-inspector:** Take safeSnapshot from core ([16d6d38])
+
 ## [plugin-inspector-v0.4.0] — 2026-07-28
 
 ### Features

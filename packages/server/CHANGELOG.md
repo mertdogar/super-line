@@ -3,6 +3,13 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## Unreleased
+
+### Features
+
+- **plugin-devtools:** Buffer a client's own frames for the DevTools panel ([ad190fa])
+- **client:** Instrument the client-side tap and give plugins a setup hook ([27beebb])
+
 ## [server-v0.18.0] — 2026-07-28
 
 ### Features

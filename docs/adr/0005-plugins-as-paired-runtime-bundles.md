@@ -80,7 +80,7 @@ Collisions (plugin names, store names, handler keys) are compile errors where
 the type system can reach and startup throws naming the key elsewhere — never
 silent. Taps and lifecycle hooks are error-isolated per listener and routed to
 `onError`; a throwing middleware keeps its existing meaning (reject the
-operation). Roadmap: `PLAN-plugins.md` at the repo root.
+operation). Roadmap: `docs/plans/PLAN-plugins.md`.
 
 ## Consequences
 

@@ -30,7 +30,7 @@ Repo-internal: `docs/.vitepress/config.ts` excludes `adr/**` from the docs site,
 | 0017 | plugin-auth hooks cover server-invoked operations, not client requests | In force |
 | 0018 | Logging is app-configured (LogTape), not a per-instance option | In force |
 | 0019 | Plugins grow a contract-time half — typed fragments merged at `defineContract` | In force (recorded retroactively 2026-07-24; decision + code date to 2026-07-06, core 0.10.1) |
-| 0020 | Auth owns the client, so it owns the session lifecycle and the React surface | In force; **supersedes D5** of `PLAN-plugin-auth-server-minted-tokens.md` (no-`refresh`) and retires `createAuth` |
+| 0020 | Auth owns the client, so it owns the session lifecycle and the React surface | In force; **supersedes D5** of `docs/plans/PLAN-plugin-auth-server-minted-tokens.md` (no-`refresh`) and retires `createAuth` |
 | 0021 | Column layout is derived from Standard JSON Schema, not a vendor's classes | In force; **amends 0013** (two consequences). Core now imports no schema library; fixes `instanceof` against a bundled zod that degenerated typed tables for *every* published consumer |
 
 ## 2. The standing position, by subsystem
@@ -165,7 +165,7 @@ auto-seeding `env` from claims (0015) · a reverse plugin index in core (0016) �
 
 ## 4. Deferred, with revival criteria
 
-- **Mux transport** (`PLAN-transport-mux.md`) — fully designed, revived only if a consumer
+- **Mux transport** (`docs/plans/PLAN-transport-mux.md`) — fully designed, revived only if a consumer
   needs two stacks that must *not* share identity/lifecycle. Purely additive; composition
   forecloses nothing. `0004`
 - **Ditching CRDT validation entirely** — the honest escape hatch if presence-tolerance proves
@@ -193,7 +193,7 @@ verification sweep; all were fixed on 2026-07-24 (none changed a decision):
 3. **0016** gained its `ADR-0016:` title prefix and Status/Date front-matter (created
    2026-07-23, per git).
 4. **ADR-0019 was written** for `defineContract({ plugins })` — retroactively recording the
-   2026-07-06 decision (`PLAN-plugin-auth.md` settled decision 6, commit `df7e72d`, core
+   2026-07-06 decision (`docs/plans/PLAN-plugin-auth.md` settled decision 6, commit `df7e72d`, core
    0.10.1) that both first-party plugins and 0016 lean on. 0005 now points at it.
 5. **The two dead `docs/guide/synced-state.md` links** (0002, 0003) now name the successor,
    `docs/collections/crdt-documents.md` (deletion traced to the store-family retirement +
@@ -203,7 +203,7 @@ verification sweep; all were fixed on 2026-07-24 (none changed a decision):
    all three `collections-crdt-*` packages) stands.
 7. **Found in verification: 0007 misquoted 0006.** It attributed a verbatim quote
    ("collaborative documents are a different animal…") to ADR-0006, which never contains it —
-   the sentence is from `PLAN-collections.md:216`, and `PLAN-collections-crdt.md` had already
+   the sentence is from `docs/plans/PLAN-collections.md:216`, and `docs/plans/PLAN-collections-crdt.md` had already
    repeated the misattribution. 0007 now attributes the quote to the plan and quotes 0006's
    actual phrase ("whose payloads are unvalidatable by construction"). The PLAN files keep
    their historical wording.

@@ -5,13 +5,13 @@
 - Supersedes: [ADR-0003](0003-stores-are-off-contract-and-untyped.md)
 - Amends: [ADR-0006](0006-collections-are-on-contract-typed-rows.md) (narrows its "docs are a separate, unvalidatable family" framing)
 - Amended by: [ADR-0008](0008-crdt-validation-is-scoped-to-present-values.md) (scopes the validate-before-commit guarantee to present values)
-- Plan: `PLAN-collections-crdt.md` (repo root)
+- Plan: `docs/plans/PLAN-collections-crdt.md`
 
 ## Context
 
 ADR-0006 introduced collections as the relational successor to the LWW store family, but
 explicitly walled off CRDT documents — in its plan's words, "collaborative documents are a
-different animal (opaque deltas — unvalidatable, unfilterable)" (`PLAN-collections.md`; the
+different animal (opaque deltas — unvalidatable, unfilterable)" (`docs/plans/PLAN-collections.md`; the
 ADR itself kept docs as the family "whose payloads are unvalidatable by construction").
 That inherited ADR-0003's load-bearing claim that **CRDT
 deltas are unvalidatable in principle**, which is why stores were kept off-contract and untyped.

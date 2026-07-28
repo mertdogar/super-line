@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-24
-- Origin: a `/grilling` session on adopting LogTape (see `PLAN-logtape.md`)
+- Origin: a `/grilling` session on adopting LogTape (see `docs/plans/PLAN-logtape.md`)
 
 ## Context
 

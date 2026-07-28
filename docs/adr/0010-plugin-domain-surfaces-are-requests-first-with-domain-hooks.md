@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-16
 - Builds on: [ADR-0005](0005-plugins-as-paired-runtime-bundles.md) (paired plugins), [ADR-0006](0006-collections-are-on-contract-typed-rows.md) (collections + RLS)
-- Origin: a `/grilling` session designing `@super-line/plugin-chat` (see `PLAN-plugin-chat.md`)
+- Origin: a `/grilling` session designing `@super-line/plugin-chat` (see `docs/plans/PLAN-plugin-chat.md`)
 
 ## Context
 

@@ -1,10 +1,10 @@
 # ADR-0019: Plugins grow a contract-time half — typed fragments merged at `defineContract`
 
 - Status: Accepted
-- Date: 2026-07-24 — records a decision settled 2026-07-06 (`PLAN-plugin-auth.md` grilling) and shipped the same day (commit `df7e72d`, core 0.10.1 / server 0.10.2); written retroactively because ADR-0016 and both first-party plugins already lean on it
+- Date: 2026-07-24 — records a decision settled 2026-07-06 (`docs/plans/PLAN-plugin-auth.md` grilling) and shipped the same day (commit `df7e72d`, core 0.10.1 / server 0.10.2); written retroactively because ADR-0016 and both first-party plugins already lean on it
 - Amends: [ADR-0005](0005-plugins-as-paired-runtime-bundles.md) (which scoped plugins "Runtime-only by constraint")
 - Amended by: [ADR-0016](0016-merged-contracts-retain-their-plugin-fragments.md) (the merge as shipped here discarded the plugin list; 0016 retains it)
-- Plan: `PLAN-plugin-auth.md` (settled decision 6; Phase 0 type spike; Phase 1)
+- Plan: `docs/plans/PLAN-plugin-auth.md` (settled decision 6; Phase 0 type spike; Phase 1)
 
 ## Context
 

@@ -4,7 +4,7 @@
 - Date: 2026-07-05
 - Narrows: [ADR-0003](0003-stores-are-off-contract-and-untyped.md) (which remained in force for CRDT doc stores until ADR-0007 superseded it)
 - Amended by: [ADR-0007](0007-crdt-docs-are-typed-collections.md) (folds CRDT docs into collections; retires the store family), [ADR-0009](0009-collection-store-is-discriminated-on-clustering.md) (splits `CollectionStore` into a discriminated union on `clustering`)
-- Plan: `PLAN-collections.md` (repo root)
+- Plan: `docs/plans/PLAN-collections.md`
 
 ## Context
 

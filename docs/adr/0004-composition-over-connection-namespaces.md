@@ -23,7 +23,7 @@ Option 2 was fully sketched and is genuinely viable — but it satisfies shared 
 
 - Core ships two helpers (the *only* super-line change): **`defineSurface`** — authors an exportable `Directional` fragment with the same `const` literal preservation `defineContract` has (without it, a separately-declared fragment widens `subscribe: true` to `boolean` and topics silently degrade to events) — and **`mergeSurfaces`** — merges two fragments per direction, where a duplicate key is a **compile error naming the key** plus a runtime throw, never a silent spread-clobber.
 - **Namespacing is a key-prefix convention, not a wire feature**: the embedded library hard-prefixes its request/event keys (`harness.join`), store names (`harness.thread`), and room names in its own source. The host owns roles, `authenticate`, `identify`, and middleware; the library's handlers/stores are spread into the host's `implement`/`stores` config; the library declares `@super-line/*` as peer dependencies.
-- **The mux is deferred, not rejected** — its design is captured in `PLAN-transport-mux.md`, to be revived if a consumer ever needs two stacks that must *not* share identity/lifecycle (true third-party isolation). Composition forecloses nothing: the mux is purely additive later, and libraries accept injected transports anyway for standalone mode.
+- **The mux is deferred, not rejected** — its design is captured in `docs/plans/PLAN-transport-mux.md`, to be revived if a consumer ever needs two stacks that must *not* share identity/lifecycle (true third-party isolation). Composition forecloses nothing: the mux is purely additive later, and libraries accept injected transports anyway for standalone mode.
 
 ## Consequences
 

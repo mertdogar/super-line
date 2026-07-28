@@ -1,7 +1,6 @@
 # chat-resources — channel resource mechanics, headless
 
-A single `tsx` script that exercises `@super-line/plugin-chat`'s **channel resources**
-(PLAN-chat-resources) with no UI at all: a human client and a bot client attach CRDT documents to a
+A single `tsx` script that exercises `@super-line/plugin-chat`'s **channel resources** with no UI at all: a human client and a bot client attach CRDT documents to a
 channel, write to them through both the live `DocHandle` and the acked `write_resource` tool path,
 watch presence, and see the owned/linked lifecycle split on channel delete. It's the scriptable
 companion to [chat-supervisor](../chat-supervisor) — same resource mechanics, none of the canvas,

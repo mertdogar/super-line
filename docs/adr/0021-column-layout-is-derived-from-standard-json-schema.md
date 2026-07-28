@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-27
 - Amends: [ADR-0013](0013-plugin-chat-host-schemas-bridge-through-standard-schema.md) (two of its consequences assumed a foreign validator must render as an opaque slot, and that typed-table planning depends on the envelope "remaining a real ZodObject")
-- Plan: `PLAN-collections-typed-tables.md` (Phase 0, `planColumns`)
+- Plan: `docs/plans/PLAN-collections-typed-tables.md` (Phase 0, `planColumns`)
 
 ## Context
 

@@ -4,7 +4,7 @@
 - Date: 2026-07-17
 - Builds on: [ADR-0005](0005-plugins-as-paired-runtime-bundles.md) (paired plugins), the connect-time
   `authenticate` model, and `conn.data` (server-only per-connection state)
-- Origin: a `/grill-with-docs` session that started as "make bot auth easier" (see `PLAN-connection-context.md`)
+- Origin: a `/grill-with-docs` session that started as "make bot auth easier" (see `docs/plans/PLAN-connection-context.md`)
 
 ## Context
 
@@ -60,7 +60,7 @@ client-visible, mutable, ephemeral** state bag. It is the visibility-mirror sibl
 - **Persisting `env` in a collection (`sessions` or new).** Rejected — persists secrets at rest and, being
   member-readable, leaks them; `env` must be ephemeral and per-connection.
 - **On-behalf-of / impersonation authority; per-`(channel, member)` scoping; a bot identity marker.** All
-  rejected — see `PLAN-connection-context.md` §9 for the reasoning.
+  rejected — see `docs/plans/PLAN-connection-context.md` §9 for the reasoning.
 
 ## Consequences
 

@@ -2,8 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-07-25 — settled in a design session against the first real downstream consumer (Omma's `designer-core`); implementation lands in the same pass
-- Supersedes: decision **D5** of `PLAN-plugin-auth-server-minted-tokens.md` ("No `refresh`. … Account-switch = reconstruct the helper (cheap)")
-- Plan: `PLAN-plugin-auth-server-minted-tokens.md` (D3 `resolveToken`, D4 non-null client, D5 no-refresh)
+- Supersedes: decision **D5** of `docs/plans/PLAN-plugin-auth-server-minted-tokens.md` ("No `refresh`. … Account-switch = reconstruct the helper (cheap)")
+- Plan: `docs/plans/PLAN-plugin-auth-server-minted-tokens.md` (D3 `resolveToken`, D4 non-null client, D5 no-refresh)
 
 ## Context
 

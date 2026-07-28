@@ -5,7 +5,7 @@
 - Builds on: [ADR-0010](0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md) (domain-layer
   before/after hooks), [ADR-0015](0015-bearer-assertions-are-signed-or-sealed.md) (signed vs sealed)
 - Origin: a `/grilling` session giving `@super-line/plugin-auth` a host-extension seam (see
-  `PLAN-plugin-auth-hooks.md`)
+  `docs/plans/PLAN-plugin-auth-hooks.md`)
 
 ## Context
 

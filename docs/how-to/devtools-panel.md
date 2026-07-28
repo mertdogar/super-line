@@ -23,11 +23,23 @@ const client = createSuperLineClient(api, {
 })
 ```
 
-Then load the extension and open DevTools → **super-line**.
+Then [load the panel](#get-the-panel) and open DevTools → **super-line**.
 
 It requires **no server configuration**. There is no inspector to enable, no port to expose, and no credential to manage — it reads the client that opted in, in the page you already have open.
 
 Nothing is observed, buffered or exposed until you add the plugin.
+
+### Get the panel
+
+The panel is a Chrome extension loaded unpacked from the repo. It is not on the Chrome Web Store, and there is no npm package for it — only the plugin above is published.
+
+```bash
+git clone https://github.com/mertdogar/super-line
+cd super-line && pnpm install
+pnpm --filter @super-line/devtools-extension build
+```
+
+Open `chrome://extensions`, switch on **Developer mode**, choose **Load unpacked**, and select `packages/devtools-extension/dist`.
 
 ### With plugin-auth
 

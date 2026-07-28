@@ -19,6 +19,20 @@ const client = createSuperLineClient(api, {
 
 Then open DevTools → **super-line**.
 
+## Get the panel
+
+The panel is a Chrome extension, loaded unpacked from the repo — it is not on the Chrome Web Store, and there is nothing to install from npm:
+
+```bash
+git clone https://github.com/mertdogar/super-line
+cd super-line && pnpm install
+pnpm --filter @super-line/devtools-extension build
+```
+
+Then open `chrome://extensions`, switch on **Developer mode**, choose **Load unpacked**, and select `packages/devtools-extension/dist`.
+
+It installs with **no permission warnings** — the panel reads the inspected page through the DevTools API, so it asks for nothing up front. The live-push toggle requests one origin when you use it, and declining costs latency only.
+
 ## What it is for
 
 super-line already ships a server-side inspector and the Control Center, which answer *"what is the cluster doing"*. This answers a different question — *"what is this page doing"* — and the two do not overlap, because most of what a client knows never reaches the wire:

@@ -54,6 +54,7 @@
 | 📨 **Server→client req/res** | `await srv.toConn(id).request(...)` — ask a client and await a typed reply, across nodes. |
 | 🛰️ **Presence & introspection** | `srv.local.*` (sync) + `srv.cluster.*` (counts, topology, `isOnline`) backed by a Redis registry. |
 | 🩺 **Control Center** | `plugins: [inspector()]` (from `@super-line/plugin-inspector`) + `npx @super-line/control-center` — a shadcn webapp for live topology, contract, roles & ctx. |
+| 🔬 **Client DevTools** | `plugins: [devtoolsPlugin()]` (from `@super-line/plugin-devtools`) + a Chrome DevTools panel — what **one tab's** client did and knows: a request that never left the socket, the exact reconnect backoff, per-subscription row routing, deliveries with zero listeners. No server config. |
 | 🎯 **Targeted send** | `srv.toConn(id)` / `srv.toUser(uid)` emit or kick any connection on any node. |
 | 🔌 **Composable** | Attaches to your `http.Server`; lifecycle hooks + middleware. |
 | 🔁 **Resilient client** | Auto-reconnect, re-subscribe, in-flight reject, queue-and-flush. |
@@ -386,6 +387,7 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 | [`@super-line/tanstack-db`](packages/tanstack-db) | [TanStack DB](https://tanstack.com/db) adapter — super-line collections as a sync source, with client-side live queries, joins & optimistic mutations |
 | **Plugins** — paired contract + runtime bundles ||
 | [`@super-line/plugin-inspector`](packages/plugin-inspector) | The Control Center inspector as a plugin — taps + a plugin-owned CC connection |
+| [`@super-line/plugin-devtools`](packages/plugin-devtools) | Client-side tap for the Chrome DevTools panel — one tab's frames, routing decisions, pending requests & held state. Needs no server |
 | [`@super-line/plugin-auth`](packages/plugin-auth) | First-party authentication — email/password, sessions, API keys, JWT, data-driven roles, all in typed collections |
 | [`@super-line/plugin-queue`](packages/plugin-queue) | Durable, at-least-once server jobs and cluster-wide cron schedules — typed inputs/results, declarative concurrency, leases, retries, and server-only collections |
 | [`@super-line/plugin-chat`](packages/plugin-chat) | Chat backbone — channels, membership, messages, streamed AI turns & channel-linked CRDT resources (6 collections, 20 server-authoritative requests, hookable server-side); Mastra bridge on `/mastra`. Requires plugin-auth |

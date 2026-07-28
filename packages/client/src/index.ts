@@ -25,7 +25,9 @@ import {
   type RawConn,
   type ResourceReplica,
   type StoreChange,
-  type TapEvent,
+  type ClientTapEvent,
+  type RouteDecision,
+  type Frame,
   type CollectionQuery,
   type CChangeFrame,
   type CrdtCollectionClient,
@@ -235,18 +237,95 @@ export interface ClientErrorInfo {
    *
    * A `resubscribe` error means that subscription is no longer live: the failure itself triggers no retry, and
    * nothing else will until the next transport reopen. Treat it as dead — resubscribe, or fail the process.
+   *
+   * `tap` is a plugin's `onClientSideEvent` throwing. It is isolated here rather than propagated, so an
+   * observer can never fail the operation it was observing.
    */
-  kind: 'connect' | 'disconnect' | 'reconnect' | 'resubscribe'
+  kind: 'connect' | 'disconnect' | 'reconnect' | 'resubscribe' | 'tap'
   /** For `resubscribe`: the collection whose subscription failed. */
   collection?: string
   /** For `resubscribe`: the document id, when it was a CRDT `open` rather than a row subscription. */
   id?: string
 }
 
+/** One request the client is still waiting on. */
+export interface PendingRequestView {
+  /** The wire correlation id. */
+  i: number
+  /** The request name, or an internal `collection:*` marker for library-driven ops. */
+  method: string
+  /**
+   * Whether it actually went out. `false` means it is queued behind an unwritable socket and will be
+   * sent on the next open — a state with no wire representation at all.
+   */
+  sent: boolean
+}
+
+/** One live topic subscription. */
+export interface TopicSubView {
+  topic: string
+  /** How many handlers are attached. */
+  listeners: number
+  /** `false` while the subscribe is still awaiting its server ack. */
+  ready: boolean
+}
+
+/** One live collection subscription, carrying the rows the client is actually holding. */
+export interface CollectionSubView {
+  /** Collection name. */
+  n: string
+  /** The client-assigned subscription id. */
+  sid: number
+  /** The query IR this subscription was opened with. */
+  query: CollectionQuery
+  /** The ordered, limited view — the client's own truth, not a reconstruction of it. */
+  rows: unknown[]
+  /** `false` until the initial snapshot has landed; changes arriving before that are buffered. */
+  settled: boolean
+}
+
+/** One open CRDT document. */
+export interface OpenDocView {
+  n: string
+  id: string
+  /** How many local replicas are attached. `0` means inbound deltas would be dropped. */
+  replicas: number
+  settled: boolean
+  deleted: boolean
+}
+
+/**
+ * What a client plugin's `setup` receives (ADR-0024) — the client's own view of itself, for observers
+ * that need current state rather than the stream of changes to it.
+ *
+ * Deliberately read-only and deliberately *incomplete*: there is no request start time here, because
+ * a reader holding the tap stream already has the timestamp of the outbound frame and can join the
+ * two. Adding one would be the client keeping state solely so an observer could read it back.
+ */
+export interface ClientPluginContext {
+  /** Stable for this client instance. A page runs several — a session replacement runs two at once. */
+  readonly clientId: string
+  /** The role this client connected as. */
+  readonly role: string
+  /** Requests awaiting a response, including those queued behind an unwritable socket. */
+  getPending(): PendingRequestView[]
+  /** Live topic subscriptions. */
+  getTopics(): TopicSubView[]
+  /** Live collection subscriptions, with the rows each is currently holding. */
+  getCollectionSubs(): CollectionSubView[]
+  /** Open CRDT documents. */
+  getOpenDocs(): OpenDocView[]
+  /**
+   * The current plaintext snapshot of one open CRDT document, or `undefined` if it is not open here.
+   * The wire carries only opaque deltas, so this is the only way to see document contents.
+   */
+  getDocSnapshot(n: string, id: string): unknown
+}
+
 /**
  * The client half of a server/client plugin pair, registered on `plugins: [...]`. All fields
- * optional. Mirrors the server half but smaller — no taps in v1 (`onEvent` is type-reserved) and no
- * handler subtraction (client `implement` is already optional per-key).
+ * optional. Mirrors the server half but smaller — no handler subtraction (client `implement` is
+ * already optional per-key).
  */
 export interface SuperLineClientPlugin {
   /** Unique among the client's plugins; a duplicate name throws at construction. */
@@ -257,8 +336,22 @@ export interface SuperLineClientPlugin {
   onDisconnect?: (code: number) => void
   /** Called on each successful reconnect after the first (multiplexed after `onReconnect`). */
   onReconnect?: () => void
-  /** Type-reserved for a client-side tap; NOT instrumented in v1. */
-  onEvent?: (event: TapEvent) => void
+  /**
+   * Client-side tap (ADR-0024), fired synchronously at each emit site with LIVE payload references —
+   * an observer must not mutate them, and must snapshot anything it keeps. Zero cost when no plugin
+   * taps; a throwing tap is isolated and routed to `onError` as `kind: 'tap'`, never failing the
+   * operation it observed.
+   *
+   * Named apart from the server plugin's `onEvent` on purpose: that hook carries `TapEvent` (the
+   * server's vocabulary — `connId`, `role`, `target`, `nodeId`), this one carries
+   * {@link ClientTapEvent}. A pair's two halves look symmetric here and are not.
+   */
+  onClientSideEvent?: (event: ClientTapEvent) => void
+  /**
+   * Imperative escape hatch, run once at construction with the plugin's {@link ClientPluginContext}.
+   * Return an optional dispose function, called on `client.close()`. Mirrors the server plugin's `setup`.
+   */
+  setup?: (ctx: ClientPluginContext) => (() => void) | void
   /** Handlers answering the library's server→client requests; a key collision (with the app or another plugin) throws. */
   implement?: Record<string, (input: unknown) => Awaitable<unknown>>
 }
@@ -318,6 +411,8 @@ export interface SuperLineClientOptions<C extends Contract, R extends RoleOf<C>>
 interface Request {
   method: string
   frame: string | Uint8Array
+  /** The pre-encode frame, kept only so the tap can report the SEND — which may be a reconnect later. */
+  obj: object
   resolve: (value: unknown) => void
   reject: (error: unknown) => void
   timer?: ReturnType<typeof setTimeout>
@@ -329,6 +424,9 @@ interface Deferred {
   resolve: () => void
   reject: (error: unknown) => void
 }
+
+/** Module-local counter, so two clients built in the same millisecond still differ. */
+let clientSeq = 1
 
 function deferred(): Deferred {
   let resolve!: () => void
@@ -374,6 +472,11 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     maxMs: opts.reconnectMaxMs ?? 30_000,
     factor: opts.reconnectFactor ?? 2,
   }
+
+  // Identifies THIS client instance to observers. A page routinely runs several — a session
+  // replacement builds its candidate before closing the incumbent — so the instance, not the page,
+  // is the unit an observer groups by.
+  const clientId = `c_${(clientSeq++).toString(36)}${Math.random().toString(36).slice(2, 8)}`
 
   // role rides along in the handshake params so the server's authenticate can verify it
   const handshakeParams = { ...opts.params, role }
@@ -424,6 +527,35 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       const what = where?.id ? `${where.collection}/${where.id}` : where?.collection
       console.error(`[super-line] client failed to re-subscribe ${what} — it is no longer live`, error)
     } else console.error(`[super-line] client ${kind} handler threw`, error)
+  }
+  // Client-side tap (ADR-0024). `tapping` is checked before every emit so an un-tapped client pays one
+  // boolean per site and never builds an event object.
+  const taps = clientPlugins.map((p) => p.onClientSideEvent).filter((t) => t !== undefined)
+  const tapping = taps.length > 0
+  function tap(event: ClientTapEvent): void {
+    for (const t of taps) {
+      try {
+        t(event)
+      } catch (err) {
+        routeError(err, 'tap')
+      }
+    }
+  }
+  const sizeOf = (bytes: string | Uint8Array): number =>
+    typeof bytes === 'string' ? bytes.length : bytes.byteLength
+  function tapFrame(dir: 'out' | 'in', f: object, bytes: string | Uint8Array): void {
+    if (tapping) tap({ k: 'frame', dir, f: f as Frame, bytes: sizeOf(bytes) })
+  }
+  /**
+   * Encode, send, and observe — the single outbound path for fire-and-forget frames, so a new send site
+   * is instrumented by construction rather than by remembering. Returns whether it went out.
+   */
+  function sendFrame(f: object): boolean {
+    if (!rawConn?.writable) return false
+    const bytes = serializer.encode(f)
+    rawConn.send(bytes)
+    tapFrame('out', f, bytes)
+    return true
   }
   function fireLifecycle(hooks: Array<((code: number) => void) | undefined>, kind: ClientErrorInfo['kind'], code: number): void {
     for (const hook of hooks) {
@@ -493,10 +625,12 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
 
   function onOpen(): void {
     attempt = 0
+    if (tapping) tap({ k: 'conn', phase: 'open' })
     for (const op of requests.values()) {
       if (!op.sent) {
         rawConn?.send(op.frame)
         op.sent = true
+        tapFrame('out', op.obj, op.frame)
       }
     }
     if (connectedOnce && (topicListeners.size || openDocs.size || collectionSubs.size))
@@ -520,10 +654,12 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
 
   function onClose(code = 1006): void {
     logConn.debug('connection closed ({code})', { code })
+    if (tapping) tap({ k: 'conn', phase: 'close', code })
     fireLifecycle(disconnectHooks, 'disconnect', code)
     for (const [id, op] of requests) {
       if (op.sent) {
         if (op.timer) clearTimeout(op.timer)
+        if (tapping) tap({ k: 'req.dropped', i: id, m: op.method, why: 'disconnected' })
         op.reject(new SuperLineError('DISCONNECTED', 'Connection closed'))
         requests.delete(id)
       }
@@ -533,6 +669,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     if (closed || !reconnectEnabled) {
       for (const [id, op] of requests) {
         if (op.timer) clearTimeout(op.timer)
+        if (tapping) tap({ k: 'req.dropped', i: id, m: op.method, why: 'disconnected' })
         op.reject(new SuperLineError('DISCONNECTED', 'Connection closed'))
         requests.delete(id)
       }
@@ -540,6 +677,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     }
     const delay = backoffDelay(attempt, backoff)
     logReconnect.debug('reconnect scheduled in {ms}ms (attempt {attempt})', { ms: delay, attempt: attempt + 1 })
+    if (tapping) tap({ k: 'conn', phase: 'retry', attempt: attempt + 1, delayMs: delay })
     reconnectTimer = setTimeout(connect, delay)
     attempt++
   }
@@ -551,8 +689,9 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     } catch {
       return
     }
+    tapFrame('in', frame, data)
     if (frame.t === 'ping') {
-      rawConn?.send(serializer.encode({ t: 'pong' }))
+      sendFrame({ t: 'pong' })
       return
     }
     if (frame.t === 'res') {
@@ -597,11 +736,13 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       if (!checkInbound(payloadOf(frame.e), frame.d, { kind: 'event', name: frame.e }))
         return
       const set = listeners.get(frame.e)
+      if (tapping) tap({ k: 'deliver', kind: 'event', name: frame.e, listeners: set?.size ?? 0 })
       if (set) for (const cb of set) cb(frame.d)
     } else if (frame.t === 'pub') {
       if (!checkInbound(payloadOf(frame.c), frame.d, { kind: 'topic', name: frame.c }))
         return
       const set = topicListeners.get(frame.c)
+      if (tapping) tap({ k: 'deliver', kind: 'topic', name: frame.c, listeners: set?.size ?? 0 })
       if (set) for (const cb of set) cb(frame.d)
     } else if (frame.t === 'env') {
       logEnv.trace('env frame received {keys}', { keys: frame.d && typeof frame.d === 'object' ? Object.keys(frame.d) : [] })
@@ -615,11 +756,15 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       if (subs)
         for (const sub of subs) {
           // before the initial snapshot lands, buffer — seeding would otherwise clobber this change
-          if (!sub.settled) sub.pending.push(frame)
-          else applyCollectionChange(sub, frame) // client re-filters per subscription
+          if (!sub.settled) {
+            sub.pending.push(frame)
+            if (tapping) tap({ k: 'route', n: frame.n, sid: sub.subId, id: frame.id, decision: 'buffered' })
+          } else applyCollectionChange(sub, frame) // client re-filters per subscription
         }
     } else if (frame.t === 'cdchg') {
       const entry = openDocs.get(docKey(frame.n, frame.id))
+      // a delta for a document this client has not opened is dropped here, and nowhere else is that visible
+      if (tapping) tap({ k: 'doc', n: frame.n, id: frame.id, replicas: entry?.replicas.size ?? 0 })
       if (entry) {
         const change = { id: frame.id, update: frame.u, origin: frame.o }
         for (const replica of entry.replicas) replica.applyRemote(change) // own-origin merges are no-ops
@@ -634,9 +779,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   }
 
   async function handleServerRequest(frame: SReqFrame): Promise<void> {
-    const send = (f: object) => {
-      if (rawConn?.writable) rawConn.send(serializer.encode(f))
-    }
+    const send = sendFrame
     const handler = serverHandlers.get(frame.m)
     if (!handler) {
       send({ t: 'serr', i: frame.i, code: 'NOT_FOUND', m: `No handler for ${frame.m}` })
@@ -667,6 +810,13 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       validateSync(schema, data)
       return true
     } catch (e) {
+      if (tapping)
+        tap({
+          k: 'validate.fail',
+          kind: info.kind,
+          name: info.name,
+          message: e instanceof Error ? e.message : String(e),
+        })
       if (opts.onValidationError) opts.onValidationError(e, info)
       else console.error(`[super-line] inbound validation failed for ${info.kind} '${info.name}'`, e)
       return false
@@ -684,17 +834,19 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   function call(method: string, input: unknown, callOpts?: CallOptions): Promise<unknown> {
     if (closed) return Promise.reject(new SuperLineError('DISCONNECTED', 'Client closed'))
     const id = nextId++
-    const frame = serializer.encode({ t: 'req', i: id, m: method, d: input })
+    const obj = { t: 'req', i: id, m: method, d: input }
+    const frame = serializer.encode(obj)
     return new Promise<unknown>((resolve, reject) => {
       const ms = callOpts?.timeoutMs ?? defaultTimeout
       const timer =
         ms > 0
           ? setTimeout(() => {
               requests.delete(id)
+              if (tapping) tap({ k: 'req.dropped', i: id, m: method, why: 'timeout' })
               reject(new SuperLineError('TIMEOUT', `Request '${method}' timed out`))
             }, ms)
           : undefined
-      const op: Request = { method, frame, resolve, reject, timer, sent: false }
+      const op: Request = { method, frame, obj, resolve, reject, timer, sent: false }
       requests.set(id, op)
       callOpts?.signal?.addEventListener(
         'abort',
@@ -709,14 +861,15 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       if (rawConn?.writable) {
         rawConn.send(frame)
         op.sent = true
-      }
+        tapFrame('out', obj, frame)
+      } else if (tapping) tap({ k: 'req.queued', i: id, m: method })
     })
   }
 
   function sendSub(topic: string): void {
     const id = nextId++
     subAckById.set(id, topic)
-    rawConn?.send(serializer.encode({ t: 'sub', i: id, c: topic }))
+    sendFrame({ t: 'sub', i: id, c: topic })
   }
 
   function topicSet(topic: string): Set<(data: unknown) => void> {
@@ -754,7 +907,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
         if (set.size === 0) {
           topicListeners.delete(topic)
           readyByTopic.delete(topic)
-          if (rawConn?.writable) rawConn.send(serializer.encode({ t: 'unsub', c: topic }))
+          sendFrame({ t: 'unsub', c: topic })
         }
       },
     }
@@ -766,21 +919,24 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   function trackRequest(method: string, makeFrame: (id: number) => object): Promise<unknown> {
     if (closed) return Promise.reject(new SuperLineError('DISCONNECTED', 'Client closed'))
     const id = nextId++
-    const frame = serializer.encode(makeFrame(id))
+    const obj = makeFrame(id)
+    const frame = serializer.encode(obj)
     return new Promise<unknown>((resolve, reject) => {
       const timer =
         defaultTimeout > 0
           ? setTimeout(() => {
               requests.delete(id)
+              if (tapping) tap({ k: 'req.dropped', i: id, m: method, why: 'timeout' })
               reject(new SuperLineError('TIMEOUT', `${method} timed out`))
             }, defaultTimeout)
           : undefined
-      const op: Request = { method, frame, resolve, reject, timer, sent: false }
+      const op: Request = { method, frame, obj, resolve, reject, timer, sent: false }
       requests.set(id, op)
       if (rawConn?.writable) {
         rawConn.send(frame)
         op.sent = true
-      }
+        tapFrame('out', obj, frame)
+      } else if (tapping) tap({ k: 'req.queued', i: id, m: method })
     })
   }
 
@@ -866,7 +1022,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
         e.replicas.delete(replica)
         if (e.replicas.size === 0) {
           openDocs.delete(key)
-          if (rawConn?.writable) rawConn.send(serializer.encode({ t: 'cdclose', n, id }))
+          sendFrame({ t: 'cdclose', n, id })
         }
       },
     }
@@ -937,11 +1093,15 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   // longer matches (an update that left the filter) or a delete is removed.
   function applyCollectionChange(sub: LiveSub, frame: CChangeFrame): void {
     const { id } = frame
+    const routed = (decision: RouteDecision): void => {
+      if (tapping) tap({ k: 'route', n: sub.n, sid: sub.subId, id, decision })
+    }
     if (frame.k === 'delete' || frame.d === undefined) {
       if (sub.map.delete(id)) {
         recomputeView(sub)
         notifySub(sub, { type: 'delete', id })
-      }
+        routed('delete')
+      } else routed('skip')
       return
     }
     const row = frame.d
@@ -950,10 +1110,13 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       sub.map.set(id, row)
       recomputeView(sub)
       notifySub(sub, { type: was ? 'update' : 'insert', id, row })
+      routed(was ? 'update' : 'insert')
     } else if (sub.map.delete(id)) {
+      // still exists — it just no longer matches THIS subscription's query
       recomputeView(sub)
       notifySub(sub, { type: 'delete', id })
-    }
+      routed('left-filter')
+    } else routed('skip')
   }
 
   function sendCollectionSub(sub: LiveSub): void {
@@ -972,6 +1135,48 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
         // leaves a long-lived client deaf while still reporting `connected`.
         routeError(err, 'resubscribe', { collection: sub.n })
       })
+  }
+
+  // Plugin `setup` (ADR-0024): built here because it closes over the state maps above, and run once
+  // at construction. Disposers fire on `client.close()`.
+  const pluginContext: ClientPluginContext = {
+    clientId,
+    role,
+    getPending: () => [...requests].map(([i, op]) => ({ i, method: op.method, sent: op.sent })),
+    getTopics: () =>
+      [...topicListeners].map(([topic, set]) => ({
+        topic,
+        listeners: set.size,
+        ready: !readyByTopic.has(topic),
+      })),
+    getCollectionSubs: () =>
+      [...collectionSubs.values()].map((sub) => ({
+        n: sub.n,
+        sid: sub.subId,
+        query: sub.query,
+        rows: sub.view,
+        settled: sub.settled,
+      })),
+    getOpenDocs: () =>
+      [...openDocs.values()].map((e) => ({
+        n: e.n,
+        id: e.id,
+        replicas: e.replicas.size,
+        settled: e.settled,
+        deleted: e.deleted,
+      })),
+    getDocSnapshot: (n, id) => {
+      const entry = openDocs.get(docKey(n, id))
+      // every replica of one document converges, so the first is as good as any
+      for (const replica of entry?.replicas ?? []) return replica.getSnapshot()
+      return undefined
+    },
+  }
+  const disposers: Array<() => void> = []
+  for (const p of clientPlugins) {
+    if (!p.setup) continue
+    const dispose = p.setup(pluginContext)
+    if (dispose) disposers.push(dispose)
   }
 
   const sendBatch = (ops: RowOp[]): Promise<void> =>
@@ -1017,7 +1222,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
           close: () => {
             collectionSubs.delete(subId)
             collectionSubsByName.get(name)?.delete(sub)
-            if (rawConn?.writable) rawConn.send(serializer.encode({ t: 'cuns', n: name, s: subId }))
+            sendFrame({ t: 'cuns', n: name, s: subId })
           },
         }
       },
@@ -1060,6 +1265,13 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       closed = true
       if (reconnectTimer) clearTimeout(reconnectTimer)
       rawConn?.close()
+      for (const dispose of disposers.splice(0)) {
+        try {
+          dispose()
+        } catch (err) {
+          routeError(err, 'tap')
+        }
+      }
     },
     onReconnect(cb: () => void): () => void {
       reconnectListeners.add(cb)

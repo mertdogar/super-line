@@ -7,6 +7,19 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Features
 
+- **control-center:** Credentials, and a terminal unauthorized state ([6faf64d])
+- **plugin-inspector:** Lock the Control Center channel behind a credential ([761f1e0])
+- A plugin connection class authorizes its own admission ([9e15eb4])
+
+### Documentation
+
+- Record ADR-0022 and stop calling the inspector channel safe-by-omission ([caf10ca])
+- **changelog:** Refresh the root aggregate for the 0.17 release ([fa9c4ed])
+
+## 2026-07-28
+
+### Features
+
 - **control-center:** A Queues view over a live collection subscription ([19cf094])
 - Add queues explorer to control-center ([05ab6b6])
 - Add clustered queue plugin and dashboard example ([e00dc23])

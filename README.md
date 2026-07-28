@@ -54,7 +54,7 @@
 | 📨 **Server→client req/res** | `await srv.toConn(id).request(...)` — ask a client and await a typed reply, across nodes. |
 | 🛰️ **Presence & introspection** | `srv.local.*` (sync) + `srv.cluster.*` (counts, topology, `isOnline`) backed by a Redis registry. |
 | 🩺 **Control Center** | `plugins: [inspector()]` (from `@super-line/plugin-inspector`) + `npx @super-line/control-center` — a shadcn webapp for live topology, contract, roles & ctx. |
-| 🔬 **Client DevTools** | `plugins: [devtoolsPlugin()]` (from `@super-line/plugin-devtools`) + a Chrome DevTools panel — what **one tab's** client did and knows: a request that never left the socket, the exact reconnect backoff, per-subscription row routing, deliveries with zero listeners. No server config. |
+| 🔬 **Client DevTools** | `plugins: [devtoolsPlugin()]` (from `@super-line/plugin-devtools`) + a [Chrome DevTools panel](https://github.com/mertdogar/super-line/releases/latest) — what **one tab's** client did and knows: a request that never left the socket, the exact reconnect backoff, per-subscription row routing, deliveries with zero listeners. No server config. |
 | 🎯 **Targeted send** | `srv.toConn(id)` / `srv.toUser(uid)` emit or kick any connection on any node. |
 | 🔌 **Composable** | Attaches to your `http.Server`; lifecycle hooks + middleware. |
 | 🔁 **Resilient client** | Auto-reconnect, re-subscribe, in-flight reject, queue-and-flush. |

@@ -31,15 +31,17 @@ Nothing is observed, buffered or exposed until you add the plugin.
 
 ### Get the panel
 
-The panel is a Chrome extension loaded unpacked from the repo. It is not on the Chrome Web Store, and there is no npm package for it — only the plugin above is published.
+Download the latest `super-line-devtools-<version>.zip` from [Releases](https://github.com/mertdogar/super-line/releases/latest) and unzip it. Open `chrome://extensions`, switch on **Developer mode**, choose **Load unpacked**, and select the unzipped folder.
 
-```bash
-git clone https://github.com/mertdogar/super-line
-cd super-line && pnpm install
-pnpm --filter @super-line/devtools-extension build
-```
+If you already have the repo, `pnpm --filter @super-line/devtools-extension build` produces the same thing in `packages/devtools-extension/dist`.
 
-Open `chrome://extensions`, switch on **Developer mode**, choose **Load unpacked**, and select `packages/devtools-extension/dist`.
+::: warning It does not auto-update
+Chrome auto-updates only extensions it hosts and signs itself, and self-hosting an update feed is limited to enterprise-managed Chrome — so a downloaded panel stays exactly as old as the day you unzipped it. The build version sits in the panel toolbar and in every export; compare it against the Releases page when behaviour looks wrong.
+
+The version banner is a different thing: it fires only when the panel and the page disagree about the **wire** format. A panel that is merely missing bug fixes says nothing, which is why the version is on screen.
+:::
+
+**Why not the Chrome Web Store?** It would auto-update, and it may still happen. It also means a developer account, per-release review latency, a privacy policy and store assets to keep current — a standing obligation for a tool whose audience already runs `npm i` and a terminal. The zip has no such tail.
 
 ### With plugin-auth
 

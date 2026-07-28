@@ -21,17 +21,17 @@ Then open DevTools → **super-line**.
 
 ## Get the panel
 
-The panel is a Chrome extension, loaded unpacked from the repo — it is not on the Chrome Web Store, and there is nothing to install from npm:
-
-```bash
-git clone https://github.com/mertdogar/super-line
-cd super-line && pnpm install
-pnpm --filter @super-line/devtools-extension build
-```
-
-Then open `chrome://extensions`, switch on **Developer mode**, choose **Load unpacked**, and select `packages/devtools-extension/dist`.
+Download the latest `super-line-devtools-<version>.zip` from [Releases](https://github.com/mertdogar/super-line/releases/latest) and unzip it. Then open `chrome://extensions`, switch on **Developer mode**, choose **Load unpacked**, and select the unzipped folder.
 
 It installs with **no permission warnings** — the panel reads the inspected page through the DevTools API, so it asks for nothing up front. The live-push toggle requests one origin when you use it, and declining costs latency only.
+
+The panel **does not auto-update**: Chrome reserves that for extensions it hosts and signs. Its build version is shown in the toolbar — check it against the Releases page when something looks wrong.
+
+Building it yourself works too, if you already have the repo:
+
+```bash
+pnpm --filter @super-line/devtools-extension build   # → packages/devtools-extension/dist
+```
 
 ## What it is for
 

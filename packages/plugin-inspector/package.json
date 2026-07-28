@@ -27,11 +27,12 @@
     "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
   },
   "dependencies": {
+    "@logtape/logtape": "^2.2.4",
     "@standard-community/standard-json": "^0.3.5"
   },
   "peerDependencies": {
-    "@super-line/core": ">=0.14.0 <1.0.0",
-    "@super-line/server": ">=0.15.0 <1.0.0"
+    "@super-line/core": ">=0.18.0 <1.0.0",
+    "@super-line/server": ">=0.18.0 <1.0.0"
   },
   "devDependencies": {
     "@super-line/core": "workspace:^",

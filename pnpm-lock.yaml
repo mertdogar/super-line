@@ -1765,6 +1765,9 @@ importers:
 
   packages/plugin-inspector:
     dependencies:
+      '@logtape/logtape':
+        specifier: ^2.2.4
+        version: 2.2.4
       '@standard-community/standard-json':
         specifier: ^0.3.5
         version: 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.7.1(valibot@1.4.2(typescript@5.9.3)))(arktype@2.2.3)(quansync@0.2.11)(valibot@1.4.2(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.4.3))(zod@4.4.3)

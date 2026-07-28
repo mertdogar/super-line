@@ -1,3 +1,5 @@
+import { createHash, timingSafeEqual } from 'node:crypto'
+import { getLogger } from '@logtape/logtape'
 import {
   SuperLineError,
   INSPECTOR_ROLE,
@@ -13,6 +15,7 @@ import {
   ROW_UPDATED_AT,
   type Contract,
   type Directional,
+  type Handshake,
   type Schema,
   type Expr,
   type DocListOpts,
@@ -38,11 +41,51 @@ export interface InspectorOptions {
    * to show their values. The opposite default from `redact` (a deny-list) and from ctx/data (shown).
    */
   revealEnvKeys?: string[]
+  /**
+   * Who may open the Control Center channel (ADR-0022). A literal `{ username, password }` is compared
+   * timing-safely against the `user` / `password` handshake params the Control Center sends; a function is
+   * called with the raw {@link Handshake} and rejects by throwing (its message reaches the client as the
+   * close reason) — that form is the seam for gating on a host's own identity system, e.g. verifying a
+   * `@super-line/plugin-auth` assertion, without this package depending on it.
+   *
+   * Omitted, the env vars `SUPER_LINE_INSPECTOR_PASSWORD` (+ optional `SUPER_LINE_INSPECTOR_USER`,
+   * default `admin`) are consulted. With neither, the channel stays **open to anyone who can reach the
+   * port** — the pre-ADR-0022 behaviour — and logs a warning on `['super-line','plugin-inspector','auth']`.
+   */
+  auth?: InspectorAuth
 }
+
+/** What {@link InspectorOptions.auth} accepts: a fixed credential, or a predicate over the handshake. */
+export type InspectorAuth = { username?: string; password: string } | ((handshake: Handshake) => unknown | Promise<unknown>)
 
 const encoder = new TextEncoder()
 function encodedByteSize(encoded: string | Uint8Array): number {
   return typeof encoded === 'string' ? encoder.encode(encoded).length : encoded.byteLength
+}
+
+const logAuth = getLogger(['super-line', 'plugin-inspector', 'auth'])
+
+// Compare via SHA-256 digests rather than the raw strings: the digests are always the same length, so there is
+// no length check to return early on — which a direct timingSafeEqual would need, leaking the secret's length.
+const digest = (value: string): Buffer => createHash('sha256').update(value, 'utf8').digest()
+const safeEqual = (a: string, b: string): boolean => timingSafeEqual(digest(a), digest(b))
+
+/**
+ * The effective admission check for the Control Center channel (ADR-0022): the explicit `auth` option, else the
+ * env vars, else `undefined` — which leaves the channel open, exactly as before ADR-0022.
+ */
+function resolveAuth(auth: InspectorAuth | undefined): ((handshake: Handshake) => unknown) | undefined {
+  if (typeof auth === 'function') return auth
+  const username = auth?.username ?? process.env.SUPER_LINE_INSPECTOR_USER ?? 'admin'
+  const password = auth?.password ?? process.env.SUPER_LINE_INSPECTOR_PASSWORD
+  if (!password) return undefined
+  return (handshake) => {
+    // Both compares always run — `&&` would skip the password check on a wrong username, timing which half failed.
+    const okUser = safeEqual(handshake.query.user ?? '', username)
+    const okPassword = safeEqual(handshake.query.password ?? '', password)
+    if (!okUser || !okPassword) throw new SuperLineError('UNAUTHORIZED', 'invalid inspector credentials')
+    return { username }
+  }
 }
 
 // Best-effort schema → JSON Schema, via lazy, optional @standard-community/standard-json. The package (and
@@ -182,6 +225,7 @@ function stripTs(expr: Expr | undefined): Expr | undefined {
 export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
   const redact = new Set(opts.redact ?? [])
   const revealEnvKeys = new Set(opts.revealEnvKeys ?? [])
+  const authenticate = resolveAuth(opts.auth)
 
   // env is masked-by-default (ADR-0012): show the shape (all keys), but mask each value to `•••` unless the
   // key is allow-listed via `revealEnvKeys` — the opposite of `redact`. Revealed values still pass through
@@ -260,6 +304,12 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
       channel = ctx.channel('events') // the CC's `events` feed rides this plugin channel (cluster-wide)
       originNodeId = ctx.instanceId
       encode = (v) => ctx.serializer.encode(v)
+      if (!authenticate)
+        logAuth.warning(
+          'the inspector channel is UNAUTHENTICATED — anyone who can reach this port can read every ' +
+            'collection (row policies are bypassed), every connection ctx, and the live message feed. Set ' +
+            'SUPER_LINE_INSPECTOR_PASSWORD, or pass inspector({ auth }).',
+        )
     },
     onEvent(event) {
       if (!channel) return
@@ -276,6 +326,7 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
     connection: {
       role: INSPECTOR_ROLE,
       subprotocol: INSPECTOR_SUBPROTOCOL,
+      ...(authenticate ? { authenticate } : {}),
       contract: InspectorContract,
       handlers: (ctx) => ({
         getContract: async () => ({

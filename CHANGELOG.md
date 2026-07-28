@@ -3,7 +3,7 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
-## Unreleased
+## 2026-07-28
 
 ### Features
 
@@ -13,6 +13,7 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Bug Fixes
 
+- Fix docs build script ([f6f18fc])
 - **collections-pglite:** Refuse a self store that can never emit a change ([460588f])
 - **docs:** Extract the plugin-queue API reference ([ef0dc28])
 

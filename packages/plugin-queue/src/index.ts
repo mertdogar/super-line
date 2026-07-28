@@ -5,6 +5,7 @@ import timezone from 'dayjs/plugin/timezone.js'
 import * as z from 'zod'
 import {
   and,
+  andFilters,
   defineContractPlugin,
   eq,
   isIn,
@@ -134,7 +135,7 @@ export interface BackoffConfig {
 export interface QueueDefinition<I extends Schema = Schema, R extends Schema = Schema> {
   input: I
   result: R
-  worker: (input: InferOut<I>, ctx: WorkerContext) => InferIn<R> | Promise<InferIn<R>>
+  worker?: (input: InferOut<I>, ctx: WorkerContext) => InferIn<R> | Promise<InferIn<R>>
   concurrency: number
   leaseMs?: number
   timeoutMs?: number
@@ -198,13 +199,40 @@ export class PermanentJobError extends Error {
 
 type QueueName<Q extends QueueDefinitions> = keyof Q & string
 type InputOf<Q extends QueueDefinitions, N extends QueueName<Q>> = InferIn<Q[N]['input']>
+type ResultOf<Q extends QueueDefinitions, N extends QueueName<Q>> = InferIn<Q[N]['result']>
+type WorkerOf<Q extends QueueDefinitions, N extends QueueName<Q>> = (
+  input: InferOut<Q[N]['input']>,
+  ctx: WorkerContext,
+) => ResultOf<Q, N> | Promise<ResultOf<Q, N>>
+type QueueWorker = NonNullable<QueueDefinition['worker']>
 type ScheduleCreateOf<Q extends QueueDefinitions> = {
   [N in QueueName<Q>]: Omit<CreateScheduleOptions<N>, 'input'> & { input: InputOf<Q, N> }
 }[QueueName<Q>]
+type HandleScheduleCreate<Q extends QueueDefinitions, N extends QueueName<Q>> = Omit<
+  CreateScheduleOptions<N>,
+  'queue' | 'input'
+> & { input: InputOf<Q, N> }
+
+/** One queue's namespace: everything keyed by queue name, with the name already applied. */
+export interface QueueHandle<Q extends QueueDefinitions, N extends QueueName<Q>> {
+  readonly name: N
+  /** Whether a worker is bound for this queue *on this node*. Unbound queues are never claimed here. */
+  readonly hasWorker: boolean
+  /** Bind this queue's worker. The last call wins, including over one declared inline in `queues`. */
+  setWorker(worker: WorkerOf<Q, N>): void
+  enqueue(input: InputOf<Q, N>, options?: EnqueueOptions): Promise<QueueJob>
+  /** Jobs of this queue only — a `filter` you pass is ANDed with that scope. */
+  list(query?: CollectionQuery): Promise<QueueJob[]>
+  readonly schedules: {
+    create(options: HandleScheduleCreate<Q, N>): Promise<QueueSchedule>
+    list(query?: CollectionQuery): Promise<QueueSchedule[]>
+  }
+}
 
 export interface QueueKit<Q extends QueueDefinitions> {
   readonly contract: ReturnType<typeof queueContract>
   readonly plugin: SuperLinePlugin
+  queue<N extends QueueName<Q>>(name: N): QueueHandle<Q, N>
   enqueue<N extends QueueName<Q>>(queue: N, input: InputOf<Q, N>, options?: EnqueueOptions): Promise<QueueJob>
   get(jobId: string): Promise<QueueJob | undefined>
   list(query?: CollectionQuery): Promise<QueueJob[]>
@@ -269,6 +297,11 @@ const occurrenceKey = (schedule: QueueSchedule, at: number): string =>
 
 const randomId = (): string => globalThis.crypto.randomUUID()
 
+const scopedTo = (queue: string, query?: CollectionQuery): CollectionQuery => ({
+  ...query,
+  filter: andFilters(eq('queue', queue), query?.filter),
+})
+
 class QueueRuntime<Q extends QueueDefinitions> {
   private ctx?: PluginContext
   private ready: Promise<void> = Promise.resolve()
@@ -278,6 +311,7 @@ class QueueRuntime<Q extends QueueDefinitions> {
   private controllers = new Set<AbortController>()
   private abandoning = false
   private unsubscribeWake?: () => void
+  private readonly bound = new Map<string, QueueWorker>()
 
   constructor(
     private readonly definitions: Q,
@@ -336,6 +370,20 @@ class QueueRuntime<Q extends QueueDefinitions> {
     const definition = this.definitions[queue]
     if (!definition) throw new Error(`Unknown queue: ${queue}`)
     return definition
+  }
+
+  private workerFor(queue: string): QueueWorker | undefined {
+    return this.bound.get(queue) ?? this.definitions[queue]?.worker
+  }
+
+  hasWorker(queue: string): boolean {
+    return Boolean(this.workerFor(queue))
+  }
+
+  setWorker(queue: string, worker: QueueWorker): void {
+    this.definition(queue)
+    this.bound.set(queue, worker)
+    void this.tick()
   }
 
   async enqueue(queue: string, input: unknown, options: EnqueueOptions = {}, links: Partial<QueueJob> = {}): Promise<QueueJob> {
@@ -432,10 +480,14 @@ class QueueRuntime<Q extends QueueDefinitions> {
   }
 
   private async tick(): Promise<void> {
-    if (this.closing) return
+    if (this.closing || !this.ctx) return
     await this.ready
     await this.reap()
     for (const [queue, definition] of Object.entries(this.definitions)) {
+      // A queue with no worker HERE is skipped, never failed (ADR-0023). Its jobs wait for this node to bind
+      // one or for a node that already has; throwing instead would burn work a peer was about to run.
+      const worker = this.workerFor(queue)
+      if (!worker) continue
       const slots = await this.slots().snapshot({
         filter: eq('queue', queue),
         orderBy: [{ field: 'index', dir: 'asc' }],
@@ -445,7 +497,7 @@ class QueueRuntime<Q extends QueueDefinitions> {
         if (slot.runId && (slot.leaseExpiresAt ?? 0) > Date.now()) continue
         const job = await this.claim(queue, slot, definition)
         if (job) {
-          const task = this.run(job, definition).finally(() => this.running.delete(task))
+          const task = this.run(job, definition, worker).finally(() => this.running.delete(task))
           this.running.add(task)
         }
       }
@@ -503,7 +555,7 @@ class QueueRuntime<Q extends QueueDefinitions> {
     return applied ? nextJob : undefined
   }
 
-  private async run(job: QueueJob, definition: QueueDefinition): Promise<void> {
+  private async run(job: QueueJob, definition: QueueDefinition, worker: QueueWorker): Promise<void> {
     const controller = new AbortController()
     this.controllers.add(controller)
     const cancel = this.context().channel('cancel').subscribe((data) => {
@@ -520,7 +572,7 @@ class QueueRuntime<Q extends QueueDefinitions> {
         else controller.signal.addEventListener('abort', fail, { once: true })
       })
       const result = await Promise.race([
-        Promise.resolve(definition.worker(job.input, { jobId: job.id, attempt: job.attempt, signal: controller.signal })),
+        Promise.resolve(worker(job.input, { jobId: job.id, attempt: job.attempt, signal: controller.signal })),
         aborted,
       ])
       let parsed: unknown
@@ -896,9 +948,24 @@ export function queue<const Q extends QueueDefinitions>(options: QueueOptions<Q>
     setup: (ctx) => runtime.setup(ctx),
   }
 
+  const handle = <N extends QueueName<Q>>(name: N): QueueHandle<Q, N> => ({
+    name,
+    get hasWorker() {
+      return runtime.hasWorker(name)
+    },
+    setWorker: (worker) => runtime.setWorker(name, worker as QueueWorker),
+    enqueue: (input, enqueueOptions) => runtime.enqueue(name, input, enqueueOptions),
+    list: (query) => runtime.list(scopedTo(name, query)),
+    schedules: {
+      create: (schedule) => runtime.createSchedule({ ...schedule, queue: name }),
+      list: (query) => runtime.listSchedules(scopedTo(name, query)),
+    },
+  })
+
   return {
     contract,
     plugin,
+    queue: handle,
     enqueue: (name, input, enqueueOptions) => runtime.enqueue(name, input, enqueueOptions),
     get: (id) => runtime.get(id),
     list: (query) => runtime.list(query),

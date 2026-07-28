@@ -179,6 +179,87 @@ describe('queue kit', () => {
     client.close()
   })
 
+  it('leaves an unbound queue queued rather than failing it, and drains it once a worker binds', async () => {
+    const kit = queue({
+      pollIntervalMs: 10,
+      queues: {
+        deferred: { input: z.string(), result: z.string(), concurrency: 1 },
+      },
+    })
+    const contract = defineContract({ roles: { user: {} }, plugins: [kit.contract] })
+    server = createSuperLineServer(contract, {
+      transports: [],
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      collections: memoryCollections(),
+      plugins: [kit.plugin],
+    })
+
+    const handle = kit.queue('deferred')
+    expect(handle.hasWorker).toBe(false)
+
+    const job = await kit.enqueue('deferred', 'work')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    // ~10 poll intervals later the job is untouched: no claim, no attempt, no failure
+    expect(await kit.get(job.id)).toMatchObject({ status: 'queued', attempt: 0 })
+
+    handle.setWorker(async (value) => value.toUpperCase())
+    expect(handle.hasWorker).toBe(true)
+    expect(await waitFor(() => kit.get(job.id), (row) => row?.status === 'completed')).toMatchObject({
+      result: 'WORK',
+    })
+  })
+
+  it('replaces an inline worker with one bound before the server is even constructed', async () => {
+    const kit = queue({
+      pollIntervalMs: 10,
+      queues: {
+        greet: { input: z.string(), result: z.string(), concurrency: 1, worker: async () => 'inline' },
+      },
+    })
+    kit.queue('greet').setWorker(async () => 'bound')
+
+    const contract = defineContract({ roles: { user: {} }, plugins: [kit.contract] })
+    server = createSuperLineServer(contract, {
+      transports: [],
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      collections: memoryCollections(),
+      plugins: [kit.plugin],
+    })
+
+    const job = await kit.enqueue('greet', 'hi')
+    expect(await waitFor(() => kit.get(job.id), (row) => row?.status === 'completed')).toMatchObject({
+      result: 'bound',
+    })
+  })
+
+  it('scopes a handle enqueue, list, and schedules to its own queue', async () => {
+    const kit = queue({
+      pollIntervalMs: 10,
+      queues: {
+        alpha: { input: z.string(), result: z.string(), concurrency: 1, worker: async (value) => value },
+        beta: { input: z.string(), result: z.string(), concurrency: 1, worker: async (value) => value },
+      },
+    })
+    const contract = defineContract({ roles: { user: {} }, plugins: [kit.contract] })
+    server = createSuperLineServer(contract, {
+      transports: [],
+      authenticate: () => ({ role: 'user' as const, ctx: {} }),
+      collections: memoryCollections(),
+      plugins: [kit.plugin],
+    })
+
+    const alpha = kit.queue('alpha')
+    await alpha.enqueue('one')
+    await kit.queue('beta').enqueue('two')
+
+    expect(await alpha.list()).toMatchObject([{ queue: 'alpha', input: 'one' }])
+    expect(await kit.list()).toHaveLength(2)
+
+    await alpha.schedules.create({ cron: '0 9 * * *', input: 'nightly' })
+    expect(await alpha.schedules.list()).toMatchObject([{ queue: 'alpha', cron: '0 9 * * *' }])
+    expect(await kit.queue('beta').schedules.list()).toEqual([])
+  })
+
   it('does not reap a worker whose lease was renewed after an expiry scan', async () => {
     const kit = queue({
       pollIntervalMs: 5,

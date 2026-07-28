@@ -53,7 +53,8 @@ export type AuthOutcome = { role: string; ctx: unknown; env?: unknown; transport
  * A plugin-owned (reserved) connection class the server declares to its transports: a role name the
  * transport short-circuits `authenticate` for, plus how to recognize it. WS matches on `subprotocol`;
  * other transports may match on the {@link Handshake} via `match`. The conn is accepted with this `role`
- * and an empty ctx, then treated as observer-invisible by the core. See ADR-0005 (phase 2).
+ * and the ctx its own {@link ReservedConnection.authenticate} resolved (an empty object when it declares
+ * none), then treated as observer-invisible by the core. See ADR-0005 (phase 2) and ADR-0022.
  */
 export interface ReservedConnection {
   /** The reserved role assigned to a matching connection (never one of the user contract's roles). */
@@ -62,6 +63,17 @@ export interface ReservedConnection {
   subprotocol?: string
   /** Predicate for transports without a subprotocol (SSE/libp2p): match on the normalized handshake. */
   match?: (handshake: Handshake) => boolean
+  /**
+   * Authorize admission to this class (ADR-0022). The host's `authenticate` resolves CONTRACT roles and so
+   * never sees a reserved connection — which is why the class that declared it decides instead. Called by the
+   * transport BEFORE accepting; the resolved value becomes the connection's `ctx`, and a **throw rejects**
+   * (same idiom as {@link ServerTransport}'s `authenticate`, whose message the transport surfaces).
+   *
+   * Deliberately does NOT return a `role`: the role is fixed at declaration, and a class free to restate it
+   * could name a *host* role — minting a connection that dispatches against the host contract with the host's
+   * `authenticate` never having run. Omit to admit unconditionally.
+   */
+  authenticate?: (handshake: Handshake) => unknown | Promise<unknown>
 }
 
 /**

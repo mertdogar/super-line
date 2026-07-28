@@ -58,16 +58,16 @@ export function webSocketServerTransport(opts: WebSocketServerTransportOptions =
     },
   })
 
-  // the reserved role for this upgrade, if it matches a declared class (by subprotocol, then by handshake)
-  function reservedRoleFor(req: IncomingMessage): string | undefined {
+  // the reserved class for this upgrade, if one matches (by subprotocol, then by handshake)
+  function reservedFor(req: IncomingMessage): ReservedConnection | undefined {
     const list = negotiable()
     if (list.length === 0) return undefined
     const raw = req.headers['sec-websocket-protocol']
     const offered = raw ? (Array.isArray(raw) ? raw.join(',') : raw).split(',').map((p) => p.trim()) : []
-    for (const rc of list) if (rc.subprotocol && offered.includes(rc.subprotocol)) return rc.role
+    for (const rc of list) if (rc.subprotocol && offered.includes(rc.subprotocol)) return rc
     if (list.some((rc) => rc.match)) {
       const handshake = buildHandshake(req)
-      for (const rc of list) if (rc.match?.(handshake)) return rc.role
+      for (const rc of list) if (rc.match?.(handshake)) return rc
     }
     return undefined
   }
@@ -82,9 +82,30 @@ export function webSocketServerTransport(opts: WebSocketServerTransportOptions =
         hooks!.onConnection(wsServerRawConn(ws, opts.backpressure), auth)
       })
     }
-    const reservedRole = reservedRoleFor(req)
-    if (reservedRole) {
-      accept({ role: reservedRole, ctx: {} }) // short-circuit authenticate for a reserved (plugin-owned) connection
+    const reserved = reservedFor(req)
+    if (reserved) {
+      // A reserved (plugin-owned) class short-circuits the HOST's authenticate — it resolves contract roles and
+      // this role is deliberately not one. The class authorizes its own admission instead (ADR-0022); with no
+      // hook declared, admission stays unconditional with an empty ctx.
+      let ctx: unknown = {}
+      if (reserved.authenticate) {
+        try {
+          ctx = (await reserved.authenticate(buildHandshake(req))) ?? {}
+        } catch (err) {
+          // Deliberately NOT a 401 on the upgrade: a refused handshake reaches a browser as a bare code 1006,
+          // indistinguishable from an unreachable host, so a client cannot stop retrying a bad credential.
+          // Complete the upgrade and close 4401 instead — `onConnection` never fires, so the core never sees it.
+          logAuth.warning('reserved connection rejected for role={role} {error}', { role: reserved.role, error: err })
+          const reason = err instanceof Error && err.message ? err.message : 'unauthorized'
+          wss.handleUpgrade(req, socket, head, (ws) => ws.close(4401, truncateReason(reason)))
+          return
+        }
+      }
+      if (stopped) {
+        socket.destroy() // stopped while authorizing — drop instead of accepting on a dead server
+        return
+      }
+      accept({ role: reserved.role, ctx })
       return
     }
     let auth: AuthOutcome
@@ -193,6 +214,13 @@ export function wsServerRawConn(ws: WsServerSocket, backpressure?: Backpressure)
       ws.terminate()
     },
   }
+}
+
+// A close reason rides the control frame, capped at 123 bytes by RFC 6455 — `ws` throws above it.
+function truncateReason(reason: string): string {
+  const encoded = new TextEncoder().encode(reason)
+  if (encoded.length <= 123) return reason
+  return new TextDecoder().decode(encoded.slice(0, 123)).replace(/�$/, '')
 }
 
 function buildHandshake(req: IncomingMessage): Handshake {

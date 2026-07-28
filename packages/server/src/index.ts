@@ -368,6 +368,17 @@ export interface PluginConnection {
   subprotocol?: string
   /** Predicate for transports without a subprotocol (SSE/libp2p): match on the normalized handshake. */
   match?: (handshake: Handshake) => boolean
+  /**
+   * Authorize admission to this class (ADR-0022). The host's `authenticate` resolves CONTRACT roles and never
+   * sees a reserved connection, so the declaring plugin decides instead. Called by the transport BEFORE
+   * accepting: the resolved value becomes `conn.ctx`, and a **throw rejects** (the WS transport closes 4401
+   * with the message, without ever surfacing the connection to the core). Omit to admit unconditionally —
+   * which is the pre-ADR-0022 behaviour, still the default.
+   *
+   * It does not return a role: the role is fixed here at declaration, so a class cannot name a *host* role
+   * and mint a connection the host never authenticated.
+   */
+  authenticate?: (handshake: Handshake) => Awaitable<unknown>
   /** The parallel contract these connections speak (its `clientToServer` = requests, `subscribe` topics = feeds). */
   contract: Contract
   /**
@@ -637,10 +648,10 @@ export function createSuperLineServer<
   const reserved: ReservedConnection[] = []
   for (const p of plugins) {
     if (!p.connection) continue
-    const { role, subprotocol, match } = p.connection
+    const { role, subprotocol, match, authenticate } = p.connection
     if (reserved.some((r) => r.role === role) || role in c.roles)
       throw new Error(`Plugin '${p.name}' reserved role '${role}' collides with an existing role`)
-    reserved.push({ role, subprotocol, match })
+    reserved.push({ role, subprotocol, match, authenticate })
   }
   const reservedRoles = new Set(reserved.map((r) => r.role))
   // serving side (handlers + parallel contract + ctx), populated after `api` is built

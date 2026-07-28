@@ -7,6 +7,26 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Features
 
+- **example:** Opt react-chat-transports into the devtools plugin ([5777f07])
+- **devtools-extension:** A Chrome DevTools panel for one tab's client ([3d40578])
+- **plugin-devtools:** Buffer a client's own frames for the DevTools panel ([ad190fa])
+- **client:** Instrument the client-side tap and give plugins a setup hook ([27beebb])
+- **core:** Give the client its own tap vocabulary and share safeSnapshot ([16ebdb8])
+
+### Refactor
+
+- **plugin-inspector:** Take safeSnapshot from core ([16d6d38])
+
+### Documentation
+
+- Say how to get the DevTools panel ([e3f76b2])
+- Record ADR-0024 and document the client DevTools panel ([a346b7b])
+- **changelog:** Refresh the root aggregate for the plugin-queue 0.2.0 release ([1417c5d])
+
+## 2026-07-28
+
+### Features
+
 - **plugin-queue:** Bind a queue's worker after construction ([2fcb4ce])
 
 ### Documentation

@@ -3,6 +3,17 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [server-v0.18.0] — 2026-07-28
+
+### Features
+
+- **plugin-inspector:** Lock the Control Center channel behind a credential ([761f1e0])
+- A plugin connection class authorizes its own admission ([9e15eb4])
+
+### Documentation
+
+- Record ADR-0022 and stop calling the inspector channel safe-by-omission ([caf10ca])
+
 ## [server-v0.17.0] — 2026-07-28
 
 ### Features

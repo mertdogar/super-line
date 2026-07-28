@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [transport-websocket-v0.9.0] — 2026-07-28
+
+### Features
+
+- A plugin connection class authorizes its own admission ([9e15eb4])
+
 ## [transport-websocket-v0.8.0] — 2026-07-24
 
 ### Features

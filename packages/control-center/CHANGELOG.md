@@ -3,6 +3,16 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [control-center-v0.14.0] — 2026-07-28
+
+### Features
+
+- **control-center:** Credentials, and a terminal unauthorized state ([6faf64d])
+
+### Documentation
+
+- Record ADR-0022 and stop calling the inspector channel safe-by-omission ([caf10ca])
+
 ## [control-center-v0.13.0] — 2026-07-28
 
 ### Features

@@ -3,6 +3,16 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [plugin-inspector-v0.4.0] — 2026-07-28
+
+### Features
+
+- **plugin-inspector:** Lock the Control Center channel behind a credential ([761f1e0])
+
+### Documentation
+
+- Record ADR-0022 and stop calling the inspector channel safe-by-omission ([caf10ca])
+
 ## [plugin-inspector-v0.3.2] — 2026-07-23
 
 ### Bug Fixes

@@ -33,6 +33,7 @@
       "@super-line/plugin-chat/react": ["./packages/plugin-chat/src/react.tsx"],
       "@super-line/plugin-chat/ai-sdk": ["./packages/plugin-chat/src/ai.ts"],
       "@super-line/plugin-queue": ["./packages/plugin-queue/src/index.ts"],
+      "@super-line/plugin-devtools": ["./packages/plugin-devtools/src/index.ts"],
       "@super-line/collections-memory": ["./packages/collections-memory/src/index.ts"],
       "@super-line/collections-crdt-memory": ["./packages/collections-crdt-memory/src/index.ts"],
       "@super-line/collections-crdt-libsql": ["./packages/collections-crdt-libsql/src/index.ts"],

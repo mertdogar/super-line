@@ -152,7 +152,7 @@ The plugin's full surface is split across focused guides:
 
 - [Sessions, roles & API keys](/how-to/auth-sessions-roles-keys) — durable sessions, roles-as-data, and `slp_` API keys.
 - [JWT & sealed tokens](/how-to/auth-jwt-sealed-tokens) — server-minted bearer assertions for stateless and cross-service connect, including the sealed-only client (`resolveToken`/`tokenParam`).
-- [Server-side hooks](/how-to/auth-hooks) — before/after connection admission, provisioning policy, and audit (ADR-0017).
+- [Server-side hooks](/how-to/auth-hooks) — before/after connection admission, provisioning policy, and audit.
 - [Provision an agent identity](/how-to/auth-agent-identity) — run an AI agent as an API-key user, plus the `authKit` management surface and revocation.
 - [Reset a password](/how-to/auth-password-reset) — the logged-out recovery flow via a host callback.
 

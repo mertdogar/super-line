@@ -14,7 +14,7 @@ import { chat } from '@super-line/plugin-chat/server'
 import { chatClient } from '@super-line/plugin-chat/client'
 import { chatAgentTools } from '@super-line/plugin-chat/ai-sdk'
 
-// Channel resources (PLAN-chat-resources): the HOST declares its CRDT collections — chat makes them
+// Channel resources: the HOST declares its CRDT collections — chat makes them
 // channel-native. Two kinds here: a todo list (owned — minted by chat, dies with its channel) and a
 // canvas (linked — host-meaningful doc id, shareable across channels, chat never deletes it).
 // Schemas are presence-tolerant (ADR-0008): concurrently-edited fields carry .catch().

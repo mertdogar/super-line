@@ -324,7 +324,7 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
 
     // Bearer assertion — one param carries both serializations (RFC 7519: a JWT is a claims set in JWS *or* JWE
     // form), dispatched on the compact dot count. Signature/decryption + expiry are checked statelessly; the one
-    // deliberate dent is a user read (the deactivation check — PLAN-plugin-chat decision 10), which also supplies
+    // deliberate dent is a user read (the deactivation check), which also supplies
     // a SEALED assertion's roles. A `signed` assertion keeps trusting its own role claims (ADR-0015).
     const jwtParam = handshake.query.jwt
     if (assertions && jwtParam) {
@@ -643,7 +643,7 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
     },
   }
 
-  // ── imperative management (PLAN-plugin-chat Phase 0) ────────────────────────────────────────────
+  // ── imperative management ───────────────────────────────────────────────────────
   // Everything below writes through the plugin co-writer so changes fan out to live subscribers; the
   // co-writer binds at plugin setup, hence the one rule: these need the running server.
 

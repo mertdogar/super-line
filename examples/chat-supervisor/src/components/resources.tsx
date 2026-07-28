@@ -1,4 +1,4 @@
-// The channel's shared resources (PLAN-chat-resources): a sticky-note canvas and a block doc,
+// The channel's shared resources: a sticky-note canvas and a block doc,
 // both CRDT documents the human edits through the native DocHandle (useDoc) while the editor
 // subagent writes through the acked writeResource path — the same doc, merging live. The registry
 // rows come from the chat plugin (useChannelResources); presence is the coarse who's-open rows.

@@ -4,7 +4,7 @@ import type { RowOf } from '@super-line/core'
 import { authContract } from '@super-line/plugin-auth'
 import { chatContract } from '@super-line/plugin-chat'
 
-// The two channel-resource doc shapes (PLAN-chat-resources): id-keyed maps merge concurrent
+// The two channel-resource doc shapes: id-keyed maps merge concurrent
 // edits cleanly — user drags a note while the agent adds another and both land. Presence-tolerant
 // (ADR-0008): the concurrently-edited records carry .catch() (so a transient partial merge never
 // rejects an innocent write) — which also means a bad agent write INSIDE them is accepted, not

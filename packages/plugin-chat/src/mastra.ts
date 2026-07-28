@@ -19,7 +19,7 @@ import type { ChatStreamEvent, StreamEventSink } from './index.js'
 // Maps one Mastra `fullStream` chunk to plugin-chat STREAM EVENTS for ONE lane: the same
 // structural `ChunkLike` view, the same stateful per-lane mapper with a `suppressToolNames`
 // mechanic, the same case vocabulary — only the OUTPUT vocabulary changed, from HarnessEvents to
-// ChatStreamEvents (PLAN-chat-streaming decision 4). The same mapper runs at every depth, so a
+// ChatStreamEvents. The same mapper runs at every depth, so a
 // subagent's tool calls and text stream with full fidelity, exactly like the supervisor's.
 //
 // Two deliberate translations from the harness original:

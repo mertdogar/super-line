@@ -8,7 +8,7 @@ The motivating case: an **AI agent** shares a channel with a human and needs rea
 `omma.ai` API key, a `projectId` — to call other services *for* the human. The server knows which creds each
 connection should hold; `env` is how it hands them over and rotates them mid-conversation. super-line is a pure
 **courier** — it validates and delivers the payload, but never interprets or acts on it (no impersonation, no
-"on-behalf-of"). See [ADR-0012](https://github.com/mertdogar/super-line/blob/main/docs/adr/0012-connection-env-is-server-vended-client-visible-state.md).
+"on-behalf-of").
 
 ::: warning env holds secrets
 `env` is **never persisted** — it lives only in memory on the live connection and is re-seeded on reconnect.

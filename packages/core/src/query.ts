@@ -34,7 +34,7 @@ export interface OrderBy {
 /**
  * What a client subscribes to. An empty query = the whole (ACL-visible) collection. `orderBy`/`limit`
  * shape the **initial snapshot only** — the live phase streams every filter-matching change, and the
- * consumer owns its window (see PLAN-collections.md, decision 11).
+ * consumer owns its window.
  */
 export interface CollectionQuery {
   filter?: Expr

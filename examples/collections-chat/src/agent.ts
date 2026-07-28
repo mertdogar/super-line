@@ -31,7 +31,7 @@ export async function seedChannels(chatKit: ChatKit): Promise<string> {
 }
 
 /**
- * Provision the AI agent as a REGULAR user (PLAN-plugin-chat decision 13) and run it as a genuine client:
+ * Provision the AI agent as a REGULAR user and run it as a genuine client:
  *
  *   1. idempotently create a passwordless `Ask AI` user (`authKit.users.create`)
  *   2. mint an API key for it (`authKit.apiKeys.create`) and add it to #ask-ai (`chatKit.members.add`)
@@ -105,7 +105,7 @@ export async function startAgent(deps: { authKit: AuthKit; chatKit: ChatKit; url
 type Streamer = (prompt: string, history: ModelMessage[]) => Promise<void>
 
 /**
- * Build the reply pipeline: the bot answers as a STREAMED message (PLAN-chat-streaming) — reasoning,
+ * Build the reply pipeline: the bot answers as a STREAMED message — reasoning,
  * its tool calls, and text land live in #ask-ai as message parts, exactly what the UI renders.
  *
  * With `AI_GATEWAY_API_KEY`: a `ToolLoopAgent` whose `stream()` result pipes through

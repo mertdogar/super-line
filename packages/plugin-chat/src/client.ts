@@ -145,7 +145,7 @@ export interface ChatClient<C extends Contract> {
   /** Open a streamed message in a channel you are a member of and get its producer handle. */
   stream(channelId: string, opts?: { metadata?: Record<string, unknown> }): Promise<ChatStreamHandle<C>>
   /**
-   * Live registry of one channel's resources (PLAN-chat-resources). Open a row's doc with the
+   * Live registry of one channel's resources. Open a row's doc with the
    * NATIVE surface: `client.collection(row.collection).open(row.docId)` / `useDoc` — chat wraps
    * nothing there.
    */

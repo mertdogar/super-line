@@ -27,7 +27,7 @@ export interface CollectionInfoLite {
 
 /**
  * The **Collection runtime**: the server-side authority for contract-declared Collections, spanning both
- * consistency models (CONTEXT.md). One Collection concept with mode-specific behaviour — not a merger of the
+ * consistency models. One Collection concept with mode-specific behaviour — not a merger of the
  * two persistence seams, which stay separate backends by construction.
  *
  * Everything a caller must know is here: the server hands it frames off the wire, relayed payloads off the

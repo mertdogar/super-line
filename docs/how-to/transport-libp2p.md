@@ -61,6 +61,6 @@ authenticate: (h) => {
 - Frames are **length-prefixed** on the stream (a raw libp2p message doesn't preserve frame boundaries under yamux) — invisible to your app.
 - Star topology only: the server is a distinguished, authoritative peer; clients dial it. There is no client-to-client data path through super-line.
 - Same `authenticate(handshake)`, same app-level ping/pong liveness, same reconnect model as every wire.
-- See `PLAN-transports.md` for the full WebRTC-direct vs circuit-relay connectivity matrix.
+- Direct WebRTC needs both peers reachable after STUN; behind symmetric NAT the dial falls back to a public circuit-relay hop. The [`libp2p-nat` example](https://github.com/mertdogar/super-line/tree/main/examples/libp2p-nat) is the working deployment of that path.
 
 Next: [Loopback (testing)](/how-to/transport-loopback) · back to [Choose a transport](/how-to/choose-a-transport).

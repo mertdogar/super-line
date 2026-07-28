@@ -19,7 +19,7 @@ A CRDT collection is **opened by id, not queried** — `collection(n).open(id)` 
 
 Unlike the old off-contract document stores, **the schema is enforced**. Every write is validated *before it commits*: the ingress node merges the incoming delta onto a scratch copy, snapshots it to plaintext, validates against the contract schema, and only then commits and fans it out. An invalid write is rejected server-side and never reaches other clients; the writer resyncs. (Relay nodes trust deltas already validated at the ingress node.)
 
-This overturned ADR-0003's old premise that "merge deltas are unvalidatable" — see [ADR-0007](https://github.com/mertdogar/super-line/blob/main/docs/adr/0007-crdt-docs-are-typed-collections.md).
+This overturned the earlier premise that merge deltas are unvalidatable: the backend merges onto a scratch copy first, so there is a plaintext snapshot to validate before anything commits.
 
 ::: warning Keep CRDT schemas tolerant
 Validation runs against the *post-merge* state, which a concurrent merge can leave **momentarily incomplete** — an overwrite of a field is internally a delete-then-insert, and under interleaved cross-node folds the delete can land a beat before the insert. Two consequences:
@@ -32,7 +32,7 @@ So for any field that is concurrently mutated, prefer `z.number().catch(0)` / `.
 This is also **what makes op-log compaction safe.** A durable/`self` backend periodically folds a doc's op-log into a baseline and trims the folded rows. The reject churn above leaves a permanent gap in the log, and compaction **bakes that gap-corrupted fold into the baseline** — turning a transient loss into permanent, cluster-wide corruption. A presence-tolerant schema means no rejects → no gaps → every baseline stays complete. Strict-required fields + compaction is the combination that wedges for good.
 :::
 
-See [ADR-0008](https://github.com/mertdogar/super-line/blob/main/docs/adr/0008-crdt-validation-is-scoped-to-present-values.md) for the full reasoning.
+Validation is therefore scoped to the values actually present in the merged snapshot.
 
 ## Server: a backend + a guard, and create the doc
 

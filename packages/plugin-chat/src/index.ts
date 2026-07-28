@@ -60,7 +60,7 @@ export type ToolState = (typeof TOOL_STATES)[number]
 /**
  * The host's opaque extension slot, present on all three collections (validate its shape in `before` hooks).
  * On MESSAGES one key is reserved: `metadata.resource` carries the plugin's resource cards
- * (created/attached/detached announcements, PLAN-chat-resources).
+ * (created/attached/detached announcements).
  */
 const metadata = z.record(z.string(), z.unknown()).optional()
 
@@ -100,7 +100,7 @@ export const membershipSchema = z.object({
 })
 
 /**
- * The messages schema, generic over the HOST-PARAMETRIZED body (PLAN-plugin-chat decision 8):
+ * The messages schema, generic over the HOST-PARAMETRIZED body:
  * `chatContract({ content })` slots the host's schema in here AND into the send/edit request inputs,
  * so the server validates every message body and types flow end-to-end. Default body: plain text.
  */
@@ -110,7 +110,7 @@ export const messageSchema = <S extends Schema>(content: S) =>
     channelId: z.string(),
     authorId: z.string(),
     // OPTIONAL because a STREAMED message's envelope stays quiet until finalize derives the
-    // projection (PLAN-chat-streaming decision 9); plain sends always carry it
+    // projection; plain sends always carry it
     content: hostSchema(content).optional(),
     createdAt: z.number(),
     editedAt: z.number().nullable(),
@@ -122,7 +122,7 @@ export const messageSchema = <S extends Schema>(content: S) =>
 
 /**
  * One block of a streamed message — its own row so a rewrite is bounded by PART size, never turn
- * size (PLAN-chat-streaming decision 3). pk = `${messageId}:${idx}` (server-assigned idx).
+ * size. pk = `${messageId}:${idx}` (server-assigned idx).
  * `parent` = the `toolCallId` of the delegating tool part this nests under (subagent trees,
  * decision 10); null = root lane. `offset` = the checkpointed length of `text` — live deltas splice
  * on top of it. `lastActivityAt` is stamped at every checkpoint so staleness is visible.
@@ -183,7 +183,7 @@ export type ChatMessagePart<Data = unknown> = MessagePartBase &
 export const partId = (messageId: string, idx: number): string => `${messageId}:${idx}`
 
 /**
- * The channel-resource link registry (PLAN-chat-resources): which docs belong to which channel.
+ * The channel-resource link registry: which docs belong to which channel.
  * pk = `${channelId}:${kind}:${docId}` (see {@link resourceId}) — duplicate attach is structurally
  * impossible, and a create-or-attach race lands on the same row. `collection` is denormalized from
  * the server-side kind registry at write time so rows self-describe which CRDT collection to open.
@@ -205,7 +205,7 @@ export type ChatResource = z.infer<typeof resourceSchema>
 export const resourceId = (channelId: string, kind: string, docId: string): string => `${channelId}:${kind}:${docId}`
 
 /**
- * Coarse who's-open presence on a resource doc (PLAN-chat-resources). DOC-scoped, deliberately not
+ * Coarse who's-open presence on a resource doc. DOC-scoped, deliberately not
  * channel-scoped — a channelId field would LWW-clobber when one linked doc is open via two channels.
  * pk = `${collection}:${docId}:${userId}` (per user, not per tab). Liveness = `heartbeatAt` recency
  * (recommended: 20s heartbeats, consider rows younger than 45s live); rows age out via
@@ -367,7 +367,7 @@ const requestDefs = <S extends Schema, D extends Schema>(content: S, data: D) =>
     sendMessage: { input: z.object({ channelId: z.string(), content: contentZ, metadata }), output: message },
     editMessage: { input: z.object({ id: z.string(), content: contentZ.optional(), metadata }), output: message },
     deleteMessage: { input: z.object({ id: z.string() }), output: z.object({ ok: z.boolean() }) },
-    // ── streaming (PLAN-chat-streaming decision 4): open → append batches → settle ────────────────
+    // ── streaming: open → append batches → settle ────────────────
     startMessage: { input: z.object({ channelId: z.string(), metadata }), output: message },
     appendMessage: {
       input: z.object({ id: z.string(), events: z.array(streamEventSchema(data)).min(1) }),
@@ -389,7 +389,7 @@ const requestDefs = <S extends Schema, D extends Schema>(content: S, data: D) =>
     // a channel (topics can't scope per-channel; decision 5)
     watchChannel: { input: z.object({ channelId: z.string() }), output: z.object({ ok: z.boolean() }) },
     unwatchChannel: { input: z.object({ channelId: z.string() }), output: z.object({ ok: z.boolean() }) },
-    // ── channel resources (PLAN-chat-resources): create-or-attach + detach; the registry is the read path ──
+    // ── channel resources: create-or-attach + detach; the registry is the read path ──
     createResource: {
       input: z.object({
         channelId: z.string(),

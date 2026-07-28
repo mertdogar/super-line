@@ -1,6 +1,6 @@
 # Server-side hooks
 
-`hooks` on `auth({...})` wrap every **server-invoked** auth operation (ADR-0017) — `authenticate` and the
+`hooks` on `auth({...})` wrap every **server-invoked** auth operation — `authenticate` and the
 imperative kit — with `before`/`after`. They are the seam for connection admission, agent-provisioning policy,
 and audit: an extension a host can't bypass because it wraps the operation itself. Client request handlers
 (`signIn`/`signUp`/`signOut`/`createApiKey`) are **not** hooked — those run over the wire and already have a veto

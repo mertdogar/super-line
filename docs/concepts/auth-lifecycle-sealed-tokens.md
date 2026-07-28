@@ -18,9 +18,9 @@ Bearer assertions are **server-minted only** — the former `getToken` client re
 
 ### Connecting with an assertion is *nearly* stateless
 
-Connecting with a bearer assertion skips the **session lookup** — there is no session row to read, which is the whole point of a stateless credential. But it is not database-free: the connect path still performs exactly **one user-row read**, the deactivation check. This is "the one deliberate dent in statelessness" (ADR-0015): an assertion is stored nowhere, so `authKit.revoke()` cannot reach it and `authKit.users.deactivate()` remains the emergency stop — and honouring `deactivate` means reading the row. Frame a JWT connect as *sessionless*, not *stateless*.
+Connecting with a bearer assertion skips the **session lookup** — there is no session row to read, which is the whole point of a stateless credential. But it is not database-free: the connect path still performs exactly **one user-row read**, the deactivation check. This is the one deliberate dent in statelessness: an assertion is stored nowhere, so `authKit.revoke()` cannot reach it and `authKit.users.deactivate()` remains the emergency stop — and honouring `deactivate` means reading the row. Frame a JWT connect as *sessionless*, not *stateless*.
 
-## Signed vs. sealed assertions: a deliberate asymmetry (ADR-0015)
+## Signed vs. sealed assertions: a deliberate asymmetry
 
 super-line's auth plugin supports two kinds of bearer assertion. **Both are minted the same way — server-side only — and both are forge-proof.** They differ in exactly one axis: what the assertion exposes to whoever holds it.
 
@@ -44,13 +44,13 @@ Both kinds land on `conn.ctx` and are dispatched by the server on the compact do
 
 ## Both kinds are server-authored
 
-This is the headline of the 2026-07-24 update to ADR-0015. Since client-side minting was retired, **there is no client-facing mint at all** — so `ctx.claims` is server-authored on a signed assertion just as `ctx.sealed` is on a sealed one. The kinds now differ *only* in whether the holder can *read* the payload, never in who *authors* it. Both are forge-proof; a JWS is signed and a JWE is AEAD-authenticated, so neither can be tampered with in flight.
+This is the headline of the 2026-07-24 change. Since client-side minting was retired, **there is no client-facing mint at all** — so `ctx.claims` is server-authored on a signed assertion just as `ctx.sealed` is on a sealed one. The kinds now differ *only* in whether the holder can *read* the payload, never in who *authors* it. Both are forge-proof; a JWS is signed and a JWE is AEAD-authenticated, so neither can be tampered with in flight.
 
 ## Why are sealed assertions server-minted only?
 
 The restriction is a load-bearing security invariant, not a limitation. Because a client can neither read *nor* generate the contents of a sealed assertion, any `sealed` payload attached to a verified connection's `ctx` is **guaranteed to be server-authored**.
 
-If clients could mint sealed assertions, a malicious actor could embed arbitrary data into one. The server cannot distinguish a client-authored encrypted payload from a server-authored one on receipt, so trusting `ctx.sealed` would become unsafe — and the signed/sealed distinction would stop carrying any information (ADR-0015: "a client that can mint a sealed payload makes `ctx.sealed` exactly as trustworthy as `ctx.claims`, which is to say not at all"). By restricting minting to the server, super-line guarantees that when your connection handler reads `ctx.sealed`, that data unquestionably originated from your trusted backend.
+If clients could mint sealed assertions, a malicious actor could embed arbitrary data into one. The server cannot distinguish a client-authored encrypted payload from a server-authored one on receipt, so trusting `ctx.sealed` would become unsafe — and the signed/sealed distinction would stop carrying any information — a client that can mint a sealed payload makes `ctx.sealed` exactly as trustworthy as `ctx.claims`, which is to say not at all. By restricting minting to the server, super-line guarantees that when your connection handler reads `ctx.sealed`, that data unquestionably originated from your trusted backend.
 
 ## Choosing a kind
 

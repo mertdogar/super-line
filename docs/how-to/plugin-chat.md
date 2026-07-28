@@ -12,8 +12,8 @@ pnpm add @super-line/core @super-line/plugin-chat @super-line/plugin-auth
 
 Unlike the raw [collections](/collections/) approach (direct, optimistic row-writes), this plugin makes
 **every mutation a request** handled server-side, so ids and timestamps are authoritative and a host can
-wrap any operation with a hook. That trade-off is recorded in
-[ADR-0010](https://github.com/mertdogar/super-line/blob/main/docs/adr/0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md).
+wrap any operation with a hook. The cost is that a client cannot write these collections directly, even
+for a change the server would have allowed.
 
 This page is the **core model** — wire it in, its membership rules, and the imperative server surface.
 Companion guides go deeper:

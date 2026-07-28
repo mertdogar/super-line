@@ -360,4 +360,3 @@ Every collision is caught, never silent:
 
 - [Plugins](/concepts/plugins) — the full model: every field, the `PluginContext` table, and what plugins deliberately don't do.
 - [Compose & embed a super-line library](/how-to/composition) — the `defineSurface` / `mergeSurfaces` discipline your paired surface builds on.
-- [ADR-0005](https://github.com/mertdogar/super-line/blob/main/docs/adr/0005-plugins-as-paired-runtime-bundles.md) — why plugins are paired runtime bundles, and why there's no outbound interception.

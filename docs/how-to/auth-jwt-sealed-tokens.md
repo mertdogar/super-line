@@ -2,7 +2,6 @@
 
 Bearer assertions from `@super-line/plugin-auth` are stateless connect credentials — a token carries its own
 proof, so verifying it is a key operation instead of a database lookup. They are **server-minted only**
-([ADR-0015](https://github.com/mertdogar/super-line/blob/main/docs/adr/0015-bearer-assertions-are-signed-or-sealed.md))
 and delivered to a client **out-of-band**; there is no client-facing mint. Enable them with `jwt: { secret, ttlMs? }`
 on `auth(...)` (`ttlMs` defaults to 15 minutes). There are two kinds — **signed** (JWS) and **sealed** (JWE) —
 and they differ only in whether the token's holder can read its payload.

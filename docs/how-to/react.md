@@ -100,7 +100,7 @@ For client query joins and optimistic UI over collections, wire them into TanSta
 
 ## Read the connection's env
 
-**`useEnv()`** tracks the connection's server-vended, client-visible [`env`](/how-to/connection-env) (ADR-0012)
+**`useEnv()`** tracks the connection's server-vended, client-visible [`env`](/how-to/connection-env)
 reactively: `null` until the first push (or for a role with no `env`), then the latest value — re-renders on
 every server-side `setEnv`.
 

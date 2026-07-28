@@ -114,7 +114,7 @@ export interface CancelMessageArgs {
 export type ChatStreamedMessage = ChatMessage & { parts: ChatMessagePart[] }
 
 /**
- * Domain-layer hooks (PLAN-plugin-chat decision 6): they wrap the operation CORES, so they fire
+ * Domain-layer hooks: they wrap the operation CORES, so they fire
  * identically for client requests and imperative `chatKit` calls — one extension point that cannot be
  * bypassed. Deletion hooks receive the removed row in `after`.
  */
@@ -156,7 +156,7 @@ export interface ResourceInitCtx {
 }
 
 /**
- * One registered resource kind (PLAN-chat-resources). Registering a kind is the single act with three
+ * One registered resource kind. Registering a kind is the single act with three
  * effects: it enables `createResource` for it, CONTRIBUTES the membership-gated CRDT read/write
  * policies for `collection` (so do NOT also policy that collection yourself — the server throws
  * "policy … collides" at construction: registration IS the policy), and enrolls the kind in the
@@ -173,7 +173,7 @@ export interface ResourceKindDef {
   init: (ctx: ResourceInitCtx) => unknown | Promise<unknown>
 }
 
-/** Streaming knobs (PLAN-chat-streaming decision 11). Few by design; the defaults are the contract. */
+/** Streaming knobs. Few by design; the defaults are the contract. */
 export interface ChatStreamingOptions {
   /** How often an in-flight part's row checkpoints its accumulated text (the late-join floor). Default 1000ms. */
   checkpointMs?: number
@@ -200,7 +200,7 @@ export interface ChatServerOptions<C extends Contract> {
   hooks?: ChatHooks
   /** Streaming-message knobs; see {@link ChatStreamingOptions}. */
   streaming?: ChatStreamingOptions
-  /** Channel-resource kinds (PLAN-chat-resources); see {@link ResourceKindDef}. */
+  /** Channel-resource kinds; see {@link ResourceKindDef}. */
   resources?: { kinds: Record<string, ResourceKindDef> }
 }
 
@@ -257,7 +257,7 @@ export interface ChatMessagesApi {
   sweepStale(opts: { olderThanMs: number }): Promise<ChatMessage[]>
 }
 
-/** Imperative channel-resource management (PLAN-chat-resources). Same cores as the requests — hooks fire with `initiator.kind: 'server'`. */
+/** Imperative channel-resource management. Same cores as the requests — hooks fire with `initiator.kind: 'server'`. */
 export interface ChatResourcesApi {
   /** Create-or-attach a resource. Server-initiated: no membership requirement, `createdBy: null`, no card. */
   create(input: CreateResourceArgs): Promise<ChatResource>
@@ -638,7 +638,7 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     return next
   }
 
-  // ── channel resources (PLAN-chat-resources) ──────────────────────────────────────────────────────
+  // ── channel resources ──────────────────────────────────────────────────────
 
   /**
    * The resource card: a regular message through sendMessageCore (hooks/moderation see it), content
@@ -954,7 +954,7 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     return message
   }
 
-  // ── streaming engine (PLAN-chat-streaming) ────────────────────────────────────────────────────────
+  // ── streaming engine ────────────────────────────────────────────────────────
   //
   // Node-local state per open stream: the ingress node that ran startMessage owns the accumulators
   // and the part-key→idx map, so appends must arrive on it (they do — same author connection). The

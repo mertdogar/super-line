@@ -1,6 +1,6 @@
 # Collections
 
-A **collection** is super-line's persisted-state primitive: named, typed state you declare **on the contract**, so the server validates every write and the types flow end-to-end with no codegen. It's the relational successor to the retired last-writer-wins Store family ([ADR-0006](https://github.com/mertdogar/super-line/blob/main/docs/adr/0006-collections-are-on-contract-typed-rows.md), [ADR-0007](https://github.com/mertdogar/super-line/blob/main/docs/adr/0007-crdt-docs-are-typed-collections.md)).
+A **collection** is super-line's persisted-state primitive: named, typed state you declare **on the contract**, so the server validates every write and the types flow end-to-end with no codegen. It's the relational successor to the retired last-writer-wins Store family.
 
 One `collection(n)` concept, **two consistency models**:
 

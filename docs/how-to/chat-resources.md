@@ -5,7 +5,7 @@ resources make that first-class: the **host declares its own [CRDT document
 collections](/collections/crdt-documents)** (the schemas stay yours), and `@super-line/plugin-chat` turns them
 channel-native — a **link registry** per channel, **server-authoritative creation**,
 **membership-gated access** (every member reads and writes, nobody else), an **acked write path**
-built for agents, and coarse **who's-open presence**. Design record: `PLAN-chat-resources.md`.
+built for agents, and coarse **who's-open presence**.
 
 Two runnable versions: [`examples/chat-resources`](https://github.com/mertdogar/super-line/tree/main/examples/chat-resources) is the headless mechanics (CLI, no UI); [`examples/chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor) is the full web app — a human and an AI agent editing one canvas live. To build it yourself step by step, follow [Tutorial 6](/tutorials/collaborative-canvas-with-agent).
 
@@ -42,8 +42,9 @@ const app = defineContract({
 })
 ```
 
-Schemas must be **presence-tolerant** ([ADR-0008](https://github.com/mertdogar/super-line/blob/main/docs/adr/0008-crdt-validation-is-scoped-to-present-values.md)):
-fields several members edit concurrently need `.catch()`/`.optional()`. Strict (catch-less) fields
+Schemas must be **presence-tolerant** — a concurrent merge can transiently drop a field, so a schema
+that *requires* it would reject a write that is in fact valid. Fields several members edit
+concurrently need `.catch()`/`.optional()`. Strict (catch-less) fields
 are safe only when set once — and they're the ones a bad write can actually be *rejected* on.
 
 ## 2 · Register the kinds (one act, three effects)

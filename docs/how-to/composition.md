@@ -99,7 +99,7 @@ The same key in *opposite* directions is **not** a collision — a request and a
 
 ## When composition isn't the tool
 
-Composition assumes the two surfaces should share identity and lifecycle. If you need two **independent** stacks — separate `authenticate`, separate reconnect, true third-party isolation — that's a different problem: two sockets (fine in practice), or the deferred mux-transport design (`PLAN-transport-mux.md` at the repo root). The reasoning lives in [ADR-0004](https://github.com/mertdogar/super-line/blob/main/docs/adr/0004-composition-over-connection-namespaces.md).
+Composition assumes the two surfaces should share identity and lifecycle. If you need two **independent** stacks — separate `authenticate`, separate reconnect, true third-party isolation — that's a different problem: two sockets (fine in practice), or a mux transport carrying two independent sessions on one wire — designed, deferred, not built. Composition was chosen over both because the requirement driving it was *shared* identity, which composition gives by construction.
 
 ## Library author checklist
 

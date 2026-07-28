@@ -65,7 +65,7 @@ const asError = (e: unknown): { error: string; message: string } => {
 const iso = (ms: number): string => new Date(ms).toISOString()
 
 /**
- * AI SDK tools over the agent's OWN chat connection (PLAN-plugin-chat decision 17). Client-side by
+ * AI SDK tools over the agent's OWN chat connection. Client-side by
  * design: every call rides the bot user's connection, so the server authorization-checks it — RLS scopes
  * reads to the bot's channels, sends require membership, management needs ownership. The model cannot
  * exceed the bot's permissions, tool or no tool.
@@ -244,7 +244,7 @@ export function chatAgentTools<C extends Contract, R extends RoleOf<C>, S extend
       },
     }),
 
-    // ── channel resources (PLAN-chat-resources): shared docs any member co-edits ────────────────────
+    // ── channel resources: shared docs any member co-edits ────────────────────
 
     list_resources: tool({
       description:

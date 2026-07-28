@@ -73,7 +73,7 @@ export type Message = RowOf<typeof chat, 'messages'>
 
 Here's the payoff. `auth()` returns an `authKit`; `chat()` returns a `chatKit`. Register **both plugins** and the chat model's row policies (read = membership-scoped RLS, write = deny) and all 20 request handlers ship *inside* `chatKit.plugin`. This file writes **no** channel/message policy or handler of its own — compare that to the hand-rolled `policies.messages` you wrote in [Tutorial 2](/tutorials/first-collection).
 
-The one thing you *do* get to add is a **hook**: a before/after wrapper around a domain operation that fires for client requests and server-side calls alike — the un-bypassable extension seam ([ADR-0010](https://github.com/mertdogar/super-line/blob/main/docs/adr/0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md)).
+The one thing you *do* get to add is a **hook**: a before/after wrapper around a domain operation that fires for client requests and server-side calls alike — the un-bypassable extension seam.
 
 ```ts [src/chat-backbone.ts]
 import http from 'node:http'
@@ -166,7 +166,7 @@ bobChat.close()
 ```
 
 ::: tip Every mutation is a request, not a row-write
-Unlike Tutorial 2 — where the client `insert`ed a row directly — the chat plugin makes each mutation a **request** handled server-side. That's why ids and timestamps are authoritative and a `before` hook can trim or reject any write, for a human and an agent alike. The reasoning is [ADR-0010](https://github.com/mertdogar/super-line/blob/main/docs/adr/0010-plugin-domain-surfaces-are-requests-first-with-domain-hooks.md).
+Unlike Tutorial 2 — where the client `insert`ed a row directly — the chat plugin makes each mutation a **request** handled server-side. That's why ids and timestamps are authoritative and a `before` hook can trim or reject any write, for a human and an agent alike.
 :::
 
 ## 5. Run it

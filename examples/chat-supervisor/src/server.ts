@@ -23,7 +23,7 @@ const docsBackend = await crdtLibsqlCollections({
   docOptions: (n) => (app.collections as Record<string, { crdt?: DocOptions }>)[n]?.crdt,
 });
 const authKit = auth({ contract: app, collections: backend, defaultRoles: ["user"] });
-// Registering a kind IS the wiring (PLAN-chat-resources): createResource enabled, membership-gated
+// Registering a kind IS the wiring: createResource enabled, membership-gated
 // doc policies contributed, delete-cascade enrolled. Both kinds 'owned' — minted by chat, die with
 // their channel.
 let supervisorUserId: string | undefined;

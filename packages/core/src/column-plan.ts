@@ -1,6 +1,6 @@
 /**
- * planColumns — schema→column introspection for typed per-collection tables
- * (PLAN-collections-typed-tables.md, Phase 0). Core owns the schema walk so the SQL
+ * planColumns — schema→column introspection for typed per-collection tables.
+ * Core owns the schema walk so the SQL
  * backends (collections-sqlite / collections-pglite) never import a schema library; they
  * render dialect DDL/statements from the abstract plan.
  *

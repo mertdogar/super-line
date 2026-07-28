@@ -31,6 +31,7 @@ export default defineConfig({
       '@super-line/plugin-auth/client': r('../../packages/plugin-auth/src/client.ts'),
       '@super-line/plugin-auth/react': r('../../packages/plugin-auth/src/react.tsx'),
       '@super-line/plugin-auth': r('../../packages/plugin-auth/src/index.ts'),
+      '@super-line/plugin-devtools': r('../../packages/plugin-devtools/src/index.ts'),
       '@super-line/plugin-chat/client': r('../../packages/plugin-chat/src/client.ts'),
       '@super-line/plugin-chat/react': r('../../packages/plugin-chat/src/react.tsx'),
       '@super-line/plugin-chat': r('../../packages/plugin-chat/src/index.ts'),

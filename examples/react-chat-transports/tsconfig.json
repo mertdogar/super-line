@@ -13,6 +13,7 @@
       "@super-line/server": ["../../packages/server/src/index.ts"],
       "@super-line/collections-sqlite": ["../../packages/collections-sqlite/src/index.ts"],
       "@super-line/plugin-inspector": ["../../packages/plugin-inspector/src/index.ts"],
+      "@super-line/plugin-devtools": ["../../packages/plugin-devtools/src/index.ts"],
       "@super-line/plugin-auth": ["../../packages/plugin-auth/src/index.ts"],
       "@super-line/plugin-auth/server": ["../../packages/plugin-auth/src/server.ts"],
       "@super-line/plugin-auth/client": ["../../packages/plugin-auth/src/client.ts"],

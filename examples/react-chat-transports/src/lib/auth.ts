@@ -1,4 +1,5 @@
 import { createSuperLineClient } from '@super-line/client'
+import { devtoolsPlugin } from '@super-line/plugin-devtools'
 import type { AuthClientOptions } from '@super-line/plugin-auth/react'
 import { chat } from '@/contract'
 import { transport } from '@/lib/transport'
@@ -12,5 +13,10 @@ export const authOptions = {
   authedRole: 'user',
   // called first as `guest` ({}), then as `user` ({ token }) after login. The `as 'user'` is the one
   // concession for the guest↔authed swap (the helper types both as the authed role).
-  connect: ({ role, params }) => createSuperLineClient(chat, { transport, role: role as 'user', params }),
+  //
+  // `devtoolsPlugin()` is per-CLIENT, and this callback runs once per session — so signing in builds a
+  // second instance while the first is still live, which is exactly what the DevTools panel shows: two
+  // clients in one timeline, the guest closing only after the user connection is confirmed.
+  connect: ({ role, params }) =>
+    createSuperLineClient(chat, { transport, role: role as 'user', params, plugins: [devtoolsPlugin()] }),
 } satisfies AuthClientOptions<typeof chat, 'user'>

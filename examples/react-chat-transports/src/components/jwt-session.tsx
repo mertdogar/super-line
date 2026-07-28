@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { authClient } from '@super-line/plugin-auth/client'
 import { SuperLineAuthProvider, useAuth, useEnv } from '@super-line/plugin-auth/react'
 import { createSuperLineClient } from '@super-line/client'
+import { devtoolsPlugin } from '@super-line/plugin-devtools'
 import { Workspace } from '@/components/workspace'
 import { Button } from '@/components/ui/button'
 import { chat } from '@/contract'
@@ -23,7 +24,10 @@ export function JwtSession({ token, onExit }: { token: string; onExit: () => voi
       authedRole: 'user',
       tokenParam: 'jwt', // → params:{ jwt } → authMethod 'jwt' / 'jwt-sealed'
       resolveToken: async () => ({ token }),
-      connect: ({ role, params }) => createSuperLineClient(chat, { transport, role: role as 'user', params }),
+      // its own devtools instance too — this session is independent of the app-wide one, so the panel
+      // lists it as a separate client rather than folding it into the same story
+      connect: ({ role, params }) =>
+        createSuperLineClient(chat, { transport, role: role as 'user', params, plugins: [devtoolsPlugin()] }),
     }),
   )
   useEffect(() => () => auth.client.close(), [auth])

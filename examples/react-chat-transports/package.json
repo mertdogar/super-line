@@ -23,6 +23,7 @@
     "@super-line/core": "workspace:*",
     "@super-line/plugin-auth": "workspace:*",
     "@super-line/plugin-chat": "workspace:*",
+    "@super-line/plugin-devtools": "workspace:*",
     "@super-line/plugin-inspector": "workspace:*",
     "@super-line/react": "workspace:*",
     "@super-line/server": "workspace:*",

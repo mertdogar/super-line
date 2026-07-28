@@ -40,7 +40,7 @@ Transport/wire is a first-class dimension throughout: connections carry a normal
 
 ## Security
 
-The inspector channel is **read-only** but **unauthenticated** in v1, and `inspector()` mirrors every message payload to the bus (an extra publish per message). Keep it to **local development or a trusted network** — never mount it on an internet-facing production node. Mask sensitive fields with `inspector({ redact: [...] })` (applies to `ctx`, `conn.data`, and message payloads).
+The inspector channel is **read-only**, but it bypasses row policies and `inspector()` mirrors every message payload to the bus (an extra publish per message). Keep it to **local development or a trusted network** — never mount it on an internet-facing production node. Mounted bare it admits anyone who can reach the port; lock it with `SUPER_LINE_INSPECTOR_PASSWORD` on the server (username defaults to `admin`) and enter the pair under **Settings** here. Mask sensitive fields with `inspector({ redact: [...] })` (applies to `ctx`, `conn.data`, and message payloads).
 
 See the [Control Center guide](https://super-line.dogar.biz/how-to/control-center) for details.
 

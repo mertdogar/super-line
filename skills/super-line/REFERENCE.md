@@ -816,4 +816,17 @@ mergeSurfaces<A, B>(a: A, b: B): MergedSurface<A, B>         // merges per direc
 
 ## Control Center inspector (plugin)
 
-`inspector(opts?: { redact?: string[]; revealEnvKeys?: string[] }): SuperLinePlugin` from `@super-line/plugin-inspector` is the **only** way to enable the Control Center — pass it in `plugins: [inspector()]`. The server no longer takes an `inspector` option and the WS transport no longer takes an `inspector` field. It taps every event (safe-snapshot + field-redact), publishes cluster-wide on its plugin channel, and serves the `InspectorContract` (`getContract` / `getTopology` / `listConnections` / `getNode` / `getConn` / `listCollections` / `queryCollection` + an `events` topic) over a reserved connection class. `redact` is a DENY-list masking named fields in `ctx`/`data`/payload snapshots; `revealEnvKeys` is the OPPOSITE — an ALLOW-list, because `env` is masked (`•••`) by default. Dev / trusted-network only.
+`inspector(opts?: { redact?: string[]; revealEnvKeys?: string[]; auth?: InspectorAuth }): SuperLinePlugin` from `@super-line/plugin-inspector` is the **only** way to enable the Control Center — pass it in `plugins: [inspector()]`. The server no longer takes an `inspector` option and the WS transport no longer takes an `inspector` field. It taps every event (safe-snapshot + field-redact), publishes cluster-wide on its plugin channel, and serves the `InspectorContract` (`getContract` / `getTopology` / `listConnections` / `getNode` / `getConn` / `listCollections` / `queryCollection` + an `events` topic) over a reserved connection class. `redact` is a DENY-list masking named fields in `ctx`/`data`/payload snapshots; `revealEnvKeys` is the OPPOSITE — an ALLOW-list, because `env` is masked (`•••`) by default. Dev / trusted-network only.
+
+**Locking it.** Inspector connections bypass the host's `authenticate` (the reserved role isn't a contract role), so the plugin authorizes them itself. Unconfigured it admits **anyone who can reach the port** — and `queryCollection` bypasses row policies — so it warns at boot on `['super-line','plugin-inspector','auth']`.
+
+```ts
+type InspectorAuth = { username?: string; password: string } | ((handshake: Handshake) => unknown | Promise<unknown>)
+```
+
+- Env fallback, consulted when `auth` is omitted: `SUPER_LINE_INSPECTOR_PASSWORD` (+ `SUPER_LINE_INSPECTOR_USER`, default `admin`). An explicit `auth` wins.
+- The literal form is compared timing-safely against the `user` / `password` handshake params the Control Center sends.
+- The function form gets the raw `Handshake` and **rejects by throwing**; its message reaches the browser as the close reason. Use it to gate on your own identity system (e.g. verify a plugin-auth assertion) — the return value becomes `conn.ctx`.
+- A refusal is a **4401 close on an established socket**, not a refused upgrade: a browser can read a close code but sees a rejected upgrade as an indistinguishable 1006. The Control Center renders it as `unauthorized` and stops auto-retrying.
+- Configure it on **every node** — the Control Center attaches to one at a time.
+- The credential rides the query string, so a fronting proxy logs it. Use `wss://`.

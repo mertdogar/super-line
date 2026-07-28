@@ -903,6 +903,8 @@ catch (e) {
 
 The read-only inspector ships as the plugin `@super-line/plugin-inspector` and is **off by default**. Mount it with `plugins: [inspector()]` — it contributes the `msg.*` telemetry tap and the reserved connection class the WS transport negotiates (`superline.inspector.v1`) — then point the dashboard at the node. Dev / trusted-network only.
 
+Mounted bare it is **unlocked**: any client reaching the port reads every collection (row policies bypassed), every connection `ctx`, and the live payload feed. Lock it with `SUPER_LINE_INSPECTOR_PASSWORD=… ` on every node (user defaults to `admin`), or `inspector({ auth: { username, password } })`, or hand `auth` a `(handshake) => unknown` predicate that throws to refuse — its return becomes `conn.ctx` and its message becomes the client's close reason. Enter the pair under **Settings** in the Control Center.
+
 ```ts
 import { inspector } from '@super-line/plugin-inspector'
 

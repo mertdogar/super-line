@@ -158,5 +158,19 @@ Resolved 2026-07-23 (ADR-0017). When an auth operation internally revokes downst
 ### Credential source
 Resolved 2026-07-25. The app-supplied answer to *"what credential should this client connect with?"* — `resolveToken` when set, otherwise the persisted [[Access token]] in `storage`. Deliberately **not** a boot hook: boot is merely its first consultation and a re-authentication is a second, which is what collapses account switching, post-expiry re-acquisition, and retry-after-rejection into one operation instead of three. It yields a credential or `null` — and `null` is a deliberate answer (*"there is none right now"*), not a failure. It never yields an identity: only the server may assert that, on the connection the credential opens.
 
+### Reserved-connection admission
+Resolved 2026-07-28 (ADR-0022). Who decides whether a [[Plugin (runtime bundle)]]-owned connection class may be
+entered. A reserved connection is admitted **without consulting the host's `authenticate`** — that short-circuit is
+what lets a plugin serve a parallel contract to clients the host's own contract knows nothing about, and it is
+also why the Control Center channel could be opened by anyone able to reach the port. Admission is now the
+**declaring plugin's** decision, taken at the handshake and expressed in the host's own idiom: reject by throwing,
+otherwise return the connection's [[Connection ctx (identity)]]. The **role is deliberately not the plugin's to
+state** — it is fixed when the class is declared, because a class that could name its own role could name a *host*
+role and mint a connection the host never authenticated. A rejection is delivered as a **close on an established
+socket, not a refused upgrade**, because a browser can observe the first and cannot observe the second: telling
+"wrong credential" apart from "server unreachable" is a client requirement that the server-side idiom has to bend
+to. Distinct from a [[Credential]] (the stored secret being checked) and from the host's `authenticate` (which
+governs contract roles and never sees a reserved connection at all).
+
 ### Session replacement
 Resolved 2026-07-25 (ADR-0020). A client's identity change, expressed the only way super-line allows — **tearing one connection down and opening another**. Role and credential are frozen at connect, so "log in", "log out" and "switch accounts" are the same operation, and the client-side auth helper is the machine that owns it. Governed by one rule: **a replacement never destroys a session it could not replace.** The candidate connection is built and confirmed before the incumbent is closed, so a [[Credential source]] that throws, or a credential the server refuses, leaves the live session running and surfaces an error instead. Only a `null` from the source drops to guest. Distinct from [[Connection session]], which is the *server's* view of a single live connection — a replacement ends one and begins another.

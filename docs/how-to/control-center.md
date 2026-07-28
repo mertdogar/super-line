@@ -39,8 +39,8 @@ const srv = createSuperLineServer(contract, { transports, authenticate, plugins:
 The old `inspector.redact` option becomes `inspector({ redact: ['token'] })`. The wire, the `superline.inspector.v1` subprotocol, and the Control Center are unchanged — only the mount point moved.
 :::
 
-::: warning Dev / trusted-network only
-The inspector channel is unauthenticated in v1. Never mount `inspector()` on an internet-facing production node. (A `redact` option masks specific `ctx`/`data` field names: `inspector({ redact: ['token'] })`.)
+::: warning Unlocked by default
+Mounted bare, `inspector()` serves **anyone who can reach the port** — the whole contract, cluster topology, every connection's `ctx`, the live message feed, and every collection's rows with row policies deliberately bypassed. The plugin warns about this at boot on the `['super-line','plugin-inspector','auth']` log category. [Lock it](#locking-the-inspector) before the port is reachable by anything you don't trust, and never mount it on an internet-facing production node. (A `redact` option masks specific `ctx`/`data` field names: `inspector({ redact: ['token'] })`.)
 :::
 
 ## Run it
@@ -50,6 +50,44 @@ npx @super-line/control-center --url ws://localhost:3000
 ```
 
 This serves the app on a local port and opens your browser. Change the endpoint from the Settings page at any time, or pass `--port` to pick the local port.
+
+## Locking the inspector
+
+Set a password and the Control Center must present it to connect:
+
+```sh
+SUPER_LINE_INSPECTOR_PASSWORD=s3cret node server.js
+```
+
+The username defaults to `admin`; override it with `SUPER_LINE_INSPECTOR_USER`. Or configure it in code, which takes precedence over the environment:
+
+```ts
+plugins: [inspector({ auth: { username: 'admin', password: process.env.CC_PASSWORD! } })]
+```
+
+Enter the two values under **Settings** in the Control Center. They're stored in your browser separately from the URL — so the URL stays safe to display, copy, and share as a `?url=` link — and travel as handshake parameters on each dial. Rejected credentials show as a distinct **unauthorized** state rather than a generic disconnect, and auto-retry stops (replaying a wrong password only earns another refusal).
+
+Every node needs the credential configured, since the Control Center attaches to one node at a time.
+
+For a host that already runs [`plugin-auth`](/how-to/plugin-auth), `auth` also takes a predicate over the raw handshake — reject by throwing, and the message reaches the browser as the reason:
+
+```ts
+plugins: [
+  inspector({
+    auth: async (handshake) => {
+      const verified = await authKit.tokens.verify(handshake.query.jwt ?? '')
+      if (!verified?.roles.includes('admin')) throw new Error('admin role required')
+      return { userId: verified.userId }
+    },
+  }),
+]
+```
+
+Whatever the check returns becomes the connection's `ctx`.
+
+::: warning The password rides the query string
+Credentials travel as handshake parameters, so a reverse proxy in front of your node will log them, and the Control Center re-dials every second while disconnected. Use `wss://` and treat this as a lock on a dev tool, not an admin console.
+:::
 
 ## The views
 

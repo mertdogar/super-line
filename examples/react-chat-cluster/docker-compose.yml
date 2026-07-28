@@ -18,13 +18,19 @@ services:
       timeout: 3s
       retries: 10
 
+  # SUPER_LINE_INSPECTOR_PASSWORD locks the inspector channel: without it, anyone who can reach the port
+  # reads every collection (row policies are bypassed for the inspector), every connection ctx, and the live
+  # message feed. Every node needs it — the Control Center attaches to one node at a time. Enter it under
+  # Settings in the Control Center (user defaults to `admin`).
   node-1:
     <<: *node
-    environment: { PORT: '8787', NODE_NAME: node-1, REDIS_URL: redis://redis:6379 }
+    environment:
+      { PORT: '8787', NODE_NAME: node-1, REDIS_URL: redis://redis:6379, SUPER_LINE_INSPECTOR_PASSWORD: cluster-demo }
 
   node-2:
     <<: *node
-    environment: { PORT: '8787', NODE_NAME: node-2, REDIS_URL: redis://redis:6379 }
+    environment:
+      { PORT: '8787', NODE_NAME: node-2, REDIS_URL: redis://redis:6379, SUPER_LINE_INSPECTOR_PASSWORD: cluster-demo }
 
   # Serves the built SPA and load-balances WebSockets across the two nodes.
   web:

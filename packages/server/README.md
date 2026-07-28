@@ -76,7 +76,7 @@ For collaborative documents, add a CRDT backend (`crdtCollections: crdtMemoryCol
 
 ### Control Center inspector
 
-Mount `plugins: [inspector()]` (from [`@super-line/plugin-inspector`](https://www.npmjs.com/package/@super-line/plugin-inspector); `inspector({ redact: ['password', 'token'] })` to mask fields) to emit `msg.*` telemetry and accept read-only [Control Center](https://www.npmjs.com/package/@super-line/control-center) clients. The plugin declares the reserved connection class the WS transport negotiates. **Default off; dev / trusted-network only.**
+Mount `plugins: [inspector()]` (from [`@super-line/plugin-inspector`](https://www.npmjs.com/package/@super-line/plugin-inspector); `inspector({ redact: ['password', 'token'] })` to mask fields) to emit `msg.*` telemetry and accept read-only [Control Center](https://www.npmjs.com/package/@super-line/control-center) clients. The plugin declares the reserved connection class the WS transport negotiates. **Default off**, and **unlocked** when mounted — set `SUPER_LINE_INSPECTOR_PASSWORD` (or `inspector({ auth })`) to require credentials; dev / trusted-network only.
 
 - 📖 Docs: <https://super-line.dogar.biz/>
 - 📚 Guides: [roles & auth](https://super-line.dogar.biz/how-to/roles-auth), [events & rooms](https://super-line.dogar.biz/how-to/events-rooms)

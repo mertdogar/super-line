@@ -7,6 +7,17 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Features
 
+- **plugin-queue:** Bind a queue's worker after construction ([2fcb4ce])
+
+### Documentation
+
+- Record ADR-0023 and describe binding a worker where it lives ([ae7aff6])
+- **changelog:** Refresh the root aggregate for the inspector-auth release ([9bfcb10])
+
+## 2026-07-28
+
+### Features
+
 - **control-center:** Credentials, and a terminal unauthorized state ([6faf64d])
 - **plugin-inspector:** Lock the Control Center channel behind a credential ([761f1e0])
 - A plugin connection class authorizes its own admission ([9e15eb4])

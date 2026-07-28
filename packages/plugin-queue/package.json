@@ -1,6 +1,6 @@
 {
   "name": "@super-line/plugin-queue",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Durable, collection-backed queues and cluster-wide cron workers for super-line.",
   "license": "MIT",

@@ -87,6 +87,17 @@ export type {
   SchemaConverter,
 } from './inspector.js'
 
+export { safeSnapshot } from './snapshot.js'
+
+export type {
+  ClientTapEvent,
+  ClientTapRecord,
+  FrameDirection,
+  RequestDropReason,
+  ConnPhase,
+  RouteDecision,
+} from './client-tap.js'
+
 export { PROTOCOL } from './wire.js'
 
 export { removeAtPath } from './store.js'

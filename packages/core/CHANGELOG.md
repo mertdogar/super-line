@@ -3,11 +3,17 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
-## Unreleased
+## [core-v0.17.0] — 2026-07-28
 
 ### Features
 
 - Add clustered queue plugin and dashboard example ([e00dc23])
+
+### Documentation
+
+- Index the design plans and record the citation rule ([7648ee5])
+- Stop citing internal design docs from published material ([4f7f7d7])
+- Land the queue plugin on the pages that enumerate the system ([e44cbf7])
 
 ## [core-v0.16.0] — 2026-07-27
 

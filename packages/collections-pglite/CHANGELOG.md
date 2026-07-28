@@ -3,7 +3,7 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
-## Unreleased
+## [collections-pglite-v0.4.0] — 2026-07-28
 
 ### Features
 
@@ -11,11 +11,16 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Bug Fixes
 
+- **collections-pglite:** Refuse a self store that can never emit a change ([460588f])
 - **core:** Derive column layout from Standard JSON Schema, not bundled zod classes ([02d182f])
 
 ### Refactor
 
 - Use zod 4's namespace import form everywhere ([faebe1c])
+
+### Documentation
+
+- Land the queue plugin on the pages that enumerate the system ([e44cbf7])
 
 ## [collections-pglite-v0.3.1] — 2026-07-23
 

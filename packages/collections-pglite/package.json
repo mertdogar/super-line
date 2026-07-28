@@ -1,6 +1,6 @@
 {
   "name": "@super-line/collections-pglite",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "type": "module",
   "description": "Self-clustering CollectionStore for super-line — central Postgres + per-node Electric-synced PGlite replica (live.changes). Postgres is the only fan-out infra; no adapter.",
   "license": "MIT",
@@ -32,7 +32,7 @@
     "postgres": "^3.4.9"
   },
   "peerDependencies": {
-    "@super-line/core": ">=0.14.0 <1.0.0"
+    "@super-line/core": ">=0.17.0 <1.0.0"
   },
   "devDependencies": {
     "@electric-sql/pglite-socket": "^0.2.6",

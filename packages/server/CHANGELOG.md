@@ -3,7 +3,7 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
-## Unreleased
+## [server-v0.17.0] — 2026-07-28
 
 ### Features
 
@@ -20,6 +20,11 @@ run `pnpm changelog` rather than editing by hand.
 ### Testing
 
 - **server:** Raise broker-integration waitFor budgets from 5s to 10s ([0cf6438])
+
+### Documentation
+
+- Stop citing internal design docs from published material ([4f7f7d7])
+- Land the queue plugin on the pages that enumerate the system ([e44cbf7])
 
 ## [server-v0.16.0] — 2026-07-24
 

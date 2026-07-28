@@ -3,7 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
-## Unreleased
+## [control-center-v0.13.0] — 2026-07-28
+
+### Features
+
+- **control-center:** A Queues view over a live collection subscription ([19cf094])
+- Add queues explorer to control-center ([05ab6b6])
 
 ### Bug Fixes
 
@@ -12,6 +17,10 @@ run `pnpm changelog` rather than editing by hand.
 ### Refactor
 
 - Use zod 4's namespace import form everywhere ([faebe1c])
+
+### Chores
+
+- Fix couple of lint errors ([6ce6478])
 
 ## [control-center-v0.12.0] — 2026-07-25
 

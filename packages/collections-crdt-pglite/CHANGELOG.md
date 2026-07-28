@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [collections-crdt-pglite-v0.3.0] — 2026-07-28
+
+### Bug Fixes
+
+- **collections-pglite:** Refuse a self store that can never emit a change ([460588f])
+
 ## [collections-crdt-pglite-v0.2.0] — 2026-07-23
 
 ### Features

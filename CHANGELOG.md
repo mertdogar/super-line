@@ -7,14 +7,26 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Features
 
+- **control-center:** A Queues view over a live collection subscription ([19cf094])
+- Add queues explorer to control-center ([05ab6b6])
 - Add clustered queue plugin and dashboard example ([e00dc23])
+
+### Bug Fixes
+
+- **collections-pglite:** Refuse a self store that can never emit a change ([460588f])
+- **docs:** Extract the plugin-queue API reference ([ef0dc28])
 
 ### Chores
 
+- Fix couple of lint errors ([6ce6478])
 - Add logtape skill ([7fa84d7])
 
 ### Documentation
 
+- Index the design plans and record the citation rule ([7648ee5])
+- Stop citing internal design docs from published material ([4f7f7d7])
+- Move design plans out of the repo root ([9e2d9d1])
+- Land the queue plugin on the pages that enumerate the system ([e44cbf7])
 - Document queue plugin ([51b45ba])
 - **changelog:** Refresh the root aggregate for the 0.16 release ([31a13b5])
 

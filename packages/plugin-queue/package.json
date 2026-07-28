@@ -28,8 +28,8 @@
     "zod": "^4.2.0"
   },
   "peerDependencies": {
-    "@super-line/core": ">=0.16.0 <1.0.0",
-    "@super-line/server": ">=0.15.0 <1.0.0"
+    "@super-line/core": ">=0.17.0 <1.0.0",
+    "@super-line/server": ">=0.17.0 <1.0.0"
   },
   "devDependencies": {
     "@super-line/client": "workspace:^",

@@ -3,6 +3,13 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## Unreleased
+
+### Documentation
+
+- Index the design plans and record the citation rule ([7648ee5])
+- Stop citing internal design docs from published material ([4f7f7d7])
+
 ## [plugin-auth-v0.9.0] — 2026-07-27
 
 ### Bug Fixes

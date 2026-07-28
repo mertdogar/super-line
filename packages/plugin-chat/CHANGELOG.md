@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## Unreleased
+
+### Documentation
+
+- Stop citing internal design docs from published material ([4f7f7d7])
+
 ## [plugin-chat-v0.10.0] — 2026-07-27
 
 ### Bug Fixes

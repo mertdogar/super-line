@@ -814,6 +814,27 @@ mergeSurfaces<A, B>(a: A, b: B): MergedSurface<A, B>         // merges per direc
 - `mergeSurfaces` merges `clientToServer` / `serverToClient` only, and **rejects any other key** — a role's `data` schema is banned from the merge, so add it **beside** the merge: `user: { ...mergeSurfaces(lib, app), data: schema }`. The same key in opposite directions is allowed.
 - Wrap surfaces in `defineSurface(...)` for the same literal-preservation reason as `defineContractPlugin`.
 
+## Client devtools (plugin)
+
+`devtoolsPlugin(opts?: { maxEvents?: number; redact?: string[] }): SuperLineClientPlugin` from `@super-line/plugin-devtools` buffers what the CLIENT sees, for the super-line Chrome DevTools panel. Add it where the client is built — `plugins: [devtoolsPlugin()]` — and nothing is observed, buffered or exposed until you do. It needs no server configuration at all and works against a server with no inspector.
+
+It is deliberately not a second Control Center. The inspector reports the server's truth; this reports what one tab's client did and knows, which is a different set of facts and not a subset:
+
+- a request created but never sent, because the socket was not writable
+- how long the current reconnect will wait, and which attempt it is on
+- which live subscription a delivered row landed in — and which one re-filtered it away, which the wire cannot distinguish from a delete
+- an inbound payload that failed contract validation on arrival
+- an event delivered to **zero listeners**, which has no server-side symptom whatsoever
+- which of several concurrently-live clients a page is running (a session replacement runs the incumbent and its candidate at the same time)
+
+`maxEvents` (default `5000`) is the ring capacity; past it the oldest records are evicted and the count is reported to the panel, which renders it as a visible gap rather than silently truncating. `redact` masks named fields at every depth before a payload enters the buffer — the buffer lives in the page's own memory, so this is about what ends up in a screenshot, not access control.
+
+Payloads are snapshotted as they arrive, so the buffer never pins an app object alive and never shows one that has since been mutated.
+
+**Tapping it yourself.** The plugin is one consumer of a general seam. Any client plugin can set `onClientSideEvent(event)` to observe the same stream — wire frames verbatim plus the client-local decisions above. It fires synchronously with live payload references, so an observer must not mutate them and must snapshot anything it keeps; a throwing tap is isolated and routed to `onError` as `kind: 'tap'`. A plugin's `setup(ctx)` additionally gets `clientId` / `role` and the accessors `getPending` / `getTopics` / `getCollectionSubs` / `getOpenDocs` / `getDocSnapshot` — the last being the only way to read a CRDT document's contents, since the wire carries opaque deltas.
+
+Note the name: the server plugin's tap is `onEvent` and carries the server's vocabulary; the client's is `onClientSideEvent` and carries its own. The two halves of a pair look symmetric and are not.
+
 ## Control Center inspector (plugin)
 
 `inspector(opts?: { redact?: string[]; revealEnvKeys?: string[]; auth?: InspectorAuth }): SuperLinePlugin` from `@super-line/plugin-inspector` is the **only** way to enable the Control Center — pass it in `plugins: [inspector()]`. The server no longer takes an `inspector` option and the WS transport no longer takes an `inspector` field. It taps every event (safe-snapshot + field-redact), publishes cluster-wide on its plugin channel, and serves the `InspectorContract` (`getContract` / `getTopology` / `listConnections` / `getNode` / `getConn` / `listCollections` / `queryCollection` + an `events` topic) over a reserved connection class. `redact` is a DENY-list masking named fields in `ctx`/`data`/payload snapshots; `revealEnvKeys` is the OPPOSITE — an ALLOW-list, because `env` is masked (`•••`) by default. Dev / trusted-network only.

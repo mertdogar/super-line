@@ -923,6 +923,45 @@ npx @super-line/control-center --url ws://localhost:3000   # opens the SPA; --ur
 
 Telemetry fans out cluster-wide over the adapter, so one dashboard sees every node's traffic (requests · events · broadcasts · publishes · collection/CRDT writes), live topology, and presence.
 
+## Debug one tab's client (DevTools panel)
+
+The Control Center answers "what is the cluster doing". When the answer is "the server looks fine, but this page is wrong", you want the other one: `@super-line/plugin-devtools` plus the super-line DevTools panel, which reports what a single tab's client did and knows.
+
+Add it where the client is built. Nothing is observed or buffered until you do, and it needs no server configuration — it works against production with the inspector switched off.
+
+```ts
+import { devtoolsPlugin } from '@super-line/plugin-devtools'
+
+const client = createSuperLineClient(api, {
+  transport: webSocketClientTransport({ url }),
+  role: 'user',
+  plugins: [devtoolsPlugin()],            // devtoolsPlugin({ redact: ['token'] }) to mask payload fields
+})
+```
+
+Using plugin-auth? It calls your own `connect`, so the plugin goes in there — and because a session replacement builds its candidate before closing the incumbent, you will correctly see **two live clients** during a sign-in:
+
+```ts
+authClient({
+  authedRole: 'user',
+  connect: ({ role, params }) =>
+    createSuperLineClient(api, { transport, role, params, plugins: [devtoolsPlugin()] }),
+})
+```
+
+Open DevTools → **super-line**. The questions it answers that no server-side view can:
+
+| Symptom | What the panel shows |
+| --- | --- |
+| "I called it and nothing happened" | the request sitting in **In flight**, or a `queued` row meaning it never left the socket |
+| "it reconnects forever" | `connection retry` rows with the attempt number and the exact backoff still to wait |
+| "a row vanished from my list" | the per-subscription routing decision — `left-filter` (still exists, no longer matches **this** query) is a different fact from `delete`, and the wire frame cannot tell them apart |
+| "my handler never fires" | a `deliver` row reading **no listeners** — a bug with no server-side symptom at all |
+| "the document stopped updating" | a `doc` row reading **no open replica**, meaning the delta arrived for a document this client had closed |
+| "the payload looks wrong" | the decoded row set the client is actually holding, and CRDT document contents — which never cross the wire in readable form |
+
+The panel installs with no permission warnings and polls. The **Polling / Live** button upgrades one origin to live push after a permission prompt; declining costs latency and nothing else, because polling stays authoritative and reports any events the buffer had to evict rather than quietly skipping them.
+
 ## Testing
 
 Test super-line by booting a **real server** on an ephemeral port and a **real client** (exercises the actual handshake + frames), then asserting through two kinds of "hooks":

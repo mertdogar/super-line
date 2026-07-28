@@ -34,6 +34,7 @@ Repo-internal: `docs/.vitepress/config.ts` excludes `adr/**` from the docs site,
 | 0021 | Column layout is derived from Standard JSON Schema, not a vendor's classes | In force; **amends 0013** (two consequences). Core now imports no schema library; fixes `instanceof` against a bundled zod that degenerated typed tables for *every* published consumer |
 | 0022 | A plugin authorizes admission to its own connection class | In force; **amends 0005** (phase 2 admitted reserved connections unconditionally). Closes the Control Center's total-read backdoor |
 | 0023 | A queue binds its worker late, and an unbound queue is skipped rather than failed | In force |
+| 0024 | The client observes itself, and emits frames rather than the inspector's taxonomy | In force; instruments the tap slot 0005 reserved on the client half, and retypes it away from the server's `TapEvent` |
 
 ## 2. The standing position, by subsystem
 

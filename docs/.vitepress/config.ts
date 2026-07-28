@@ -174,6 +174,7 @@ export default defineConfig({
           collapsed: true,
           items: [
             { text: 'Inspect with Control Center', link: '/how-to/control-center' },
+            { text: 'Debug a tab with DevTools', link: '/how-to/devtools-panel' },
             { text: 'Test your app', link: '/how-to/testing' },
             { text: 'Use with your AI agent', link: '/how-to/ai-agents' },
           ],
@@ -234,6 +235,7 @@ export default defineConfig({
             { text: 'Chat · channel resources', link: '/how-to/chat-resources' },
             { text: 'Chat · drive from scripts', link: '/how-to/chat-headless' },
             { text: 'Control Center inspector', link: '/how-to/control-center' },
+            { text: 'Client DevTools panel', link: '/how-to/devtools-panel' },
             { text: 'Super Harness', link: '/plugins/super-harness' },
           ],
         },

@@ -80,6 +80,7 @@ Fan out across nodes with a pluggable server↔server adapter.
 Develop, test, and operate super-line.
 
 - [Control Center](/how-to/control-center) — inspect topology and live message traffic in the browser.
+- [DevTools panel](/how-to/devtools-panel) — debug one tab's client: in-flight requests, reconnect backoff, per-subscription routing, CRDT contents.
 - [Testing](/how-to/testing) — drive contracts end to end with the loopback transport.
 - [AI agents](/how-to/ai-agents) — wire agents as first-class server-authoritative writers.
 

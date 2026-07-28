@@ -1582,12 +1582,18 @@ importers:
       '@super-line/client':
         specifier: workspace:*
         version: link:../client
+      '@super-line/collections-memory':
+        specifier: workspace:*
+        version: link:../collections-memory
       '@super-line/core':
         specifier: workspace:*
         version: link:../core
       '@super-line/plugin-inspector':
         specifier: workspace:*
         version: link:../plugin-inspector
+      '@super-line/plugin-queue':
+        specifier: workspace:*
+        version: link:../plugin-queue
       '@super-line/server':
         specifier: workspace:*
         version: link:../server

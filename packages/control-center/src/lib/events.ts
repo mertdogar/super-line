@@ -225,6 +225,20 @@ export function formatDuration(ms: number, now: number = Date.now()): string {
   return `${d}d ${h % 24}h`
 }
 
+/** Compact length of a span already measured in ms, e.g. "820ms", "14m". Unlike {@link formatDuration}, which
+ * takes an epoch-ms *instant* and reports how long ago it was, this takes the elapsed amount itself. */
+export function formatSpan(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '--'
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ${s % 60}s`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ${m % 60}m`
+  return `${Math.floor(h / 24)}d ${h % 24}h`
+}
+
 /** A heatmap band: applies to values strictly below `max`; the last band (max=Infinity) catches the rest. */
 type HeatBand = { max: number; color: string }
 

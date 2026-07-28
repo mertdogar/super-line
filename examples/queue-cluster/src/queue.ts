@@ -4,6 +4,18 @@ import { queue } from '@super-line/plugin-queue'
 
 const nodeName = process.env.NODE_NAME ?? 'queue-node'
 
+async function waitRandom(minMs: number, maxMs: number, signal?: AbortSignal) {
+  const delayMs = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs
+  await delay(delayMs, undefined, { signal })
+}
+
+
+function maybeFail(probability: number) {
+  if (Math.random() < probability) {
+    throw new Error(`failed with probability ${probability}`)
+  }
+}
+
 export const queueKit = queue({
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 250),
   shutdownGraceMs: 10_000,
@@ -27,7 +39,8 @@ export const queueKit = queue({
       },
       worker: async ({ reportId }, { attempt, signal }) => {
         console.log(`[${nodeName}] started ${reportId} (attempt ${attempt})`)
-        await delay(1_500, undefined, { signal })
+        await waitRandom(1_500, 3_000, signal)
+        maybeFail(0.3)
         console.log(`[${nodeName}] completed ${reportId}`)
         return { reportId, processedBy: nodeName, completedAt: Date.now() }
       },

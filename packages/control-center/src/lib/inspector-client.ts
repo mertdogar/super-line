@@ -1,6 +1,8 @@
 import {
   INSPECTOR_SUBPROTOCOL,
   jsonSerializer,
+  applyQuery,
+  matchesFilter,
   type ConnDescriptor,
   type ConnView,
   type InspectedContract,
@@ -10,8 +12,16 @@ import {
   type CollectionInfo,
   type CollectionQuery,
 } from '@super-line/core'
+import type { LiveRowSet, RowSetEvent } from '@super-line/client'
 
 export type InspectorStatus = 'connecting' | 'open' | 'closed'
+
+/** The `collection.change` payload a live row set folds in, narrowed off the inspector event union. */
+interface CollectionChange {
+  op: 'insert' | 'update' | 'delete'
+  id: string
+  row?: unknown
+}
 
 /** A typed client for the super-line inspector channel (the reserved `superline.inspector.v1` WS). */
 export interface InspectorClient {
@@ -24,6 +34,8 @@ export interface InspectorClient {
   listCollections(): Promise<CollectionInfo[]>
   /** Browse a collection's rows via the query IR (policy-bypassed, trusted observer). */
   queryCollection(collection: string, query?: CollectionQuery): Promise<unknown[]>
+  /** Subscribe to a collection's rows reactively (policy-bypassed, trusted observer). */
+  subscribeCollection(collection: string, query?: CollectionQuery): LiveRowSet & { error?: Error }
   /** Subscribe to live inspection records. Returns an unsubscribe fn. */
   onEvent(cb: (env: InspectorEnvelope) => void): () => void
   /** Observe connection status (called immediately with the current status). Returns an unsubscribe fn. */
@@ -131,6 +143,106 @@ export function createInspector(opts: InspectorOptions): InspectorClient {
     getConn: (id) => request<ConnView>('getConn', { id }),
     listCollections: () => request<CollectionInfo[]>('listCollections'),
     queryCollection: (collection, query) => request<unknown[]>('queryCollection', { collection, ...query }),
+    subscribeCollection(collection, query = {}) {
+      const map = new Map<string, unknown>()
+      let view: unknown[] = []
+      let inView = new Set<string>()
+      let key = 'id'
+      let closed = false
+      // Changes that land while the initial snapshot is in flight are buffered, then replayed onto it — the
+      // snapshot may predate them, so applying them first would be undone by it.
+      let buffered: CollectionChange[] | undefined = []
+      const listeners = new Set<(ev: RowSetEvent) => void>()
+
+      let resolveReady!: () => void
+      let rejectReady!: (err: unknown) => void
+      const ready = new Promise<void>((res, rej) => {
+        resolveReady = res
+        rejectReady = rej
+      })
+      void ready.catch(() => {}) // the caller may not await it; don't trip unhandled-rejection
+
+      // Recompute the ordered/limited view, then evict rows that fell outside it so `map` stays bounded by
+      // `limit` — the honest cost is that a delete inside the window can't backfill from beyond it.
+      const recompute = (): Set<string> => {
+        view = applyQuery([...map.values()], query)
+        const next = new Set(view.map((r) => String((r as Record<string, unknown>)[key])))
+        if (query.limit !== undefined && map.size > query.limit) {
+          for (const id of map.keys()) if (!next.has(id)) map.delete(id)
+        }
+        const prev = inView
+        inView = next
+        return prev
+      }
+
+      const apply = (change: CollectionChange): void => {
+        const { op, id, row } = change
+        if (op === 'delete' || !row) {
+          if (!map.delete(id)) return
+          if (recompute().has(id)) emit({ type: 'delete', id })
+          return
+        }
+        if (!matchesFilter(query.filter, row)) {
+          if (!map.delete(id)) return
+          if (recompute().has(id)) emit({ type: 'delete', id })
+          return
+        }
+        const was = map.has(id)
+        map.set(id, row)
+        // Only notify when the view actually admits (or just dropped) the row — churn beyond the window
+        // must not re-render the table.
+        if (recompute().has(id) || inView.has(id)) emit({ type: was ? 'update' : 'insert', id, row })
+      }
+
+      const emit = (ev: RowSetEvent): void => {
+        for (const cb of listeners) cb(ev)
+      }
+
+      Promise.all([
+        request<CollectionInfo[]>('listCollections'),
+        request<unknown[]>('queryCollection', { collection, ...query }),
+      ])
+        .then(([infos, rows]) => {
+          if (closed) return
+          key = infos.find((c) => c.name === collection)?.key ?? key
+          for (const r of rows) {
+            const id = (r as Record<string, unknown>)[key]
+            if (typeof id === 'string') map.set(id, r)
+          }
+          recompute()
+          const replay = buffered ?? []
+          buffered = undefined // from here changes apply directly
+          for (const change of replay) apply(change)
+          resolveReady()
+        })
+        .catch((err) => {
+          handle.error = err instanceof Error ? err : new Error(String(err))
+          rejectReady(err)
+        })
+
+      const onChange = (env: InspectorEnvelope): void => {
+        if (env.event.type !== 'collection.change' || env.event.n !== collection) return
+        const change: CollectionChange = { op: env.event.op, id: env.event.id, row: env.event.row }
+        if (buffered) buffered.push(change)
+        else apply(change)
+      }
+      eventCbs.add(onChange)
+
+      const handle: LiveRowSet & { error?: Error } = {
+        rows: () => view,
+        subscribe: (cb) => {
+          listeners.add(cb)
+          return () => listeners.delete(cb)
+        },
+        ready,
+        close: () => {
+          closed = true
+          eventCbs.delete(onChange)
+          listeners.clear()
+        },
+      }
+      return handle
+    },
     onEvent(cb) {
       eventCbs.add(cb)
       return () => eventCbs.delete(cb)

@@ -39,6 +39,7 @@ const NAV: NavItem[] = [
   { id: 'topology', label: 'Topology', icon: Network },
   { id: 'contract', label: 'Contract', icon: FileText },
   { id: 'collections', label: 'Collections', icon: Table2 },
+  { id: 'queues', label: 'Queues', icon: ListTodo },
   { id: 'connections', label: 'Connections', icon: Boxes },
   { id: 'feed', label: 'Live feed', icon: Radio },
   { id: 'plugins', label: 'Plugins', icon: Blocks },

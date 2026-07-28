@@ -22,7 +22,8 @@ export function BrandMark({ status, className }: { status: InspectorStatus; clas
           vectorEffect="non-scaling-stroke"
           className={cn(
             'transition-all duration-700 [transform-box:fill-box] [transform-origin:center]',
-            status === 'closed' ? 'scale-y-[0.04] stroke-muted-foreground' : 'stroke-primary',
+            // unauthorized flatlines like closed — there's no signal either way, only a different cause
+            status === 'closed' || status === 'unauthorized' ? 'scale-y-[0.04] stroke-muted-foreground' : 'stroke-primary',
             status === 'connecting' && 'cc-breathe',
           )}
         />

@@ -210,3 +210,54 @@ describe('inspector client', () => {
     expect(sub.rows()[0]).toMatchObject({ id: 'a', n: 1 })
   })
 })
+
+/** A server whose inspector demands credentials (ADR-0022). */
+async function startAuthedServer() {
+  const httpServer = http.createServer()
+  const srv = createSuperLineServer(contract, {
+    transports: [webSocketServerTransport({ server: httpServer })],
+    authenticate: () => ({ role: 'user' as const, ctx: {} }),
+    plugins: [inspector({ auth: { username: 'admin', password: 's3cret' } })],
+  })
+  srv.implement({ user: { ping: async () => 1 } })
+  await new Promise<void>((resolve) => httpServer.listen(0, resolve))
+  const { port } = httpServer.address() as AddressInfo
+  cleanups.push(async () => {
+    await srv.close()
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()))
+  })
+  return { srv, url: `ws://127.0.0.1:${port}` }
+}
+
+describe('inspector credentials', () => {
+  it('splices credentials into the dial URL, leaving the configured url untouched', async () => {
+    const { url } = await startAuthedServer()
+    const insp = createInspector({ url, user: 'admin', password: 's3cret' })
+    cleanups.push(() => insp.close())
+    await whenOpen(insp)
+    expect(await insp.getNode()).toMatchObject({ rooms: [] })
+  })
+
+  it('reports a refusal as terminal `unauthorized` carrying the server reason, and stops retrying', async () => {
+    const { url } = await startAuthedServer()
+    const seen: string[] = []
+    const insp = createInspector({ url, user: 'admin', password: 'wrong' })
+    cleanups.push(() => insp.close())
+    insp.onStatus((s, reason) => seen.push(reason ? `${s}:${reason}` : s))
+
+    await waitFor(() => seen.includes('unauthorized:invalid inspector credentials'))
+    // Past the 1s auto-retry: a refused credential must not be replayed, so nothing further is attempted.
+    await new Promise((r) => setTimeout(r, 1300))
+    expect(seen.filter((s) => s === 'connecting')).toHaveLength(1)
+    expect(seen.at(-1)).toBe('unauthorized:invalid inspector credentials')
+  })
+
+  it('still reports an unreachable server as retryable `closed`', async () => {
+    const seen: string[] = []
+    const insp = createInspector({ url: 'ws://127.0.0.1:1', user: 'admin', password: 's3cret' })
+    cleanups.push(() => insp.close())
+    insp.onStatus((s) => seen.push(s))
+    await waitFor(() => seen.filter((s) => s === 'connecting').length > 1, 4000)
+    expect(seen).not.toContain('unauthorized')
+  })
+})

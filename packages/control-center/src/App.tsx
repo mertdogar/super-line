@@ -7,7 +7,7 @@ import type {
   NodeStat,
   NodeView,
 } from '@super-line/core'
-import { useInspector } from '@/hooks/use-inspector'
+import { useInspector, type InspectorCredentials } from '@/hooks/use-inspector'
 import { useDirectory } from '@/hooks/use-directory'
 import { Badge } from '@/components/ui/badge'
 import { TopologyGraph } from '@/components/topology-graph'
@@ -50,21 +50,42 @@ const NAV_BOTTOM: NavItem[] = [
 ]
 
 const STORAGE_KEY = 'superline.cc.url'
+// Credentials persist under their OWN keys, never folded into the URL string — the URL is displayed in
+// Settings, echoed by the launcher, and shareable as a ?url= deep link. A password must be in none of those.
+const USER_KEY = 'superline.cc.user'
+const PASSWORD_KEY = 'superline.cc.password'
 const DEFAULT_URL = 'ws://localhost:3000'
+
+function readStored(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null // localStorage may be unavailable (private mode)
+  }
+}
+
+function writeStored(key: string, value: string): void {
+  try {
+    if (value) localStorage.setItem(key, value)
+    else localStorage.removeItem(key)
+  } catch {
+    /* ignore */
+  }
+}
 
 function seedUrl(): string {
   // precedence: explicit ?url= deep-link → user's saved choice → launcher default → built-in default
   const fromQuery = new URLSearchParams(window.location.search).get('url')
   if (fromQuery) return fromQuery
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) return stored
-  } catch {
-    /* localStorage may be unavailable (private mode) */
-  }
+  const stored = readStored(STORAGE_KEY)
+  if (stored) return stored
   const injected = (window as { __CC_DEFAULT_URL__?: string }).__CC_DEFAULT_URL__
   if (injected) return injected
   return DEFAULT_URL
+}
+
+function seedCredentials(): InspectorCredentials {
+  return { user: readStored(USER_KEY) ?? '', password: readStored(PASSWORD_KEY) ?? '' }
 }
 
 function NavButton({
@@ -94,9 +115,10 @@ function NavButton({
 
 export default function App(): React.JSX.Element {
   const [url, setUrl] = React.useState(seedUrl)
+  const [credentials, setCredentials] = React.useState(seedCredentials)
   const [view, setView] = React.useState<View>('topology')
   const [reconnect, setReconnect] = React.useState(0)
-  const { client, status } = useInspector(url, reconnect)
+  const { client, status, authReason } = useInspector(url, credentials, reconnect)
 
   const [topology, setTopology] = React.useState<NodeStat[]>([])
   const [connections, setConnections] = React.useState<ConnDescriptor[]>([])
@@ -110,13 +132,12 @@ export default function App(): React.JSX.Element {
   const [ready, setReady] = React.useState(false)
   const [showShortcuts, setShowShortcuts] = React.useState(false)
 
-  const connect = React.useCallback((next: string) => {
+  const connect = React.useCallback((next: string, nextCredentials: InspectorCredentials) => {
     setUrl(next)
-    try {
-      localStorage.setItem(STORAGE_KEY, next)
-    } catch {
-      /* ignore */
-    }
+    setCredentials(nextCredentials)
+    writeStored(STORAGE_KEY, next)
+    writeStored(USER_KEY, nextCredentials.user)
+    writeStored(PASSWORD_KEY, nextCredentials.password)
   }, [])
 
   // Topology node selection: a conn opens the shared ConnDetail panel; a server opens NodeDetail. Only one
@@ -310,7 +331,13 @@ export default function App(): React.JSX.Element {
           ) : null}
 
           {showState ? (
-            <ConnectionState status={status} url={url} onRetry={() => setReconnect((n) => n + 1)} />
+            <ConnectionState
+              status={status}
+              url={url}
+              authReason={authReason}
+              onRetry={() => setReconnect((n) => n + 1)}
+              onOpenSettings={() => setView('settings')}
+            />
           ) : view === 'topology' ? (
             <div className="flex min-h-0 flex-1">
               <div className="min-w-0 flex-1">
@@ -354,7 +381,15 @@ export default function App(): React.JSX.Element {
               {view === 'collections' && <CollectionsExplorer client={client} contract={contract} />}
               {view === 'feed' && <LiveFeed events={feed} connections={connections} topology={topology} />}
               {view === 'queues' && <QueuesPage client={client} />}
-              {view === 'settings' && <SettingsPage url={url} status={status} onConnect={connect} />}
+              {view === 'settings' && (
+                <SettingsPage
+                  url={url}
+                  credentials={credentials}
+                  status={status}
+                  authReason={authReason}
+                  onConnect={connect}
+                />
+              )}
               {view === 'resources' && <ResourcesPage />}
             </div>
           )}

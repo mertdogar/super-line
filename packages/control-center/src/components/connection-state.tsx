@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { RotateCw } from 'lucide-react'
+import { KeyRound, RotateCw } from 'lucide-react'
 import type { InspectorStatus } from '@/lib/inspector-client'
 import { BrandMark } from '@/components/brand-mark'
 import { Button } from '@/components/ui/button'
@@ -12,28 +12,41 @@ import { Button } from '@/components/ui/button'
 export function ConnectionState({
   status,
   url,
+  authReason,
   onRetry,
+  onOpenSettings,
 }: {
   status: InspectorStatus
   url: string
+  /** The server's explanation for a refused credential, when it sent one. */
+  authReason?: string
   onRetry: () => void
+  onOpenSettings: () => void
 }): React.JSX.Element {
   // `status` is already de-strobed upstream (useInspector holds a failed connect at a steady 'closed'
   // through the silent auto-retries), so this state can render it straight.
   const copy =
     status === 'connecting'
       ? { title: 'Connecting…', detail: `Reaching the inspector at ${url}.`, hint: null as string | null }
-      : status === 'closed'
+      : status === 'unauthorized'
         ? {
-            title: 'Can’t reach the inspector',
-            detail: `No inspector answered at ${url}. The server may be down, on another port, or not exposing the inspector.`,
-            hint: 'Make sure the server mounts inspector() in its plugins, then set the right URL under Settings. Retrying automatically every second.',
+            title: 'Credentials rejected',
+            detail: authReason
+              ? `The inspector at ${url} refused this connection: ${authReason}`
+              : `The inspector at ${url} refused these credentials.`,
+            hint: 'This server runs inspector({ auth }). Enter the username and password under Settings — auto-retry is off, since retrying the same credentials would only be refused again.',
           }
-        : {
-            title: 'Connected · no nodes reporting',
-            detail: `The inspector at ${url} is reachable, but no super-line node has reported yet.`,
-            hint: 'Waiting for the first topology heartbeat — this clears as soon as a node checks in.',
-          }
+        : status === 'closed'
+          ? {
+              title: 'Can’t reach the inspector',
+              detail: `No inspector answered at ${url}. The server may be down, on another port, or not exposing the inspector.`,
+              hint: 'Make sure the server mounts inspector() in its plugins, then set the right URL under Settings. Retrying automatically every second.',
+            }
+          : {
+              title: 'Connected · no nodes reporting',
+              detail: `The inspector at ${url} is reachable, but no super-line node has reported yet.`,
+              hint: 'Waiting for the first topology heartbeat — this clears as soon as a node checks in.',
+            }
   return (
     <div className="flex h-full flex-col items-center justify-center gap-5 p-8 text-center">
       <BrandMark status={status} className="h-14 w-28" />
@@ -42,7 +55,12 @@ export function ConnectionState({
         <p className="max-w-md text-sm text-muted-foreground">{copy.detail}</p>
       </div>
       <code className="rounded-md border bg-card/60 px-2.5 py-1 font-mono text-xs text-foreground">{url}</code>
-      {status !== 'connecting' ? (
+      {status === 'unauthorized' ? (
+        <Button size="sm" variant="secondary" onClick={onOpenSettings}>
+          <KeyRound className="h-3.5 w-3.5" />
+          Open Settings
+        </Button>
+      ) : status !== 'connecting' ? (
         <Button size="sm" variant="secondary" onClick={onRetry}>
           <RotateCw className="h-3.5 w-3.5" />
           Retry

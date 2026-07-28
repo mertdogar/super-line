@@ -14,7 +14,14 @@ import {
 } from '@super-line/core'
 import type { LiveRowSet, RowSetEvent } from '@super-line/client'
 
-export type InspectorStatus = 'connecting' | 'open' | 'closed'
+/**
+ * `unauthorized` is terminal and distinct from `closed` on purpose: the server closes with 4401 when it
+ * refuses our credentials, which is the one failure retrying cannot fix (ADR-0022).
+ */
+export type InspectorStatus = 'connecting' | 'open' | 'closed' | 'unauthorized'
+
+/** WS close code the server sends when a reserved connection's credentials are refused (private-use range). */
+const UNAUTHORIZED_CODE = 4401
 
 /** The `collection.change` payload a live row set folds in, narrowed off the inspector event union. */
 interface CollectionChange {
@@ -38,8 +45,11 @@ export interface InspectorClient {
   subscribeCollection(collection: string, query?: CollectionQuery): LiveRowSet & { error?: Error }
   /** Subscribe to live inspection records. Returns an unsubscribe fn. */
   onEvent(cb: (env: InspectorEnvelope) => void): () => void
-  /** Observe connection status (called immediately with the current status). Returns an unsubscribe fn. */
-  onStatus(cb: (status: InspectorStatus) => void): () => void
+  /**
+   * Observe connection status (called immediately with the current status). `reason` carries the server's
+   * close message on `unauthorized` — a host `auth` predicate can explain *why* it refused. Returns an unsubscribe fn.
+   */
+  onStatus(cb: (status: InspectorStatus, reason?: string) => void): () => void
   close(): void
 }
 
@@ -52,10 +62,29 @@ type WireFrame = { t: string; i?: number; c?: string; d?: unknown; code?: string
 
 export interface InspectorOptions {
   url: string
+  /**
+   * Credentials for a server running `inspector({ auth })`. Spliced into the dial URL as `user`/`password`
+   * handshake params — deliberately NOT baked into `url`, which the Control Center persists and displays.
+   */
+  user?: string
+  password?: string
   /** WebSocket implementation (defaults to `globalThis.WebSocket`). */
   WebSocket?: typeof WebSocket
   /** Auto-reconnect on drop. Defaults to `true`. */
   reconnect?: boolean
+}
+
+/** Splice the credentials into the dial URL. A URL too malformed to parse is dialed as typed, so the WS reports it. */
+function dialUrl(url: string, user?: string, password?: string): string {
+  if (!password) return url
+  try {
+    const u = new URL(url)
+    u.searchParams.set('user', user || 'admin')
+    u.searchParams.set('password', password)
+    return u.toString()
+  } catch {
+    return url
+  }
 }
 
 export function createInspector(opts: InspectorOptions): InspectorClient {
@@ -65,36 +94,42 @@ export function createInspector(opts: InspectorOptions): InspectorClient {
   const reconnect = opts.reconnect ?? true
 
   const eventCbs = new Set<(env: InspectorEnvelope) => void>()
-  const statusCbs = new Set<(status: InspectorStatus) => void>()
+  const statusCbs = new Set<(status: InspectorStatus, reason?: string) => void>()
   const waiters = new Map<number, Waiter>()
   let ws: WebSocket
   let nextId = 1
   let closed = false
   let status: InspectorStatus = 'connecting'
+  let statusReason: string | undefined
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 
-  function setStatus(next: InspectorStatus): void {
+  function setStatus(next: InspectorStatus, reason?: string): void {
     status = next
-    for (const cb of statusCbs) cb(next)
+    statusReason = reason
+    for (const cb of statusCbs) cb(next, reason)
   }
 
   function connect(): void {
     setStatus('connecting')
-    ws = new WS(opts.url, INSPECTOR_SUBPROTOCOL)
+    ws = new WS(dialUrl(opts.url, opts.user, opts.password), INSPECTOR_SUBPROTOCOL)
     ws.binaryType = 'arraybuffer'
     ws.onopen = () => {
       setStatus('open')
       ws.send(jsonSerializer.encode({ t: 'sub', i: nextId++, c: 'events' })) // subscribe live events
     }
     ws.onmessage = (event: MessageEvent) => onMessage(event.data as string | ArrayBuffer)
-    ws.onclose = () => {
+    ws.onclose = (event: CloseEvent) => {
       for (const [, w] of waiters) w.reject(new Error('Inspector disconnected'))
       waiters.clear()
-      if (closed || !reconnect) {
-        setStatus('closed')
+      // A refused credential is terminal — retrying it every second would just replay the same rejection.
+      // The server accepts the socket purely so it can close it with this code; a rejected UPGRADE would
+      // reach us as an indistinguishable 1006.
+      if (event.code === UNAUTHORIZED_CODE) {
+        setStatus('unauthorized', event.reason || undefined)
         return
       }
       setStatus('closed')
+      if (closed || !reconnect) return
       reconnectTimer = setTimeout(connect, 1000)
     }
     ws.onerror = () => {} // the close handler drives reconnect
@@ -249,7 +284,7 @@ export function createInspector(opts: InspectorOptions): InspectorClient {
     },
     onStatus(cb) {
       statusCbs.add(cb)
-      cb(status)
+      cb(status, statusReason)
       return () => statusCbs.delete(cb)
     },
     close() {

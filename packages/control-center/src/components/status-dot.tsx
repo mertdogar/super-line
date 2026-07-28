@@ -7,6 +7,7 @@ const LABEL: Record<InspectorStatus, string> = {
   open: 'connected',
   connecting: 'connecting',
   closed: 'disconnected',
+  unauthorized: 'unauthorized',
 }
 
 export function StatusDot({ status }: { status: InspectorStatus }): React.JSX.Element {

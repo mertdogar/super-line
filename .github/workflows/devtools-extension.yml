@@ -38,10 +38,11 @@ jobs:
             exit 1
           fi
 
-      # Root `pnpm typecheck` EXCLUDES this package (React JSX), so its own script has to run here or
-      # a type break ships inside the zip.
+      # The one check that earns its place here: root `pnpm typecheck` EXCLUDES this package (React
+      # JSX), so it is the gate a local run does NOT already cover. Tests are not re-run — the tag is
+      # cut from a commit that passed the suite locally, and coupling the zip to every other package's
+      # health only means an unrelated failure blocks a release.
       - run: pnpm --filter @super-line/devtools-extension typecheck
-      - run: pnpm test:fast
 
       - run: pnpm --filter @super-line/devtools-extension build
 

@@ -1,0 +1,53 @@
+@import 'tailwindcss';
+
+/* DevTools has its own light/dark setting and the panel must follow it, not the OS. Chrome does not
+   expose that as a class on our document, but it does honour prefers-color-scheme inside the panel
+   frame, so the media query is the correct signal here. */
+@theme {
+  --color-bg: #ffffff;
+  --color-fg: #1f1f1f;
+  --color-muted: #5f6368;
+  --color-line: #e0e0e0;
+  --color-panel: #f8f9fa;
+  --color-accent: #1a73e8;
+  --color-out: #1967d2;
+  --color-in: #188038;
+  --color-warn: #b06000;
+  --color-bad: #c5221f;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-bg: #202124;
+    --color-fg: #e8eaed;
+    --color-muted: #9aa0a6;
+    --color-line: #3c4043;
+    --color-panel: #292a2d;
+    --color-accent: #8ab4f8;
+    --color-out: #8ab4f8;
+    --color-in: #81c995;
+    --color-warn: #fdd663;
+    --color-bad: #f28b82;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font:
+    12px/1.5 system-ui,
+    -apple-system,
+    sans-serif;
+}
+
+/* The timeline is dense and monospaced; tabular figures stop ids and latencies jittering as they update. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

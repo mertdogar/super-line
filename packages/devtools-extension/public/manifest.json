@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "super-line devtools",
+  "version": "0.1.0",
+  "description": "Inspect a super-line client from the browser's own DevTools: frames, in-flight requests, subscriptions, collections and CRDT documents.",
+  "devtools_page": "devtools.html",
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "permissions": ["scripting"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"]
+}

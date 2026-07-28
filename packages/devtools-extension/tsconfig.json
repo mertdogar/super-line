@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "resolveJsonModule": true,
+    "types": ["chrome", "vite/client"],
+    "noEmit": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@super-line/core": ["../core/src/index.ts"],
+      "@super-line/client": ["../client/src/index.ts"],
+      "@super-line/plugin-devtools": ["../plugin-devtools/src/index.ts"]
+    }
+  },
+  "include": ["src", "test", "vite.config.ts"]
+}

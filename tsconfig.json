@@ -6,6 +6,7 @@
   "include": ["packages/*/src", "packages/*/test", "examples/*/src"],
   "exclude": [
     "packages/control-center",
+    "packages/devtools-extension",
     "examples/collections-chat",
     "examples/chat-supervisor",
     "examples/react-chat-transports"

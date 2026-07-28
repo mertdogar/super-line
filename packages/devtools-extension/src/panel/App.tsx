@@ -3,7 +3,15 @@ import { NOT_INSTALLED, drain } from '../lib/bridge.js'
 import { downloadExport, exportRows, EXPORT_FORMATS, type ExportFormat } from '../lib/export.js'
 import { CATEGORIES, type Category } from '../lib/labels.js'
 import { applyOpFilter, toOperations } from '../lib/operations.js'
-import { applyBatch, applyFilter, applyPushed, initialState, type Filter, type PanelState } from '../lib/reduce.js'
+import {
+  applyBatch,
+  applyFilter,
+  applyPushed,
+  initialState,
+  SUPPORTED_TAP_VERSION,
+  type Filter,
+  type PanelState,
+} from '../lib/reduce.js'
 import { connectPushPort, injectRelay, isGranted, requestPush, revokePush } from '../lib/push.js'
 import { Activity } from './Activity.js'
 import { Timeline } from './Timeline.js'
@@ -119,7 +127,8 @@ export function App(): React.JSX.Element {
     downloadExport(exportRows(visibleFrames, visibleOps, mode), format, {
       mode,
       pageLoadId: state.pageLoadId,
-      tapVersion: 1,
+      panelVersion: __PANEL_VERSION__,
+      tapVersion: SUPPORTED_TAP_VERSION,
       filter,
       now: Date.now(),
     })
@@ -362,6 +371,14 @@ function Toolbar(p: ToolbarProps): React.JSX.Element {
       )}
 
       <div className="ml-auto flex items-center gap-2">
+        {/* nothing auto-updates this panel and the wire-version banner only fires on a protocol
+            change, so the build has to name itself or a stale one is invisible */}
+        <span
+          className="tabular text-[var(--color-muted)] opacity-60"
+          title={`super-line devtools ${__PANEL_VERSION__} — this panel does not auto-update; compare against the Releases page`}
+        >
+          v{__PANEL_VERSION__}
+        </span>
         <span className="tabular text-[var(--color-muted)]">
           {p.shown === p.total ? `${p.total}` : `${p.shown} / ${p.total}`}
           {p.dropped > 0 && <span className="ml-2 text-[var(--color-warn)]">{p.dropped} dropped</span>}

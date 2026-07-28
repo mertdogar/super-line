@@ -1,0 +1,92 @@
+name: Release DevTools extension
+
+# Chrome only auto-updates extensions it hosts and signs itself, and self-hosting an `update_url` is
+# limited to enterprise-managed Chrome — so this extension is distributed as a zip the user loads
+# unpacked. The version in the zip is therefore the ONLY thing telling a user how old their panel is,
+# which is why the tag and package.json are checked against each other before anything is built.
+on:
+  push:
+    tags: ['devtools-extension-v*']
+  # Dry run: builds and attaches the zip as a workflow artifact without cutting a Release.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Resolve version
+        id: v
+        run: echo "version=$(node -p "require('./packages/devtools-extension/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tagged="${GITHUB_REF_NAME#devtools-extension-v}"
+          if [ "$tagged" != "${{ steps.v.outputs.version }}" ]; then
+            echo "::error::tag $GITHUB_REF_NAME says $tagged but package.json says ${{ steps.v.outputs.version }}"
+            exit 1
+          fi
+
+      # Root `pnpm typecheck` EXCLUDES this package (React JSX), so its own script has to run here or
+      # a type break ships inside the zip.
+      - run: pnpm --filter @super-line/devtools-extension typecheck
+      - run: pnpm test:fast
+
+      - run: pnpm --filter @super-line/devtools-extension build
+
+      - name: Zip the unpacked extension
+        run: |
+          cd packages/devtools-extension/dist
+          zip -r "$GITHUB_WORKSPACE/super-line-devtools-${{ steps.v.outputs.version }}.zip" .
+
+      - name: Upload dry-run artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: super-line-devtools-${{ steps.v.outputs.version }}
+          path: super-line-devtools-${{ steps.v.outputs.version }}.zip
+
+      - name: Cut the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Quoted heredoc: the body is markdown full of backticks, and an unquoted one would run them
+        # as command substitution. Every value below is substituted by Actions before the shell sees it.
+        run: |
+          cat > notes.md <<'EOF'
+          ## Install
+
+          1. Download `super-line-devtools-${{ steps.v.outputs.version }}.zip` below and unzip it.
+          2. Open `chrome://extensions` and switch on **Developer mode**.
+          3. **Load unpacked** → select the unzipped folder.
+
+          It installs with no permission warnings. Then add the plugin where your client is built:
+
+          ```ts
+          import { devtoolsPlugin } from '@super-line/plugin-devtools'
+
+          const client = createSuperLineClient(api, { transport, role: 'user', plugins: [devtoolsPlugin()] })
+          ```
+
+          Open DevTools → **super-line**. Nothing is observed or buffered until the plugin is present.
+
+          This panel does **not** auto-update — Chrome reserves that for extensions it hosts and signs.
+          The build version is in the panel toolbar; check it against this page when something looks wrong.
+
+          [Changelog](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/packages/devtools-extension/CHANGELOG.md) · [Guide](https://super-line.dogar.biz/how-to/devtools-panel)
+          EOF
+          gh release create "${{ github.ref_name }}" \
+            "super-line-devtools-${{ steps.v.outputs.version }}.zip" \
+            --title "DevTools panel ${{ steps.v.outputs.version }}" \
+            --notes-file notes.md

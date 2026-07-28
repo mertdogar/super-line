@@ -21,6 +21,8 @@ export interface ExportContext {
   mode: ExportMode
   pageLoadId?: string
   tapVersion?: number
+  /** Which panel build wrote the file — nothing auto-updates it, so an old export can be an old bug. */
+  panelVersion?: string
   filter: Filter
   /** Injected rather than read from the clock, so the output is reproducible under test. */
   now: number
@@ -90,6 +92,7 @@ export function exportJson(rows: unknown[], ctx: ExportContext): string {
       source: 'super-line devtools',
       exportedAt: new Date(ctx.now).toISOString(),
       mode: ctx.mode,
+      panelVersion: ctx.panelVersion,
       pageLoadId: ctx.pageLoadId,
       tapVersion: ctx.tapVersion,
       filter: ctx.filter,

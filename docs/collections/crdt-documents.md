@@ -34,6 +34,66 @@ This is also **what makes op-log compaction safe.** A durable/`self` backend per
 
 Validation is therefore scoped to the values actually present in the merged snapshot.
 
+## Collaborative text: a native root
+
+Some content merges at a granularity no field can express. A document's described root is diff-and-patched
+whole on every write, so a **string in it is replaced, not merged** — two people typing in one paragraph and
+one of them loses their keystrokes. Rich text needs a **native root**: a CRDT type bound *beside* the
+described root, in the same document.
+
+```ts
+collections: {
+  notes: { schema: z.object({}), crdt: { mode: 'document', validate: false } },
+}
+```
+
+```ts
+import { yDocOf } from '@super-line/collections-crdt-memory'
+
+const handle = client.collection('notes').open(docId)
+await handle.ready
+
+// Tiptap wants a Y.Doc and does not care how it syncs — super-line already is.
+Collaboration.configure({ document: yDocOf(handle), field: 'body' })   // `field` IS the root key
+```
+
+There is **no provider**. A native root replicates with no further work, because the wire already carries
+whole-document updates — and it survives op-log compaction for the same reason (a baseline is a whole-document
+encoding, not a re-encoding of the snapshot).
+
+The trade is one asymmetry: **replication is free, legibility is forfeit.** The plaintext snapshot
+materialises only the described root, so a native root is absent from the document's inferred type, from
+validation, from the queryable projection and from the inspector. `yDocOf` lives in the engine package rather
+than on `DocHandle` so that `@super-line/client` never acquires a CRDT dependency.
+
+::: warning Three things to get right
+- **Turn ingress validation off** (`validate: false`). There is nothing in the described root for a schema to
+  check, and validating a document per keystroke is unaffordable regardless — see below.
+- **Keep validatable state out of that document.** A rejected write rebuilds the replica on a fresh `Y.Doc`,
+  orphaning anything bound to the old one. A native root cannot cause a rejection, but a described field in
+  the same document can. Model the metadata as a [row collection](/collections/row-collections) beside it —
+  which you want anyway, since a CRDT collection is opened by id and never queried, so a document's own
+  *title* could not live in it and stay sortable.
+- **Agree on the root's kind.** A Yjs root is fixed the first time it is touched: open `body` as a text type
+  once and nothing can later open it as the fragment an editor expects. Keep the name in a shared constant.
+:::
+
+## Turning ingress validation off
+
+`crdt: { validate: false }` makes the server pass **no validator**, so the backend skips the merge-and-check
+entirely rather than performing it and discarding the result.
+
+Reach for it when writes are too fine-grained to validate. The check is proportional to document size and
+history depth — a CRDT has no cheap clone, and on a durable backend it re-reads the log — which is affordable
+per shape or per scene field and ruinous per character.
+
+The cost is exact: **the policy becomes the only gate on content.** It still decides *who* may write; nothing
+then decides *what*. Row collections are unaffected — their validation is per-row and cheap, because a row
+carries no history.
+
+> Relayed deltas already took this path: a delta arriving from another node was validated at *its* ingress
+> node, so every other node in a cluster skips the fold too.
+
 ## Server: a backend + a guard, and create the doc
 
 Give the server a CRDT backend (a separate backend from the [row backend](/collections/backends) — CRDT never joins a cross-collection atomic batch) and a [guard-shaped policy](/collections/policies#crdt-document-guards). **Creation is server-authoritative** — clients open existing documents:
@@ -104,6 +164,7 @@ Mount [`inspector()`](/how-to/control-center) and every document open/write/chan
 - [`examples/ai-canvas`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas) — a collaborative canvas over `@super-line/collections-crdt-memory` with a **server-side AI agent** as a co-writer: `srv.collection('scene').open(id)` reads the live board and drives it while you keep editing in two tabs; the edits **merge** (concurrent edits to different fields both survive).
 - [`examples/ai-canvas-pglite`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas-pglite) — the same board re-clustered across two nodes on `@super-line/collections-crdt-pglite` (central Postgres + Electric), validate-before-commit at the ingress node.
 - [`examples/chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor) — a CRDT document attached to a **chat channel** as a [channel resource](/how-to/chat-resources): a human and a Mastra agent co-edit one canvas, the agent writing through the chat plugin's acked `write_resource` path instead of a raw co-writer.
+- [`examples/react-chat-transports`](https://github.com/mertdogar/super-line/tree/main/examples/react-chat-transports) — a **rich-text editor** on a native root: every channel carries a Tiptap document beside its conversation, with per-character merge and live carets. Also the reference for pairing a validated `resources` row (the title) with an unvalidated CRDT document (the prose).
 
 ## Next
 

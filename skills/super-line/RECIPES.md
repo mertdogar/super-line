@@ -761,6 +761,76 @@ const api = defineContract({
 - A **contract plugin** ships collections + roles + policies as a bundle (a paired runtime plugin carries the handlers); **`mergeSurfaces`** grafts a library's requests/events into an existing role.
 - Always wrap with `defineContractPlugin` / `defineSurface` — a plain const widens `subscribe: true` to `boolean` and silently downgrades a topic to a push event.
 
+## Collaborative rich text (Tiptap / y-prosemirror) — a native root
+
+A schema describes fields, and fields merge per field. Text has to merge per **character**, so it cannot live
+in the described root at all: that root is diff-and-patched whole on every write, which *replaces* a string
+rather than merging it. Put the text in a **native root** — a CRDT type bound beside the described one, in the
+same document.
+
+```ts
+// CONTRACT — nothing describable is left, so ingress validation goes off (see the note below).
+const api = defineContract({
+  collections: {
+    // the prose: opened by id, never queried
+    notes: { schema: z.object({}), crdt: { mode: 'document', validate: false } },
+    // its title/owner: an ORDINARY row collection, because a CRDT collection is not queryable
+    noteMeta: { schema: z.object({ id: z.string(), title: z.string(), ownerId: z.string() }), key: 'id' },
+  },
+  roles: { user: { clientToServer: {} } },
+})
+
+// SERVER — as any CRDT collection: a separate backend, a guard policy, server-authoritative creation.
+const srv = createSuperLineServer(api, {
+  collections: memoryCollections(),
+  crdtCollections: crdtMemoryCollections(),
+  policies: {
+    notes:    { read: (p, id) => true, write: (p, id) => true },     // guard shape (deny-by-default)
+    noteMeta: { read: () => undefined, write: (p, op, next) => next.ownerId === p },
+  },
+})
+await srv.collection('notes').create(docId, {})
+await srv.collection('noteMeta').insert({ id: docId, title: 'Design notes', ownerId: 'ada' })
+
+// CLIENT — bind an editor straight to the document. There is NO provider.
+import { crdtCollectionsClient, yDocOf } from '@super-line/collections-crdt-memory'
+import Collaboration from '@tiptap/extension-collaboration'
+import CollaborationCaret from '@tiptap/extension-collaboration-caret'
+
+const handle = client.collection('notes').open(docId)
+await handle.ready                                    // bind AFTER catch-up, or you seed an empty paragraph
+
+useEditor({
+  extensions: [
+    StarterKit.configure({ undoRedo: false }),        // Collaboration ships its own history —
+                                                      // a shared undo stack must not undo other people's edits
+    Collaboration.configure({ document: yDocOf(handle), field: 'body' }),   // `field` IS the Yjs root key
+    CollaborationCaret.configure({ provider: { awareness }, user: { name, color } }),
+  ],
+})
+// React: const { native } = useDoc('notes', docId) → yDocOf({ native: () => native })
+```
+
+- **Why no provider.** An editor wants a `Y.Doc` and does not care how it syncs; super-line already syncs this
+  one. A native root replicates for free because the wire carries whole-document updates — and survives op-log
+  compaction for the same reason.
+- **Replication is free, legibility is forfeit.** The plaintext snapshot materialises only the described root,
+  so a native root never appears in the inferred type, in validation, in the queryable projection or in the
+  inspector. That is why the title lives in `noteMeta`: a CRDT collection is opened by id and never queried,
+  so a document's own name could not be sorted or searched from inside it.
+- **`validate: false` is required, and it costs something.** The server passes no validator, so the backend
+  skips the merge-and-check instead of running it and throwing the result away. Validating per keystroke is
+  unaffordable regardless (the check is proportional to document size and history — a CRDT has no cheap
+  clone). **The policy is then the only gate on content:** it decides who may write, and nothing decides what.
+- **Keep validatable state out of that document.** A rejected write rebuilds the replica on a fresh `Y.Doc`
+  and orphans the editor bound to the old one. A native root cannot cause a rejection, but a described field
+  in the same document can — hence the split above.
+- **A Yjs root's kind is fixed on first use.** Touch `body` as a text type once and nothing can later open it
+  as the fragment an editor expects. Keep the root name in one shared constant.
+- **Carets are a separate protocol.** Yjs awareness never travels on a document update and is meant to
+  evaporate, so it needs an ephemeral broadcast of its own (a request + an event over a room), not a
+  collection. Do not persist cursor positions.
+
 ## Durable CRDT document collection (libsql / Turso)
 
 A durable, mergeable document is a **CRDT document collection** — declared on the contract (so every delta is **validate-before-commit** schema-checked), opened by id, and persisted to libsql/Turso. The factory is **async** — it rehydrates every doc (history-preserving) before returning.

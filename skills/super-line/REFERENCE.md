@@ -439,7 +439,8 @@ Backends (all drop-in, one line to swap): `@super-line/collections-memory` (in-m
 A collection has **two consistency models** — LWW **rows** (above, queryable) and CRDT **docs** (whole-document merge, opened by id). A CRDT collection is declared with a `crdt` key (**no `key`** — the id is external) and is **opened by id, not queried**.
 
 ```ts
-// CONTRACT — the `crdt` key discriminates (DocOptions: { mode?: 'shallow'|'document'; opaque?: string[] }):
+// CONTRACT — the `crdt` key discriminates
+// (DocOptions: { mode?: 'shallow'|'document'; opaque?: string[]; validate?: boolean }):
 defineContract({ collections: { scenes: { schema: z.object({ shapes: z.record(z.any()) }), crdt: { mode: 'document' } } } })
 
 // SERVER — a SEPARATE backend (crdtCollections:, NOT collections:) + guard-shaped policies (deny-by-default):
@@ -452,7 +453,7 @@ await srv.collection('scenes').create(id, data)       // creation is SERVER-auth
 const co = srv.collection('scenes').open(id, { origin? })  // reactive server co-writer: getSnapshot/subscribe/set/update/delete(path)/close
 
 // CLIENT — needs crdtCollections: crdtCollectionsClient() (the universal client engine, any tier):
-const doc = client.collection('scenes').open(id)      // → DocHandle { getSnapshot, subscribe, set, update, delete(path), deleted, ready, close }
+const doc = client.collection('scenes').open(id)      // → DocHandle { getSnapshot, subscribe, set, update, delete(path), native(), deleted, ready, close }
 await doc.ready
 // React: const { data, set, update, delete: del, deleted } = useDoc('scenes', id)
 ```
@@ -461,6 +462,25 @@ await doc.ready
 - **Reject → resync.** A rejected write (schema or write-policy) was applied optimistically, so the client re-opens and hard-**resets** its replica to authoritative, discarding the bad edit (`onStoreError` still fires). Validation runs on the **post-merge** state, so keep CRDT schemas to per-field/structural rules — an aggregate/cross-field constraint (maxItems, sum-of-fields) can reject a valid-looking concurrent write; put those in requests.
 - Access = guard-shaped `CrdtCollectionPolicy` (`read(principal,id,snapshot?)→bool`, `write(principal,id)→bool`), deny-by-default — NOT the RLS filter shape LWW rows use. Wire: per-doc channel `d:<n>:<id>`, frames `cdopen/cdwr/cdchg/cddel/cdclose`.
 - Backends: `collections-crdt-memory` (relay + the universal `crdtCollectionsClient`) · `collections-crdt-libsql` (durable · relay, `await crdtLibsqlCollections`, snapshot-per-doc) · `collections-crdt-pglite` (**self**: `await crdtPgliteCollections({ pgUrl, electricUrl?, docOptions? })` — central Postgres Yjs op-log + per-node Electric→PGlite replica, validate-before-commit at ingress, no adapter). Inspector surfaces them in `listCollections` (synthetic `id` key) + `queryCollection` synthesizes `{ id, ...snapshot }` doc-rows (browsable in the Control Center Collections view). Guide: `/collections/crdt-documents`; example: `examples/ai-canvas`.
+
+**Collaborative text — a native root.** A described field is diff-and-patched **whole** on every write, so a string in the schema is *replaced*, not merged: two people in one paragraph and one loses their keystrokes. Rich text therefore lives in a **native root** — a CRDT type bound *beside* the described root, in the same document.
+
+```ts
+collections: { notes: { schema: z.object({}), crdt: { mode: 'document', validate: false } } }
+
+import { yDocOf } from '@super-line/collections-crdt-memory'
+const handle = client.collection('notes').open(docId)
+await handle.ready
+Collaboration.configure({ document: yDocOf(handle), field: 'body' })   // Tiptap: `field` IS the Yjs root key
+// React: const { native } = useDoc('notes', docId)  → pass to yDocOf(); it is a VALUE, so it can be a dep
+```
+
+- **No provider.** An editor wants a `Y.Doc` and does not care how it syncs. A native root replicates with no extra work (the wire already carries whole-document updates) and survives op-log compaction for the same reason.
+- **Replication is free, legibility is forfeit.** The plaintext snapshot materialises only the described root, so a native root is absent from the inferred type, from validation, from the queryable projection and from the inspector. `yDocOf` lives in the engine package so `@super-line/client` gains no CRDT dependency (`DocHandle.native()` is `unknown`).
+- **Set `validate: false`** (see below) and **keep validatable state out of that document** — a rejected write rebuilds the replica on a fresh `Y.Doc`, orphaning the editor bound to the old one. Put the title/owner in a **row collection** beside it, which you want regardless: a CRDT collection is opened by id and never queried, so a document's own title could not live in it and stay sortable.
+- **A Yjs root's kind is fixed on first use** — open `body` as a text type once and nothing can later open it as the fragment an editor expects. Keep the root name in a shared constant.
+
+**`crdt: { validate: false }` — skipping ingress validation.** The server passes **no** validator, so the backend skips the merge-and-check entirely instead of running it and discarding the result. Use it when writes are too fine-grained to validate: the check is proportional to document size and history depth (a CRDT has no cheap clone; a durable backend re-reads the log), which is fine per shape and ruinous per keystroke. **The cost is exact — the policy becomes the only gate on content:** it still decides *who* may write, and nothing then decides *what*. Row-collection validation is unaffected (per-row, cheap, no history). Relayed deltas already skipped it, having been validated at their own ingress node. Example: `examples/react-chat-transports` (a Tiptap document per chat channel, with live carets).
 
 ## @super-line/plugin-auth
 

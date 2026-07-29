@@ -3,7 +3,11 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
-## Unreleased
+## [plugin-auth-v0.9.1] — 2026-07-29
+
+### Bug Fixes
+
+- **plugin-auth:** Write presence once per session change, not twice ([37ff0bb])
 
 ### Documentation
 

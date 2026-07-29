@@ -131,3 +131,50 @@ describe('crdtMemoryCollections', () => {
     )
   })
 })
+
+// A native root: a Yjs shared type bound BESIDE super-store's described root ("root") in the same doc. It is
+// how collaborative text enters a CRDT document collection — the described root is diff-and-patched whole on
+// every write, which is exactly the granularity rich text cannot accept. The property being pinned is the
+// asymmetry that makes it work: the wire carries whole-document updates, so a native root replicates for
+// free, while the plaintext snapshot materialises only the described root, so nothing downstream of the
+// snapshot (validation above all) can see it.
+describe('crdtMemoryCollections — native roots', () => {
+  it('replicates a second Y root while keeping it out of the snapshot and the validator', async () => {
+    const store = crdtMemoryCollections()
+    store.create('notes', 'n1', { title: 'hello' }, { mode: 'document' })
+
+    const p = peer(await store.read('notes', 'n1'))
+    // Write ONLY to the native root. `.doc` is super-store's public escape hatch; no yjs import needed.
+    const delta = p.write(() => p.sv.doc.getText('prose').insert(0, 'hello world'))
+
+    // The validator still runs and still passes: `title` is untouched and `prose` is invisible to it.
+    // (A native root can never fail the contract, because the contract never describes it.)
+    expect(() => store.apply({ n: 'notes', id: 'n1', update: delta, origin: 'alice' }, { mode: 'document' }, requireTitle)).not.toThrow()
+
+    // It reached canonical state, and a fresh peer catches up on it through the ordinary read path.
+    const after = peer(await store.read('notes', 'n1'))
+    expect(after.sv.doc.getText('prose').toString()).toBe('hello world')
+    // ...yet it is absent from the plaintext snapshot — the described root is all `getSnapshot` materialises.
+    expect(after.sv.getSnapshot()).toEqual({ title: 'hello' })
+  })
+
+  it('merges concurrent native-root edits instead of clobbering them', async () => {
+    const store = crdtMemoryCollections()
+    store.create('notes', 'n1', { title: 'hello' }, { mode: 'document' })
+    const seed = await store.read('notes', 'n1')
+
+    // Two peers branch from the same seed and type at the same position — the case a plain string field
+    // (a scalar value-cell, replaced whole) would resolve by losing one writer's keystrokes entirely.
+    const a = peer(seed)
+    const b = peer(seed)
+    const da = a.write(() => a.sv.doc.getText('prose').insert(0, 'aaa'))
+    const db = b.write(() => b.sv.doc.getText('prose').insert(0, 'bbb'))
+
+    store.apply({ n: 'notes', id: 'n1', update: da, origin: 'a' }, { mode: 'document' }, requireTitle)
+    store.apply({ n: 'notes', id: 'n1', update: db, origin: 'b' }, { mode: 'document' }, requireTitle)
+
+    const merged = peer(await store.read('notes', 'n1')).sv.doc.getText('prose').toString()
+    expect(merged).toHaveLength(6) // both survived
+    expect(merged.split('').sort().join('')).toBe('aaabbb')
+  })
+})

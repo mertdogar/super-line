@@ -25,6 +25,9 @@ export interface PhaseMetrics {
   ops: number
   publishes: number
   publishBytes: number
+  /** What the Adapter handed to this node's runtime. Comparable ACROSS adapters — a broker and a mesh
+   *  deliver the same useful frames; only the mesh also transports the ones nobody wanted. */
+  delivers: number
   arrivals: number
   accepted: number
   discarded: number
@@ -69,7 +72,7 @@ export interface RunMetrics {
   publishKinds: Map<string, Tally>
   nodes: NodeMetrics[]
   client: ClientMetrics
-  totals: { publishes: Tally; arrivals: Tally; accepted: number }
+  totals: { publishes: Tally; delivers: Tally; arrivals: Tally; accepted: number }
 }
 
 const isL3 = (r: LabRecord): r is LabRecord & { layer: 'l3' } => r.layer === 'l3'
@@ -84,6 +87,7 @@ export function computeMetrics(run: RunData): RunMetrics {
       ops: 0,
       publishes: 0,
       publishBytes: 0,
+      delivers: 0,
       arrivals: 0,
       accepted: 0,
       discarded: 0,
@@ -105,7 +109,7 @@ export function computeMetrics(run: RunData): RunMetrics {
   const arrivalKinds = new Map<string, Tally>()
   const publishVerdicts = new Map<Verdict, Tally>()
   const publishKinds = new Map<string, Tally>()
-  const totals = { publishes: zero(), arrivals: zero(), accepted: 0 }
+  const totals = { publishes: zero(), delivers: zero(), arrivals: zero(), accepted: 0 }
 
   // One gossipsub (peer, seqno) is one publish seen from every node that received it — an exact
   // cluster-wide join key that needs no correlation on payload bytes or timing.
@@ -129,6 +133,11 @@ export function computeMetrics(run: RunData): RunMetrics {
     const nic = records.filter((r): r is LabRecord & { layer: 'nic' } => r.layer === 'nic')
     for (const r of records) {
       if (isL2(r)) {
+        if (r.kind === 'deliver') {
+          add(totals.delivers, r.bytes)
+          const dm = phaseOf(r.phase)
+          if (dm) dm.delivers++
+        }
         if (r.kind === 'publish') {
           add(totals.publishes, r.bytes)
           attributed += r.bytes

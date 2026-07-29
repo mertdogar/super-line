@@ -20,7 +20,11 @@ const PRESENCE = '\x00sl:presence'
 /** Classify one arrival on a node that did not publish it. */
 export function classifyArrival(channel: string, accepted: boolean): Classified {
   if (channel === PRESENCE) return { verdict: 'by-design', kind: 'presence-gossip' }
-  if (channel.startsWith('x:inspector')) return { verdict: 'observation', kind: 'inspector-feed' }
+  // Observation is not automatically waste — if someone is watching, carrying the feed IS the point. But
+  // an inspector frame nobody subscribed to is waste wearing observation's clothes, and the split is what
+  // makes that visible.
+  if (channel.startsWith('x:inspector'))
+    return { verdict: 'observation', kind: accepted ? 'inspector-feed-watched' : 'inspector-feed-UNWATCHED' }
   if (!accepted) return { verdict: 'waste', kind: 'discarded-on-arrival' }
   if (channel === 'cbatch') return { verdict: 'by-design', kind: 'relay-replication' }
   return { verdict: 'useful', kind: channelClass(channel) }
@@ -39,7 +43,8 @@ export function classifyPublish(
   publisherDeliveredLocally: boolean,
 ): Classified {
   if (channel === PRESENCE) return { verdict: 'by-design', kind: 'presence-gossip' }
-  if (channel.startsWith('x:inspector')) return { verdict: 'observation', kind: 'inspector-feed' }
+  if (channel.startsWith('x:inspector'))
+    return { verdict: 'observation', kind: remoteAccepted > 0 ? 'inspector-feed-watched' : 'inspector-feed-UNWATCHED' }
   if (remoteAccepted > 0) return { verdict: 'useful', kind: channelClass(channel) }
   if (publisherDeliveredLocally) return { verdict: 'waste', kind: 'locally-satisfiable' }
   return { verdict: 'waste', kind: 'cluster-zero-interest' }

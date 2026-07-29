@@ -8,7 +8,8 @@
     "node": "tsx src/node.ts",
     "client": "tsx src/client.ts",
     "conductor": "tsx src/conductor.ts",
-    "analyze": "tsx src/analyze/index.ts"
+    "analyze": "tsx src/analyze/index.ts",
+    "lab": "node run.mjs"
   },
   "dependencies": {
     "@super-line/adapter-libp2p": "workspace:*",

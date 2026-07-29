@@ -14,6 +14,7 @@ export function toBaseline(runs: RunMetrics[]): Record<string, number> {
       out[`${r.runId}/${k}`] = v
     }
     p('total.publishes', r.totals.publishes.count)
+    p('total.delivers', r.totals.delivers.count)
     p('total.arrivals', r.totals.arrivals.count)
     p('total.accepted', r.totals.accepted)
     p('total.arrivalBytes', r.totals.arrivals.bytes)
@@ -48,14 +49,15 @@ export function renderReport(runs: RunMetrics[], baseline: Record<string, number
 
   w('## Headline')
   w()
-  w('| run | adapter | inspector | publishes | arrivals | accepted | acceptance ratio | waste |')
-  w('|---|---|---|---:|---:|---:|---:|---:|')
+  w('| run | adapter | inspector | publishes | delivers | mesh arrivals | accepted | acceptance ratio | waste |')
+  w('|---|---|---|---:|---:|---:|---:|---:|---:|')
   for (const r of runs) {
     const waste = t(r.arrivalVerdicts as Map<string, Tally>, 'waste').count
     const ratio = r.totals.arrivals.count === 0 ? 1 : r.totals.accepted / r.totals.arrivals.count
     w(
       `| \`${r.runId}\` | ${r.adapter} | ${r.inspector ? 'on' : 'off'} | ${r.totals.publishes.count} | ` +
-        `${r.totals.arrivals.count} | ${r.totals.accepted} | ${(ratio * 100).toFixed(1)}% | ` +
+        `${r.totals.delivers.count} | ${r.totals.arrivals.count || '—'} | ${r.totals.accepted} | ` +
+        `${r.totals.arrivals.count === 0 ? '—' : `${(ratio * 100).toFixed(1)}%`} | ` +
         `${waste} (${pct(waste, r.totals.arrivals.count)}) |`,
     )
   }
@@ -74,12 +76,12 @@ export function renderReport(runs: RunMetrics[], baseline: Record<string, number
 
     w('### Per phase')
     w()
-    w('| # | phase | ops | publishes | arrivals | accepted | discarded | wasted publishes | what it isolates |')
-    w('|---:|---|---:|---:|---:|---:|---:|---:|---|')
+    w('| # | phase | ops | publishes | delivers | arrivals | accepted | discarded | wasted pub | what it isolates |')
+    w('|---:|---|---:|---:|---:|---:|---:|---:|---:|---|')
     for (const ph of r.phases) {
       const spec = PHASES.find((p) => p.n === ph.n)
       w(
-        `| ${ph.n} | ${ph.name} | ${ph.ops} | ${ph.publishes} | ${ph.arrivals} | ${ph.accepted} | ` +
+        `| ${ph.n} | ${ph.name} | ${ph.ops} | ${ph.publishes} | ${ph.delivers} | ${ph.arrivals} | ${ph.accepted} | ` +
           `**${ph.discarded}** | **${ph.wastedPublishes}** | ${spec?.detail ?? ''} |`,
       )
     }

@@ -1,12 +1,22 @@
 {
   "name": "@super-line/plugin-inspector",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "type": "module",
-  "description": "Control Center inspector for super-line, packaged as a plugin — taps + a plugin-owned CC connection.",
+  "description": "Control Center inspector for super-line, packaged as a plugin \u2014 taps + a plugin-owned CC connection.",
   "license": "MIT",
   "author": "Mert",
-  "keywords": ["super-line", "plugin", "inspector", "control-center", "observability"],
-  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/plugin-inspector" },
+  "keywords": [
+    "super-line",
+    "plugin",
+    "inspector",
+    "control-center",
+    "observability"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mertdogar/super-line.git",
+    "directory": "packages/plugin-inspector"
+  },
   "homepage": "https://mertdogar.github.io/super-line/",
   "bugs": "https://github.com/mertdogar/super-line/issues",
   "main": "./dist/index.cjs",
@@ -14,14 +24,27 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
-  "files": ["dist", "CHANGELOG.md"],
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
   "sideEffects": false,
-  "engines": { "node": ">=18" },
-  "publishConfig": { "access": "public" },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
     "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
@@ -32,7 +55,7 @@
   },
   "peerDependencies": {
     "@super-line/core": ">=0.19.0 <1.0.0",
-    "@super-line/server": ">=0.18.0 <1.0.0"
+    "@super-line/server": ">=0.19.0 <1.0.0"
   },
   "devDependencies": {
     "@super-line/core": "workspace:^",

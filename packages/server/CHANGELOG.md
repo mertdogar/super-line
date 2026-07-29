@@ -3,12 +3,20 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
-## Unreleased
+## [server-v0.19.0] — 2026-07-29
 
 ### Features
 
 - **plugin-devtools:** Buffer a client's own frames for the DevTools panel ([ad190fa])
 - **client:** Instrument the client-side tap and give plugins a setup hook ([27beebb])
+
+### Bug Fixes
+
+- **plugin-inspector:** Publish the feed only while something is watching ([29bf66f])
+
+### Performance
+
+- **server:** Deliver a targeted send locally instead of across the cluster ([74f8acb])
 
 ## [server-v0.18.0] — 2026-07-28
 

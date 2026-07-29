@@ -36,8 +36,15 @@ const gte = (a, b) => {
   return x !== i ? x > i : y !== j ? y > j : z >= k
 }
 
+// Private packages are exempt: every failure this section prevents happens on npm — a caret range
+// published in a manifest, resolving to a second physical copy of a sibling. A package that is never
+// published has no manifest out there to resolve, so its dependency style is a workspace-linking
+// detail rather than a contract, and forcing peers on one (traffic-lab, an app, not a library) would
+// be ceremony that protects nothing.
+const published = pkgs.filter((pkg) => !pkg.private)
+
 const errors = []
-for (const pkg of pkgs) {
+for (const pkg of published) {
   for (const [dep] of internal(pkg.dependencies)) {
     errors.push(`${pkg.name}: "${dep}" is in dependencies — internal packages must be peerDependencies.`)
   }
@@ -103,4 +110,4 @@ if (errors.length) {
   console.error(`\n✗ manifest check failed:\n\n${errors.map((e) => `  ${e}`).join('\n')}\n`)
   process.exit(1)
 }
-console.log(`✓ ${pkgs.length} manifests: no internal hard dependencies, peer ranges wide`)
+console.log(`✓ ${published.length} published manifests: no internal hard dependencies, peer ranges wide`)

@@ -3,6 +3,16 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [plugin-inspector-v0.5.0] — 2026-07-29
+
+### Bug Fixes
+
+- **plugin-inspector:** Publish the feed only while something is watching ([29bf66f])
+
+### Performance
+
+- **server:** Deliver a targeted send locally instead of across the cluster ([74f8acb])
+
 ## [plugin-inspector-v0.4.1] — 2026-07-28
 
 ### Refactor

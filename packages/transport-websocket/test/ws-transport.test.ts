@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 import { INSPECTOR_SUBPROTOCOL, type AuthOutcome, type Handshake, type RawConn, type ReservedConnection } from '@super-line/core'
-import { webSocketServerTransport, webSocketClientTransport } from '../src/index.js'
+import { webSocketServerTransport, webSocketClientTransport, type WebSocketClientTransportOptions } from '../src/index.js'
 
 const dec = new TextDecoder()
 const cleanups: Array<() => Promise<void> | void> = []
@@ -145,7 +145,7 @@ describe('websocket transport', () => {
     let opened = false
     webSocketClientTransport({
       url: 'ws://127.0.0.1:1',
-      WebSocket: ScriptedWs as unknown as typeof WebSocket,
+      WebSocket: ScriptedWs as unknown as WebSocketClientTransportOptions['WebSocket'],
     }).connect(
       { role: 'user' },
       {

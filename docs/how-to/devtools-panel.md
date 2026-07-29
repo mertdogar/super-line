@@ -4,6 +4,8 @@ The [Control Center](/how-to/control-center) answers *"what is the cluster doing
 
 Use it when the server looks healthy and the page still misbehaves.
 
+<img src="/devtools/activity.png" alt="The super-line DevTools panel in Activity mode — one row per operation, showing a sendMessage request at 16ms, the row insert it produced, and a resubscribe that returned zero rows then seven, with the selected operation's wire frame in the inspector alongside" class="sl-shot" />
+
 ## Setup
 
 Install the plugin and add it where the client is built:
@@ -57,6 +59,10 @@ authClient({
 
 Expect to see **two live clients** during a sign-in. That is correct: an identity change builds and confirms its replacement connection before closing the incumbent, so both exist briefly. The panel keeps them in one ordered timeline, which is what makes the handover readable.
 
+<img src="/devtools/connection.png" alt="The panel during a sign-out and sign-in — signOut, the connection closing with code 1005, reopening as guest, then signIn closing and reopening as a user, with three clients listed in the rail: two closed and one live" class="sl-shot" />
+
+Every client that has existed on this page stays in the rail, daggered once closed, so a handover you missed is still there to read afterwards.
+
 ## What it shows that a server cannot
 
 | Symptom | What the panel shows |
@@ -69,6 +75,18 @@ Expect to see **two live clients** during a sign-in. That is correct: an identit
 | "the payload looks wrong" | the row set the client is actually holding, and CRDT document contents — which cross the wire only as opaque deltas |
 
 The **Collections** and **Docs** tabs read the client's own state rather than a reconstruction of it, so what you see is what the client is holding, not what the panel guessed from the traffic.
+
+<img src="/devtools/collections.png" alt="The Collections tab listing every live subscription with its id and the number of rows the client currently holds, beside a timeline showing a send and a channel switch" class="sl-shot" />
+
+Every category also has a **problems** axis that cuts across all of them at once — failures, timeouts, rejected payloads and zero-listener deliveries, wherever they came from.
+
+<img src="/devtools/problems.png" alt="The panel with the problems filter on, showing two of twenty-eight rows: the connection closes, with everything healthy filtered away" class="sl-shot" />
+
+## Two views of the same traffic
+
+**Activity** merges a request and its response into one row, which is the pairing you would otherwise do by eye. **Frames** does not merge anything: every frame is its own row, routing decisions included, which is what you want when the question is what actually crossed the wire and in what order.
+
+<img src="/devtools/frames.png" alt="The panel in Frames mode — the sendMessage request, the row-change frame, its routing decision, and the response each on their own line, with the selected frame's JSON in the inspector" class="sl-shot" />
 
 ## Polling and live push
 

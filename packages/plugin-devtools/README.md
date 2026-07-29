@@ -19,6 +19,8 @@ const client = createSuperLineClient(api, {
 
 Then open DevTools → **super-line**.
 
+<img alt="The super-line DevTools panel in Activity mode — one row per operation, showing a sendMessage request at 16ms, the row insert it produced, and a resubscribe that returned zero rows then seven, with the selected operation's wire frame in the inspector alongside" src="https://super-line.dogar.biz/devtools/activity.png">
+
 ## Get the panel
 
 Download the latest `super-line-devtools-<version>.zip` from [Releases](https://github.com/mertdogar/super-line/releases/latest) and unzip it. Then open `chrome://extensions`, switch on **Developer mode**, choose **Load unpacked**, and select the unzipped folder.

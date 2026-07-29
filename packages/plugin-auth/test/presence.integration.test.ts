@@ -5,7 +5,7 @@ import { createSuperLineClient } from '@super-line/client'
 import { memoryCollections } from '@super-line/collections-memory'
 import { authContract, type AuthSession, type AuthUserPresence } from '@super-line/plugin-auth'
 import { auth } from '@super-line/plugin-auth/server'
-import { createInMemoryAdapter, createSuperLineServer, MemoryBus } from '@super-line/server'
+import { createInMemoryAdapter, createSuperLineServer, MemoryBus, type SuperLinePlugin } from '@super-line/server'
 import { createLoopbackTransport } from '@super-line/transport-loopback'
 
 const app = defineContract({
@@ -168,6 +168,57 @@ describe('plugin-auth connection sessions', () => {
     })
     const ended = (await serverA.collection('sessions').snapshot({})) as AuthSession[]
     expect(ended.every((row) => row.endedAt !== null)).toBe(true)
+  })
+
+  it('writes presence exactly once per session change', async () => {
+    // Every `sessions` write path refreshes presence itself. A second, tap-driven refresh on top of that
+    // doubled every presence row change on the wire — one sign-in, one heartbeat and one disconnect each
+    // woke every subscriber twice with identical data.
+    const collections = memoryCollections()
+    const loopback = createLoopbackTransport()
+    const authKit = auth({ contract: app, collections })
+    const presence: string[] = []
+    const sessionChanges: string[] = []
+    const count: SuperLinePlugin = {
+      name: 'count',
+      onEvent: (event) => {
+        if (event.type !== 'collection.change') return
+        if (event.n === 'userPresence') presence.push(event.op)
+        if (event.n === 'sessions') sessionChanges.push(event.op)
+      },
+    }
+    const server = createSuperLineServer(app, {
+      nodeKey: 'auth-presence-once',
+      transports: [loopback.server],
+      collections,
+      authenticate: authKit.authenticate,
+      identify: authKit.identify,
+      plugins: [authKit.plugin, count],
+      heartbeat: false, // no timer: every sessions write below is one we made on purpose
+    })
+    cleanups.push(() => server.close())
+    server.implement({ user: { ping: async () => ({ ok: true }) } })
+    const guest = createSuperLineClient(app, { transport: loopback.client(), role: 'guest' })
+    const identity = await guest.signUp({ email: 'once@example.com', password: 'passpass', displayName: 'Once' })
+    guest.close()
+    presence.length = 0
+    sessionChanges.length = 0
+
+    const user = createSuperLineClient(app, {
+      transport: loopback.client(),
+      role: 'user',
+      params: { token: identity.token },
+    })
+    cleanups.unshift(() => user.close())
+    await user.ping()
+    await waitFor(() => presence.length > 0)
+    expect(sessionChanges).toEqual(['insert'])
+    expect(presence).toEqual(['insert'])
+
+    user.close()
+    await waitFor(async () => ((await server.collection('userPresence').read(identity.userId)) as AuthUserPresence).connectedAt === null)
+    expect(sessionChanges).toEqual(['insert', 'update'])
+    expect(presence).toEqual(['insert', 'update'])
   })
 
   it('records API-key provenance without creating an email credential', async () => {

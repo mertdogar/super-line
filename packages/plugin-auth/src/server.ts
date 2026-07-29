@@ -453,11 +453,9 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
   // captured at startup so `revoke` (callable outside a handler) can reach the co-writer + cluster-wide kick
   const plugin: SuperLinePlugin<AuthSurface> = {
     name: 'auth',
-    onEvent: (event) => {
-      if (stopping || event.type !== 'collection.change' || event.n !== 'sessions' || !event.row) return
-      const userId = (event.row as Partial<AuthSession>).userId
-      if (userId) void track(refreshPresence(userId))
-    },
+    // No `collection.change` tap on `sessions`: every write path below already refreshes presence for the
+    // user it touched, so a tap would double each presence change — and, because it also sees changes
+    // relayed from other nodes, would have every node rewrite a row its owner had already fanned out.
     setup: (ctx) => {
       if (!ctx.nodeKey) throw new Error(
         'plugin-auth requires a stable createSuperLineServer({ nodeKey }): it keys per-node session ' +

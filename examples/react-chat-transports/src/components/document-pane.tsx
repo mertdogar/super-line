@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, type ReactNode } from 'react'
 import { FileText, X } from 'lucide-react'
 import { EditorContent, useEditor, useEditorState, type Editor as TiptapEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -6,8 +6,8 @@ import { Placeholder } from '@tiptap/extensions'
 import Collaboration from '@tiptap/extension-collaboration'
 import CollaborationCaret from '@tiptap/extension-collaboration-caret'
 import { yDocOf } from '@super-line/collections-crdt-memory'
-import { useClient } from '@super-line/plugin-auth/react'
-import { NOTE_FIELD, NOTE_KIND, type Channel } from '@/contract'
+import { useClient, useDoc } from '@super-line/plugin-auth/react'
+import { NOTE_FIELD, NOTE_KIND, type Channel, type CrdtName } from '@/contract'
 import { EditorToolbar } from '@/components/editor-toolbar'
 import { bridgeAwareness } from '@/lib/awareness'
 import { useChannelResources, useMe, useUsers } from '@/lib/chat'
@@ -67,7 +67,16 @@ export function DocumentPane({
           <Empty>Loading…</Empty>
         </>
       ) : (
-        <Editor key={resource.docId} channelId={channel.id} docId={resource.docId} title={title} onClose={onClose} />
+        // `collection` is denormalized onto the registry row so a row self-describes which CRDT
+        // collection to open — nothing here has to know the kind's collection name.
+        <Editor
+          key={resource.docId}
+          channelId={channel.id}
+          collection={resource.collection}
+          docId={resource.docId}
+          title={title}
+          onClose={onClose}
+        />
       )}
     </aside>
   )
@@ -99,11 +108,13 @@ function Empty({ children }: { children: ReactNode }): React.JSX.Element {
 
 function Editor({
   channelId,
+  collection,
   docId,
   title,
   onClose,
 }: {
   channelId: string
+  collection: string
   docId: string
   title: string
   onClose?: () => void
@@ -111,37 +122,31 @@ function Editor({
   const client = useClient()!
   const me = useMe()
   const users = useUsers()
-  const [handle, setHandle] = useState<{ native(): unknown } | undefined>()
-  const [ready, setReady] = useState(false)
 
-  // Open the document and hold it for as long as the pane is mounted. `ready` gates the editor rather
-  // than the pane: frames are processed concurrently, so binding before the catch-up snapshot lands would
-  // let Tiptap seed an empty paragraph into a document that is about to arrive with content.
-  useEffect(() => {
-    const doc = client.collection('notes').open(docId)
-    setReady(false)
-    setHandle(doc)
-    let live = true
-    void doc.ready.then(() => live && setReady(true)).catch(() => {})
-    return () => {
-      live = false
-      setHandle(undefined)
-      doc.close()
-    }
-  }, [client, docId])
+  // The pairing plugin-chat documents: `useChannelResources` for the registry row, `useDoc` for its
+  // document. The hook owns the whole lifecycle — open on mount, close on unmount, re-open when the id
+  // changes — so there is nothing to hand-roll here. The cast is the one seam: a registry row's
+  // `collection` is a plain string, while `useDoc` wants a collection name the contract declares.
+  const { native } = useDoc(collection as CrdtName, docId)
 
   const identity = useMemo(() => ({ name: users.get(me)?.displayName ?? 'someone', color: colorFor(me) }), [users, me])
 
   const bridge = useMemo(() => {
-    if (!handle || !ready) return undefined
-    return bridgeAwareness(client, channelId, yDocOf(handle), identity)
-  }, [handle, ready, client, channelId, identity])
+    if (!native) return undefined
+    return bridgeAwareness(client, channelId, yDocOf({ native: () => native }), identity)
+  }, [native, client, channelId, identity])
   useEffect(() => () => bridge?.destroy(), [bridge])
 
   // The editor lives in a child that only mounts once there is a document to bind to. Building it here
   // instead would mean calling `useEditor` on the first render with no extensions, and ProseMirror
   // rejects an extension-less schema outright ("Schema is missing its top node type").
-  if (!handle || !bridge) {
+  //
+  // `native` appears as soon as the handle exists, which is NOT the same as the catch-up snapshot having
+  // landed. Opening a document that already has content can therefore bind an editor to an empty
+  // fragment, and y-prosemirror will insert the paragraph ProseMirror requires — a real op that merges
+  // with the arriving content and leaves a stray empty paragraph. Closing that properly wants a
+  // readiness signal from `useDoc`, which it does not yet expose.
+  if (!bridge) {
     return (
       <>
         <Header title={title} onClose={onClose} />
@@ -149,7 +154,7 @@ function Editor({
       </>
     )
   }
-  return <Surface ydoc={yDocOf(handle)} awareness={bridge.awareness} identity={identity} title={title} onClose={onClose} />
+  return <Surface ydoc={yDocOf({ native: () => native })} awareness={bridge.awareness} identity={identity} title={title} onClose={onClose} />
 }
 
 function Surface({

@@ -1,5 +1,5 @@
 import * as z from 'zod'
-import { defineContract, type RowOf } from '@super-line/core'
+import { defineContract, type CrdtCollectionName, type RowOf } from '@super-line/core'
 import { authContract } from '@super-line/plugin-auth'
 import { chatContract } from '@super-line/plugin-chat'
 
@@ -75,6 +75,9 @@ export type Message = RowOf<typeof chat, 'messages'>
 export type UserPresence = RowOf<typeof chat, 'userPresence'>
 /** The registry row for a channel resource — the document's validated, queryable half. */
 export type Resource = RowOf<typeof chat, 'resources'>
+
+/** The CRDT collections this contract declares — what `useDoc` accepts as a name. */
+export type CrdtName = CrdtCollectionName<typeof chat>
 
 /** The resource kind, and the Yjs root the editor binds to. Both halves must agree, so neither is inlined. */
 export const NOTE_KIND = 'note'

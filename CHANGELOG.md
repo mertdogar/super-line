@@ -3,6 +3,36 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## Unreleased
+
+### Refactor
+
+- **react-chat-transports:** Open the document through useDoc ([b2f268b])
+
+## 2026-07-29
+
+### Features
+
+- **react-chat-transports:** A collaborative document beside every channel ([f24a2f3])
+- **server:** Pass a validator only when the collection wants one ([c92f454])
+- **react:** Expose the native document handle from useDoc ([c70408c])
+- **client:** Expose the engine's native document handle ([33f77b5])
+- **collections-crdt-memory:** Push local changes and hand out the Yjs document ([2bb38e1])
+- **core:** Let a collection opt out of ingress validation, and expose the engine's document ([c07b72b])
+
+### Performance
+
+- **collections-crdt-pglite:** Skip the fold when there is nothing to validate ([628eb75])
+
+### Chores
+
+- Add the tiptap and chrome-extensions agent skills ([6d201de])
+
+### Documentation
+
+- Record native roots and the per-collection validation toggle (ADR-0025) ([4e6de55])
+- **changelog:** Regenerate the root aggregate ([83a4b8a])
+
 ## 2026-07-29
 
 ### Features

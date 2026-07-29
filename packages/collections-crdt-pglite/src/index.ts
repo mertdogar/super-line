@@ -320,12 +320,17 @@ export async function crdtPgliteCollections(opts: CrdtPgliteCollectionsOptions):
       if (metaRows.count === 0) throw new SuperLineError('NOT_FOUND', `No document: ${n}/${id}`)
       // Validate-before-commit: fold the authoritative central state + the incoming delta on a scratch, snapshot to
       // plaintext, and let the server validate. A throw aborts before any INSERT — nothing is committed or fanned.
-      const scratch = await foldScratch(n, id)
-      try {
-        scratch.applyUpdate(fromB64(update))
-        validate(scratch.getSnapshot())
-      } finally {
-        scratch.dispose()
+      // With no validator the fold is SKIPPED outright, which matters most here: it is a full op-log SELECT plus a
+      // replay of every row, so it is the difference between a write costing one INSERT and costing the document's
+      // entire history. Relayed deltas and `crdt: { validate: false }` collections both take this path.
+      if (validate) {
+        const scratch = await foldScratch(n, id)
+        try {
+          scratch.applyUpdate(fromB64(update))
+          validate(scratch.getSnapshot())
+        } finally {
+          scratch.dispose()
+        }
       }
       // Commit: append to the op-log (→ Electric → fold on every node incl. here). Folding is Electric's job — apply
       // only persists, so the writer node's doc stays consistent (no partial-state optimism).

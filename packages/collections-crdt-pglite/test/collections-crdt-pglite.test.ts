@@ -292,4 +292,43 @@ describe('collections-crdt-pglite — compaction + materialized snapshot', () =>
     for (const r of rows.rows) fold.applyUpdate(fromB64(r.update))
     expect(fold.getSnapshot()).toEqual({ v: 4 })
   }, 20_000)
+
+  // Compaction is where a native root (a Yjs type beside the described "root") is most at risk: the fold
+  // rewrites history into one baseline row and DELETES everything it superseded, so anything the baseline
+  // failed to capture is gone cluster-wide and permanently. It survives because the baseline is a whole-doc
+  // `encodeState()` and not a re-encoding of the plaintext snapshot — the snapshot cannot see a native root.
+  it('preserves a native root through the fold → baseline → trim cycle', async () => {
+    const { store, db, table, ups } = await makeStore({ everyNUpdates: 100, debounceMs: 60 })
+    await store.create('notes', 'n', { v: 0 }, docMode)
+
+    const seedRow = await host.query<{ update: string }>(`SELECT update FROM "${ups}" WHERE collection='notes' AND res_id='n' ORDER BY seq LIMIT 1`)
+    const cl = new StoreValue<Record<string, unknown>, StoreMode>({}, docMode)
+    cl.applyUpdate(fromB64(seedRow.rows[0]!.update))
+    let cur = ''
+    const off = cl.onUpdate((u, m) => {
+      if (m.local) cur = b64(u)
+    })
+    // Interleave described-root writes with native-root keystrokes, exactly as an editor beside a form would.
+    for (let v = 1; v <= 4; v++) {
+      cl.update({ v })
+      await host.query(`INSERT INTO "${ups}" (collection, res_id, update, origin) VALUES ('notes', 'n', '${cur}', 'w')`)
+      await db.query(`INSERT INTO "${ups}" (collection, res_id, update, origin) VALUES ('notes', 'n', '${cur}', 'w')`)
+      cl.doc.getText('prose').insert(cl.doc.getText('prose').length, `${v}`)
+      await host.query(`INSERT INTO "${ups}" (collection, res_id, update, origin) VALUES ('notes', 'n', '${cur}', 'w')`)
+      await db.query(`INSERT INTO "${ups}" (collection, res_id, update, origin) VALUES ('notes', 'n', '${cur}', 'w')`)
+    }
+    off()
+
+    await waitFor(async () => {
+      const r = await host.query<{ data: unknown }>(`SELECT data FROM "${table}" WHERE collection='notes' AND id='n'`)
+      return JSON.stringify(r.rows[0]?.data) === JSON.stringify({ v: 4 })
+    }, 16_000)
+
+    const rows = await host.query<{ update: string }>(`SELECT update FROM "${ups}" WHERE collection='notes' AND res_id='n' ORDER BY seq`)
+    expect(rows.rows.length).toBeLessThan(9) // seed + 8 writes, trimmed to a baseline
+    const fold = new StoreValue<Record<string, unknown>, StoreMode>({}, docMode)
+    for (const r of rows.rows) fold.applyUpdate(fromB64(r.update))
+    expect(fold.getSnapshot()).toEqual({ v: 4 }) // materialized snapshot: described root only
+    expect(fold.doc.getText('prose').toString()).toBe('1234') // ...but the native root came through whole
+  }, 20_000)
 })

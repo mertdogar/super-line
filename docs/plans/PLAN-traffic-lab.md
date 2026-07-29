@@ -13,11 +13,63 @@ for.
 
 ## Status
 
-- **Not started.** All eight design decisions are settled (see the decision tree). Two items still
-  need explicit sign-off before Phase 1 — see "Open decisions".
-- **Verified 2026-07-29:** UDP multicast to `224.0.0.251:5353` crosses a user-defined Docker bridge
-  on the dev machine (Docker 29.6.2, macOS) — three of three datagrams received between two
-  containers. mDNS discovery in compose is viable with **no** `network_mode: host`.
+**BUILT — phases 0–7 complete, 2026-07-29, on branch `traffic-lab` (local, not pushed).**
+
+- **Phases 0–5 (the lab).** `packages/traffic-lab`, four tap layers, eleven phases, the analyzer,
+  the committed baseline, and the `{libp2p, redis} × {inspector off, on}` matrix behind
+  `node run.mjs`. mDNS verified across a plain Docker bridge — no `network_mode: host`, no
+  bootstrap list.
+- **Phase 6 (F1) and Phase 7 (F2) landed**, both with regression tests verified to fail without
+  the fix. Both lanes green (fast 796, integration 159 — one pglite compaction test flakes under
+  container CPU contention and passes standalone; pre-existing, see CLAUDE.md).
+
+### What the matrix measured
+
+Identical workload throughout — `delivers` is 1850 in all four profiles both before and after, so
+every difference below is overhead, not workload.
+
+| | publishes | mesh arrivals | acceptance |
+|---|---:|---:|---:|
+| libp2p, inspector off — before | 850 | 2560 | 80.5% |
+| libp2p, inspector **on** — before | 4893 | 10636 | **19.3%** |
+| all four profiles — after F1+F2 | **750** | **2360** | **87.3%** |
+
+- **F1**: with no Control Center attached anywhere, the inspector was 75.9% of all cross-node
+  traffic (2.28 MB of ~3.1 MB), every frame discarded. An inspector-enabled node is now
+  byte-identical to one without the plugin.
+- **F2**: `emit-local` went from 100 publishes and 200 discarded arrivals to **zero of both** — the
+  phase no longer touches the wire at all.
+- **Residual waste is 12.7%, and all of it is F3**: 200 discarded from `room-local` and 100 from
+  `emit-remote`'s third node. Nothing else in the workload wastes a frame, which is a sharper
+  statement of the open problem than the plan started with.
+
+### Findings the lab produced that were not on the suspect list
+
+- **A client whose first dial was refused never reconnected.** `webSocketClientTransport` wired
+  `onclose` but not `onerror`, and Node 22's undici fires ONLY `error` for a failed handshake. Every
+  lab client failed to connect on a cold start. Invisible on a Node 24 dev machine, fatal in the
+  `node:22` containers this repo ships. Fixed with a regression test that scripts both event
+  sequences rather than dialling a dead port.
+- **Presence gossip is the largest single by-design category** — 859 arrivals / 129 KB, larger than
+  every application pattern combined, and it scales with room churn rather than with traffic. F5 now
+  has a number.
+- **Measured overhead is 18–22×**: total interface bytes over bytes super-line can account for.
+  gossipsub's control traffic dwarfs the payloads it carries — which is the strongest argument yet
+  against F3a (a topic per channel), since that overhead scales with topic count.
+- **A CRDT create is node-local and does not relay**, so a node that never ran one answers `open`
+  with `NOT_FOUND` forever. The lab has to seed every node. Sharp edge, not addressed here.
+- **Interest is state, not an event.** F1's first cut announced once on the edge; the cross-process
+  inspector tests converged at exactly 10.04s, proving the announcement had been lost outright and
+  the keepalive was the only recovery. Re-assertion period is now 2s.
+
+### Still open
+
+- **Open decision 1 is unresolved** and was taken the conservative way: the mesh tap duplicates the
+  libp2p channel codec rather than adding public API to a published package unattended. Swapping to
+  an export is a two-line change.
+- **`transport-websocket`, `server` and `plugin-inspector` all have source changes and no version
+  bump.** Per CLAUDE.md that is a release, not an option — but a release tag must be pushed with the
+  release, so none was created.
 
 ## What the code reading established
 

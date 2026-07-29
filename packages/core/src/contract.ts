@@ -67,6 +67,23 @@ export interface RoleBlock extends Directional {
 export interface DocOptions {
   mode?: 'shallow' | 'document'
   opaque?: string[]
+  /**
+   * Ingress validation (validate-before-commit) for this collection. Default `true`.
+   *
+   * Unlike its siblings this is super-line's own knob, not super-store's — backends forward the whole bag to
+   * `StoreValue`, which ignores keys it does not know. Set `false` and the server passes NO validator to
+   * {@link CrdtCollectionStore.apply}, so the backend skips the scratch fold entirely rather than performing
+   * it and discarding the result.
+   *
+   * Turn it off when writes are too fine-grained to validate: the fold is proportional to document size and
+   * op-log depth (a CRDT has no cheap clone), which is affordable per shape or per scene field and ruinous per
+   * keystroke. It is also the only way to hold **collaborative text**, whose merge granularity is finer than
+   * any field the schema could describe.
+   *
+   * The cost is exact: the {@link CrdtCollectionPolicy} remains the only gate on such a collection. It still
+   * decides *who* may write; nothing then decides *what*.
+   */
+  validate?: boolean
 }
 
 /**

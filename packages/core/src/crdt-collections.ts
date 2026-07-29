@@ -77,6 +77,13 @@ export interface CrdtCollectionStore {
    * nothing is committed and the throw propagates (the server resyncs the writer). On success it commits,
    * fires {@link CrdtCollectionStore.onChange}, and returns. `NOT_FOUND` if the doc is absent.
    *
+   * **`validate` is OPTIONAL, and its absence must skip the fold — not merely ignore its result.** Two callers
+   * pass nothing: a relayed delta (already validated at its ingress node — the skip is what makes relay cheap)
+   * and any collection declaring `crdt.validate: false`. Both used to be spelled as a validator that did
+   * nothing, which left every backend computing a full `encodeState()` + scratch `StoreValue` + `getSnapshot()`
+   * in order to hand it to an empty function. Implementations MUST branch on `validate` being undefined and
+   * commit directly; the fold is the expensive half, so ignoring the result is not the same optimisation.
+   *
    * **INVARIANT — a `relay` backend MUST apply synchronously.** When a delta arrives from another node the
    * server sets a re-publish guard, applies, and clears the guard in `finally`; the guard is what stops this
    * node from re-publishing a delta it merely relayed in. It is sound only while `apply` emits `onChange`
@@ -86,7 +93,7 @@ export interface CrdtCollectionStore {
    * never relays. (`collections-crdt-libsql` keeps its hot path sync and persists off `onChange` for exactly
    * this reason — the rule lives here now rather than in that one backend's comment.)
    */
-  apply(change: DocChange, opts: DocOptions | undefined, validate: (snapshot: unknown) => void): Awaitable<void>
+  apply(change: DocChange, opts: DocOptions | undefined, validate?: (snapshot: unknown) => void): Awaitable<void>
   /** Remove a document (idempotent). */
   delete(n: string, id: string): Awaitable<void>
   /** Id-enumeration + summaries for a collection (Q4) — no content query. */

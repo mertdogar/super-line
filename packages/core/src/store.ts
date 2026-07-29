@@ -45,17 +45,33 @@ export interface StoreChange {
 }
 
 /**
- * A reactive handle over one opened CRDT document (mirrors super-store's `StoreValue` surface). `set`/`update`
- * return the {@link StoreChange} to send up (null on a no-op); `applyRemote` merges an inbound Change (own-origin
- * merges are idempotent); `seed` hydrates the catch-up snapshot. Implemented by the client `DocHandle` replica.
+ * A reactive handle over one opened CRDT document (mirrors super-store's `StoreValue` surface). Mutations are
+ * void: every local change leaves through {@link ResourceReplica.onLocalChange}, whoever produced it.
+ * `applyRemote` merges an inbound Change (own-origin merges are idempotent); `seed` hydrates the catch-up
+ * snapshot. Implemented by the client `DocHandle` replica.
  */
 export interface ResourceReplica {
   getSnapshot(): unknown
   subscribe(cb: () => void): () => void
-  set(data: unknown): StoreChange | null
-  update(partial: unknown): StoreChange | null
+  set(data: unknown): void
+  update(partial: unknown): void
   /** Remove the value at `path` (a surgical key removal that merges, unlike a full-doc `set`). */
-  delete(path: (string | number)[]): StoreChange | null
+  delete(path: (string | number)[]): void
+  /**
+   * Observe local changes so the client can write them through. **Push, not pull, because `set` is no longer
+   * the only writer**: a {@link ResourceReplica.native} handle is mutated directly by whatever binds to it (a
+   * rich-text editor, say), producing changes no `set` call will ever return. It must therefore survive
+   * {@link ResourceReplica.reset}, which swaps the underlying document — the implementation owns the
+   * subscriber set rather than delegating to a document that a resync will discard.
+   */
+  onLocalChange(cb: (change: StoreChange) => void): () => void
+  /**
+   * The engine's own document handle, for content the contract cannot describe — a **native root**, i.e. a CRDT
+   * type bound beside the described root in the same document. Typed `unknown` on purpose: it keeps every CRDT
+   * vocabulary out of `@super-line/client`, so the engine package that already owns that dependency is the one
+   * that hands back a typed handle (`yDocOf` for the Yjs engine). Undefined for engines with nothing to expose.
+   */
+  native?(): unknown
   applyRemote(change: StoreChange): void
   seed(snapshot: unknown): void
   /**

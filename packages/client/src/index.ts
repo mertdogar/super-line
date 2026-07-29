@@ -210,6 +210,17 @@ export interface DocHandle<Doc = unknown> {
   update(partial: Partial<Doc>): void
   /** Surgically remove the value at `path` (merges, unlike a full-doc `set`); sent to the server. */
   delete(path: (string | number)[]): void
+  /**
+   * The CRDT engine's own document handle, for a **native root** — a CRDT type bound beside the
+   * contract-described root, holding content whose merge granularity is finer than a field (collaborative
+   * text). Mutating it writes through exactly like `set`, and its content is invisible to the described
+   * snapshot and therefore to validation.
+   *
+   * `unknown` by design: typing it would put the engine's CRDT library into `@super-line/client`'s public
+   * surface. Narrow it with the accessor from the engine package — `yDocOf(handle)` from
+   * `@super-line/collections-crdt-memory` for the Yjs engine — which also documents the caveats.
+   */
+  native(): unknown
   /** Resolves once the catch-up snapshot has been applied; rejects if the open is denied or the doc is absent. */
   readonly ready: Promise<void>
   /** True once the server fans out a delete for this document. */
@@ -997,26 +1008,23 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     }
     entry.replicas.add(replica)
     sendDocOpen(entry)
+    // Every local change writes through here, whoever produced it: `set`/`update`/`delete` below, or a direct
+    // mutation of the replica's native handle (a rich-text editor bound to a native root). Registered once per
+    // replica and owned by the replica, so it survives the doc swap a reject→resync performs.
+    const offLocal = replica.onLocalChange((change) => sendDocWrite(n, change))
     return {
       getSnapshot: () => replica.getSnapshot(),
       subscribe: (cb) => replica.subscribe(cb),
-      set: (data) => {
-        const change = replica.set(data)
-        if (change) sendDocWrite(n, change)
-      },
-      update: (partial) => {
-        const change = replica.update(partial)
-        if (change) sendDocWrite(n, change)
-      },
-      delete: (path) => {
-        const change = replica.delete(path)
-        if (change) sendDocWrite(n, change)
-      },
+      native: () => replica.native?.(),
+      set: (data) => replica.set(data),
+      update: (partial) => replica.update(partial),
+      delete: (path) => replica.delete(path),
       ready: entry.ready.promise,
       get deleted() {
         return entry.deleted
       },
       close: () => {
+        offLocal() // stop writing through: a closed handle must not keep publishing its replica's edits
         const e = openDocs.get(key)
         if (!e) return
         e.replicas.delete(replica)

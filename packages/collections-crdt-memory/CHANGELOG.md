@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [collections-crdt-memory-v0.3.0] — 2026-07-29
+
+### Features
+
+- **collections-crdt-memory:** Push local changes and hand out the Yjs document ([2bb38e1])
+
 ## [collections-crdt-memory-v0.2.0] — 2026-07-23
 
 ### Features

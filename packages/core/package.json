@@ -1,27 +1,50 @@
 {
   "name": "@super-line/core",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "type": "module",
   "description": "Shared contract, validation, wire protocol and errors for super-line.",
   "license": "MIT",
   "author": "Mert",
-  "keywords": ["websocket", "typesafe", "contract", "standard-schema", "typescript"],
-  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/core" },
+  "keywords": [
+    "websocket",
+    "typesafe",
+    "contract",
+    "standard-schema",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mertdogar/super-line.git",
+    "directory": "packages/core"
+  },
   "homepage": "https://mertdogar.github.io/super-line/",
   "bugs": "https://github.com/mertdogar/super-line/issues",
   "sideEffects": false,
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
-  "files": ["dist", "CHANGELOG.md"],
-  "publishConfig": { "access": "public" },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
     "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"

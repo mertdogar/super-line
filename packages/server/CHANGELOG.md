@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [server-v0.20.0] — 2026-07-29
+
+### Features
+
+- **server:** Pass a validator only when the collection wants one ([c92f454])
+
 ## [server-v0.19.0] — 2026-07-29
 
 ### Features

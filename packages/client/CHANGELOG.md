@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [client-v0.15.0] — 2026-07-29
+
+### Features
+
+- **client:** Expose the engine's native document handle ([33f77b5])
+
 ## [client-v0.14.0] — 2026-07-28
 
 ### Features

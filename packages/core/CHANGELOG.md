@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [core-v0.20.0] — 2026-07-29
+
+### Features
+
+- **core:** Let a collection opt out of ingress validation, and expose the engine's document ([c07b72b])
+
 ## [core-v0.19.0] — 2026-07-28
 
 ### Features

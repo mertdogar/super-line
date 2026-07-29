@@ -1,12 +1,24 @@
 {
   "name": "@super-line/collections-crdt-memory",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
-  "description": "In-memory CRDT (Yjs, via super-store) document collection backend for super-line — merging collaborative docs under the collection API.",
+  "description": "In-memory CRDT (Yjs, via super-store) document collection backend for super-line \u2014 merging collaborative docs under the collection API.",
   "license": "MIT",
   "author": "Mert",
-  "keywords": ["super-line", "collections", "crdt", "yjs", "super-store", "sync", "collaboration"],
-  "repository": { "type": "git", "url": "git+https://github.com/mertdogar/super-line.git", "directory": "packages/collections-crdt-memory" },
+  "keywords": [
+    "super-line",
+    "collections",
+    "crdt",
+    "yjs",
+    "super-store",
+    "sync",
+    "collaboration"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mertdogar/super-line.git",
+    "directory": "packages/collections-crdt-memory"
+  },
   "homepage": "https://mertdogar.github.io/super-line/",
   "bugs": "https://github.com/mertdogar/super-line/issues",
   "main": "./dist/index.cjs",
@@ -14,14 +26,27 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
-  "files": ["dist", "CHANGELOG.md"],
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
   "sideEffects": false,
-  "engines": { "node": ">=18" },
-  "publishConfig": { "access": "public" },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
     "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
@@ -30,7 +55,7 @@
     "@super-store/store": "^0.3.0"
   },
   "peerDependencies": {
-    "@super-line/core": ">=0.14.0 <1.0.0"
+    "@super-line/core": ">=0.20.0 <1.0.0"
   },
   "devDependencies": {
     "@super-line/core": "workspace:^"

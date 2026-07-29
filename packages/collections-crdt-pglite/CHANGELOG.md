@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [collections-crdt-pglite-v0.4.0] — 2026-07-29
+
+### Performance
+
+- **collections-crdt-pglite:** Skip the fold when there is nothing to validate ([628eb75])
+
 ## [collections-crdt-pglite-v0.3.0] — 2026-07-28
 
 ### Bug Fixes

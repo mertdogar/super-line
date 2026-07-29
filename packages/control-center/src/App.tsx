@@ -257,14 +257,10 @@ export default function App(): React.JSX.Element {
   const isDataView = view !== 'settings' && view !== 'resources'
   const showState = isDataView && (status !== 'open' || (ready && topology.length === 0 && !nodeView))
 
-  const activeNav = React.useMemo(() => {
-    const nav = [...NAV]
-    if (queueLensActive(contract)) {
-      const idx = nav.findIndex((n) => n.id === 'collections')
-      nav.splice(idx === -1 ? nav.length : idx + 1, 0, { id: 'queues', label: 'Queues', icon: ListTodo })
-    }
-    return nav
-  }, [contract])
+  const activeNav = React.useMemo(
+    () => (queueLensActive(contract) ? NAV : NAV.filter((n) => n.id !== 'queues')),
+    [contract],
+  )
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">

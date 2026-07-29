@@ -102,11 +102,29 @@ export interface Inspector {
   protocol: string
   request: (m: string, d?: unknown) => Promise<unknown>
   subscribeEvents: () => Promise<void>
+  /** Drop everything seen so far — used after warming a cluster up, so assertions read a clean slate. */
+  clear: () => void
   /** Unwrapped events (envelope `.event`), back-compat for assertions on event fields. */
   events: InspectorEventLike[]
   /** Full inspection records, for assertions on envelope metadata (ts/byteSize/originNodeId). */
   envelopes: InspectorEnvelopeLike[]
   close: () => void
+}
+
+/**
+ * Wait until nodes OTHER than the inspector's own are publishing for it, then hand back a clean slate.
+ *
+ * The inspector publishes its feed only while something is watching, and a watcher on one node reaches
+ * the others as an announcement over the adapter. Across a real broker that takes a round trip, so a test
+ * that acts on a remote node microseconds after subscribing races the announcement — a window no human
+ * can act inside, but every test can. `probe` must be a repeatable action on a remote node.
+ */
+export async function awaitWatchers(insp: Inspector, probe: () => Promise<unknown>, timeout = 10_000): Promise<void> {
+  await waitFor(async () => {
+    await probe()
+    return insp.events.length > 0
+  }, timeout)
+  insp.clear()
 }
 
 // A minimal raw-ws inspector client (the typed client ships in @super-line/control-center):
@@ -150,6 +168,10 @@ export function connectInspector(url: string): Promise<Inspector> {
         protocol: ws.protocol,
         request: (m, d) => sendFrame({ t: 'req', m, d }),
         subscribeEvents: () => sendFrame({ t: 'sub', c: 'events' }).then(() => undefined),
+        clear: () => {
+          events.length = 0
+          envelopes.length = 0
+        },
         events,
         envelopes,
         close: () => ws.close(),

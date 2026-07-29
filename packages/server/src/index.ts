@@ -822,14 +822,28 @@ export function createSuperLineServer<
 
   // personal (c:/u:) channels carry a control envelope, not a raw frame to forward verbatim
   function handlePersonal(channel: string, payload: string | Uint8Array): void {
-    const set = members.get(channel)
-    if (!set) return
     let env: PersonalEnvelope
     try {
       env = serializer.decode(payload) as PersonalEnvelope
     } catch {
       return
     }
+    deliverPersonal(channel, env)
+  }
+
+  /**
+   * Is this personal channel satisfiable without touching the wire?
+   *
+   * True only for `c:<connId>`, and only when the connection is here. A connection id is a UUID and its
+   * OWNING node is the sole subscriber of its channel, so a local member proves no other node can want the
+   * frame. Deliberately never true for `u:<userId>` — a user's connections legitimately span nodes, and
+   * presence is not a reliable enough oracle to bet a dropped message on.
+   */
+  const localConnChannel = (channel: string): boolean => channel.startsWith(CONN) && members.has(channel)
+
+  function deliverPersonal(channel: string, env: PersonalEnvelope): void {
+    const set = members.get(channel)
+    if (!set) return
     if (env.p === 'close') {
       for (const conn of set) conn.close()
       return
@@ -865,6 +879,10 @@ export function createSuperLineServer<
     } catch {
       return
     }
+    settleReply(env)
+  }
+
+  function settleReply(env: ReplyEnvelope): void {
     const w = originWaiters.get(env.i)
     if (!w) return
     originWaiters.delete(env.i)
@@ -908,7 +926,10 @@ export function createSuperLineServer<
               reqId: r.corrId,
             },
       )
-    void adapter.publish(REPLY + r.origin, serializer.encode(env))
+    // The reply to a request THIS node originated has nowhere to go but here — publishing it would be a
+    // round trip whose only recipient is the sender.
+    if (r.origin === instanceId) settleReply(env)
+    else void adapter.publish(REPLY + r.origin, serializer.encode(env))
   }
 
   // one heartbeat timer: ping every conn (for lastPongAt liveness) + optional reaping
@@ -1472,6 +1493,16 @@ export function createSuperLineServer<
     close: () => void
     setEnv: (env: unknown) => void
   } {
+    // A frame for a connection on THIS node has no business on the wire: deliver it here and skip the
+    // publish entirely. Without this, every targeted emit crossed the whole cluster to be discarded by
+    // every other node — measured at 100% waste on a three-node mesh.
+    const send = (env: PersonalEnvelope): void => {
+      if (localConnChannel(channel)) {
+        deliverPersonal(channel, env)
+        return
+      }
+      void adapter.publish(channel, serializer.encode(env))
+    }
     return {
       emit(event, data) {
         if (taps.length)
@@ -1481,14 +1512,13 @@ export function createSuperLineServer<
             name: event,
             data,
           })
-        const env: PersonalEnvelope = { p: 'emit', f: { t: 'evt', e: event, d: data } }
-        void adapter.publish(channel, serializer.encode(env))
+        send({ p: 'emit', f: { t: 'evt', e: event, d: data } })
       },
       close() {
-        void adapter.publish(channel, serializer.encode({ p: 'close' } satisfies PersonalEnvelope))
+        send({ p: 'close' })
       },
       setEnv(value) {
-        void adapter.publish(channel, serializer.encode({ p: 'env', d: value } satisfies PersonalEnvelope))
+        send({ p: 'env', d: value })
       },
     }
   }
@@ -1524,7 +1554,9 @@ export function createSuperLineServer<
       if (taps.length)
         emitTap({ type: 'msg.serverRequest', target: id, name, input, reqId })
       const env: PersonalEnvelope = { p: 'req', o: instanceId, i: reqId, m: name, d: input }
-      void adapter.publish(CONN + id, serializer.encode(env))
+      const channel = CONN + id
+      if (localConnChannel(channel)) deliverPersonal(channel, env)
+      else void adapter.publish(channel, serializer.encode(env))
     })
   }
 

@@ -4,7 +4,7 @@ import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
 import { inspector } from '@super-line/plugin-inspector'
-import { connectInspector, createHarness, waitFor } from './harness.js'
+import { awaitWatchers, connectInspector, createHarness, waitFor } from './harness.js'
 
 // Requires Docker (the shared per-run rabbitmq:4 from global-docker.ts); skipped cleanly when Docker is absent.
 let dockerAvailable = true
@@ -43,7 +43,10 @@ describe.skipIf(!dockerAvailable)('rabbitmq inspector events cross-process', () 
     const nodeB = await node()
 
     const insp = await connectInspector(nodeA.url) // inspector on A
-    await insp.subscribeEvents() // awaits the queueBind to i:events, so no race
+    await insp.subscribeEvents()
+    // B publishes only once it has heard that A has a watcher; warm up until it does.
+    const warm = h.client(contract, { url: nodeB.url, role: 'user' })
+    await awaitWatchers(insp, () => warm.join({ room: 'warm' }))
 
     const u = h.client(contract, { url: nodeB.url, role: 'user' }) // conn on B
     await u.join({ room: 'x' })
@@ -60,15 +63,17 @@ describe.skipIf(!dockerAvailable)('rabbitmq inspector events cross-process', () 
 
     const insp = await connectInspector(nodeA.url) // inspector on A
     await insp.subscribeEvents()
+    const warm = h.client(contract, { url: nodeB.url, role: 'user' })
+    await awaitWatchers(insp, () => warm.join({ room: 'warm' }))
 
     const u = h.client(contract, { url: nodeB.url, role: 'user' }) // request handled on B
     await u.join({ room: 'x' }) // B emits msg.request/response; they must cross the bus to A
 
-    await waitFor(() => insp.events.some((e) => e.type === 'msg.request'), 10000)
-    const req = insp.events.find((e) => e.type === 'msg.request')
-    expect(req?.name).toBe('join')
-    const input = req?.input as { room: string } | undefined
-    expect(input?.room).toBe('x')
+    // Matched on identity, not position: the warm-up's own events keep arriving after it settles.
+    const isX = (e: { type: string; input?: unknown }): boolean =>
+      e.type === 'msg.request' && (e.input as { room?: string } | undefined)?.room === 'x'
+    await waitFor(() => insp.events.some(isX), 10000)
+    expect(insp.events.find(isX)?.name).toBe('join')
 
     await waitFor(() => insp.events.some((e) => e.type === 'msg.response'), 10000)
     expect(insp.events.find((e) => e.type === 'msg.response')?.ok).toBe(true)

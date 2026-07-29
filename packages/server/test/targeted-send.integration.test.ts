@@ -71,4 +71,46 @@ describe('targeted cross-node send (slice 5)', () => {
     n2.srv.toConn(idA).close()
     await waitFor(() => n1.srv.local.connections.length === 0)
   })
+
+  /**
+   * A connection id is a UUID and only its owning node subscribes `c:<id>`, so a frame for a connection
+   * that is right here can never be wanted anywhere else. Publishing it anyway cost a full cluster
+   * broadcast per emit — measured at 100% waste on a three-node libp2p mesh, where every other node
+   * received, decoded and discarded every one.
+   */
+  it('does not touch the wire for a connection on this node', async () => {
+    const bus = new MemoryBus()
+    const published: string[] = []
+    // A second adapter on the same bus, subscribed to the very channels under test — the bus only
+    // delivers to subscribers, so a spy watching anything else would pass this test vacuously.
+    const spy = createInMemoryAdapter(bus)
+    spy.onMessage((channel) => published.push(channel))
+
+    const n1 = await h.server(contract, {
+      authenticate: auth,
+      identify,
+      adapter: createInMemoryAdapter(bus),
+    })
+    n1.srv.implement({ shared: { hello: async () => ({ ok: true }) }, user: {} })
+
+    const got: unknown[] = []
+    const c1 = h.client(contract, { url: n1.url, role: 'user', params: { uid: 'u1' } })
+    c1.on('notice', (n) => got.push(n))
+    await c1.hello({})
+    await waitFor(() => n1.srv.local.connections.length === 1)
+
+    const id = n1.srv.local.connections[0]!.id
+    void spy.subscribe(`c:${id}`)
+    void spy.subscribe('u:u1')
+
+    n1.srv.toConn(id).emit('notice', { text: 'local' })
+    await waitFor(() => got.length === 1) // still delivered…
+    expect(got[0]).toEqual({ text: 'local' })
+    expect(published).toEqual([]) // …and nothing crossed the bus to do it
+
+    // `u:` is deliberately NOT short-circuited: a user's connections legitimately span nodes.
+    n1.srv.toUser('u1').emit('notice', { text: 'user' })
+    await waitFor(() => got.length === 2)
+    expect(published).toEqual(['u:u1'])
+  })
 })

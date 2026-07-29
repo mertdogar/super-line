@@ -290,8 +290,14 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
   const remoteWatchers = new Map<string, number>()
   let localWatchers = 0
 
-  const KEEPALIVE_MS = 10_000
-  const WATCHER_TTL_MS = 30_000
+  // Interest is STATE, not an event, so it is re-asserted rather than announced once. The period is
+  // simply how long a node is willing to be wrong: an edge announcement can be lost outright (a peer
+  // whose broker subscription has not landed yet receives nothing, and pub/sub has no retention), and
+  // until the next assertion that peer publishes nothing — a blind window in a live feed. Measured at
+  // 10s that window was plainly visible; at 2s it is not, and the cost is one tiny message every two
+  // seconds per watched node, only ever while something is watching.
+  const KEEPALIVE_MS = 2_000
+  const WATCHER_TTL_MS = 8_000
 
   return {
     name: 'inspector',

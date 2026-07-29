@@ -109,7 +109,9 @@ const peers = (): number =>
 
 serveControl(CTRL_PORT, {
   '/ready': () => ({ ok: true, node: NODE, adapter: KIND, inspector: INSPECTOR, peers: peers(), busReceived }),
-  '/phase': (body) => {
+  // Stamping is separate from running: every actor is stamped, only clients execute. Folding the two
+  // together made each client run its workload twice — once per call — which non-idempotent ops caught.
+  '/stamp': (body) => {
     // NIC is sampled at every boundary, so a phase's total wire cost is the difference across its edges.
     sampleNic(rec)
     rec.setPhase(body.phase === null ? null : Number(body.phase))

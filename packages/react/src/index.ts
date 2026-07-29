@@ -168,6 +168,13 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
   ): {
     data: DocOf<C, N> | undefined
     deleted: boolean
+    /**
+     * The engine's native document handle, or `undefined` before the doc is open. A **value**, not a getter, so
+     * it can be a dependency: it keeps its identity across merges and changes only when the underlying document
+     * is replaced, which is exactly when anything bound to it (a rich-text editor) must be rebuilt. Narrow it
+     * with the engine package's accessor — `yDocOf` for Yjs.
+     */
+    native: unknown
     set: (value: DocOf<C, N>) => void
     update: (partial: Partial<DocOf<C, N>>) => void
     delete: (path: (string | number)[]) => void
@@ -176,9 +183,13 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     const client = useMaybeClient()
     const handleRef = useRef<DocHandle<Doc> | undefined>(undefined)
     // `handle.getSnapshot()` is already identity-stable between merges (the CRDT store caches it), but
-    // this hook exposes two fields, so the pair is memoised too — a fresh object per read would spin
+    // this hook exposes several fields, so the group is memoised too — a fresh object per read would spin
     // useSyncExternalStore forever.
-    const pairRef = useRef<{ data: Doc | undefined; deleted: boolean }>({ data: undefined, deleted: false })
+    const pairRef = useRef<{ data: Doc | undefined; deleted: boolean; native: unknown }>({
+      data: undefined,
+      deleted: false,
+      native: undefined,
+    })
     const subscribe = useCallback(
       (onChange: () => void) => {
         if (!client) {
@@ -200,12 +211,12 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     )
     const getPair = useCallback(() => {
       const handle = handleRef.current
-      const next = { data: handle?.getSnapshot(), deleted: handle?.deleted ?? false }
+      const next = { data: handle?.getSnapshot(), deleted: handle?.deleted ?? false, native: handle?.native() }
       const prev = pairRef.current
-      if (prev.data === next.data && prev.deleted === next.deleted) return prev
+      if (prev.data === next.data && prev.deleted === next.deleted && prev.native === next.native) return prev
       return (pairRef.current = next)
     }, [])
-    const { data, deleted } = useSyncExternalStore(subscribe, getPair, getPair)
+    const { data, deleted, native } = useSyncExternalStore(subscribe, getPair, getPair)
     // These return `void`, so an idle write throws synchronously rather than resolving a promise nobody awaits.
     const doc = useCallback((): DocHandle<Doc> => {
       const handle = handleRef.current
@@ -215,7 +226,7 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
     const set = useCallback((value: Doc) => doc().set(value), [doc])
     const update = useCallback((partial: Partial<Doc>) => doc().update(partial), [doc])
     const del = useCallback((path: (string | number)[]) => doc().delete(path), [doc])
-    return { data, deleted, set, update, delete: del }
+    return { data, deleted, native, set, update, delete: del }
   }
 
   /**

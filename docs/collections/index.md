@@ -53,6 +53,7 @@ If you'd **query, filter, paginate, join, or secure per row** → [row collectio
 | [CRDT document collections](/collections/crdt-documents) | Open a doc by id, merge concurrent edits, validate-before-commit, tolerant schemas, `useDoc`. |
 | [Row-level security & policies](/collections/policies) | Deny-by-default `read`/`write` policies, the RLS filter, CRDT guards, policy staleness. |
 | [Querying with TanStack DB](/collections/tanstack-db) | Joins, live queries, and optimism via the `@super-line/tanstack-db` adapter. |
-| [Backends & clustering](/collections/backends) | The capability matrix, `relay` vs. `self` clustering, advisory foreign keys. |
+| [Backends & clustering](/collections/backends) | The capability matrix, `relay` vs. `self` clustering, every factory option, advisory foreign keys. |
+| [Choose a collection backend](/how-to/choose-a-collection-backend) | Which backend to use: durability, coordination, what you have to operate. |
 
 New to collections? The fastest way in is **[Tutorial 2 · Your first collection](/tutorials/first-collection)** — a live, filtered row-set end to end in a few minutes.

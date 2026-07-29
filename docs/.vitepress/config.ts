@@ -122,6 +122,11 @@ export default defineConfig({
           ],
         },
         {
+          text: 'Collections',
+          collapsed: true,
+          items: [{ text: 'Choose a collection backend', link: '/how-to/choose-a-collection-backend' }],
+        },
+        {
           text: 'Queues & workers',
           collapsed: true,
           items: [
@@ -208,6 +213,7 @@ export default defineConfig({
             { text: 'Row-level security & policies', link: '/collections/policies' },
             { text: 'Querying with TanStack DB', link: '/collections/tanstack-db' },
             { text: 'Backends & clustering', link: '/collections/backends' },
+            { text: 'Choose a backend', link: '/how-to/choose-a-collection-backend' },
           ],
         },
       ],

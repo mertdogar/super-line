@@ -34,6 +34,12 @@ Prove who's on a connection — the connect-time primitive, or the batteries-inc
 - [Provision an agent identity](/how-to/auth-agent-identity) — run an AI agent as an ordinary API-key user.
 - [Reset a password](/how-to/auth-password-reset) — logged-out recovery through a host callback.
 
+## Collections
+
+Where typed collection state lives, and how it reaches other nodes.
+
+- [Choose a collection backend](/how-to/choose-a-collection-backend) — match a row and CRDT backend to your durability and clustering needs.
+
 ## Queues & workers
 
 - [Add a queue (plugin)](/how-to/plugin-queue) — wire `@super-line/plugin-queue` into one contract and one server.

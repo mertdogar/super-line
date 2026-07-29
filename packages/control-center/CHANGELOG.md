@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [control-center-v0.14.1] — 2026-07-29
+
+### Bug Fixes
+
+- **control-center:** Render the Queues nav entry once ([ad3ea2d])
+
 ## [control-center-v0.14.0] — 2026-07-28
 
 ### Features

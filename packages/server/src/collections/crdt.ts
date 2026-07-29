@@ -107,11 +107,17 @@ export function createCrdtCollections(config: CollectionRuntimeConfig, host: Col
           throw new SuperLineError('FORBIDDEN', `Write denied: ${frame.n}/${frame.id}`)
         // validate-before-commit: the backend merges onto a scratch copy and calls this with the post-merge
         // plaintext; a throw aborts the commit (nothing fanned) and surfaces as an err → the client resyncs.
+        // `crdt.validate: false` passes NO validator instead, so the backend skips the fold rather than running
+        // it for a check nobody makes — the only way keystroke-rate writes (collaborative text) are affordable.
         let snapshot: unknown
-        await s.apply({ n: frame.n, id: frame.id, update: frame.u as string, origin: frame.o }, def.crdt, (snap) => {
-          snapshot = snap
-          validateSync(def.schema, snap)
-        })
+        const validate =
+          def.crdt.validate === false
+            ? undefined
+            : (snap: unknown): void => {
+                snapshot = snap
+                validateSync(def.schema, snap)
+              }
+        await s.apply({ n: frame.n, id: frame.id, update: frame.u as string, origin: frame.o }, def.crdt, validate)
         host.tap(() => ({
           type: 'crdt.write',
           connId: conn.id,
@@ -146,7 +152,9 @@ export function createCrdtCollections(config: CollectionRuntimeConfig, host: Col
 
   // A CRDT delta/delete arriving on a d: channel from the adapter: forward raw to local subscribers, and — for
   // a relay backend that didn't originate it — apply the delta locally so this node converges. Remote deltas
-  // were already validated at their originating node (Q3), so the local apply trusts them (no-op validate).
+  // were already validated at their originating node (Q3), so the local apply passes NO validator. That is not
+  // cosmetic: it used to pass `() => {}`, which the backend could not tell from a real check, so every node in
+  // the cluster rebuilt the whole document and materialized its plaintext in order to call an empty function.
   function onRelay(channel: string, payload: string | Uint8Array): void {
     // deliver-on-receipt: forward BEFORE consulting `own`. The loopback is how this node's own subscribers get
     // the delta — its store `onChange` deliberately publishes without delivering. `sendRaw` passes the single
@@ -170,7 +178,7 @@ export function createCrdtCollections(config: CollectionRuntimeConfig, host: Col
     }
     relaying = true
     try {
-      void store.apply({ n: frame.n, id: frame.id, update: frame.u as string, origin: frame.o }, def.crdt, () => {})
+      void store.apply({ n: frame.n, id: frame.id, update: frame.u as string, origin: frame.o }, def.crdt)
     } catch {
       // doc not present on this node yet (creates are node-local) — drop; it catches up on next open
     } finally {

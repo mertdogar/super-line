@@ -7,6 +7,16 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Bug Fixes
 
+- **plugin-auth:** Write presence once per session change, not twice ([37ff0bb])
+
+### Documentation
+
+- **changelog:** Regenerate the root aggregate ([6ada378])
+
+## 2026-07-29
+
+### Bug Fixes
+
 - **devtools-extension:** Say "1 row", in the one place that spells it ([42affa9])
 - **control-center:** Render the Queues nav entry once ([ad3ea2d])
 

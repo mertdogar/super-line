@@ -227,6 +227,11 @@ export function formatMs(ms: number | undefined): string {
   return `${(ms / 1000).toFixed(2)}s`
 }
 
+/** Row counts appear in the timeline and again in the collections rail — one spelling, one place. */
+export function formatRows(n: number): string {
+  return n === 1 ? '1 row' : `${n} rows`
+}
+
 export function formatClock(ts: number): string {
   const d = new Date(ts)
   return `${d.toLocaleTimeString(undefined, { hour12: false })}.${String(d.getMilliseconds()).padStart(3, '0')}`

@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { formatBytes, formatClock, formatMs } from '../lib/labels.js'
+import { formatBytes, formatClock, formatMs, formatRows } from '../lib/labels.js'
 import type { OpEntry, Operation } from '../lib/operations.js'
 import { Divider, Follow, Wire } from './rows.js'
 import { Empty } from './Timeline.js'
@@ -76,7 +76,7 @@ function Row({
         {op.detail && <span className="truncate text-[var(--color-muted)]">{op.detail}</span>}
 
         <span className="ml-auto flex shrink-0 items-baseline gap-2 tabular text-[var(--color-muted)]">
-          {op.rows !== undefined && <span>{op.rows === 1 ? '1 row' : `${op.rows} rows`}</span>}
+          {op.rows !== undefined && <span>{formatRows(op.rows)}</span>}
           {/* time spent waiting for a writable socket is invisible on the wire, so it is called out */}
           {op.queuedMs !== undefined && op.queuedMs > 0 && (
             <span className="text-[var(--color-warn)]">queued {formatMs(op.queuedMs)}</span>

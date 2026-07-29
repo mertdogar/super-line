@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ClientTapEvent, Frame } from '@super-line/core'
-import { categoryOf, eventName, formatBytes, frameName, isProblem, summarizeQuery } from '../src/lib/labels.js'
+import { categoryOf, eventName, formatBytes, formatRows, frameName, isProblem, summarizeQuery } from '../src/lib/labels.js'
 
 /** Every wire frame type, so a new one cannot slip through unnamed. */
 const ALL_FRAMES: Frame[] = [
@@ -159,5 +159,15 @@ describe('formatBytes', () => {
     expect(formatBytes(163)).toBe('163 B')
     expect(formatBytes(2048)).toBe('2.0 kB')
     expect(formatBytes(3 * 1024 * 1024)).toBe('3.0 MB')
+  })
+})
+
+describe('formatRows', () => {
+  it('says "1 row", not "1 rows"', () => {
+    // it drifted once already: the timeline was fixed and the collections rail kept saying "1 rows",
+    // which is why the spelling lives in one function now
+    expect(formatRows(0)).toBe('0 rows')
+    expect(formatRows(1)).toBe('1 row')
+    expect(formatRows(8)).toBe('8 rows')
   })
 })

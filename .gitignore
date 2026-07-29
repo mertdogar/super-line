@@ -15,3 +15,5 @@ docs/reference/*
 .agents/
 .codex/
 .env
+# tiptap reference clones (skills/tiptap) — not part of the build
+.reference/

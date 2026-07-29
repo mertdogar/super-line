@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent } from 'react'
-import { Hash, Lock, Menu, Pencil, Send, Trash2, Users } from 'lucide-react'
+import { FileText, Hash, Lock, Menu, Pencil, Send, Trash2, Users } from 'lucide-react'
 import { Avatar } from '@/components/avatar'
 import { MembersPanel } from '@/components/members-panel'
 import { Button } from '@/components/ui/button'
@@ -18,9 +18,13 @@ interface ChannelViewProps {
   isMember: boolean
   /** Opens the mobile sidebar drawer (the hamburger only renders below `md`). */
   onOpenNav?: () => void
+  /** Whether the channel's document pane is showing. */
+  docOpen?: boolean
+  /** Show/hide the document pane. Its own toggle, because on a narrow window it takes over the column. */
+  onToggleDoc?: () => void
 }
 
-export function ChannelView({ myUserId, channel, isMember, onOpenNav }: ChannelViewProps): React.JSX.Element {
+export function ChannelView({ myUserId, channel, isMember, onOpenNav, docOpen, onToggleDoc }: ChannelViewProps): React.JSX.Element {
   const chat = useChat()
   const users = useUsers()
   const messages = useMessages(channel.id) // live, membership-scoped: empty until you join
@@ -61,6 +65,17 @@ export function ChannelView({ myUserId, channel, isMember, onOpenNav }: ChannelV
           <span className="hidden text-xs text-muted-foreground sm:inline">
             over <b className="font-semibold text-foreground">{TRANSPORT_LABELS[kind]}</b>
           </span>
+          {isMember && onToggleDoc && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onToggleDoc}
+              aria-pressed={docOpen}
+              className={cn(docOpen && 'bg-muted text-foreground')}
+            >
+              <FileText className="mr-1 h-4 w-4" /> Doc
+            </Button>
+          )}
           {isMember && (
             <Button variant="ghost" size="sm" onClick={() => setShowMembers((s) => !s)}>
               <Users className="mr-1 h-4 w-4" /> Members

@@ -13,11 +13,15 @@ import { createSuperLineServer } from '@super-line/server'
 import { auth } from '@super-line/plugin-auth/server'
 import { chat as chatKitFactory } from '@super-line/plugin-chat/server'
 import { sqliteCollections } from '@super-line/collections-sqlite'
+import { pgliteCollections } from '@super-line/collections-pglite'
+import { crdtMemoryCollections } from '@super-line/collections-crdt-memory'
+import { crdtPgliteCollections } from '@super-line/collections-crdt-pglite'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { httpServerTransport } from '@super-line/transport-http'
 import { libp2pServerTransport } from '@super-line/transport-libp2p'
+import type { DocOptions } from '@super-line/core'
 import type { AuthContext } from '@super-line/plugin-auth'
-import { chat } from './contract.js'
+import { chat, NOTE_KIND } from './contract.js'
 
 // ONE server, THREE client↔server transports: WebSocket + HTTP share the http.Server; libp2p rides a
 // started libp2p node. The browser's `?transport=` dial picks which wire to dial — and the accounts,
@@ -31,6 +35,18 @@ const DB_FILE = process.env.DB_FILE ?? fileURLToPath(new URL('../chat.db', impor
 // The ONLY thing this process shares with the verifier (src/verifier.ts) — no database, no super-line.
 // A real deployment injects a real secret; this default keeps the example a one-command start.
 const JWT_SECRET = process.env.AUTH_JWT_SECRET ?? 'dev-only-insecure-shared-secret'
+// One switch, two backends. `PG_URL` is set under `docker compose` and unset on the README's local path,
+// and it decides BOTH storage seams at once:
+//
+//   rows      (accounts · channels · messages)  Postgres + Electric  |  a sqlite file
+//   documents (the per-channel prose)           Postgres op-log      |  in-memory
+//
+// They are separate seams by design — a CRDT document never joins a cross-collection batch — but there is
+// no reason for them to land in different databases, so under compose they share one. Locally the rows
+// still persist and the documents live only as long as the process, which is the honest trade for needing
+// nothing installed. Nothing downstream can tell: each is just a `CollectionStore` / `CrdtCollectionStore`.
+const PG_URL = process.env.PG_URL
+const ELECTRIC_URL = process.env.ELECTRIC_URL ?? 'http://localhost:3000/v1/shape'
 
 // A stable, seed-derived PeerId so the browser can dial a known multiaddr it fetches from /libp2p-addr.
 const seed = new Uint8Array(32)
@@ -109,7 +125,17 @@ server.on('request', (req, res) => {
 })
 
 // One CollectionStore shared by the server AND the auth kit (so authenticate reads sessions/users from it).
-const backend = sqliteCollections({ file: DB_FILE, collections: chat.collections })
+//
+// Under `docker compose` this is Postgres, the same database the documents use — accounts, channels and
+// messages in typed tables that Electric streams into this node's local replica. Keeping the rows in
+// sqlite while the documents sat in Postgres would have been an arbitrary split, and a second durable
+// store is a second thing to provision, back up and migrate.
+//
+// The README's no-Docker path has no Postgres, so it falls back to a sqlite file. Both are `CollectionStore`
+// implementations, so nothing above this line — the auth kit, the chat kit, every policy — can tell.
+const backend = PG_URL
+  ? await pgliteCollections({ pgUrl: PG_URL, electricUrl: ELECTRIC_URL, collections: chat.collections })
+  : sqliteCollections({ file: DB_FILE, collections: chat.collections })
 
 // plugin-auth owns identity, access tokens, connection sessions, presence and the `guest` role;
 // plugin-chat owns the whole chat model — its policies and its 20+ request handlers ship INSIDE
@@ -130,8 +156,19 @@ const authKit = auth({
     return typeof workspace === 'string' ? { workspace } : undefined
   },
 })
+// A merged contract's `collections` is an intersection of every plugin's fragment, so it has no string
+// index signature — the lookup a backend needs is by name at runtime. Widening it here is the whole fix.
+const collectionDefs = chat.collections as Record<string, { crdt?: DocOptions } | undefined>
+const crdtCollections = PG_URL
+  ? await crdtPgliteCollections({ pgUrl: PG_URL, electricUrl: ELECTRIC_URL, docOptions: (n) => collectionDefs[n]?.crdt })
+  : crdtMemoryCollections()
+
 const chatKit = chatKitFactory({
   contract: chat,
+  // A channel resource: a CRDT document attached to a channel, with the plugin owning its registry row,
+  // its membership-gated access and its lifecycle. `owned` means the document is minted by the plugin and
+  // cascade-deleted with its channel — right for a document that IS the channel's, and has no life without it.
+  resources: { kinds: { [NOTE_KIND]: { collection: 'notes', lifecycle: 'owned', init: () => ({}) } } },
   hooks: {
     // one domain rule, applied to every writer: trim, and refuse empty bodies
     sendMessage: {
@@ -141,8 +178,31 @@ const chatKit = chatKitFactory({
         return { ...input, content }
       },
     },
+    // Every channel gets exactly one document, by construction rather than on first visit — so the pane is
+    // never empty-until-someone-clicks, and the registry row (which carries the title) exists from the start.
+    createChannel: { after: (channel) => void attachNote(channel.id, channel.name).catch(() => {}) },
   },
 })
+
+/**
+ * Idempotent: make sure this channel has its one document, and that the document actually exists.
+ *
+ * The two halves can come apart, which is the point of the second check. A resource row is a validated
+ * sqlite row and survives a restart; the document it points at only survives if the CRDT backend is
+ * durable. On the no-Postgres path it is not — so a restart leaves a registry row addressing a document
+ * that is gone, and the pane would open onto NOT_FOUND. Re-minting the document under the id the row
+ * already names keeps the pair consistent without inventing a second row.
+ */
+async function attachNote(channelId: string, name: string): Promise<void> {
+  const existing = (await chatKit.resources.of(channelId)).find((r) => r.kind === NOTE_KIND)
+  if (!existing) {
+    await chatKit.resources.create({ channelId, kind: NOTE_KIND, title: `${name} notes` })
+    return
+  }
+  if ((await srv.collection('notes').read(existing.docId)) === undefined) {
+    await srv.collection('notes').create(existing.docId, {})
+  }
+}
 
 const srv = createSuperLineServer(chat, {
   nodeKey: 'react-chat-transports', // stable across restarts: plugin-auth sweeps this node's stale sessions with it
@@ -153,6 +213,7 @@ const srv = createSuperLineServer(chat, {
     libp2pServerTransport({ node }), // protocol /super-line/1.0.0 on the started node
   ],
   collections: backend,
+  crdtCollections,
   plugins: [authKit.plugin, chatKit.plugin, inspector()],
   authenticate: authKit.authenticate,
   identify: authKit.identify, // principal := userId, so plugin-chat's read policies key on the logged-in user
@@ -162,10 +223,45 @@ const srv = createSuperLineServer(chat, {
   },
 })
 
-// Nothing to implement: every clientToServer key on this contract is answered by a plugin. The empty
-// map is not a formality — implement() re-checks that coverage at runtime and throws if a key is
-// unhandled (or handled twice), so this line is the assertion that the app added no surface of its own.
-srv.implement({})
+// ONE handler, and it is worth knowing why it is the only one. Every durable thing this app does —
+// accounts, channels, membership, messages, the documents themselves — is answered by a plugin;
+// implement() re-checks that coverage at runtime and throws on a key that is unhandled or handled twice,
+// so this map is a live assertion about how little the app adds.
+//
+// What it adds is carets. Document *content* is a CRDT and needs nothing here: it rides the collection
+// machinery, is policy-gated by the plugin, and converges on its own. But Yjs **awareness** — who is
+// where, and what they have selected — is a separate protocol that never travels on a document update,
+// and it is meant to evaporate. So it wants the opposite of a collection: an ephemeral broadcast that is
+// never stored and never replayed. A room is exactly that.
+//
+// Sending is also what subscribes you. A client publishes its own caret the moment its editor mounts, so
+// the first update doubles as the join and no second request is needed; moving to another channel moves
+// the connection, which is what stops a long session accumulating rooms it stopped caring about.
+const docRoom = (channelId: string): string => `doc:${channelId}`
+const roomOf = new WeakMap<object, string>() // conn → the doc room it currently occupies
+
+srv.implement({
+  user: {
+    awarenessUpdate: async ({ channelId, update }, _ctx, conn) => {
+      // Membership is the gate, and it is the plugin's own answer — not a second, drifting copy of it.
+      // Without this, a caret would reach a document its sender may not read.
+      const mine = await chatKit.members.get(channelId, (conn.ctx as AuthContext).userId!)
+      if (!mine) throw new Error('not a member')
+
+      const room = docRoom(channelId)
+      const previous = roomOf.get(conn)
+      if (previous !== room) {
+        if (previous) srv.room(previous).remove(conn)
+        srv.room(room).add(conn)
+        roomOf.set(conn, room)
+      }
+      // Everyone in the room INCLUDING the sender; the client drops its own echo by comparing the Yjs
+      // client id it already carries, which is cheaper than the server tracking who not to send to.
+      srv.room(room).broadcast('awareness', { channelId, update })
+      return { ok: true }
+    },
+  },
+})
 
 /** Drop first-timers into the seeded public channels so nobody lands on an empty workspace. */
 async function welcome(userId: string): Promise<void> {
@@ -185,6 +281,10 @@ async function seedWorkspace(): Promise<void> {
   for (const name of ['general', 'random']) {
     if (!channels.has(name)) await chatKit.channels.create({ name })
   }
+  // Backfill: `createChannel.after` covers every channel made from now on, but the seeded pair predates
+  // it on an existing chat.db — and with the in-memory CRDT backend the documents are gone after a
+  // restart while their registry rows are not, so re-attaching has to be idempotent rather than one-shot.
+  for (const channel of await chatKit.channels.find()) await attachNote(channel.id, channel.name)
 
   const known = new Set((await authKit.users.find()).map((u) => u.displayName))
   for (const [displayName, email] of [
@@ -203,7 +303,8 @@ await seedWorkspace()
 server.listen(PORT, () => {
   const { port } = (server.address() as AddressInfo) ?? { port: PORT }
   console.log(`[${NODE}] up on :${port} (WS + HTTP) · libp2p /ws :${P2P_PORT} · peer ${node.peerId.toString()}`)
-  console.log(`  collections: ${DB_FILE}`)
+  console.log(`  rows: ${PG_URL ? 'postgres (electric replica)' : DB_FILE}`)
+  console.log(`  documents: ${PG_URL ? 'postgres op-log (electric replica)' : 'in-memory (set PG_URL to persist)'}`)
   console.log('  demo logins: ada@example.com / grace@example.com — password "superline"')
   console.log('  JWT: enabled (2-minute tokens) — run `pnpm verifier` for the stateless verifier service')
 })

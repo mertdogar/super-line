@@ -23,6 +23,10 @@ export default defineConfig({
       '@super-line/core': r('../../packages/core/src/index.ts'),
       '@super-line/client': r('../../packages/client/src/index.ts'),
       '@super-line/react': r('../../packages/react/src/index.ts'),
+      // The CRDT client engine (and `yDocOf`). Source-aliased like the rest so there is exactly ONE
+      // copy of core in the bundle — two would break `instanceof SuperLineError`, and two copies of
+      // Yjs would be worse still, since documents from different copies do not interoperate.
+      '@super-line/collections-crdt-memory': r('../../packages/collections-crdt-memory/src/index.ts'),
       // the browser only dials, so bundle the CLIENT halves — avoids pulling the server transports'
       // and plugins' Node-only code into the SPA. Subpaths before the bare alias.
       '@super-line/transport-websocket': r('../../packages/transport-websocket/src/index.ts'),

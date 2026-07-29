@@ -1,4 +1,5 @@
 import { createSuperLineClient } from '@super-line/client'
+import { crdtCollectionsClient } from '@super-line/collections-crdt-memory'
 import { devtoolsPlugin } from '@super-line/plugin-devtools'
 import type { AuthClientOptions } from '@super-line/plugin-auth/react'
 import { chat } from '@/contract'
@@ -17,6 +18,16 @@ export const authOptions = {
   // `devtoolsPlugin()` is per-CLIENT, and this callback runs once per session — so signing in builds a
   // second instance while the first is still live, which is exactly what the DevTools panel shows: two
   // clients in one timeline, the guest closing only after the user connection is confirmed.
+  //
+  // `crdtCollectionsClient()` is the universal client engine for CRDT document collections — universal
+  // because the client only ever merges opaque deltas, so the same engine pairs with whichever backend
+  // the server runs (Postgres + Electric under compose, in-memory without it).
   connect: ({ role, params }) =>
-    createSuperLineClient(chat, { transport, role: role as 'user', params, plugins: [devtoolsPlugin()] }),
+    createSuperLineClient(chat, {
+      transport,
+      role: role as 'user',
+      params,
+      crdtCollections: crdtCollectionsClient(),
+      plugins: [devtoolsPlugin()],
+    }),
 } satisfies AuthClientOptions<typeof chat, 'user'>

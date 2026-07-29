@@ -11,7 +11,7 @@ type Client = SuperLineClient<typeof chat, 'user'>
 // The plugin's React binding — `useChannels`/`useMembers`/`useMessages` over the chatClient (which owns
 // the membership-driven re-subscribe mechanic) + `useChat()` for the request methods (send/join/…).
 const binding = createChatHooks<typeof chat>()
-export const { useChat, useChannels, useMembers, useMessages } = binding
+export const { useChat, useChannels, useMembers, useMessages, useChannelResources } = binding
 
 // A tiny reactive view over a raw client collection — for the reads the chat plugin doesn't wrap:
 // plugin-auth's world-readable `users` directory and `userPresence`, plus my own membership rows.

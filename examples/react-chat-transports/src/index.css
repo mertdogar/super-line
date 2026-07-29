@@ -97,3 +97,131 @@ body {
   font-family: 'Lato', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+/* ── the channel document ─────────────────────────────────────────────────────────────────────
+ * Editor typography, hand-rolled: this app has no typography plugin, so `prose` would be inert.
+ */
+.tiptap {
+  outline: none;
+  line-height: 1.65;
+  color: var(--foreground);
+}
+.tiptap > * + * {
+  margin-top: 0.75em;
+}
+.tiptap h1,
+.tiptap h2,
+.tiptap h3 {
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: 1.4em;
+}
+.tiptap h1 {
+  font-size: 1.5rem;
+}
+.tiptap h2 {
+  font-size: 1.25rem;
+}
+.tiptap h3 {
+  font-size: 1.05rem;
+}
+.tiptap ul,
+.tiptap ol {
+  padding-left: 1.25rem;
+}
+.tiptap ul {
+  list-style: disc;
+}
+.tiptap ol {
+  list-style: decimal;
+}
+.tiptap li::marker {
+  color: var(--muted-foreground);
+}
+.tiptap blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 0.85rem;
+  color: var(--muted-foreground);
+}
+.tiptap code {
+  background: var(--muted);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.875em;
+}
+.tiptap pre {
+  background: var(--muted);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 0.9rem;
+  overflow-x: auto;
+}
+.tiptap pre code {
+  background: none;
+  padding: 0;
+}
+/* The empty-document hint, so a fresh channel document is not a blank void. */
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* ── remote carets ───────────────────────────────────────────────────────────────────────────
+ * CollaborationCaret ships NO styles; without these a peer's name renders as bare text in the
+ * paragraph. Every colour comes from `user.color` via `currentColor`, so one rule set covers
+ * everybody and no per-user CSS is generated.
+ */
+.collaboration-carets__caret {
+  position: relative;
+  margin-left: -1px;
+  margin-right: -1px;
+  border-left: 2px solid currentColor;
+  border-right: none;
+  word-break: normal;
+  pointer-events: none;
+  border-radius: 1px;
+}
+.collaboration-carets__label {
+  position: absolute;
+  top: -1.55em;
+  left: -2px;
+  z-index: 20;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: currentColor;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  user-select: none;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.22);
+  /* Grows out of the caret it belongs to, rather than popping in at full size. */
+  transform-origin: bottom left;
+  animation: caret-label-in 140ms ease-out;
+}
+/* The peer's selected range, tinted in their own colour. `color-mix` keeps the text legible
+ * underneath, which a flat opacity on the whole element would not. */
+.collaboration-carets__selection {
+  background-color: color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 2px;
+  pointer-events: none;
+}
+@keyframes caret-label-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .collaboration-carets__label {
+    animation: none;
+  }
+}

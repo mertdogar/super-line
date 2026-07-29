@@ -5,6 +5,10 @@ history — built almost entirely out of **`@super-line/plugin-auth`** and **`@s
 over **WebSocket**, **HTTP (SSE)** or **libp2p**. You pick the wire per tab with `?transport=`; every message
 carries a badge showing which wire it was sent over.
 
+Beside every conversation is that channel's **shared document** — a Tiptap rich-text editor that merges
+per character, with live carets. So the same connection carries both of super-line's consistency models at
+once: the messages are last-writer-wins rows, the document is a CRDT, and each is a `collection(…)`.
+
 The point: the plugins sit *above* the transport seam. Sign-in, collections, RLS, membership and live delivery
 behave identically on all three wires, and no code in this example is transport-aware except one module.
 
@@ -18,7 +22,9 @@ docker compose up --build
 - **Chat** → http://localhost:8100 — sign in, then pick a wire in the sidebar footer.
 - **Control Center** → http://localhost:8101 — watch the traffic, whichever wire it took.
 
-Three services come up: the chat node, Caddy, and a **`verifier`** that exists only to check JWTs (below).
+Five services come up: the chat node, Caddy, a **`verifier`** that exists only to check JWTs (below), and
+**Postgres + Electric**, which back everything durable — the accounts, channels and messages *and* the
+documents, in one database.
 
 Two seeded demo logins (password `superline`), one click away on the login screen:
 
@@ -37,6 +43,10 @@ http://localhost:8100/?transport=libp2p
 > Two tabs in the same browser share one `localStorage`, so they share one signed-in account. To watch **two
 > people** talk across two wires, open the second one in a **private window** and sign in as the other demo user.
 
+Type into the document in both windows at once, in the **same paragraph**. Both people's characters survive
+and the carets follow each other around — that is the difference between merging and last-writer-wins, and
+it is the one thing you cannot demonstrate with a plain string field.
+
 ### Or locally (no Docker)
 
 ```bash
@@ -48,30 +58,95 @@ pnpm --filter @super-line/example-react-chat-transports dev
 pnpm --filter @super-line/example-react-chat-transports verifier
 ```
 
-Accounts, channels and messages live in `chat.db` next to the source (gitignored — delete it to reset the
-workspace; in Docker it's a named volume).
+`PG_URL` is what compose sets, and it decides **both** storage seams at once:
+
+| | `PG_URL` set (compose) | unset (local) |
+|---|---|---|
+| rows — accounts, channels, messages | Postgres + Electric | `chat.db` beside the source |
+| documents — the per-channel prose | Postgres op-log + Electric | in memory |
+
+So the local path needs nothing installed, at the cost of documents living only as long as the process
+(the chat around them still persists). Nothing downstream notices: each is just a `CollectionStore` or a
+`CrdtCollectionStore`, and the client only ever merges opaque deltas, so one client engine pairs with
+every backend.
 
 ## What the app actually declares
 
-The entire contract:
+Nearly the entire contract:
 
 ```ts
 export const chat = defineContract({
   roles: { user: {} },                              // the role we connect as; plugin-auth adds `guest`
+  collections: {
+    notes: { schema: z.object({}), crdt: { mode: 'document', validate: false } },   // the documents
+  },
   plugins: [authContract(), chatContract()],        // identity + the whole chat model
 })
 ```
 
-That's it — no requests, no events, no topics of its own. `plugin-auth` brings the users / credentials /
-sessions / presence collections and the `guest` role; `plugin-chat` brings channels / memberships / messages
-plus its request handlers and read policies. The server proves it:
+`plugin-auth` brings the users / credentials / sessions / presence collections and the `guest` role;
+`plugin-chat` brings channels / memberships / messages plus its request handlers and read policies. Even
+"who's online" is plugin data: the sidebar subscribes to plugin-auth's `userPresence` rows, derived from real
+connection sessions — so a tab on libp2p and a tab on HTTP see each other with no app code.
+
+The app adds exactly **one request and one event**, both for carets, and the server says so out loud:
 
 ```ts
-srv.implement({})   // throws if any clientToServer key were unhandled — every one belongs to a plugin
+srv.implement({ user: { awarenessUpdate } })   // throws if any OTHER key were unhandled
 ```
 
-Even "who's online" is plugin data: the sidebar subscribes to plugin-auth's `userPresence` rows, which are
-derived from real connection sessions — so a tab on libp2p and a tab on HTTP see each other with no app code.
+`implement()` re-checks coverage at runtime and throws on a key that is unhandled or handled twice, so that
+line is a live assertion about how little is left over. Which raises the obvious question — why do carets
+need hand-written surface when the document itself does not?
+
+Because they are not the same kind of state. The document's *content* is a CRDT: it rides the collection
+machinery, is membership-gated by the plugin, and converges by itself. **Awareness** — who is where, and
+what they have selected — is a separate Yjs protocol that never travels on a document update, so it would
+not cross the wire however well the document syncs. It is also meant to evaporate: persisting a cursor
+position would be a bug, not a feature. So it wants precisely the opposite of a collection — an ephemeral
+broadcast, stored nowhere and never replayed — which is a request and an event over a room.
+
+## The channel's document
+
+Each channel owns one document, attached as a **plugin-chat channel resource** — so the plugin mints it,
+membership-gates it, and deletes it with its channel. A resource is a pair, and the split is the interesting
+part:
+
+| | where it lives | what it gives you |
+|---|---|---|
+| **title, author, timestamps** | a `resources` **row** | validated, queryable, policy-gated — how the pane has a heading at all |
+| **the prose** | a `notes` **CRDT document** | merges per character, opened by id, never queried |
+
+They are split because a CRDT document collection is *opened by id and never queried* — a document's own
+name could not live inside it and still be sortable or searchable. Attaching a resource wires both halves in
+one call:
+
+```ts
+chat({ resources: { kinds: { note: { collection: 'notes', lifecycle: 'owned', init: () => ({}) } } } })
+```
+
+### Binding an editor
+
+There is no Yjs provider anywhere in this example, and there does not need to be. Tiptap wants a `Y.Doc` and
+does not care how it syncs; super-line is already syncing this one:
+
+```ts
+const handle = client.collection('notes').open(resource.docId)
+await handle.ready
+
+Collaboration.configure({ document: yDocOf(handle), field: 'body' })
+```
+
+`field` is a Yjs *root name*, and that is exactly the mechanism. The text lives in a **native root** — a CRDT
+type sitting beside the contract-described root in the same document. It has to, because the described root
+is diff-and-patched whole on every write: a string in there is *replaced*, so two people in one paragraph
+would clobber each other. A native root replicates for free (the wire already carries whole-document
+updates) and is invisible to the plaintext snapshot, so validation and the queryable projection never see it.
+
+Which is why the collection declares `validate: false`. There is nothing in the described root for a schema
+to check — and validating a document per keystroke would be unaffordable anyway, since the check has to
+rebuild the whole document to run. The trade is exact and worth stating: the **policy** still decides who may
+write; nothing then decides what.
 
 ## One server, three wires
 
@@ -83,7 +158,8 @@ createSuperLineServer(chat, {
     httpServerTransport({ server }),                      // HTTP — http request channel (same server)
     libp2pServerTransport({ node }),                      // libp2p — a started libp2p node
   ],
-  collections: backend,                                   // one sqlite CollectionStore for both plugins
+  collections: backend,                                   // rows — one CollectionStore for both plugins
+  crdtCollections,                                        // a SEPARATE seam: Postgres + Electric, or memory
   plugins: [authKit.plugin, chatKit.plugin, inspector()],
   authenticate: authKit.authenticate,
   identify: authKit.identify,                             // principal := userId, so RLS keys on the user
@@ -127,7 +203,7 @@ auth({ …, jwt: { secret: JWT_SECRET, ttlMs: 2 * 60_000 } })   // 2 minutes her
 
 **Verifying, somewhere else.** *Verify elsewhere* calls `GET /api/verify` on the `verifier` service. Look at
 what [`src/verifier.ts`](./src/verifier.ts) imports: `node:http` and `jose`. No super-line, no contract, no
-collections — and in `docker-compose.yml` it has no `chat-db` volume and no route to the database. It shares
+collections — and in `docker-compose.yml` it has no `PG_URL`, so no route to the database at all. It shares
 exactly **one** thing with the chat node, the signing secret, and that is enough to trust the caller. That is
 the difference between an assertion and an access token: an access token is a lookup key, so whoever validates
 it needs your database.
@@ -182,7 +258,16 @@ A few behaviours worth watching for, because they are properties of JWTs rather 
   `@libp2p/webrtc` (`webRTCDirect()` to a public-UDP server, or relayed `webRTC()` via a `circuit-relay-v2`
   container) and the same `libp2pClientTransport`/`libp2pServerTransport` carry the chat over a WebRTC data
   channel. See the [libp2p transport guide](../../docs/how-to/transport-libp2p.md).
+- **Rows and documents are different seams, even sharing one database.** `collections:` takes a
+  `CollectionStore` and `crdtCollections:` takes a `CrdtCollectionStore` — never one interface, and a CRDT
+  document never joins a cross-collection atomic batch. Under compose both happen to be Postgres, which is
+  the self-clustering tier: each owns its cross-node sync through Electric and needs no super-line adapter.
+- **Awareness is high-rate.** Every cursor move and selection change publishes, so the caret traffic dwarfs
+  the message traffic — watch the Control Center's live feed while someone types. It is also fire-and-forget:
+  a dropped caret frame heals on the next keystroke, which is why nothing retries it.
 - Single node by design — this example showcases three *client* transports to one server. For *server↔server*
   fan-out across nodes, see the `react-chat-cluster-*` examples (that's the `Adapter`, a separate axis).
+  Both backends here are the self-clustering tier, so a second node would converge through Electric without
+  an adapter — the example stays single-node because its subject is three *client* transports, not clustering.
 - For the same plugin stack with typing indicators and a streaming AI agent (WebSocket only), see
   [`examples/collections-chat`](../collections-chat).

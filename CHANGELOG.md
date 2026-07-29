@@ -5,6 +5,35 @@ run `pnpm changelog` rather than editing by hand.
 
 ## 2026-07-29
 
+### Features
+
+- **traffic-lab:** The adapter × inspector matrix (phases 4-5) ([fd1a2bb])
+- **traffic-lab:** Classify, report, and diff against a baseline (phase 3) ([15318ac])
+- **traffic-lab:** The phased traffic zoo (phase 2) ([b3f3e3a])
+- **traffic-lab:** Tap all four planes (phase 1) ([6e0763a])
+- **traffic-lab:** Scaffold the multi-container lab (phase 0) ([a4fb22d])
+
+### Bug Fixes
+
+- **plugin-inspector:** Publish the feed only while something is watching ([29bf66f])
+- **transport-websocket:** Announce a close when the socket only reports an error ([42a9273])
+
+### Performance
+
+- **server:** Deliver a targeted send locally instead of across the cluster ([74f8acb])
+
+### Testing
+
+- **transport-websocket:** Type the scripted socket against the option type ([d26d734])
+
+### Documentation
+
+- **plans:** Record what the traffic lab measured ([2426a8f])
+- **plans:** Design the traffic lab and name what it measures ([24e5075])
+- **changelog:** Regenerate the root aggregate ([6dfaf9f])
+
+## 2026-07-29
+
 ### Bug Fixes
 
 - **plugin-auth:** Write presence once per session change, not twice ([37ff0bb])
@@ -20,6 +49,10 @@ run `pnpm changelog` rather than editing by hand.
 - **devtools-extension:** Say "1 row", in the one place that spells it ([42affa9])
 - **control-center:** Render the Queues nav entry once ([ad3ea2d])
 
+### CI
+
+- **devtools-extension:** Stop re-running the suite in the release job ([140ee9c])
+
 ### Documentation
 
 - Show the DevTools panel instead of describing it ([f58585f])
@@ -29,10 +62,6 @@ run `pnpm changelog` rather than editing by hand.
 ### Features
 
 - **devtools-extension:** Ship the panel as a downloadable release zip ([90d2a84])
-
-### CI
-
-- **devtools-extension:** Stop re-running the suite in the release job ([140ee9c])
 
 ### Documentation
 

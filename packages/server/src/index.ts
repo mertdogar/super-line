@@ -394,6 +394,23 @@ export interface PluginChannel {
   publish(data: unknown): void
   /** Subscribe to this channel. `meta.from` is the publishing node. Returns an unsubscribe fn. */
   subscribe(handler: (data: unknown, meta: BusMeta) => void): () => void
+  /**
+   * How many subscribers this channel has **on this node**, right now.
+   *
+   * A plugin that fans out observations needs to know whether anything consumes them, and a
+   * plugin-owned connection is observer-invisible — no lifecycle hook fires for it — so a plugin has
+   * no other way to notice its consumer arriving or leaving. Node-local by construction: cluster-wide
+   * interest is a plugin's own business to gossip, exactly as the inspector does.
+   */
+  readonly subscribers: number
+  /**
+   * Called when {@link PluginChannel.subscribers} changes. Returns an unsubscribe fn.
+   *
+   * The edge, not just the level: a plugin that gossips its interest must announce the moment a consumer
+   * arrives. Polling the count instead costs a window of silence at the start of every session — long
+   * enough, on a live feed, to lose the first events a reader attached in order to see.
+   */
+  onSubscribersChanged(cb: (count: number) => void): () => void
 }
 
 /**
@@ -730,6 +747,8 @@ export function createSuperLineServer<
   const busListeners = new Map<string, Set<(data: unknown, meta: BusMeta) => void>>()
   // plugin-private channels (x:<plugin>:<name>), off-contract so they don't ride the validated bus path
   const pluginChannels = new Map<string, Set<(data: unknown, meta: BusMeta) => void>>()
+  // per plugin channel: who wants to hear that its LOCAL subscriber count moved (PluginChannel.onSubscribersChanged)
+  const pluginChannelObservers = new Map<string, Set<(count: number) => void>>()
   const instanceId = randomUUID() // identifies this node; lets the bus drop its own looped-back echo
   // owns node identity on the wire: stamps `nd` outbound, reports `own` inbound. Detection only — each caller
   // still picks its own delivery policy (see the Cluster docs: deliver-at-source vs deliver-on-receipt).
@@ -1387,6 +1406,9 @@ export function createSuperLineServer<
   function pluginChannel(pluginName: string, name: string): PluginChannel {
     const channel = PLUGIN + pluginName + ':' + name
     return {
+      get subscribers() {
+        return pluginChannels.get(channel)?.size ?? 0
+      },
       publish(data) {
         const set = pluginChannels.get(channel)
         if (set) for (const cb of set) callBus(cb, data, instanceId, channel) // local echo
@@ -1400,6 +1422,7 @@ export function createSuperLineServer<
           void adapter.subscribe(channel)
         }
         set.add(handler)
+        announceSubscribers(channel)
         return () => {
           const current = pluginChannels.get(channel)
           if (!current) return
@@ -1408,8 +1431,38 @@ export function createSuperLineServer<
             pluginChannels.delete(channel)
             void adapter.unsubscribe(channel)
           }
+          announceSubscribers(channel)
         }
       },
+      onSubscribersChanged(cb) {
+        let set = pluginChannelObservers.get(channel)
+        if (!set) {
+          set = new Set()
+          pluginChannelObservers.set(channel, set)
+        }
+        set.add(cb)
+        return () => {
+          const current = pluginChannelObservers.get(channel)
+          if (!current) return
+          current.delete(cb)
+          if (current.size === 0) pluginChannelObservers.delete(channel)
+        }
+      },
+    }
+  }
+
+  // Tell a plugin its local subscriber count moved. Isolated like every other plugin callback: an observer
+  // that throws must not take down the subscribe it was observing.
+  function announceSubscribers(channel: string): void {
+    const observers = pluginChannelObservers.get(channel)
+    if (!observers) return
+    const count = pluginChannels.get(channel)?.size ?? 0
+    for (const cb of observers) {
+      try {
+        cb(count)
+      } catch (err) {
+        fireError(err, { kind: 'event', name: channel })
+      }
     }
   }
 

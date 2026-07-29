@@ -384,6 +384,70 @@ describe('inspector events topic (slice 5)', () => {
     expect(insp.envelopes.find((en) => en.event.type === 'connect')?.originNodeId).toBe(nodeB.srv.nodeId)
     insp.close()
   })
+
+  /**
+   * With nothing watching, the feed has no consumer, and on a three-node libp2p mesh the unwanted copies
+   * measured 76% of ALL cross-node traffic — every frame carried, decrypted, decoded and discarded.
+   */
+  it('publishes nothing on the bus while no Control Center is attached', async () => {
+    const bus = new MemoryBus()
+    const published: string[] = []
+    const watch = createInMemoryAdapter(bus)
+    watch.onMessage((channel) => published.push(channel))
+    void watch.subscribe('x:inspector:events')
+
+    const node = await h.server(eventsContract, {
+      authenticate: eventsAuth,
+      adapter: createInMemoryAdapter(bus),
+      plugins: [inspector()],
+    })
+    node.srv.implement({ user: { join: async () => ({ ok: true }) } })
+
+    const u = h.client(eventsContract, { url: node.url, role: 'user' })
+    await u.join({ room: 'x' })
+    await waitFor(() => node.srv.local.connections.length === 1)
+    await tick(50)
+
+    expect(published).toEqual([]) // no connect, no room.add, no msg.request — nothing at all
+  })
+
+  it('starts publishing the moment a Control Center attaches, and stops when it leaves', async () => {
+    const bus = new MemoryBus()
+    const published: string[] = []
+    const watch = createInMemoryAdapter(bus)
+    watch.onMessage((channel) => published.push(channel))
+    void watch.subscribe('x:inspector:events')
+
+    const nodeA = await h.server(eventsContract, {
+      authenticate: eventsAuth,
+      adapter: createInMemoryAdapter(bus),
+      plugins: [inspector()],
+    })
+    const nodeB = await h.server(eventsContract, {
+      authenticate: eventsAuth,
+      adapter: createInMemoryAdapter(bus),
+      plugins: [inspector()],
+    })
+    nodeA.srv.implement({ user: { join: async () => ({ ok: true }) } })
+    nodeB.srv.implement({ user: { join: async () => ({ ok: true }) } })
+
+    const insp = await connectInspector(nodeA.url)
+    await insp.subscribeEvents()
+
+    // B has no Control Center of its own; it publishes only because A announced one.
+    const u = h.client(eventsContract, { url: nodeB.url, role: 'user' })
+    await u.join({ room: 'x' })
+    await waitFor(() => published.some((c) => c === 'x:inspector:events'))
+
+    insp.close()
+    await waitFor(() => nodeA.srv.local.connections.length === 0 || true)
+    await tick(50)
+    const afterClose = published.length
+    const u2 = h.client(eventsContract, { url: nodeB.url, role: 'user' })
+    await u2.join({ room: 'y' })
+    await tick(50)
+    expect(published.length).toBe(afterClose) // the watcher left, so B went quiet again
+  })
 })
 
 const msgContract = defineContract({

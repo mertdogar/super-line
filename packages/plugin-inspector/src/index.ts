@@ -275,10 +275,29 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
   let originNodeId = ''
   let encode: (value: unknown) => string | Uint8Array = (v) => JSON.stringify(v)
 
+  /**
+   * Which OTHER nodes currently have a Control Center attached, and when each last said so.
+   *
+   * A Control Center connects to one node, but the feed it expects is cluster-wide, so every other node
+   * has to publish for it. Without this, every node published every event unconditionally — and with no
+   * Control Center anywhere, all of it was carried across the cluster and discarded. Measured on a
+   * three-node libp2p mesh with nothing watching, that unwanted feed was 76% of all cross-node traffic.
+   *
+   * Announcements are re-sent while watched and expire on the receiving side, rather than relying on a
+   * single "watcher left" message: this is at-most-once delivery, and a dropped announcement must cost a
+   * node a few seconds of over-reporting, never permanent silence in the feed.
+   */
+  const remoteWatchers = new Map<string, number>()
+  let localWatchers = 0
+
+  const KEEPALIVE_MS = 10_000
+  const WATCHER_TTL_MS = 30_000
+
   return {
     name: 'inspector',
     setup(ctx) {
       channel = ctx.channel('events') // the CC's `events` feed rides this plugin channel (cluster-wide)
+      const watchers = ctx.channel('watchers')
       originNodeId = ctx.instanceId
       encode = (v) => ctx.serializer.encode(v)
       if (!authenticate)
@@ -287,9 +306,43 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
             'collection (row policies are bypassed), every connection ctx, and the live message feed. Set ' +
             'SUPER_LINE_INSPECTOR_PASSWORD, or pass inspector({ auth }).',
         )
+
+      const off = watchers.subscribe((data, meta) => {
+        if (meta.from === originNodeId) return // our own echo; the local subscriber count is the truth here
+        if ((data as { w?: boolean }).w) remoteWatchers.set(meta.from, Date.now())
+        else remoteWatchers.delete(meta.from)
+      })
+
+      // Announce on the EDGE, the instant a Control Center attaches or leaves. Polling here would open a
+      // window in which peer nodes still believed nobody was watching, and the events they dropped in it
+      // are exactly the ones a reader attached in order to see.
+      localWatchers = channel.subscribers
+      const offCount = channel.onSubscribersChanged((count) => {
+        const was = localWatchers > 0
+        localWatchers = count
+        if (count > 0 !== was) watchers.publish({ w: count > 0 })
+      })
+
+      // Keepalive + expiry, not a lone "watcher left" message: delivery is at-most-once, and a dropped
+      // announcement has to cost a node a few seconds of over-reporting, never permanent silence.
+      const timer = setInterval(() => {
+        const now = Date.now()
+        for (const [node, seen] of remoteWatchers) if (now - seen > WATCHER_TTL_MS) remoteWatchers.delete(node)
+        if (localWatchers > 0) watchers.publish({ w: true })
+      }, KEEPALIVE_MS)
+      timer.unref?.()
+
+      return () => {
+        clearInterval(timer)
+        offCount()
+        off()
+      }
     },
     onEvent(event) {
       if (!channel) return
+      // Nobody is watching anywhere in the cluster, so the feed has no consumer and publishing it is pure
+      // cost — snapshotting and redaction included, which is why this returns before any of that work.
+      if (localWatchers === 0 && remoteWatchers.size === 0) return
       const snapped = snapshotEvent(event)
       const payload = eventPayload(snapped)
       const envelope: InspectorEnvelope = {

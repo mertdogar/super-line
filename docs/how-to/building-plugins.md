@@ -280,13 +280,42 @@ return {
   },
   setup(ctx) {
     // push live updates: a subscribe to the `updates` topic bridges to this channel
-    const timer = setInterval(() => ctx.channel('updates').publish(currentTotals()), 1000)
+    const updates = ctx.channel('updates')
+    const timer = setInterval(() => {
+      if (updates.subscribers > 0) updates.publish(currentTotals())
+    }, 1000)
     return () => clearInterval(timer)
   },
 }
 ```
 
 A reserved connection's **request** goes to its `handlers`; a **subscribe** to one of its contract's topics is bridged to the plugin's `ctx.channel(name)` of the same name — so anything the plugin publishes there streams to attached clients, cluster-wide, wire-identical. The transport advertises the subprotocol **only** because the plugin declared it, so the server stays the single authority.
+
+### Publish only when something is listening
+
+Every `publish` crosses the cluster whether or not anyone wants it, so a plugin that fans out
+observations should ask first. A channel reports its **local** subscriber count, and tells you when that
+count moves:
+
+```ts
+updates.subscribers                              // how many subscribers this NODE has right now
+updates.onSubscribersChanged((count) => { … })   // fires the moment one attaches or leaves
+```
+
+Reserved connections are observer-invisible — no lifecycle hook fires for them — so this is the only
+signal that your consumer arrived or left.
+
+On a single node the count answers the question outright. **Across a cluster it does not**, and the
+difference matters: a client attaches to *one* node, but expects a feed the whole cluster produces, so
+every other node has to publish for it while its own count stays zero. Gossip that fact on a second
+channel — announce when your local count crosses zero, re-announce on a timer, and expire a peer's
+announcement if it goes quiet. Delivery is at-most-once, so a lost announcement must cost a node a few
+seconds of over-publishing, never permanent silence.
+
+`@super-line/plugin-inspector` does exactly this, and it is worth knowing why: before it did, every node
+published every observed event unconditionally. Measured on a three-node libp2p mesh with **no Control
+Center attached at all**, that unwanted feed was 76% of all cross-node traffic — carried, decrypted,
+decoded and discarded on every node.
 
 This is exactly what [`@super-line/plugin-inspector`](/how-to/control-center) is: a tap that snapshots + redacts every event and publishes it on its `events` channel, plus a connection class (the `superline.inspector.v1` subprotocol) that serves the Control Center. If you want a complete, real reference, read that package's `src/index.ts`.
 

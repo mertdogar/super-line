@@ -1,0 +1,96 @@
+name: super-line-traffic-lab
+
+# Every actor is a container (PLAN "Architecture"). Clients are PINNED to a node — a round-robin load
+# balancer would destroy the all-local-room vs spread-room contrast the whole experiment turns on.
+#
+#   ADAPTER=libp2p|redis   SL_INSPECTOR=off|on   are the two profile axes (4 runs total).
+#
+# The `src` bind-mounts let a code change take effect on restart with no image rebuild; they cover the
+# lab plus the three library packages the fix phases touch.
+x-app: &app
+  build:
+    context: ../..
+    dockerfile: packages/traffic-lab/Dockerfile
+  image: super-line-traffic-lab:dev
+  volumes:
+    - ./src:/app/packages/traffic-lab/src:ro
+    - ../core/src:/app/packages/core/src:ro
+    - ../server/src:/app/packages/server/src:ro
+    - ../client/src:/app/packages/client/src:ro
+    - ../transport-websocket/src:/app/packages/transport-websocket/src:ro
+    - ../plugin-inspector/src:/app/packages/plugin-inspector/src:ro
+    - ../adapter-libp2p/src:/app/packages/adapter-libp2p/src:ro
+    - ./runs:/runs
+
+x-node-env: &node-env
+  PORT: '8800'
+  CTRL_PORT: '8900'
+  P2P_PORT: '9001'
+  ADAPTER: ${ADAPTER:-libp2p}
+  SL_INSPECTOR: ${SL_INSPECTOR:-off}
+  RUN_ID: ${RUN_ID:-}
+  DUMP_DIR: /runs
+  REDIS_URL: redis://redis:6379
+
+x-client-env: &client-env
+  CTRL_PORT: '8900'
+  ADAPTER: ${ADAPTER:-libp2p}
+  SL_INSPECTOR: ${SL_INSPECTOR:-off}
+  RUN_ID: ${RUN_ID:-}
+  DUMP_DIR: /runs
+
+services:
+  node-1:
+    <<: *app
+    command: pnpm --filter @super-line/traffic-lab node
+    environment: { <<: *node-env, NODE_NAME: node-1 }
+
+  node-2:
+    <<: *app
+    command: pnpm --filter @super-line/traffic-lab node
+    environment: { <<: *node-env, NODE_NAME: node-2 }
+
+  node-3:
+    <<: *app
+    command: pnpm --filter @super-line/traffic-lab node
+    environment: { <<: *node-env, NODE_NAME: node-3 }
+
+  # Two clients on node-1 — together they are the all-local room.
+  client-1a:
+    <<: *app
+    command: pnpm --filter @super-line/traffic-lab client
+    environment: { <<: *client-env, CLIENT_NAME: client-1a, NODE_URL: 'ws://node-1:8800' }
+    depends_on: [node-1]
+
+  client-1b:
+    <<: *app
+    command: pnpm --filter @super-line/traffic-lab client
+    environment: { <<: *client-env, CLIENT_NAME: client-1b, NODE_URL: 'ws://node-1:8800' }
+    depends_on: [node-1]
+
+  # One client per remaining node — with client-1a these three are the spread room.
+  client-2:
+    <<: *app
+    command: pnpm --filter @super-line/traffic-lab client
+    environment: { <<: *client-env, CLIENT_NAME: client-2, NODE_URL: 'ws://node-2:8800' }
+    depends_on: [node-2]
+
+  client-3:
+    <<: *app
+    command: pnpm --filter @super-line/traffic-lab client
+    environment: { <<: *client-env, CLIENT_NAME: client-3, NODE_URL: 'ws://node-3:8800' }
+    depends_on: [node-3]
+
+  conductor:
+    <<: *app
+    command: pnpm --filter @super-line/traffic-lab conductor
+    environment:
+      <<: *client-env
+      NODES: node-1,node-2,node-3
+      CLIENTS: client-1a,client-1b,client-2,client-3
+    depends_on: [node-1, node-2, node-3, client-1a, client-1b, client-2, client-3]
+
+  # Control profile only: the broker-filtered reference libp2p's single shared topic is measured against.
+  redis:
+    image: redis:7-alpine
+    profiles: [redis]

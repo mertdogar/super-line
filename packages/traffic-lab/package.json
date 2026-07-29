@@ -1,0 +1,28 @@
+{
+  "name": "@super-line/traffic-lab",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Multi-container traffic lab: taps every plane super-line's bytes cross and classifies the waste.",
+  "scripts": {
+    "node": "tsx src/node.ts",
+    "client": "tsx src/client.ts",
+    "conductor": "tsx src/conductor.ts",
+    "analyze": "tsx src/analyze/index.ts"
+  },
+  "dependencies": {
+    "@super-line/adapter-libp2p": "workspace:*",
+    "@super-line/adapter-redis": "workspace:*",
+    "@super-line/client": "workspace:*",
+    "@super-line/collections-crdt-memory": "workspace:*",
+    "@super-line/collections-memory": "workspace:*",
+    "@super-line/core": "workspace:*",
+    "@super-line/plugin-inspector": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "@super-line/transport-websocket": "workspace:*",
+    "zod": "^4.2.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

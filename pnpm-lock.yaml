@@ -2034,6 +2034,43 @@ importers:
         specifier: ^4.2.0
         version: 4.4.3
 
+  packages/traffic-lab:
+    dependencies:
+      '@super-line/adapter-libp2p':
+        specifier: workspace:*
+        version: link:../adapter-libp2p
+      '@super-line/adapter-redis':
+        specifier: workspace:*
+        version: link:../adapter-redis
+      '@super-line/client':
+        specifier: workspace:*
+        version: link:../client
+      '@super-line/collections-crdt-memory':
+        specifier: workspace:*
+        version: link:../collections-crdt-memory
+      '@super-line/collections-memory':
+        specifier: workspace:*
+        version: link:../collections-memory
+      '@super-line/core':
+        specifier: workspace:*
+        version: link:../core
+      '@super-line/plugin-inspector':
+        specifier: workspace:*
+        version: link:../plugin-inspector
+      '@super-line/server':
+        specifier: workspace:*
+        version: link:../server
+      '@super-line/transport-websocket':
+        specifier: workspace:*
+        version: link:../transport-websocket
+      zod:
+        specifier: ^4.2.0
+        version: 4.4.3
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
+
   packages/transport-http:
     devDependencies:
       '@super-line/core':

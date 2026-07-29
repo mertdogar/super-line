@@ -1,5 +1,5 @@
 import http from 'node:http'
-import type { Adapter } from '@super-line/core'
+import { jsonSerializer, type Adapter } from '@super-line/core'
 import { createSuperLineServer } from '@super-line/server'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { createLibp2pAdapter, type PubSubLibp2p } from '@super-line/adapter-libp2p'
@@ -9,7 +9,12 @@ import { crdtMemoryCollections } from '@super-line/collections-crdt-memory'
 import { inspector } from '@super-line/plugin-inspector'
 import { lab } from './contract.js'
 import { serveControl } from './control.js'
-import { adapterKind, flag, num, str } from './env.js'
+import { adapterKind, flag, num, runId, str } from './env.js'
+import { Recorder } from './tap/record.js'
+import { tapAdapter } from './tap/adapter-tap.js'
+import { tapMesh } from './tap/mesh-tap.js'
+import { serverTapPlugin } from './tap/plugins.js'
+import { sampleNic } from './tap/nic.js'
 
 const NODE = str('NODE_NAME')
 const PORT = num('PORT', 8800)
@@ -17,22 +22,33 @@ const CTRL_PORT = num('CTRL_PORT', 8900)
 const P2P_PORT = num('P2P_PORT', 9001)
 const KIND = adapterKind()
 const INSPECTOR = flag('SL_INSPECTOR')
+const TOPIC = str('P2P_TOPIC', 'super-line/v1')
 
 type Ctx = { name: string }
+type LabAdapter = Adapter & { node?: PubSubLibp2p }
+
+const rec = new Recorder(NODE, str('DUMP_DIR', '/runs'), runId())
 
 /**
- * Both adapters are built the same way for the lab: no persistent identity (mDNS re-finds peers after a
- * restart, so a stable peer id would be noise) and no tuning. The Redis profile is the control — it filters
- * at the broker, which is exactly the property libp2p's single shared topic lacks.
+ * Both adapters are built the same way: no persistent identity (mDNS re-finds peers after a restart) and
+ * no tuning. The Redis profile is the control — it filters at the broker, which is exactly the property
+ * libp2p's single shared topic lacks.
  */
-async function buildAdapter(): Promise<Adapter & { node?: PubSubLibp2p }> {
+async function buildAdapter(): Promise<LabAdapter> {
   if (KIND === 'redis') return createRedisAdapter({ url: str('REDIS_URL', 'redis://redis:6379') })
-  return createLibp2pAdapter({ discovery: 'mdns', listen: [`/ip4/0.0.0.0/tcp/${P2P_PORT}`] })
+  return createLibp2pAdapter({ discovery: 'mdns', listen: [`/ip4/0.0.0.0/tcp/${P2P_PORT}`], topic: TOPIC })
 }
 
-const adapter = await buildAdapter()
+const decode = (payload: string | Uint8Array): unknown => jsonSerializer.decode(payload)
+const { adapter, interest } = tapAdapter(await buildAdapter(), rec, decode)
+// L3 only exists on libp2p: Redis has no mesh to listen to, and filters at the broker, so its acceptance
+// ratio is 1.0 by construction. The report states that asymmetry rather than pretending to measure it.
+const mesh = adapter.node ? tapMesh(adapter.node, TOPIC, rec, interest, decode) : undefined
+
+rec.write({ layer: 'meta', node: NODE, adapter: KIND, inspector: INSPECTOR, ...(mesh ? { peerId: mesh.peerId } : {}) })
+
 const wsServer = http.createServer()
-const plugins = INSPECTOR ? [inspector()] : []
+const plugins = INSPECTOR ? [serverTapPlugin(rec), inspector()] : [serverTapPlugin(rec)]
 
 const srv = createSuperLineServer(lab, {
   transports: [webSocketServerTransport({ server: wsServer })],
@@ -93,6 +109,16 @@ const peers = (): number =>
 
 serveControl(CTRL_PORT, {
   '/ready': () => ({ ok: true, node: NODE, adapter: KIND, inspector: INSPECTOR, peers: peers(), busReceived }),
+  '/phase': (body) => {
+    // NIC is sampled at every boundary, so a phase's total wire cost is the difference across its edges.
+    sampleNic(rec)
+    rec.setPhase(body.phase === null ? null : Number(body.phase))
+    return { ok: true, node: NODE }
+  },
+  '/flush': () => {
+    sampleNic(rec)
+    return { ok: true, node: NODE, ...rec.flush(), interest: interest.snapshot().length }
+  },
   // Creation is server-authoritative for CRDT collections, and it must happen after the mesh forms or the
   // relayed create is lost — so the conductor drives it rather than boot doing it blind.
   '/seed': async (body) => {

@@ -1,7 +1,10 @@
 /** Environment every lab actor reads. Compose is the only writer; nothing here has a runtime default that hides a misconfiguration. */
 
+// An empty value counts as unset: compose interpolates `${RUN_ID:-}` to `''` when the shell has no value,
+// and taking that literally silently writes every run's dumps into one undifferentiated directory.
 export const str = (name: string, fallback?: string): string => {
-  const v = process.env[name] ?? fallback
+  const raw = process.env[name]
+  const v = raw === undefined || raw === '' ? fallback : raw
   if (v === undefined) throw new Error(`traffic-lab: missing required env ${name}`)
   return v
 }

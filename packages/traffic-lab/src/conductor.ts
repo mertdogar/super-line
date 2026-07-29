@@ -40,10 +40,23 @@ async function main(): Promise<void> {
   )
   for (const c of clients) console.log(`[conductor] client ready: ${c.client} (${c.connId})`)
 
+  // Nodes are stamped with the phase before the clients act, so a frame produced by the phase can never be
+  // recorded under the previous one.
+  const stamp = async (phase: number | null): Promise<void> => {
+    await Promise.all([...NODES, ...CLIENTS].map((a) => call(base(a), '/phase', { phase })))
+  }
+
   // Phase 0 smoke: one request per client, proving the whole stack round-trips.
+  await stamp(1)
   const results = await Promise.all(CLIENTS.map((c) => call<{ ops: number }>(base(c), '/phase', { phase: 1 })))
   const total = results.reduce((a, r) => a + r.ops, 0)
   console.log(`[conductor] smoke complete — ${total} ops across ${CLIENTS.length} clients`)
+
+  await new Promise((r) => setTimeout(r, 1500)) // let in-flight fan-out land before the dumps are closed
+  const flushed = await Promise.all(
+    [...NODES, ...CLIENTS].map(async (a) => ({ actor: a, ...(await call<{ written: number }>(base(a), '/flush')) })),
+  )
+  for (const f of flushed) console.log(`[conductor] dump ${f.actor}: ${f.written} records`)
 }
 
 await main()

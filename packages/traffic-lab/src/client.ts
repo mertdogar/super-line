@@ -3,11 +3,17 @@ import { webSocketClientTransport } from '@super-line/transport-websocket'
 import { crdtCollectionsClient } from '@super-line/collections-crdt-memory'
 import { lab } from './contract.js'
 import { serveControl } from './control.js'
-import { num, str } from './env.js'
+import { num, runId, str } from './env.js'
+import { Recorder } from './tap/record.js'
+import { clientTapPlugin } from './tap/plugins.js'
+import { sampleNic } from './tap/nic.js'
 
 const NAME = str('CLIENT_NAME')
 const NODE_URL = str('NODE_URL')
 const CTRL_PORT = num('CTRL_PORT', 8900)
+
+const rec = new Recorder(NAME, str('DUMP_DIR', '/runs'), runId())
+rec.write({ layer: 'meta', adapter: 'client', inspector: false })
 
 let connId = ''
 let connected = false
@@ -17,6 +23,7 @@ const client = createSuperLineClient(lab, {
   role: 'user',
   params: { name: NAME },
   crdtCollections: crdtCollectionsClient({ origin: NAME }),
+  plugins: [clientTapPlugin(rec)],
   onConnect: () => {
     console.log(`[${NAME}] transport open`)
     void establish()
@@ -53,7 +60,7 @@ const nextOp = (): number => {
   return Number(`${[...NAME].reduce((a, c) => a + c.charCodeAt(0), 0)}${String(opCounter).padStart(5, '0')}`)
 }
 
-async function runPhase(n: number): Promise<{ ops: number }> {
+async function runPhase(n: number, _body: Record<string, unknown>): Promise<{ ops: number }> {
   let ops = 0
   if (n === 1) {
     await client.ping({ op: nextOp(), phase: n, from: NAME })
@@ -64,7 +71,15 @@ async function runPhase(n: number): Promise<{ ops: number }> {
 
 serveControl(CTRL_PORT, {
   '/ready': () => ({ ok: connected, client: NAME, connId, node: NODE_URL }),
-  '/phase': async (body) => runPhase(Number(body.phase)),
+  '/phase': async (body) => {
+    sampleNic(rec)
+    rec.setPhase(Number(body.phase))
+    return runPhase(Number(body.phase), body)
+  },
+  '/flush': () => {
+    sampleNic(rec)
+    return { ok: true, client: NAME, ...rec.flush() }
+  },
 })
 
 console.log(`[${NAME}] traffic-lab client · control :${CTRL_PORT} · dialing ${NODE_URL}`)

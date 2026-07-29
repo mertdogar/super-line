@@ -112,6 +112,81 @@ describe('websocket transport', () => {
     expect(authCalls).toBe(0)
     ws.close()
   })
+
+  /**
+   * A failed dial is the ONLY close signal the core gets for a server that is not up yet, and it is what
+   * schedules the reconnect. The two cases below are the two real-world event sequences; the fakes pin them
+   * deterministically because which one you get depends on the runtime — **Node 22's undici fires `error`
+   * alone**, while browsers and Node 24 fire `error` then `close`. A live refused-dial test would therefore
+   * pass on a Node 24 dev machine while the Node 22 containers this repo actually ships stayed broken.
+   */
+  class ScriptedWs {
+    static OPEN = 1
+    static script: 'error-only' | 'error-then-close' = 'error-only'
+    readyState = 0
+    binaryType = ''
+    onopen: (() => void) | null = null
+    onmessage: ((event: unknown) => void) | null = null
+    onclose: ((event: { code: number }) => void) | null = null
+    onerror: (() => void) | null = null
+    constructor(public url: string) {
+      queueMicrotask(() => {
+        this.onerror?.()
+        if (ScriptedWs.script === 'error-then-close') this.onclose?.({ code: 1006 })
+      })
+    }
+    send(): void {}
+    close(): void {}
+  }
+
+  const dialWith = async (script: 'error-only' | 'error-then-close'): Promise<number[]> => {
+    ScriptedWs.script = script
+    const closes: number[] = []
+    let opened = false
+    webSocketClientTransport({
+      url: 'ws://127.0.0.1:1',
+      WebSocket: ScriptedWs as unknown as typeof WebSocket,
+    }).connect(
+      { role: 'user' },
+      {
+        onOpen: () => {
+          opened = true
+        },
+        onMessage: () => {},
+        onClose: (code) => closes.push(code),
+        onDrain: () => {},
+      },
+    )
+    await waitFor(() => closes.length > 0)
+    await new Promise((r) => setTimeout(r, 20)) // let a second announcement land, if one is coming
+    expect(opened).toBe(false)
+    return closes
+  }
+
+  it('announces a close when the socket reports only an error (Node 22 undici)', async () => {
+    expect(await dialWith('error-only')).toEqual([1006])
+  })
+
+  it('announces a close exactly once when the socket fires both error and close', async () => {
+    // Two announcements would schedule two reconnects and double the dial rate on every failure.
+    expect(await dialWith('error-then-close')).toEqual([1006])
+  })
+
+  it('reports a real refused dial as a close', async () => {
+    // bind and immediately release a port, so nothing is listening on an address that was valid a moment ago
+    const probe = http.createServer()
+    await new Promise<void>((r) => probe.listen(0, r))
+    const { port } = probe.address() as AddressInfo
+    await new Promise<void>((r) => probe.close(() => r()))
+
+    const closes: number[] = []
+    webSocketClientTransport({ url: `ws://127.0.0.1:${port}` }).connect(
+      { role: 'user' },
+      { onOpen: () => {}, onMessage: () => {}, onClose: (code) => closes.push(code), onDrain: () => {} },
+    )
+    await waitFor(() => closes.length > 0)
+    expect(closes).toEqual([1006])
+  })
 })
 
 async function waitFor(pred: () => boolean, timeout = 2000): Promise<void> {

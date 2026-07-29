@@ -156,9 +156,22 @@ export function webSocketClientTransport(opts: WebSocketClientTransportOptions):
     connect(handshakeParams, hooks) {
       const ws = new WS(buildUrl(opts.url, handshakeParams))
       ws.binaryType = 'arraybuffer'
+      // A dead socket must report exactly one close, whichever event announces it. On **Node 22** the global
+      // WebSocket (undici) fires ONLY `error` when a dial is refused — no `close` ever follows — so a
+      // transport listening for `close` alone leaves the core with no reconnect signal and the client dead
+      // for the life of the process. Browsers and Node 24 fire `error` THEN `close`, which is why the gap is
+      // invisible on a modern dev machine and fatal in a `node:22` container. Hence the latch: whichever
+      // event arrives first announces, the second is dropped, so a failure never schedules two reconnects.
+      let announced = false
+      const announceClose = (code: number): void => {
+        if (announced) return
+        announced = true
+        hooks.onClose(code)
+      }
       ws.onopen = () => hooks.onOpen()
       ws.onmessage = (event: MessageEvent) => hooks.onMessage(toClientBytes(event.data))
-      ws.onclose = (event: CloseEvent) => hooks.onClose(event.code)
+      ws.onclose = (event: CloseEvent) => announceClose(event.code)
+      ws.onerror = () => announceClose(1006) // abnormal: the spec gives a failed handshake no close code
       return {
         get writable() {
           return ws.readyState === WS.OPEN

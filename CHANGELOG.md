@@ -3,6 +3,33 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## 2026-07-29
+
+### Bug Fixes
+
+- **devtools-extension:** Say "1 row", in the one place that spells it ([42affa9])
+- **control-center:** Render the Queues nav entry once ([ad3ea2d])
+
+### Documentation
+
+- Show the DevTools panel instead of describing it ([f58585f])
+
+## 2026-07-28
+
+### Features
+
+- **devtools-extension:** Ship the panel as a downloadable release zip ([90d2a84])
+
+### CI
+
+- **devtools-extension:** Stop re-running the suite in the release job ([140ee9c])
+
+### Documentation
+
+- Lead with the release download for the DevTools panel ([8be34a2])
+- **context:** Record the client-side tap and the release-commit rules ([c763eee])
+- **changelog:** Refresh the root aggregate for the DevTools release ([496270c])
+
 ## 2026-07-28
 
 ### Features

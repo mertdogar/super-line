@@ -3,11 +3,26 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
-## Unreleased
+## 2026-07-30
+
+### Features
+
+- **server:** Tell callers when a declared interest is live ([87e9d7e])
 
 ### Refactor
 
 - **react-chat-transports:** Open the document through useDoc ([b2f268b])
+
+### Testing
+
+- **server:** Wait for BOTH nodes before asserting a gossiped presence view ([e03e746])
+- One polling wait with backoff, and teardown that cannot hang ([e86664a])
+
+### Documentation
+
+- Document readiness, and what the flakiness investigation actually found ([36c809e])
+- **collections:** Compare the backends so one can actually be chosen ([12b7c73])
+- **changelog:** Regenerate the root aggregate ([6eb8e2e])
 
 ## 2026-07-29
 

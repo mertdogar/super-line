@@ -7,6 +7,28 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Features
 
+- **react,plugin-auth:** StrictMode is supported — useSuperLineClient + committed-effect auth provider ([d56c759])
+- **plugin-chat:** Module-level react binding + auto-building ChatProvider ([52c9736])
+- **plugin-auth:** React half feeds the shared binding — Register and re-exports removed ([d598faa])
+- **client:** One-shot CollectionHandle.query() — snapshot without a lasting subscription ([9ec3171])
+- **react:** Hook upgrades — useLiveQuery, lazy useDoc ids, readiness/error/handles, unified useRequest ([d618e52])
+- **react:** Registered module-level binding — Register, SuperLineProvider, module-level hooks ([1d2ee85])
+
+### Refactor
+
+- **examples:** App-scale examples on the registered binding — workarounds deleted, live bug fixed ([7a6e290])
+- **examples:** Factory examples on the upgraded hooks — StrictMode on everywhere ([8002148])
+
+### Documentation
+
+- The teaching surface teaches one registered React binding ([45187f4])
+- **plans:** Lock PLAN-react-dx and record ADR-0026 (one registered React binding) ([d32ec24])
+- **changelog:** Regenerate the root aggregate ([b8dd54f])
+
+## 2026-07-30
+
+### Features
+
 - **server:** Tell callers when a declared interest is live ([87e9d7e])
 
 ### Refactor

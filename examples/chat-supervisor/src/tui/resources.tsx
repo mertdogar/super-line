@@ -3,21 +3,19 @@
 // from web coords (mouse click-select + drag-move, arrow-key nudge in move mode), the doc as an
 // ordered block list (pick / reorder / edit / add / remove). Presence is the coarse who's-open line.
 //
-// Registry + presence come from the library hooks (hooks.ts). Only the doc hook stays local:
-// `useDoc` from @super-line/react always opens, but the pane's docIds arrive async from the registry
-// — `useCrdtDoc` tolerates an empty id instead of forcing a mount-gate per tab.
+// Registry + presence come from the library hooks (hooks.ts); the docs come straight from the
+// registered `useDoc`, which is null-tolerant on the id — the pane's docIds arrive async from the
+// registry, and a null id just idles the hook. No local reimplementation left.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useKeyboard } from '@opentui/react'
 import type { KeyEvent, MouseEvent } from '@opentui/core'
-import type { DocHandle, SuperLineClient } from '@super-line/client'
 import { COLORS } from './theme'
 import { Dialog } from './dialog'
 import { TextEditor } from './pickers'
+import { useDoc } from '@super-line/react'
 import { useChannelResources, useResourcePresence } from './hooks'
-import type { app, CanvasDoc, TextDoc } from '../contract'
-
-type Client = SuperLineClient<typeof app, 'user'>
+import type { CanvasDoc, TextDoc } from '../contract'
 
 // The web canvas board is 1200×800 (see agents.ts RESOURCE_SHAPES); notes carry hex `color`s.
 export const WEB_W = 1200
@@ -36,32 +34,16 @@ const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.m
 
 interface DocState<T> {
   data: T | undefined
+  ready: boolean
   update: (partial: DeepPartial<T>) => void
   del: (path: (string | number)[]) => void
 }
 
-function useCrdtDoc<T>(client: Client, name: 'canvases' | 'docs', id: string): DocState<T> {
-  const [data, setData] = useState<T>()
-  const ref = useRef<DocHandle<T>>(undefined)
-  useEffect(() => {
-    if (!id) {
-      setData(undefined)
-      ref.current = undefined
-      return
-    }
-    const handle = client.collection(name).open(id) as unknown as DocHandle<T>
-    ref.current = handle
-    setData(handle.getSnapshot())
-    const unsub = handle.subscribe(() => setData(handle.getSnapshot()))
-    return () => {
-      unsub()
-      handle.close()
-      ref.current = undefined
-    }
-  }, [client, name, id])
-  const update = useCallback((partial: DeepPartial<T>) => ref.current?.update(partial as Partial<T>), [])
-  const del = useCallback((path: (string | number)[]) => ref.current?.delete(path), [])
-  return { data, update, del }
+// The registered `useDoc` owns the whole lifecycle (open on id, close on unmount, idle on null); this
+// wrapper only keeps the DeepPartial widening described above.
+function useDeepDoc<T>(name: 'canvases' | 'docs', id: string | undefined): DocState<T> {
+  const { data, ready, update, delete: del } = useDoc(name, id ?? null)
+  return { data: data as T | undefined, ready, update: update as (partial: DeepPartial<T>) => void, del }
 }
 
 // ── canvas ─────────────────────────────────────────────────────────────────────────────────────────
@@ -255,7 +237,6 @@ type EditTarget =
   | { type: 'new-block' }
 
 export function ResourcePane({
-  client,
   channelId,
   tab,
   focused,
@@ -266,7 +247,6 @@ export function ResourcePane({
   onSetTab,
   onReturnToPrompt,
 }: {
-  client: Client
   channelId: string
   tab: 'canvas' | 'doc'
   focused: boolean
@@ -280,8 +260,8 @@ export function ResourcePane({
   const rows = useChannelResources(channelId)
   const canvasRow = rows.find((r) => r.kind === 'canvas')
   const docRow = rows.find((r) => r.kind === 'doc')
-  const canvas = useCrdtDoc<CanvasDoc>(client, 'canvases', canvasRow?.docId ?? '')
-  const doc = useCrdtDoc<TextDoc>(client, 'docs', docRow?.docId ?? '')
+  const canvas = useDeepDoc<CanvasDoc>('canvases', canvasRow?.docId)
+  const doc = useDeepDoc<TextDoc>('docs', docRow?.docId)
 
   const [selectedNote, setSelectedNote] = useState<string | null>(null)
   const [selectedBlock, setSelectedBlock] = useState<string | null>(null)
@@ -443,7 +423,7 @@ export function ResourcePane({
           <box flexGrow={1} justifyContent="center" alignItems="center">
             <text fg={COLORS.dim}>Setting up this channel's canvas and doc…</text>
           </box>
-        ) : !body.data ? (
+        ) : !body.ready || !body.data ? (
           <box flexGrow={1} justifyContent="center" alignItems="center">
             <text fg={COLORS.dim}>Opening…</text>
           </box>

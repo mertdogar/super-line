@@ -1,4 +1,3 @@
-import { useClient } from '@super-line/plugin-auth/react'
 import { ChatProvider } from '@/lib/chat'
 import { BearerBanner } from '@/components/bearer-banner'
 import { Shell } from '@/components/shell'
@@ -17,11 +16,9 @@ export function Workspace({
   /** Present only for a JWT-authenticated connection — see components/jwt-session.tsx. */
   bearer?: BearerInfo
 }): React.JSX.Element {
-  // Non-null exactly while `status === 'authed'` — the provider gates it.
-  const client = useClient()!
   return (
     <>
-      <ChatProvider client={client} me={me}>
+      <ChatProvider me={me}>
         <div className="flex h-full flex-col">
           {bearer && <BearerBanner bearer={bearer} onExit={onSignOut} />}
           <div className="min-h-0 flex-1">

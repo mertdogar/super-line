@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { authClient } from '@super-line/plugin-auth/client'
-import { SuperLineAuthProvider, useAuth, useEnv } from '@super-line/plugin-auth/react'
+import { SuperLineAuthProvider, useAuth } from '@super-line/plugin-auth/react'
+import { useEnv } from '@super-line/react'
 import { createSuperLineClient } from '@super-line/client'
 import { devtoolsPlugin } from '@super-line/plugin-devtools'
 import { Workspace } from '@/components/workspace'

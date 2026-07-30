@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChannelView } from '@/components/channel-view'
 import { Sidebar } from '@/components/sidebar'
 import { useChannels, useMe, useMyMemberships } from '@/lib/chat'
-import { useRequest, useSubscription } from '@super-line/plugin-auth/react'
+import { useRequest, useSubscription } from '@super-line/react'
 import { cn } from '@/lib/utils'
 
 export function Shell({ myName, onSignOut }: { myName: string; onSignOut: () => void }): React.JSX.Element {

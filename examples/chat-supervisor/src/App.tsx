@@ -1,21 +1,26 @@
-import { useEffect, useMemo } from 'react'
-import { chatClient } from '@super-line/plugin-chat/client'
-import { createChatHooks } from '@super-line/plugin-chat/react'
-import { useAuth, useClient } from '@super-line/plugin-auth/react'
+import { ChatProvider, useChat as useMaybeChat } from '@super-line/plugin-chat/react'
+import type { ChatClient } from '@super-line/plugin-chat/client'
+import { useAuth } from '@super-line/plugin-auth/react'
 import { Login } from '@/components/login'
 import { Chat } from '@/components/chat'
-import { app } from '@/contract'
+import type { app } from '@/contract'
 
-export const {
-  ChatProvider,
-  useChat,
+// The registered module-level chat binding, re-exported so components have one local import site.
+export {
   useChannels,
   useMessages,
   useMessageParts,
   useChatHistory,
   useChannelResources,
   useResourcePresence,
-} = createChatHooks<typeof app>()
+} from '@super-line/plugin-chat/react'
+
+/** The chat client for request methods. Panes only mount inside the authed provider, so a missing client is a wiring bug — throw, don't null-check at every call site. */
+export function useChat(): ChatClient<typeof app> {
+  const chat = useMaybeChat()
+  if (!chat) throw new Error('useChat outside the authed <ChatProvider> subtree')
+  return chat
+}
 
 export function App(): React.JSX.Element {
   const { state, signOut } = useAuth()
@@ -32,12 +37,10 @@ export function App(): React.JSX.Element {
 }
 
 function Authed({ me, name, onSignOut }: { me: string; name: string; onSignOut: () => void }): React.JSX.Element {
-  // Non-null exactly while `status === 'authed'` — the provider gates it, so there is no null branch here.
-  const client = useClient()!
-  const chat = useMemo(() => chatClient<typeof app, 'user'>(client, { userId: me }), [client, me])
-  useEffect(() => () => chat.close(), [chat])
+  // The provider AUTO-BUILDS its chatClient from the shared context and rebuilds it per session —
+  // the useMemo(chatClient) + close-effect dance this file used to carry is the library's job now.
   return (
-    <ChatProvider chat={chat}>
+    <ChatProvider>
       <Chat me={me} myName={name} onSignOut={onSignOut} />
     </ChatProvider>
   )

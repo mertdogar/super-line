@@ -119,7 +119,6 @@ createRoot(p.renderer).render(
   <ChatProvider chat={chat}>
     <box flexDirection="row" width={50} height={28}>
       <ResourcePane
-        client={auth.client}
         channelId={ch.id}
         tab="canvas"
         focused={false}

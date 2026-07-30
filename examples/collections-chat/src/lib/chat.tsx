@@ -1,23 +1,19 @@
-import { createContext, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react'
-import { eq, type CollectionQuery } from '@super-line/core'
-import type { SuperLineClient } from '@super-line/client'
-import { chatClient, type ChatClient } from '@super-line/plugin-chat/client'
-import { createChatHooks } from '@super-line/plugin-chat/react'
-import { chat, type Membership, type User } from '@/contract'
+import { createContext, useContext, useMemo, type ReactNode } from 'react'
+import { eq } from '@super-line/core'
+import { useCollection } from '@super-line/react'
+import { ChatProvider as PluginChatProvider, useChat as useMaybeChat } from '@super-line/plugin-chat/react'
+import type { ChatClient } from '@super-line/plugin-chat/client'
+import type { chat, Membership, User } from '@/contract'
 
-type Client = SuperLineClient<typeof chat, 'user'>
+// The plugin's registered module-level hooks, re-exported so components have one import site beside
+// the app-level extras below.
+export { useChannels, useMembers, useMessages, useMessageParts, useChatHistory } from '@super-line/plugin-chat/react'
 
-// The plugin's React binding — `useChannels`/`useMembers`/`useMessages` over the chatClient (which owns
-// the membership-driven re-subscribe mechanic) + `useChat()` for the request methods (send/join/…).
-const binding = createChatHooks<typeof chat>()
-export const { useChat, useChannels, useMembers, useMessages, useMessageParts, useChatHistory } = binding
-
-// A tiny reactive view over any raw client collection — for the app-specific reads the chat plugin
-// doesn't wrap: the world-readable `users` directory (author names) and my own membership rows.
-function useLiveRows<Row>(client: Client, name: 'users' | 'memberships', query: CollectionQuery): Row[] {
-  const sub = useMemo(() => client.collection(name).subscribe(query) as { rows(): unknown; subscribe(cb: () => void): () => void; close(): void }, [client, name, query])
-  useEffect(() => () => sub.close(), [sub])
-  return useSyncExternalStore(sub.subscribe, () => sub.rows() as Row[], () => sub.rows() as Row[])
+/** The chat client for request methods (send/join/…). Panes only mount inside the authed provider, so a missing client is a wiring bug — throw, don't null-check at every call site. */
+export function useChat(): ChatClient<typeof chat> {
+  const chatCli = useMaybeChat()
+  if (!chatCli) throw new Error('useChat outside the authed <ChatProvider> subtree')
+  return chatCli
 }
 
 interface ChatExtra {
@@ -28,28 +24,24 @@ interface ChatExtra {
   myMemberships: Membership[]
 }
 const ExtraCtx = createContext<ChatExtra | null>(null)
-const EMPTY_QUERY: CollectionQuery = {}
 
 /**
- * Wire the plugin chat client into React and add two app-level reads (users directory + my memberships).
- * Rebuild it whenever the underlying super-line client swaps (login/logout) — the chatClient wraps ONE
- * connection.
+ * App-level chat wiring. The plugin's ChatProvider AUTO-BUILDS its chatClient from the shared context
+ * (rebuilding on session swap) — nothing to construct here; the app only adds its own reads (users
+ * directory + my memberships) over the registered `useCollection`.
  */
-export function ChatProvider({ client, me, children }: { client: Client; me: string; children: ReactNode }): ReactNode {
-  const chatCli = useMemo<ChatClient<typeof chat>>(() => chatClient(client, { userId: me }), [client, me])
-  useEffect(() => () => chatCli.close(), [chatCli])
-
-  const users = useLiveRows<User>(client, 'users', EMPTY_QUERY)
-  const myFilter = useMemo<CollectionQuery>(() => ({ filter: eq('userId', me) }), [me])
-  const myMemberships = useLiveRows<Membership>(client, 'memberships', myFilter)
+export function ChatProvider({ me, children }: { me: string; children: ReactNode }): ReactNode {
+  const { rows: users } = useCollection('users')
+  const myQuery = useMemo(() => ({ filter: eq('userId', me) }), [me])
+  const { rows: myMemberships } = useCollection('memberships', myQuery)
 
   const usersMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
   const extra = useMemo<ChatExtra>(() => ({ me, users: usersMap, myMemberships }), [me, usersMap, myMemberships])
 
   return (
-    <binding.ChatProvider chat={chatCli}>
+    <PluginChatProvider>
       <ExtraCtx.Provider value={extra}>{children}</ExtraCtx.Provider>
-    </binding.ChatProvider>
+    </PluginChatProvider>
   )
 }
 

@@ -6,7 +6,7 @@ import { Placeholder } from '@tiptap/extensions'
 import Collaboration from '@tiptap/extension-collaboration'
 import CollaborationCaret from '@tiptap/extension-collaboration-caret'
 import { yDocOf } from '@super-line/collections-crdt-memory'
-import { useClient, useDoc } from '@super-line/plugin-auth/react'
+import { useMaybeClient, useDoc } from '@super-line/react'
 import { NOTE_FIELD, NOTE_KIND, type Channel, type CrdtName } from '@/contract'
 import { EditorToolbar } from '@/components/editor-toolbar'
 import { bridgeAwareness } from '@/lib/awareness'
@@ -119,7 +119,7 @@ function Editor({
   title: string
   onClose?: () => void
 }): React.JSX.Element {
-  const client = useClient()!
+  const client = useMaybeClient()!
   const me = useMe()
   const users = useUsers()
 
@@ -127,25 +127,23 @@ function Editor({
   // document. The hook owns the whole lifecycle — open on mount, close on unmount, re-open when the id
   // changes — so there is nothing to hand-roll here. The cast is the one seam: a registry row's
   // `collection` is a plain string, while `useDoc` wants a collection name the contract declares.
-  const { native } = useDoc(collection as CrdtName, docId)
+  const { native, ready } = useDoc(collection as CrdtName, docId)
 
   const identity = useMemo(() => ({ name: users.get(me)?.displayName ?? 'someone', color: colorFor(me) }), [users, me])
 
   const bridge = useMemo(() => {
-    if (!native) return undefined
+    // `ready` is the sequencing signal: `native` exists as soon as the handle opens, BEFORE the
+    // catch-up snapshot has applied — binding the editor that early let y-prosemirror insert the
+    // paragraph ProseMirror requires into an empty fragment, a real op that merged with the arriving
+    // content as a stray empty paragraph. Waiting for `ready` closes that properly.
+    if (!ready || !native) return undefined
     return bridgeAwareness(client, channelId, yDocOf({ native: () => native }), identity)
-  }, [native, client, channelId, identity])
+  }, [ready, native, client, channelId, identity])
   useEffect(() => () => bridge?.destroy(), [bridge])
 
-  // The editor lives in a child that only mounts once there is a document to bind to. Building it here
-  // instead would mean calling `useEditor` on the first render with no extensions, and ProseMirror
+  // The editor lives in a child that only mounts once the document is READY to bind to. Building it
+  // here instead would mean calling `useEditor` on the first render with no extensions, and ProseMirror
   // rejects an extension-less schema outright ("Schema is missing its top node type").
-  //
-  // `native` appears as soon as the handle exists, which is NOT the same as the catch-up snapshot having
-  // landed. Opening a document that already has content can therefore bind an editor to an empty
-  // fragment, and y-prosemirror will insert the paragraph ProseMirror requires — a real op that merges
-  // with the arriving content and leaves a stray empty paragraph. Closing that properly wants a
-  // readiness signal from `useDoc`, which it does not yet expose.
   if (!bridge) {
     return (
       <>

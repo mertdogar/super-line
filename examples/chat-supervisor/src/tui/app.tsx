@@ -15,10 +15,10 @@ import { ChannelPicker, Login, SessionInfo } from './pickers'
 import { ResourcePane } from './resources'
 import { COMMANDS } from './commands'
 import { config } from './config'
-import { useAuth, useClient, useCollection } from '@super-line/plugin-auth/react'
+import { useAuth } from '@super-line/plugin-auth/react'
+import { useCollection, useMaybeClient } from '@super-line/react'
 import {
   ChatProvider,
-  chatClient,
   useChannels,
   useChat,
   useMembers,
@@ -75,12 +75,12 @@ function Authed({
   onSwitchAccount: () => void
   quit: () => void
 }) {
-  // Non-null exactly while `status === 'authed'` — the provider gates it.
-  const client = useClient() as Client
-  const chat = useMemo(() => chatClient<typeof app, 'user'>(client, { userId: me }), [client, me])
-  useEffect(() => () => chat.close(), [chat])
+  // Non-null exactly while `status === 'authed'` — the provider gates it. The chat provider
+  // auto-builds its chatClient from the same shared context; the client is only threaded below for
+  // the connection indicator's polling.
+  const client = useMaybeClient() as Client
   return (
-    <ChatProvider chat={chat}>
+    <ChatProvider>
       <Cockpit client={client} me={me} name={name} onSwitchAccount={onSwitchAccount} quit={quit} />
     </ChatProvider>
   )
@@ -259,7 +259,6 @@ function Cockpit({
         </scrollbox>
         {showPane && active ? (
           <ResourcePane
-            client={client}
             channelId={active.id}
             tab={tab}
             focused={paneFocused}

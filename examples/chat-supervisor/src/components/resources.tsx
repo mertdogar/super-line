@@ -6,7 +6,7 @@
 import { useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { Bot, FileText, StickyNote, Trash2, ArrowDown, ArrowUp, Plus } from 'lucide-react'
 import { useChannelResources, useResourcePresence } from '@/App'
-import { useCollection, useDoc } from '@super-line/plugin-auth/react'
+import { useCollection, useDoc } from '@super-line/react'
 import type { CanvasDoc, ResourceRow, TextDoc } from '@/contract'
 
 const PALETTE = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8']
@@ -84,7 +84,7 @@ function Presence({ row, me }: { row: ResourceRow; me: string }): React.JSX.Elem
 // ── canvas: draggable sticky notes ───────────────────────────────────────────────────────────────
 
 function CanvasBoard({ docId }: { docId: string }): React.JSX.Element {
-  const { data, update, delete: del } = useDoc('canvases', docId)
+  const { data, ready, update, delete: del } = useDoc('canvases', docId)
   const [color, setColor] = useState(PALETTE[0]!)
   const boardRef = useRef<HTMLDivElement>(null)
   // Keyed by pointerId so two fingers dragging two notes don't share one slot; each slot caches
@@ -92,7 +92,7 @@ function CanvasBoard({ docId }: { docId: string }): React.JSX.Element {
   const drags = useRef<Map<number, { id: string; dx: number; dy: number; last: number; x: number; y: number }>>(new Map())
   const patch = (p: DeepPartial<CanvasDoc>): void => update(p as Partial<CanvasDoc>)
 
-  if (!data) return <PaneLoading />
+  if (!ready || !data) return <PaneLoading />
   const items = Object.entries(data.items ?? {})
 
   const addNote = (e: ReactMouseEvent<HTMLDivElement>): void => {
@@ -187,9 +187,9 @@ function CanvasBoard({ docId }: { docId: string }): React.JSX.Element {
 // last-writer-wins, so simultaneous typing in the same block clobbers — work in your own block.
 
 function DocEditor({ docId }: { docId: string }): React.JSX.Element {
-  const { data, update, delete: del } = useDoc('docs', docId)
+  const { data, ready, update, delete: del } = useDoc('docs', docId)
   const patch = (p: DeepPartial<TextDoc>): void => update(p as Partial<TextDoc>)
-  if (!data) return <PaneLoading />
+  if (!ready || !data) return <PaneLoading />
   const blocks = Object.entries(data.blocks ?? {}).sort((a, b) => a[1].order - b[1].order || (a[0] < b[0] ? -1 : 1))
 
   const addBlock = (): void => {

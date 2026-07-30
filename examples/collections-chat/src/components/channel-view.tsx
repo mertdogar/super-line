@@ -7,7 +7,7 @@ import { ChatInput } from '@/components/ui/chat/chat-input'
 import { ChatMessageList } from '@/components/ui/chat/chat-message-list'
 import type { Channel, FeedMessage, MessagePart } from '@/contract'
 import { useChat, useMessageParts, useMessages, useUsers } from '@/lib/chat'
-import { useRequest } from '@super-line/plugin-auth/react'
+import { useRequest } from '@super-line/react'
 import { cn } from '@/lib/utils'
 
 type FeedPart = MessagePart

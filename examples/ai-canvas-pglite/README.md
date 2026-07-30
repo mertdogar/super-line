@@ -85,3 +85,5 @@ transport differs (here central Postgres + the Electric op-log, no adapter).
 - Peer discovery is **mDNS** (multicast on the shared network), driven by the adapter's `discovery: 'mdns'`. Docker's
   compose bridge passes multicast; many cloud/k8s networks don't — there, use a headless Service and swap it for
   `discovery: { dns: { hostname: 'ai-canvas-p2p.default.svc.cluster.local', port: 9001 } }`.
+
+> **Why `createSuperLineHooks` and not the module-level `Register` binding?** Deliberate: `Register` is a program-wide singleton (one declaration per TypeScript program), and the repo's examples share one typecheck program — so these self-contained demos use the factory form, which also stays the right tool for multi-contract apps. The app-scale examples (`collections-chat`, `react-chat-transports`, `chat-supervisor`) demonstrate the registered module-level binding.

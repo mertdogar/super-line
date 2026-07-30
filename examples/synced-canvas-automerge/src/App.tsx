@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { createSuperLineClient } from '@super-line/client'
 import { webSocketClientTransport } from '@super-line/transport-websocket'
-import { createSuperLineHooks } from '@super-line/react'
+import { createSuperLineHooks, useSuperLineClient } from '@super-line/react'
 import * as A from '@automerge/automerge'
 import { canvas } from './contract.js'
 import { fromB64 } from './b64.js'
@@ -25,14 +25,16 @@ const { Provider, useRequest, useEvent } = createSuperLineHooks<typeof canvas, '
 
 export function App() {
   const [name] = useState(() => `user-${Math.random().toString(36).slice(2, 6)}`)
-  const [client] = useState(() =>
-    createSuperLineClient(canvas, {
-      transport: webSocketClientTransport({ url: WS_URL }),
-      role: 'user',
-      params: { name },
-    }),
+  // StrictMode-safe ownership: built in a committed effect, closed on unmount
+  const client = useSuperLineClient(
+    () =>
+      createSuperLineClient(canvas, {
+        transport: webSocketClientTransport({ url: WS_URL }),
+        role: 'user',
+        params: { name },
+      }),
+    [name],
   )
-  useEffect(() => () => client.close(), [client])
 
   return (
     <Provider client={client}>
@@ -64,21 +66,19 @@ function Board({ me }: { me: string }) {
     setPatchLog((prev) => [entry, ...prev].slice(0, 50))
   }
 
-  const { call: joinDoc } = useRequest('joinDoc')
+  // auto-fetch: catches up on mount (exactly once, even under StrictMode) and again on a fresh session
+  const { data: joined } = useRequest('joinDoc', { docId: DOC_ID })
   const { call: pushChange } = useRequest('pushChange')
   const { call: serverNudge } = useRequest('serverNudge')
 
   // Catch up by LOADING the server's snapshot — never `A.from` on the client (that forks
   // history). `load` doesn't go through patchCallback, so the patch log starts empty.
   useEffect(() => {
-    void joinDoc({ docId: DOC_ID })
-      .then(({ snapshot }) => {
-        docRef.current = A.load<Canvas>(fromB64(snapshot))
-        setReady(true)
-        rerender()
-      })
-      .catch(() => {})
-  }, [joinDoc])
+    if (!joined) return
+    docRef.current = A.load<Canvas>(fromB64(joined.snapshot))
+    setReady(true)
+    rerender()
+  }, [joined])
 
   // Apply change(s) the server fans out, tagged by origin ('peer' = another client, 'server').
   useEvent('change', (msg) => {

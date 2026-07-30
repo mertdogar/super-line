@@ -30,3 +30,5 @@ Open <http://localhost:5173> in **two windows**. Drag shapes, "Add shape", doubl
 | `App.tsx` | Holds a local `Y.Doc`, pushes local edits up (origin-tagged to avoid echo), applies fanned-out updates down, and renders the board. |
 
 The echo-break: local edits carry no origin and get pushed; updates applied from the server are tagged `'remote'` and are skipped by the push listener.
+
+> **Why `createSuperLineHooks` and not the module-level `Register` binding?** Deliberate: `Register` is a program-wide singleton (one declaration per TypeScript program), and the repo's examples share one typecheck program — so these self-contained demos use the factory form, which also stays the right tool for multi-contract apps. The app-scale examples (`collections-chat`, `react-chat-transports`, `chat-supervisor`) demonstrate the registered module-level binding.

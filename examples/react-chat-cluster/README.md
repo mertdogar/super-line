@@ -97,3 +97,5 @@ the plugin warns at boot.
   `lb_policy round_robin`.
 - `Dockerfile` / `Dockerfile.web` — the node image (tsx off source) and the SPA image
   (multi-stage `vite build` → Caddy).
+
+> **Why `createSuperLineHooks` and not the module-level `Register` binding?** Deliberate: `Register` is a program-wide singleton (one declaration per TypeScript program), and the repo's examples share one typecheck program — so these self-contained demos use the factory form, which also stays the right tool for multi-contract apps. The app-scale examples (`collections-chat`, `react-chat-transports`, `chat-supervisor`) demonstrate the registered module-level binding.

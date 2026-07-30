@@ -33,3 +33,5 @@ Open <http://localhost:5173> in **two windows**. Drag shapes, "Add shape", doubl
 - The server holds the canonical doc, `applyChanges` to it, persists (`A.save`), and re-broadcasts the changes to the room. Applying a change a peer already has is an idempotent no-op, so there's no echo loop and no origin-tagging needed.
 
 > **Note** — for parity with the Yjs example this broadcasts `getChanges()` deltas, which is simple but assumes no client misses a message. A production build would use Automerge's **sync protocol** (`initSyncState` / `generateSyncMessage` / `receiveSyncMessage`) for gap-tolerant reconnects — that's the robust upgrade, at the cost of per-peer sync state on the server.
+
+> **Why `createSuperLineHooks` and not the module-level `Register` binding?** Deliberate: `Register` is a program-wide singleton (one declaration per TypeScript program), and the repo's examples share one typecheck program — so these self-contained demos use the factory form, which also stays the right tool for multi-contract apps. The app-scale examples (`collections-chat`, `react-chat-transports`, `chat-supervisor`) demonstrate the registered module-level binding.

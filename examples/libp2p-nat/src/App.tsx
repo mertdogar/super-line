@@ -138,10 +138,9 @@ function ChatApp({ name, room }: { name: string; room: string }) {
 function Room({ room, me }: { room: string; me: string }) {
   const [messages, setMessages] = useState<Message[]>([])
   const [text, setText] = useState('')
-  const [online, setOnline] = useState(0)
-  const [node, setNode] = useState('…')
 
-  const { call: join } = useRequest('join')
+  // auto-fetch: joins on mount (exactly once, even under StrictMode) and re-joins if the room changes
+  const { data: joined } = useRequest('join', { room })
   const { call: send, loading: sending } = useRequest('send')
   const presence = useSubscription('presence')
 
@@ -149,18 +148,9 @@ function Room({ room, me }: { room: string; me: string }) {
     if (m.room === room) setMessages((prev) => [...prev, m])
   })
 
-  useEffect(() => {
-    join({ room })
-      .then((r) => {
-        setOnline(r.count)
-        setNode(r.node)
-      })
-      .catch(() => {})
-  }, [join, room])
-
-  useEffect(() => {
-    if (presence?.room === room) setOnline(presence.count)
-  }, [presence, room])
+  // live presence once it has arrived for this room; the join response seeds the count before that
+  const online = presence?.room === room ? presence.count : (joined?.count ?? 0)
+  const node = joined?.node ?? '…'
 
   const submit = (e: FormEvent) => {
     e.preventDefault()

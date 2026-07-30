@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { createSuperLineClient } from '@super-line/client'
 import { webSocketClientTransport } from '@super-line/transport-websocket'
-import { createSuperLineHooks } from '@super-line/react'
+import { createSuperLineHooks, useSuperLineClient } from '@super-line/react'
 import * as Y from 'yjs'
 import { canvas } from './contract.js'
 import { fromB64, toB64 } from './b64.js'
@@ -25,15 +25,17 @@ const { Provider, useRequest, useEvent } = createSuperLineHooks<typeof canvas, '
 
 export function App() {
   const [name] = useState(() => `user-${Math.random().toString(36).slice(2, 6)}`)
-  const [client] = useState(() =>
-    createSuperLineClient(canvas, {
-      transport: webSocketClientTransport({ url: WS_URL }),
-      role: 'user',
-      params: { name },
-    }),
+  // StrictMode-safe ownership: built in a committed effect, closed on unmount
+  const client = useSuperLineClient(
+    () =>
+      createSuperLineClient(canvas, {
+        transport: webSocketClientTransport({ url: WS_URL }),
+        role: 'user',
+        params: { name },
+      }),
+    [name],
   )
   const [doc] = useState(() => new Y.Doc())
-  useEffect(() => () => client.close(), [client])
 
   return (
     <Provider client={client}>
@@ -45,7 +47,8 @@ export function App() {
 function Board({ doc, me }: { doc: Y.Doc; me: string }) {
   const shapes = useShapes(doc)
   const patches = usePatchLog(doc)
-  const { call: joinDoc } = useRequest('joinDoc')
+  // auto-fetch: catches up on mount (exactly once, even under StrictMode) and again on a fresh session
+  const { data: joined } = useRequest('joinDoc', { docId: DOC_ID })
   const { call: pushUpdate } = useRequest('pushUpdate')
   const { call: serverNudge } = useRequest('serverNudge')
   const boardRef = useRef<HTMLDivElement>(null)
@@ -60,12 +63,14 @@ function Board({ doc, me }: { doc: Y.Doc; me: string }) {
       void pushUpdate({ docId: DOC_ID, update: toB64(update) }).catch(() => {})
     }
     doc.on('update', onUpdate)
-    // Catch up to the server's current state on mount; 'sync' keeps it out of the patch log.
-    void joinDoc({ docId: DOC_ID })
-      .then(({ snapshot }) => Y.applyUpdate(doc, fromB64(snapshot), 'sync'))
-      .catch(() => {})
     return () => doc.off('update', onUpdate)
-  }, [doc, joinDoc, pushUpdate])
+  }, [doc, pushUpdate])
+
+  // Apply the catch-up snapshot when it lands; 'sync' keeps it out of the patch log. applyUpdate is
+  // a merge, so re-applying the same snapshot (StrictMode's double-run) is a no-op.
+  useEffect(() => {
+    if (joined) Y.applyUpdate(doc, fromB64(joined.snapshot), 'sync')
+  }, [joined, doc])
 
   // Apply updates the server fans out, tagged by origin (other clients = 'peer', server = 'server').
   useEvent('update', (msg) => {

@@ -1,6 +1,6 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { createSuperLineClient } from '@super-line/client'
-import { createSuperLineHooks } from '@super-line/react'
+import { createSuperLineHooks, useSuperLineClient } from '@super-line/react'
 import { crdtCollectionsClient } from '@super-line/collections-crdt-memory'
 import { webSocketClientTransport } from '@super-line/transport-websocket'
 import { api } from './contract.js'
@@ -18,13 +18,16 @@ function pickName(): string {
 
 export function App() {
   const [name] = useState(pickName)
-  const [client] = useState(() =>
-    createSuperLineClient(api, {
-      transport: webSocketClientTransport({ url: WS_URL }),
-      role: 'user',
-      params: { name },
-      crdtCollections: crdtCollectionsClient(),
-    }),
+  // StrictMode-safe ownership: built in a committed effect, closed on unmount
+  const client = useSuperLineClient(
+    () =>
+      createSuperLineClient(api, {
+        transport: webSocketClientTransport({ url: WS_URL }),
+        role: 'user',
+        params: { name },
+        crdtCollections: crdtCollectionsClient(),
+      }),
+    [name],
   )
   return (
     <Provider client={client}>
@@ -41,7 +44,7 @@ interface LogEntry {
 }
 
 function Board({ me }: { me: string }) {
-  const { data, update, delete: del } = useDoc('scene', SCENE_ID)
+  const { data, ready, update, delete: del } = useDoc('scene', SCENE_ID)
   const { call: agentEdit, loading } = useRequest('agentEdit')
   const [prompt, setPrompt] = useState('')
   const [log, setLog] = useState<LogEntry[]>([])
@@ -100,7 +103,7 @@ function Board({ me }: { me: string }) {
     }
   }
 
-  if (data === undefined) return <p className="connecting">connecting…</p>
+  if (!ready) return <p className="connecting">connecting…</p>
 
   return (
     <div className="wrap">

@@ -56,3 +56,5 @@ agent's co-writes from human edits in real time.
 
 > Extension: wire `replica.subscribe(...)` so a long agent turn reacts to the user's edits mid-turn — a free
 > bonus of the reactive replica (deferred here to keep each turn simple).
+
+> **Why `createSuperLineHooks` and not the module-level `Register` binding?** Deliberate: `Register` is a program-wide singleton (one declaration per TypeScript program), and the repo's examples share one typecheck program — so these self-contained demos use the factory form, which also stays the right tool for multi-contract apps. The app-scale examples (`collections-chat`, `react-chat-transports`, `chat-supervisor`) demonstrate the registered module-level binding.

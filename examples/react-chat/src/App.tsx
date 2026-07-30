@@ -1,7 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { createSuperLineClient } from '@super-line/client'
 import { webSocketClientTransport } from '@super-line/transport-websocket'
-import { createSuperLineHooks } from '@super-line/react'
+import { createSuperLineHooks, useSuperLineClient } from '@super-line/react'
 import { chat } from './contract.js'
 
 const WS_URL = 'ws://localhost:8787'
@@ -48,11 +48,11 @@ function JoinForm({ onJoin }: { onJoin: (creds: { name: string; room: string }) 
 }
 
 function ChatApp({ name, room }: { name: string; room: string }) {
-  // create the client once; it connects immediately and reconnects on its own
-  const [client] = useState(() =>
-    createSuperLineClient(chat, { transport: webSocketClientTransport({ url: WS_URL }), role: 'user', params: { name } }),
+  // StrictMode-safe ownership: built in a committed effect, closed on unmount, rebuilt if `name` changes
+  const client = useSuperLineClient(
+    () => createSuperLineClient(chat, { transport: webSocketClientTransport({ url: WS_URL }), role: 'user', params: { name } }),
+    [name],
   )
-  useEffect(() => () => client.close(), [client])
 
   return (
     <Provider client={client}>
@@ -64,9 +64,9 @@ function ChatApp({ name, room }: { name: string; room: string }) {
 function Room({ room, me }: { room: string; me: string }) {
   const [messages, setMessages] = useState<Message[]>([])
   const [text, setText] = useState('')
-  const [online, setOnline] = useState(0)
 
-  const { call: join } = useRequest('join')
+  // auto-fetch: joins on mount (exactly once, even under StrictMode) and re-joins if the room changes
+  const { data: joined } = useRequest('join', { room })
   const { call: send, loading: sending } = useRequest('send')
   const presence = useSubscription('presence')
 
@@ -75,17 +75,8 @@ function Room({ room, me }: { room: string; me: string }) {
     if (m.room === room) setMessages((prev) => [...prev, m])
   })
 
-  // join once on mount; seed the online count from the response
-  useEffect(() => {
-    join({ room })
-      .then((r) => setOnline(r.count))
-      .catch(() => {})
-  }, [join, room])
-
-  // keep the count live as others join/leave
-  useEffect(() => {
-    if (presence?.room === room) setOnline(presence.count)
-  }, [presence, room])
+  // live presence once it has arrived for this room; the join response seeds the count before that
+  const online = presence?.room === room ? presence.count : (joined?.count ?? 0)
 
   const submit = (e: FormEvent) => {
     e.preventDefault()

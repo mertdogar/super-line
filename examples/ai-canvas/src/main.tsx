@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App.js'
 import './styles.css'
@@ -5,5 +6,10 @@ import './styles.css'
 const root = document.getElementById('root')
 if (!root) throw new Error('#root not found')
 
-// No StrictMode — it double-invokes effects in dev, which would open the live connection twice.
-createRoot(root).render(<App />)
+// StrictMode is safe: clients are owned by useSuperLineClient / committed effects,
+// so the dev-mode double-invoke opens and closes one extra properly-paired connection.
+createRoot(root).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)

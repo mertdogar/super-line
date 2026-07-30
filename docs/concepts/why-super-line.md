@@ -42,4 +42,4 @@ See [The contract](/concepts/the-contract) for the full model.
 
 Socket.IO splits its types into `ClientToServerEvents` / `ServerToClientEvents` / `InterServerEvents` interfaces you wire as **positional generics** (easy to swap) with no runtime validation. super-line keeps the directional split but in **one shared object**, validates inbound automatically, and adds **per-role contracts**. See the full [comparison & FAQ](/concepts/comparison-faq).
 
-Ready to write one? Start with [Your first round-trip](/tutorials/first-round-trip).
+Ready to write one? Start with [Run a super-line server](/tutorials/run-a-server).

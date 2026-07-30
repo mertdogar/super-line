@@ -9,7 +9,7 @@ and the plugin owns the rest.
 pnpm add @super-line/core @super-line/plugin-auth
 ```
 
-Not sure you need the plugin over a hand-rolled `authenticate`? See [Choose an auth strategy](/how-to/choose-an-auth-strategy). New to it? Walk the [Add auth to your app](/tutorials/add-auth-to-your-app) tutorial first.
+Not sure you need the plugin over a hand-rolled `authenticate`? See [Choose an auth strategy](/how-to/choose-an-auth-strategy). New to it? Walk the [Add auth + chat](/tutorials/add-auth-and-chat) tutorial first.
 
 ## Wire it in
 

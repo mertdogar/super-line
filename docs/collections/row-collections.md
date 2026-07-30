@@ -2,7 +2,7 @@
 
 A **row collection** is a table: many small rows, each validated against a schema you declare on the contract. You filter them, subscribe to subsets, mutate them in atomic batches, and secure them per row. This is the common case — messages, users, tasks, orders.
 
-> New to collections? Start with [the overview](/collections/) for the rows-vs-documents split, or build one hands-on in [Tutorial 2](/tutorials/first-collection).
+> New to collections? Start with [the overview](/collections/) for the rows-vs-documents split, or build one hands-on in [Tutorial 4](/tutorials/store-your-data).
 
 ## Declare rows on the contract
 

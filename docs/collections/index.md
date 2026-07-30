@@ -56,4 +56,4 @@ If you'd **query, filter, paginate, join, or secure per row** → [row collectio
 | [Backends & clustering](/collections/backends) | The capability matrix, `relay` vs. `self` clustering, every factory option, advisory foreign keys. |
 | [Choose a collection backend](/how-to/choose-a-collection-backend) | Which backend to use: durability, coordination, what you have to operate. |
 
-New to collections? The fastest way in is **[Tutorial 2 · Your first collection](/tutorials/first-collection)** — a live, filtered row-set end to end in a few minutes.
+New to collections? The fastest way in is **[Tutorial 4 · Store your data](/tutorials/store-your-data)** — a live, filtered row-set end to end in a few minutes.

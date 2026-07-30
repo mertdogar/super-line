@@ -28,7 +28,7 @@ Companion guides go deeper:
   todo lists…) to channels: membership-gated collaboration for every member, humans and agents alike.
 
 ::: tip New here? Build it first
-[Tutorial 4 · Assemble a chat backbone](/tutorials/chat-backbone) stands the whole thing up in one
+[Tutorial 5 · Add auth + chat](/tutorials/add-auth-and-chat) stands the whole thing up in one
 runnable file. This page is the reference you reach for afterwards.
 :::
 

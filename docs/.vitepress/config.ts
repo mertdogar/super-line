@@ -33,8 +33,11 @@ export default defineConfig({
   vite: {
     plugins: [llmstxt({ domain: 'https://super-line.dogar.biz' })],
     resolve: {
-      // The in-page ChatDemo runs the real plugin-chat server; its dist imports
-      // `randomUUID` from Node's `crypto`. Point that at a browser shim.
+      // The tutorial-3 demo mounts real React islands; pnpm would otherwise hand
+      // @super-line/react its own `react` instance and hooks break at runtime.
+      dedupe: ['react', 'react-dom'],
+      // The in-page demos run real servers; their dist imports Node's `crypto`
+      // (randomUUID, and plugin-auth's scrypt/hashing). Point that at a browser shim.
       alias: {
         crypto: fileURLToPath(new URL('./shims/crypto.ts', import.meta.url)),
         'node:crypto': fileURLToPath(new URL('./shims/crypto.ts', import.meta.url)),
@@ -66,20 +69,27 @@ export default defineConfig({
       { text: 'Examples', link: '/examples/' },
     ],
     sidebar: {
-      // ── Tutorials — the curated learning spine (few, guaranteed-success) ──
+      // ── Tutorials — the 7-step learning path (each step has a live in-page demo) ──
       '/tutorials/': [
         {
-          text: 'Tutorials',
+          text: 'Getting started',
           items: [
             { text: 'The learning path', link: '/tutorials/' },
-            { text: '1 · Your first typed round-trip', link: '/tutorials/first-round-trip' },
-            { text: '2 · Your first collection', link: '/tutorials/first-collection' },
-            { text: '3 · Go collaborative (a CRDT doc)', link: '/tutorials/go-collaborative' },
-            { text: '4 · Add auth to your app', link: '/tutorials/add-auth-to-your-app' },
-            { text: '5 · Assemble a chat backbone', link: '/tutorials/chat-backbone' },
-            { text: '6 · Put a live AI agent in the chat', link: '/tutorials/ai-agent-chat' },
-            { text: '7 · Co-edit a canvas with an agent', link: '/tutorials/collaborative-canvas-with-agent' },
-            { text: '8 · Run your first durable job', link: '/tutorials/first-queue' },
+            { text: '1 · Run a super-line server', link: '/tutorials/run-a-server' },
+            { text: '2 · Connect a typed client', link: '/tutorials/connect-a-client' },
+            { text: '3 · Make it React', link: '/tutorials/react-hooks' },
+            { text: '4 · Store your data', link: '/tutorials/store-your-data' },
+            { text: '5 · Add auth + chat (plugins)', link: '/tutorials/add-auth-and-chat' },
+            { text: '6 · Collaborate on one document', link: '/tutorials/collaborate-with-crdt' },
+            { text: '7 · Go multi-node', link: '/tutorials/go-multi-node' },
+          ],
+        },
+        {
+          text: 'Going deeper',
+          items: [
+            { text: 'Put a live AI agent in the chat', link: '/tutorials/ai-agent-chat' },
+            { text: 'Co-edit a canvas with an agent', link: '/tutorials/collaborative-canvas-with-agent' },
+            { text: 'Run your first durable job', link: '/tutorials/first-queue' },
           ],
         },
       ],

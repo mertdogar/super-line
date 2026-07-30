@@ -26,9 +26,19 @@ const REFERENCE_GUIDE_ALIASES: Record<string, string> = {
   'control-center': '/how-to/control-center',
 }
 
+// The 2026-07-30 tutorial redesign absorbed five lessons into the new 7-step path.
+const TUTORIAL_ALIASES: Record<string, string> = {
+  '/tutorials/first-round-trip': '/tutorials/connect-a-client',
+  '/tutorials/first-collection': '/tutorials/store-your-data',
+  '/tutorials/go-collaborative': '/tutorials/collaborate-with-crdt',
+  '/tutorials/add-auth-to-your-app': '/tutorials/add-auth-and-chat',
+  '/tutorials/chat-backbone': '/tutorials/add-auth-and-chat',
+}
+
 function redirectAliases() {
   const path = location.pathname.replace(/\.html$/, '').replace(/\/$/, '')
-  if (path === '/guide/getting-started') return location.replace('/tutorials/first-round-trip')
+  if (path === '/guide/getting-started') return location.replace('/tutorials/run-a-server')
+  if (TUTORIAL_ALIASES[path]) return location.replace(TUTORIAL_ALIASES[path])
   if (path === '/guide/the-contract') return location.replace('/concepts/the-contract')
   if (path === '/guide/why') return location.replace('/concepts/why-super-line')
   // Auth docs relocated into the first-class Authentication section (2026-07-24).

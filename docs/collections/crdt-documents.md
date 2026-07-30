@@ -171,4 +171,4 @@ Mount [`inspector()`](/how-to/control-center) and every document open/write/chan
 - [Attach collaborative resources to channels](/how-to/chat-resources) — make a CRDT document channel-native: membership-gated, with an agent-friendly acked write path and who's-open presence.
 - [Row-level security & policies](/collections/policies#crdt-document-guards) — the guard-shaped CRDT policy in depth.
 - [Backends & clustering](/collections/backends#crdt-backends) — the durable and self-clustering CRDT tiers.
-- [Tutorial 3 · Go collaborative](/tutorials/go-collaborative) — build one hands-on, two tabs merging live.
+- [Tutorial 6 · Collaborate on one document](/tutorials/collaborate-with-crdt) — build one hands-on, two tabs merging live.

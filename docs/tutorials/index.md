@@ -1,69 +1,73 @@
 # Tutorials
 
-Seven lessons, in order. Each one is a **hands-on build** with a guaranteed outcome at the end — follow the steps and it works. This is the fastest way to feel how super-line fits together; once a pattern clicks here, the [How-to guides](/how-to/) and [Concepts](/concepts/) go deeper on demand.
+A single learning path, seven steps. Each step is a **hands-on build** with a guaranteed outcome — and each begins with a **live demo**: a real super-line server booted *inside the page* (over the in-memory loopback transport), running the same code you're about to write. You see the thing work, then you build it, then your build behaves exactly like the demo did.
 
 <div class="sl-qs-hero">
 
 <p class="sl-qs-meta">
-  <span>~75 minutes end to end</span>
+  <span>~50 minutes end to end</span>
   <span>Node 18+</span>
-  <span>TypeScript · zero codegen</span>
+  <span>live in-page demos · zero codegen</span>
 </p>
 
 </div>
 
 ## The path
 
-### 1 · [Your first typed round-trip](/tutorials/first-round-trip)
+### 1 · [Run a super-line server](/tutorials/run-a-server)
 
-Stand up a server and a client from an empty folder and exercise **all three wire patterns at once** — a request, a pushed event, and a subscribable topic — over one typed connection. The foundation everything else builds on.
+Two files — a **contract** declaring every interaction, and a **server** implementing it — booted on a WebSocket wire. The in-page server streams its own real diagnostics while you build yours.
 
-*You'll touch:* `defineContract`, `createSuperLineServer`, `createSuperLineClient`, roles, and runtime validation.
+*You'll touch:* `defineContract`, `createSuperLineServer`, `authenticate`, roles, transports.
 
-### 2 · [Your first collection](/tutorials/first-collection)
+### 2 · [Connect a typed client](/tutorials/connect-a-client)
 
-Add **persisted, typed state**: declare a collection on the contract, give the server a backend and a row policy, then subscribe to a live, filtered row-set from the client and watch a write converge. This is the leap from messaging to a server-authoritative sync source.
+The client imports the **same contract** and gets the whole surface inferred: call the request, listen for the event, subscribe to the topic — then watch the server reject a hand-crafted invalid payload types couldn't stop.
 
-*You'll touch:* [`collections` on the contract](/collections/row-collections), [row-level policies](/collections/policies), `client.collection(...).subscribe(...)`.
+*You'll touch:* `createSuperLineClient`, `send`/`on`/`subscribe`, `SuperLineError`, server-side validation.
 
-### 3 · [Go collaborative — a CRDT document](/tutorials/go-collaborative)
+### 3 · [Make it React](/tutorials/react-hooks)
 
-Open a **CRDT document collection** by id, bind it to a UI, and open two tabs — concurrent edits to different fields **merge** instead of clobbering, and every write is still schema-validated on the contract.
+Register your contract once and every hook is typed by it. Two **real React apps run on the page**, sharing one live row-set — and the component source shown is the module actually running.
 
-*You'll touch:* [CRDT document collections](/collections/crdt-documents), `client.collection(...).open(id)`, the reactive `DocHandle`.
+*You'll touch:* `Register`, `SuperLineProvider`, `useSuperLineClient`, `useRequest`/`useEvent`/`useSubscription`, `useCollection`.
 
-### 4 · [Add auth to your app](/tutorials/add-auth-to-your-app)
+### 4 · [Store your data](/tutorials/store-your-data)
 
-In Tutorial 2 you keyed a row policy on a `principal` — here you make it a real logged-in user. Merge [`@super-line/plugin-auth`](/how-to/plugin-auth) into the same contract for email/password sign-up, durable sessions, and roles, then watch two users each see only their own private rows.
+The machinery under `useCollection`: declare a typed collection on the contract, fence it with deny-by-default **row-level policies**, and hand the server a **storage backend**. Then stop the server and boot a new one on the same backend — the rows survive, because servers are replaceable and backends aren't.
 
-*You'll touch:* [plugin-auth](/how-to/plugin-auth), `authContract()`, `authClient`, and `identify` — the principal behind every policy.
+*You'll touch:* [`collections`](/collections/row-collections) on the contract, [policies](/collections/policies), `identify`, memory → SQLite [backends](/collections/backends).
 
-### 5 · [Assemble a chat backbone (a plugin)](/tutorials/chat-backbone)
+### 5 · [Add auth + chat — plugins snap in whole domains](/tutorials/add-auth-and-chat)
 
-With identity in hand from Tutorial 4, merge a **second** plugin — [`@super-line/plugin-chat`](/how-to/plugin-chat) for channels, membership, and messages — into the same contract, then watch two users talk over a model you never wrote a policy or handler for. This is where the hand-rolled collection from Tutorial 2 becomes a reusable, hookable backbone.
+Merge `authContract()` and `chatContract()` onto your contract and wire their server kits: real sign-up (the in-page demo scrypt-hashes your password with the actual plugin), durable sessions, and a full channels/membership/messages model — none of which you implement.
 
-*You'll touch:* [contract-fragment plugins](/concepts/plugins), [the chat plugin](/how-to/plugin-chat), domain hooks, `chatClient`.
+*You'll touch:* [plugin-auth](/how-to/plugin-auth), [plugin-chat](/how-to/plugin-chat), `authClient`, `chatClient`, domain hooks, `nodeKey`.
 
-### 6 · [Put a live AI agent in the chat](/tutorials/ai-agent-chat)
+### 6 · [Collaborate on one document](/tutorials/collaborate-with-crdt)
 
-Add a third participant to that channel — an **AI agent**. Because super-line has no bot type, the agent is a regular API-key user on the same wire, and three library calls turn it into a live participant whose whole answer **streams** into the channel as one message. Runs fully offline, then swaps in a real LLM in one block.
+Rows are last-writer-wins; a shared canvas wants **merge**. Open a CRDT document from two clients, edit different fields simultaneously, and watch both edits survive — with every write still schema-validated before it commits.
 
-*You'll touch:* [standard-user automation](/how-to/chat-bots), [streamed messages](/how-to/chat-streaming), and the `chatAgentTools` AI SDK toolset.
+*You'll touch:* [CRDT document collections](/collections/crdt-documents), `open(id)`, the `DocHandle`, validate-before-commit, `useDoc`.
 
-### 7 · [A human and an agent co-edit a canvas](/tutorials/collaborative-canvas-with-agent)
+### 7 · [Go multi-node](/tutorials/go-multi-node)
 
-Attach a **CRDT document** to that channel as a [channel resource](/how-to/chat-resources) — a shared sticky-note canvas. The human edits it through the native handle; the agent edits the *same* document through an acked `write_resource` path, as an ordinary channel member. Both edits **merge**. This is the shape behind the [`chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor) app.
+Read a complete **adapter** (it fits on the page), run a two-node cluster in the tab, and sever its bus with a button. Then the one-line Redis swap, and the cluster event bus for server↔server coordination.
 
-*You'll touch:* [channel resources](/how-to/chat-resources), [`createResource` + `writeResource`](/how-to/chat-resources), the `DocHandle`, and the two co-writer doors.
+*You'll touch:* the `Adapter` seam, `adapter:` option, `srv.publish`/`srv.subscribe`, Redis/libp2p adapters.
 
-### 8 · [Run your first durable job](/tutorials/first-queue)
+## Going deeper
 
-Add a server-only queue as a paired plugin, enqueue a typed job, and watch a worker complete it. You will construct `queueKit` once and place its contract and runtime halves in their corresponding plugin arrays.
+Three larger builds continue where the path ends — same project style, bigger payoffs:
 
-*You'll touch:* `queue()`, `queueKit.enqueue`, declarative concurrency, retries, and durable job inspection.
+- **[Put a live AI agent in the chat](/tutorials/ai-agent-chat)** — an agent is just a provisioned user with an API key; three library calls make it a live, streaming participant in the Tutorial 5 channel.
+- **[Co-edit a canvas with an agent](/tutorials/collaborative-canvas-with-agent)** — a human and an AI agent as co-writers on one Tutorial 6-style document, attached to a chat channel.
+- **[Run your first durable job](/tutorials/first-queue)** — server-only queues, workers, retries, and cron as another paired plugin.
 
 ## Before you start
 
-Everything runs on **Node 18+** with TypeScript and [`tsx`](https://tsx.is) — no build step while you learn. super-line is ESM-only. Each lesson is self-contained, but they share a mental model, so do them in order the first time.
+Everything runs on **Node 18+** with TypeScript and [`tsx`](https://tsx.is) — no build step while you learn. super-line is ESM-only (`"type": "module"`). The steps share one small project and a mental model that builds in order, so walk the path top to bottom the first time; each page still stands alone if you're returning for a refresher.
 
-When you're ready to build your own thing, jump to the [How-to guides](/how-to/) for task recipes, [Concepts](/concepts/) for the model behind the API, or the [API reference](/reference/) for every export.
+The in-page demos run the real npm packages over the loopback transport, and every demo carries a *"What's real here"* caption so you always know which part is the library and which part is staging. If a demo can't start in your browser, the code on the page is the same wiring — run it locally instead.
+
+When you're ready to build your own thing: [How-to guides](/how-to/) for task recipes, [Concepts](/concepts/) for the model behind the API, [Collections](/collections/) for the data layer, and the [API reference](/reference/) for every export.

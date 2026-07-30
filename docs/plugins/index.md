@@ -60,7 +60,7 @@ Guides: [wire it in](/how-to/plugin-chat) ·
 [run an AI chat bot](/how-to/chat-bots) ·
 [attach channel resources](/how-to/chat-resources) ·
 [drive a channel from scripts](/how-to/chat-headless) ·
-[tutorial: assemble a backbone](/tutorials/chat-backbone) ·
+[tutorial: add auth + chat](/tutorials/add-auth-and-chat) ·
 [tutorial: add a live AI agent](/tutorials/ai-agent-chat) ·
 [tutorial: co-edit a canvas](/tutorials/collaborative-canvas-with-agent).
 

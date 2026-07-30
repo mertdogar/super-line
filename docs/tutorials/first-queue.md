@@ -1,6 +1,6 @@
-# Tutorial 8 · Run your first durable job
+# Run your first durable job
 
-<p class="sl-qs-crumb"><a href="/tutorials/">Tutorials</a> → <strong>8 · Run your first durable job</strong></p>
+<p class="sl-qs-crumb"><a href="/tutorials/">Tutorials</a> → <strong>Going deeper · Run your first durable job</strong></p>
 
 Use `@super-line/plugin-queue` when work must survive the request that created it. In this tutorial you add a typed report worker, enqueue work from a request, and receive the durable job id immediately.
 

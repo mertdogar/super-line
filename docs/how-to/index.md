@@ -1,6 +1,6 @@
 # How-to guides
 
-Task-oriented recipes — each solves one problem and assumes you know the basics. If you don't, start with the [Tutorials](/tutorials/first-round-trip) for a guaranteed-success build, then come back here to get a specific thing done.
+Task-oriented recipes — each solves one problem and assumes you know the basics. If you don't, start with the [Tutorials](/tutorials/) for a guaranteed-success build, then come back here to get a specific thing done.
 
 ## Contract & interactions
 

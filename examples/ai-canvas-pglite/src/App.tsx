@@ -45,7 +45,7 @@ interface LogEntry {
 
 function Board({ me }: { me: string }) {
   const { data, update, delete: del } = useDoc('scene', SCENE_ID)
-  const { call: agentEdit, isLoading } = useRequest('agentEdit')
+  const { call: agentEdit, loading } = useRequest('agentEdit')
   const [prompt, setPrompt] = useState('')
   const [log, setLog] = useState<LogEntry[]>([])
   const boardRef = useRef<HTMLDivElement>(null)
@@ -94,7 +94,7 @@ function Board({ me }: { me: string }) {
 
   const runAgent = async (): Promise<void> => {
     const p = prompt.trim()
-    if (!p || isLoading) return
+    if (!p || loading) return
     setPrompt('')
     try {
       const res = await agentEdit({ prompt: p })
@@ -129,10 +129,10 @@ function Board({ me }: { me: string }) {
           onKeyDown={(e) => {
             if (e.key === 'Enter') void runAgent()
           }}
-          disabled={isLoading}
+          disabled={loading}
         />
-        <button type="button" onClick={() => void runAgent()} disabled={isLoading || !prompt.trim()}>
-          {isLoading ? 'thinking…' : 'Send'}
+        <button type="button" onClick={() => void runAgent()} disabled={loading || !prompt.trim()}>
+          {loading ? 'thinking…' : 'Send'}
         </button>
       </div>
 

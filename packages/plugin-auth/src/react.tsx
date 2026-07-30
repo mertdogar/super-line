@@ -131,7 +131,7 @@ export const useClient: Hooks['useMaybeClient'] = line.useMaybeClient
 export const useEvent: Hooks['useEvent'] = line.useEvent
 /** Subscribe to a topic and track its latest value. Idle before authentication. */
 export const useSubscription: Hooks['useSubscription'] = line.useSubscription
-/** Wrap a request as `{ data, error, isLoading, call }`. `call` rejects `UNAUTHORIZED` before authentication. */
+/** Wrap a request as `{ data, error, loading, refetch, call }`. `call` rejects `UNAUTHORIZED` before authentication. */
 export const useRequest: Hooks['useRequest'] = line.useRequest
 /** Open a CRDT document by id and track it reactively. Idle reads before authentication; writes throw. */
 export const useDoc: Hooks['useDoc'] = line.useDoc

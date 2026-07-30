@@ -67,7 +67,7 @@ function Room({ room, me }: { room: string; me: string }) {
   const [online, setOnline] = useState(0)
 
   const { call: join } = useRequest('join')
-  const { call: send, isLoading: sending } = useRequest('send')
+  const { call: send, loading: sending } = useRequest('send')
   const presence = useSubscription('presence')
 
   // append messages for this room as they arrive

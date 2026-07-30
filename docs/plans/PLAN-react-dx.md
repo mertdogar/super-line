@@ -117,10 +117,12 @@ function useRequest<M extends keyof Requests<C, R>>(
 ```
 
 - **Auto-fetches** on mount, when the JSON-stable serialization of `input` changes, and when the client
-  swaps (new session ⇒ refresh) — iff an input was supplied (or the method takes none) and `enabled !== false`.
-- **Mutation usage** = omit `input` on an input-requiring method: nothing auto-fires, `call(input)` is
-  the imperative path (today's behavior, unchanged). Void-input methods that must not auto-fire pass
-  `{ enabled: false }`.
+  swaps (new session ⇒ refresh) — iff an input argument was supplied and `enabled !== false`. **Arity is
+  the mode switch** (as built: runtime cannot know whether a method needs input): a no-input method opts
+  into auto-fetch by passing an explicit `undefined` input; `useRequest(m)` never auto-fires, full stop.
+- **Mutation usage** = omit `input`: nothing auto-fires, `call(input)` is the imperative path (today's
+  behavior, unchanged); `refetch` rejects in this mode.
+- A ref-keyed once-per-(client, input) guard keeps StrictMode's double-invoked effect from double-sending.
 - Last-call-wins state, as today. **Breaking**: `isLoading` → `loading`, and void-input call sites that
   relied on manual-only semantics now auto-fetch unless disabled.
 
@@ -138,11 +140,14 @@ nothing. `rows[0]` is the row.
 export function useLiveQuery<Row>(
   make: (() => LiveRowSet<Row>) | null,            // null = idle
   deps: readonly unknown[],
-): { rows: Row[]; ready: boolean; error?: unknown }
+): { rows: Row[]; ready: boolean; error?: unknown; sub: LiveRowSet<Row> | undefined }
 ```
 
-Context-free (no contract/role types), factory+deps shaped — the store lifecycle lives in a committed
-effect (plugin-chat's `useStoreRows` pattern, StrictMode-proof). Named row-free at the user's pick (the
+Context-free (no contract/role types), factory+deps shaped, StrictMode-proof; `sub` exposes the
+underlying set (a window, not ownership — the hook closes it), which is also how `useCollection` gets
+its D4 `sub` field for free. As built: `data`-style readiness caveat — a just-opened CRDT doc exposes a
+(possibly empty) local snapshot BEFORE catch-up, so **`ready` is the gate, not `data === undefined`**;
+`useDoc`'s doc-comment says so. Named row-free at the user's pick (the
 doc-comment names `LiveRowSet`, so grep-findability survives; the near-collision with TanStack DB's
 live-query vocabulary was weighed and accepted). `useCollection` consumes it internally; control-center
 and the example `useLiveRows` copies can adopt it (control-center's adoption is decided when the

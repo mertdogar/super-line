@@ -11,15 +11,18 @@ import { createSuperLineClient, type SuperLineClient } from '@super-line/client'
 import {
   createSuperLineHooks,
   SuperLineProvider,
+  useLiveQuery,
   useCollection as boundUseCollection,
   useMaybeClient as boundUseMaybeClient,
 } from '@super-line/react'
 import { memoryCollections } from '@super-line/collections-memory'
+import { crdtMemoryCollections, crdtCollectionsClient } from '@super-line/collections-crdt-memory'
 import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
 
 const contract = defineContract({
   collections: {
     messages: { schema: z.object({ id: z.string(), channelId: z.string(), text: z.string() }), key: 'id' },
+    scenes: { schema: z.object({ title: z.string().catch('untitled') }), crdt: { mode: 'document' } },
   },
   roles: {
     user: {
@@ -37,7 +40,7 @@ const contract = defineContract({
   },
 })
 
-const { Provider, useRequest, useCollection } = createSuperLineHooks<typeof contract, 'user'>()
+const { Provider, useRequest, useCollection, useDoc } = createSuperLineHooks<typeof contract, 'user'>()
 
 // Bind the module-level surface to this test's concrete contract BY CAST. Deliberate: `Register` is a
 // program-wide singleton and the root typecheck program must stay unregistered (a second declaration
@@ -61,18 +64,30 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c()
 })
 
-async function boot(): Promise<{ client: SuperLineClient<typeof contract, 'user'>; srv: SuperLineServer<typeof contract, { role: 'user'; ctx: object }> }> {
+async function boot(): Promise<{
+  client: SuperLineClient<typeof contract, 'user'>
+  srv: SuperLineServer<typeof contract, { role: 'user'; ctx: object }>
+  counts: { add: number }
+}> {
   const server = http.createServer()
+  const counts = { add: 0 }
   const srv = createSuperLineServer(contract, {
     transports: [webSocketServerTransport({ server })],
     authenticate: () => ({ role: 'user' as const, ctx: {} }),
     identify: () => 'tester',
     collections: memoryCollections(),
-    policies: { messages: { read: () => undefined, write: () => true } },
+    crdtCollections: crdtMemoryCollections(),
+    policies: {
+      messages: { read: () => undefined, write: () => true },
+      scenes: { read: () => true, write: () => true },
+    },
   })
   srv.implement({
     user: {
-      add: async ({ a, b }) => ({ sum: a + b }),
+      add: async ({ a, b }) => {
+        counts.add++
+        return { sum: a + b }
+      },
       echo: async ({ tag, delayMs }) => {
         await new Promise((resolve) => setTimeout(resolve, delayMs))
         return { tag }
@@ -84,13 +99,14 @@ async function boot(): Promise<{ client: SuperLineClient<typeof contract, 'user'
   const client = createSuperLineClient(contract, {
     transport: webSocketClientTransport({ url }),
     role: 'user',
+    crdtCollections: crdtCollectionsClient(),
   })
   cleanups.push(() => client.close())
   cleanups.push(async () => {
     await srv.close()
     await new Promise<void>((resolve) => server.close(() => resolve()))
   })
-  return { client, srv }
+  return { client, srv, counts }
 }
 
 function wrapper(client: SuperLineClient<typeof contract, 'user'>) {
@@ -109,7 +125,7 @@ describe('react hooks', () => {
 
     expect(returned).toEqual({ sum: 5 })
     expect(result.current.data).toEqual({ sum: 5 })
-    expect(result.current.isLoading).toBe(false)
+    expect(result.current.loading).toBe(false)
   })
 
   it('useRequest keeps the newest call, not the last one to resolve', async () => {
@@ -124,7 +140,7 @@ describe('react hooks', () => {
     })
 
     expect(result.current.data).toEqual({ tag: 'fast' })
-    expect(result.current.isLoading).toBe(false)
+    expect(result.current.loading).toBe(false)
   })
 
   it('useCollection reflects a filtered snapshot, live server pushes, and client write-through', async () => {
@@ -199,5 +215,211 @@ describe('react hooks', () => {
       await srv.collection('messages').insert({ id: 's2', channelId: 'general', text: 'live' })
     })
     await waitFor(() => expect(result.current.rows.map((r) => r.id).sort()).toEqual(['s1', 's2']))
+  })
+})
+
+const settle = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms))
+
+describe('useRequest (unified, TanStack-style)', () => {
+  it('auto-fetches when an input is supplied and refetches when it changes', async () => {
+    const { client } = await boot()
+    const { result, rerender } = renderHook(({ input }) => useRequest('add', input), {
+      wrapper: wrapper(client),
+      initialProps: { input: { a: 2, b: 3 } },
+    })
+    await waitFor(() => expect(result.current.data).toEqual({ sum: 5 }))
+    expect(result.current.loading).toBe(false)
+
+    rerender({ input: { a: 3, b: 4 } })
+    await waitFor(() => expect(result.current.data).toEqual({ sum: 7 }))
+  })
+
+  it('enabled:false holds fire until flipped', async () => {
+    const { client, counts } = await boot()
+    const { result, rerender } = renderHook(({ enabled }) => useRequest('add', { a: 1, b: 1 }, { enabled }), {
+      wrapper: wrapper(client),
+      initialProps: { enabled: false },
+    })
+    await act(() => settle())
+    expect(result.current.data).toBeUndefined()
+    expect(counts.add).toBe(0)
+
+    rerender({ enabled: true })
+    await waitFor(() => expect(result.current.data).toEqual({ sum: 2 }))
+  })
+
+  it('the input-omitted form is manual: nothing auto-fires, call works, refetch rejects', async () => {
+    const { client, counts } = await boot()
+    const { result } = renderHook(() => useRequest('add'), { wrapper: wrapper(client) })
+    await act(() => settle())
+    expect(counts.add).toBe(0)
+    expect(result.current.data).toBeUndefined()
+
+    await act(async () => {
+      await result.current.call({ a: 4, b: 4 })
+    })
+    expect(result.current.data).toEqual({ sum: 8 })
+    await expect(result.current.refetch()).rejects.toThrow(/manual/)
+  })
+
+  it('auto-fetch fires exactly once under StrictMode double-mounting', async () => {
+    const { client, counts } = await boot()
+    const { result } = renderHook(() => useRequest('add', { a: 5, b: 5 }), {
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(StrictMode, null, createElement(Provider, { client, children })),
+    })
+    await waitFor(() => expect(result.current.data).toEqual({ sum: 10 }))
+    await act(() => settle())
+    expect(counts.add).toBe(1)
+  })
+
+  it('refetch re-runs with the hook input', async () => {
+    const { client, counts } = await boot()
+    const { result } = renderHook(() => useRequest('add', { a: 6, b: 6 }), { wrapper: wrapper(client) })
+    await waitFor(() => expect(result.current.data).toEqual({ sum: 12 }))
+
+    await act(async () => {
+      await result.current.refetch()
+    })
+    expect(counts.add).toBe(2)
+    expect(result.current.data).toEqual({ sum: 12 })
+  })
+})
+
+describe('useCollection (readiness, idle, handles, batch)', () => {
+  it('ready distinguishes "snapshot not yet applied" from "genuinely empty"', async () => {
+    const { client } = await boot()
+    const { result } = renderHook(() => useCollection('messages'), { wrapper: wrapper(client) })
+    expect(result.current.ready).toBe(false)
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    expect(result.current.rows).toEqual([])
+  })
+
+  it('query: null is the idle state — no subscription, no live surface, writes reject', async () => {
+    const { client } = await boot()
+    const { result } = renderHook(() => useCollection('messages', null), { wrapper: wrapper(client) })
+    await act(() => settle())
+    expect(result.current.ready).toBe(false)
+    expect(result.current.rows).toEqual([])
+    expect(result.current.sub).toBeUndefined()
+    expect(result.current.handle).toBeUndefined()
+    await expect(result.current.insert({ id: 'x', channelId: 'c', text: 't' })).rejects.toMatchObject({
+      code: 'UNAUTHORIZED',
+    })
+  })
+
+  it('exposes the underlying handle and live subscription, and batch applies atomically', async () => {
+    const { client } = await boot()
+    const { result } = renderHook(() => useCollection('messages'), { wrapper: wrapper(client) })
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    expect(result.current.handle).toBeDefined()
+    expect(result.current.sub).toBeDefined()
+    expect(result.current.sub?.rows()).toBe(result.current.rows)
+
+    await act(async () => {
+      await result.current.batch([
+        { type: 'insert', row: { id: 'b1', channelId: 'general', text: 'one' } },
+        { type: 'insert', row: { id: 'b2', channelId: 'general', text: 'two' } },
+      ])
+    })
+    await waitFor(() => expect(result.current.rows.map((r) => r.id).sort()).toEqual(['b1', 'b2']))
+
+    await act(async () => {
+      await result.current.batch([{ type: 'delete', id: 'b1' }])
+    })
+    await waitFor(() => expect(result.current.rows.map((r) => r.id)).toEqual(['b2']))
+  })
+})
+
+describe('useLiveQuery (context-free low-level glue)', () => {
+  it('drives rows/ready from a caller-built LiveRowSet and re-makes on deps change', async () => {
+    const { client, srv } = await boot()
+    await srv.collection('messages').insert({ id: 'q1', channelId: 'a', text: 'in-a' })
+    await srv.collection('messages').insert({ id: 'q2', channelId: 'b', text: 'in-b' })
+
+    const { result, rerender } = renderHook(
+      ({ channel }) =>
+        useLiveQuery(() => client.collection('messages').subscribe({ filter: eq('channelId', channel) }), [channel]),
+      { initialProps: { channel: 'a' } },
+    )
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    expect(result.current.rows.map((r) => (r as { id: string }).id)).toEqual(['q1'])
+
+    rerender({ channel: 'b' })
+    await waitFor(() => expect(result.current.rows.map((r) => (r as { id: string }).id)).toEqual(['q2']))
+  })
+
+  it('a null make is the idle state', async () => {
+    const { result } = renderHook(() => useLiveQuery(null, []))
+    expect(result.current.rows).toEqual([])
+    expect(result.current.ready).toBe(false)
+  })
+})
+
+describe('useDoc (lazy ids, readiness, errors, handle)', () => {
+  it('ready flips only after the catch-up snapshot: pre-existing content is whole before ready reads true', async () => {
+    const { client, srv } = await boot()
+    await srv.collection('scenes').create('s1', { title: 'hello' })
+
+    const { result } = renderHook(() => useDoc('scenes', 's1'), { wrapper: wrapper(client) })
+    // The sequencing contract the react-chat-transports editor needs: `ready` stays false until the
+    // catch-up snapshot has applied, however early a (possibly empty) local snapshot exists — binding
+    // an editor before `ready` is exactly the stray-merge bug this field prevents.
+    expect(result.current.ready).toBe(false)
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    expect(result.current.data).toEqual({ title: 'hello' })
+    expect(result.current.handle).toBeDefined()
+    expect(result.current.error).toBeUndefined()
+  })
+
+  it('a null id idles the hook; writes throw', async () => {
+    const { client } = await boot()
+    const { result } = renderHook(() => useDoc('scenes', null), { wrapper: wrapper(client) })
+    await act(() => settle())
+    expect(result.current.ready).toBe(false)
+    expect(result.current.data).toBeUndefined()
+    expect(result.current.handle).toBeUndefined()
+    expect(() => result.current.set({ title: 'nope' })).toThrow()
+  })
+
+  it('an async resolver opens the doc it resolves to, re-running on deps change', async () => {
+    const { client, srv } = await boot()
+    await srv.collection('scenes').create('r1', { title: 'first' })
+    await srv.collection('scenes').create('r2', { title: 'second' })
+
+    const { result, rerender } = renderHook(
+      ({ which }) =>
+        useDoc(
+          'scenes',
+          async () => {
+            await settle(20)
+            return which
+          },
+          [which],
+        ),
+      { wrapper: wrapper(client), initialProps: { which: 'r1' } },
+    )
+    await waitFor(() => expect(result.current.data).toEqual({ title: 'first' }))
+
+    rerender({ which: 'r2' })
+    await waitFor(() => expect(result.current.data).toEqual({ title: 'second' }))
+    expect(result.current.error).toBeUndefined()
+  })
+
+  it('an absent doc surfaces on error instead of hanging invisible', async () => {
+    const { client } = await boot()
+    const { result } = renderHook(() => useDoc('scenes', 'missing'), { wrapper: wrapper(client) })
+    await waitFor(() => expect(result.current.error).toBeDefined())
+    expect(result.current.ready).toBe(false)
+    expect(result.current.error).toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it('a resolver that resolves null idles instead of opening', async () => {
+    const { client } = await boot()
+    const { result } = renderHook(() => useDoc('scenes', async () => null, []), { wrapper: wrapper(client) })
+    await act(() => settle())
+    expect(result.current.ready).toBe(false)
+    expect(result.current.handle).toBeUndefined()
+    expect(result.current.error).toBeUndefined()
   })
 })

@@ -167,9 +167,30 @@ Module-level exports typed off the shared `Register` (`ReturnType<typeof createC
 - Null tolerance: no shared client (pre-auth) ⇒ no ChatClient ⇒ module-level `useChat(): ChatClient<RC> | null` returns null and the row-hooks idle — the factory's throwing `useChat` is unchanged, only the module-level export is maybe-style, matching `useMaybeClient`'s role.
 - New optional peer: `@super-line/plugin-chat` → `@super-line/react` (minimum = the minor shipping D1).
 
-### D10 — StrictMode story is designed in its own ticket
+### D10 — StrictMode is supported: committed-effect ownership everywhere (locked 2026-07-30)
 
-Deliberately not specified here (wayfinder ticket "Design the StrictMode story", HITL). Constraint this PLAN imposes: `SuperLineProvider`/`SuperLineAuthProvider`/`ChatProvider` must stay compatible with whatever it decides — all client construction/teardown introduced by this PLAN lives in committed effects, never render.
+The diagnosis: construction connects and `close()` is terminal, so a `useState(() => createSuperLineClient(…))`
+initializer leaks one connected socket per StrictMode double-invoked render, and `SuperLineAuthProvider`'s
+old close-on-cleanup killed its kept client TERMINALLY on StrictMode's fake unmount — the dev app died.
+The fix (user-locked: hook + provider fix; committed-effect over ref-counted cache):
+
+```ts
+export function useSuperLineClient<C, R>(
+  make: () => SuperLineClient<C, R>,   // read via ref — inline arrows safe; `deps` alone drive rebuilds
+  deps?: readonly unknown[],
+): SuperLineClient<C, R> | null        // null until the first commit; the hooks idle on null by design
+```
+
+- Generic (not Register-bound) so factory users get it too. Every build is paired with exactly one
+  close; StrictMode costs one extra properly-paired connect/close cycle in dev.
+- **`SuperLineAuthProvider` builds its `authClient` in a committed effect** (options captured at build
+  time via ref — the documented capture-at-mount semantics hold) and **withholds children until the
+  instance exists** (one imperceptible commit in prod): `useAuth()`'s stable-instance contract
+  (ADR-0020) holds because no consumer ever renders without an instance. Adopted instances render
+  children from the first paint and are never closed.
+- The auto-ChatProvider (D9) already used this pattern; the three providers are now uniform.
+- Examples re-enable StrictMode in their migration tickets (user's call); the docs' "omit StrictMode"
+  callout dies in the docs ticket.
 
 ## Build order
 

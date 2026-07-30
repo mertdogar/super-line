@@ -12,6 +12,7 @@ import {
   createSuperLineHooks,
   SuperLineProvider,
   useLiveQuery,
+  useSuperLineClient,
   useCollection as boundUseCollection,
   useMaybeClient as boundUseMaybeClient,
 } from '@super-line/react'
@@ -68,6 +69,7 @@ async function boot(): Promise<{
   client: SuperLineClient<typeof contract, 'user'>
   srv: SuperLineServer<typeof contract, { role: 'user'; ctx: object }>
   counts: { add: number }
+  url: string
 }> {
   const server = http.createServer()
   const counts = { add: 0 }
@@ -106,7 +108,7 @@ async function boot(): Promise<{
     await srv.close()
     await new Promise<void>((resolve) => server.close(() => resolve()))
   })
-  return { client, srv, counts }
+  return { client, srv, counts, url }
 }
 
 function wrapper(client: SuperLineClient<typeof contract, 'user'>) {
@@ -421,5 +423,71 @@ describe('useDoc (lazy ids, readiness, errors, handle)', () => {
     expect(result.current.ready).toBe(false)
     expect(result.current.handle).toBeUndefined()
     expect(result.current.error).toBeUndefined()
+  })
+})
+
+describe('useSuperLineClient (StrictMode-safe client ownership)', () => {
+  it('pairs every build with a close under StrictMode and works end to end', async () => {
+    const { url } = await boot()
+    let builds = 0
+    let closes = 0
+    const make = () => {
+      builds++
+      const c = createSuperLineClient(contract, {
+        transport: webSocketClientTransport({ url }),
+        role: 'user',
+      })
+      const close = c.close.bind(c)
+      ;(c as { close: () => void }).close = () => {
+        closes++
+        close()
+      }
+      return c
+    }
+    const view = renderHook(() => useSuperLineClient(make, []), {
+      wrapper: ({ children }: { children: ReactNode }) => createElement(StrictMode, null, children),
+    })
+    await waitFor(() => expect(view.result.current).not.toBeNull())
+    // StrictMode's effect cycle: build → close → rebuild. Every socket opened is paired with a close.
+    expect(builds).toBe(2)
+    expect(closes).toBe(1)
+
+    const live = view.result.current!
+    await expect(live.add({ a: 1, b: 2 })).resolves.toEqual({ sum: 3 })
+
+    view.unmount()
+    expect(closes).toBe(builds)
+  })
+
+  it('rebuilds when deps change, closing the previous client', async () => {
+    const { url } = await boot()
+    const made: Array<{ closed: boolean }> = []
+    const view = renderHook(
+      ({ tag }) =>
+        useSuperLineClient(() => {
+          const c = createSuperLineClient(contract, {
+            transport: webSocketClientTransport({ url }),
+            role: 'user',
+            params: { tag },
+          })
+          const entry = { closed: false }
+          made.push(entry)
+          const close = c.close.bind(c)
+          ;(c as { close: () => void }).close = () => {
+            entry.closed = true
+            close()
+          }
+          return c
+        }, [tag]),
+      { initialProps: { tag: 'a' } },
+    )
+    await waitFor(() => expect(view.result.current).not.toBeNull())
+    const first = view.result.current
+
+    view.rerender({ tag: 'b' })
+    await waitFor(() => expect(view.result.current).not.toBe(first))
+    expect(made[0]?.closed).toBe(true)
+    view.unmount()
+    expect(made.every((entry) => entry.closed)).toBe(true)
   })
 })

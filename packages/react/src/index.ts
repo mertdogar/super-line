@@ -126,6 +126,37 @@ export function useLiveQuery<Row>(
 }
 
 /**
+ * StrictMode-safe client ownership: builds the client in a COMMITTED effect, closes it in that
+ * effect's cleanup, and rebuilds when `deps` change — so StrictMode's dev-mode effect cycle
+ * (mount → cleanup → re-run) opens and closes a real socket once extra but never leaks one, and a
+ * client constructed during a render React later discards is never created at all. `make` is read via
+ * a ref: an inline arrow is safe, `deps` alone drive rebuilds.
+ *
+ * Returns `null` until the first commit (and between rebuilds) — exactly the state every hook in this
+ * package idles on, and what `SuperLineProvider` accepts. Construction connects, so this is the ONLY
+ * way to own a client from React that survives StrictMode; a `useState(() => createSuperLineClient(…))`
+ * initializer leaks a connected socket every double-invoked render.
+ */
+export function useSuperLineClient<C extends Contract, R extends RoleOf<C>>(
+  make: () => SuperLineClient<C, R>,
+  deps: readonly unknown[] = [],
+): SuperLineClient<C, R> | null {
+  const [client, setClient] = useState<SuperLineClient<C, R> | null>(null)
+  const makeRef = useRef(make)
+  makeRef.current = make
+  useEffect(() => {
+    const next = makeRef.current()
+    setClient(next)
+    return () => {
+      next.close()
+      setClient((current) => (current === next ? null : current))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `deps` drives rebuilds; `make` rides the ref
+  }, deps)
+  return client
+}
+
+/**
  * Bind typed React hooks to a contract + role. Create the client once, wrap your
  * tree in the returned `<Provider>`, then use the hooks inside.
  *

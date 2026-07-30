@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import {
   SuperLineProvider,
   type RegisterGuard,
@@ -66,24 +66,43 @@ export function SuperLineAuthProvider(props: SuperLineAuthProviderProps): ReactN
   const { children, client: adopted, ...options } = props as { children?: ReactNode } & {
     client?: AuthClient<RegisteredContract, RegisteredRole>
   } & AuthClientOptions<RegisteredContract, RegisteredRole>
-  const [built] = useState(() => (adopted ? null : authClient<RegisteredContract, RegisteredRole>(options)))
-  const auth = (adopted ?? built) as AuthClient<RegisteredContract, RegisteredRole>
-
-  // Close only what we built. An adopted instance outlives this tree by definition.
-  useEffect(() => (built ? () => built.client.close() : undefined), [built])
+  // Built in a COMMITTED effect, never in a render (StrictMode-safe): a useState-initializer build
+  // leaked one connected guest socket per double-invoked render, and closing the kept instance on
+  // StrictMode's fake unmount was TERMINAL — the dev app died. Now every build is paired with exactly
+  // one close, and the cycle simply constructs a fresh instance. Options are captured at build time
+  // (i.e. mount) via a ref, as documented above.
+  const optionsRef = useRef(options)
+  optionsRef.current = options
+  const [built, setBuilt] = useState<AuthClient<RegisteredContract, RegisteredRole> | null>(null)
+  useEffect(() => {
+    if (adopted) {
+      setBuilt(null)
+      return
+    }
+    const next = authClient<RegisteredContract, RegisteredRole>(optionsRef.current)
+    setBuilt(next)
+    return () => {
+      next.client.close()
+      setBuilt((current) => (current === next ? null : current))
+    }
+  }, [adopted])
+  const auth = adopted ?? built
 
   const state = useSyncExternalStore(
-    auth.subscribe,
-    () => auth.state,
-    () => auth.state,
+    auth ? auth.subscribe : noop,
+    () => auth?.state ?? IDLE,
+    () => auth?.state ?? IDLE,
   )
   // Null until there is a CONFIRMED authed session, so the shared hooks idle rather than running
   // against a guest connection whose every collection subscribe would be denied.
-  const client = state.status === 'authed' ? auth.client : null
+  const client = auth && state.status === 'authed' ? auth.client : null
 
   return (
     <AuthCtx.Provider value={auth}>
-      <Feed client={client}>{children}</Feed>
+      {/* Children are withheld for the one building commit: useAuth()'s stable-instance contract
+          (ADR-0020) holds because no consumer ever renders without an instance to hold. An adopted
+          instance exists from the first paint, so nothing is withheld on that path. */}
+      <Feed client={client}>{auth ? children : null}</Feed>
     </AuthCtx.Provider>
   )
 }

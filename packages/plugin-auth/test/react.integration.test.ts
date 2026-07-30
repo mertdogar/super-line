@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createElement, type ReactNode } from 'react'
+import { createElement, StrictMode, type ReactNode } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import * as z from 'zod'
@@ -7,7 +7,7 @@ import { defineContract } from '@super-line/core'
 import { memoryCollections } from '@super-line/collections-memory'
 import { authContract } from '@super-line/plugin-auth'
 import { auth } from '@super-line/plugin-auth/server'
-import { authClient, type TokenStorage } from '@super-line/plugin-auth/client'
+import { authClient, type AuthClient, type TokenStorage } from '@super-line/plugin-auth/client'
 import { SuperLineAuthProvider, useAuth } from '@super-line/plugin-auth/react'
 import {
   createSuperLineHooks,
@@ -29,6 +29,7 @@ const app = defineContract({
 type Bound = ReturnType<typeof createSuperLineHooks<typeof app, 'user'>>
 const useSharedMaybeClient = boundUseMaybeClient as unknown as Bound['useMaybeClient']
 const useSharedCollection = boundUseCollection as unknown as Bound['useCollection']
+const useBoundAuth = useAuth as unknown as () => AuthClient<typeof app, 'user'>
 
 const h = createHarness()
 afterEach(async () => {
@@ -76,7 +77,7 @@ describe('plugin-auth react — the session feeds the SHARED binding', () => {
     const { url } = await boot()
     const { result } = renderHook(
       () => ({
-        auth: useAuth(),
+        auth: useBoundAuth(),
         client: useSharedMaybeClient(),
         users: useSharedCollection('users'),
       }),
@@ -106,6 +107,35 @@ describe('plugin-auth react — the session feeds the SHARED binding', () => {
     expect(result.current.auth.state.status).toBe('guest')
     await waitFor(() => expect(result.current.client).toBeNull())
     expect(result.current.users.rows).toEqual([])
+  })
+
+  it('survives StrictMode: builds in a committed effect, every build paired with a close, session fully usable', async () => {
+    const { url } = await boot()
+    const storage = memStorage()
+    const { result } = renderHook(
+      () => ({
+        auth: useBoundAuth(),
+        client: useSharedMaybeClient(),
+      }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(StrictMode, null, createElement(optionsWrapper(url, storage), null, children)),
+      },
+    )
+
+    // Children are withheld for the building commit(s); once the instance exists the session must be
+    // FULLY usable — under the old useState-initializer + terminal close, StrictMode's effect cycle
+    // killed the kept client and this whole flow hung dead.
+    await waitFor(() => expect(result.current).not.toBeNull())
+    await waitFor(() => expect(result.current.auth.state.pending).toBe(false))
+    expect(result.current.auth.state.status).toBe('guest')
+
+    await act(async () => {
+      await result.current.auth.signUp({ email: 'strict@x.com', password: 'hunter22', displayName: 'Strict' })
+    })
+    expect(result.current.auth.state.status).toBe('authed')
+    await waitFor(() => expect(result.current.client).not.toBeNull())
+    expect(await result.current.auth.client.whoami()).toMatchObject({ displayName: 'Strict' })
   })
 
   it('adopts an externally-owned auth client and never closes it on unmount', async () => {

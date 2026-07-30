@@ -529,9 +529,11 @@ export type RegisteredRole = Register extends { role: infer R extends string }
 
 /**
  * Makes an unregistered app fail at the provider — the one place every app touches — with the property
- * name as the message, instead of leaving a trail of cryptic `never`s at each hook.
+ * name as the message, instead of leaving a trail of cryptic `never`s at each hook. Exported so plugin
+ * providers that FEED the shared context (`SuperLineAuthProvider`) can put the same guard on their own
+ * props; inside a plugin's own (unregistered) compilation, cast the guard away at the one render site.
  */
-type RegisterGuard = Register extends { contract: Contract; role: string }
+export type RegisterGuard = Register extends { contract: Contract; role: string }
   ? unknown
   : {
       /** ⛔ Declare `interface Register { contract; role }` on '@super-line/react' first. */

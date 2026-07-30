@@ -1,17 +1,20 @@
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { createSuperLineHooks } from '@super-line/react'
-import type { Contract, RoleOf } from '@super-line/core'
+import {
+  SuperLineProvider,
+  type RegisterGuard,
+  type RegisteredContract,
+  type RegisteredRole,
+} from '@super-line/react'
 import { authClient, type AuthClient, type AuthClientOptions, type AuthState } from './client.js'
 
 export type { AuthClient, AuthClientOptions, AuthState, TokenStorage } from './client.js'
 
 /**
- * Declare your contract and authed role ONCE, by declaration merging, and every hook in this module is typed
- * by it — no factory, no destructuring, no generic threading at the call site.
+ * This module is the auth half of the ONE React binding (ADR-0026): `Register` lives in
+ * `@super-line/react` — declare your contract and role THERE, once —
  *
- * @example
  * ```ts
- * declare module '@super-line/plugin-auth/react' {
+ * declare module '@super-line/react' {
  *   interface Register {
  *     contract: typeof app
  *     role: 'user'
@@ -19,43 +22,10 @@ export type { AuthClient, AuthClientOptions, AuthState, TokenStorage } from './c
  * }
  * ```
  *
- * Note for LIBRARY authors: this is a global augmentation. If you ship a package (rather than an app), keep the
- * declaration in a source-only ambient file your `.d.ts` build does not emit — otherwise every consumer inherits
- * it, and one with its own contract cannot override it.
+ * — and import the data hooks (`useClient`, `useCollection`, `useDoc`, …) from `@super-line/react`
+ * directly. This module exports only what is auth's: {@link SuperLineAuthProvider}, which owns the
+ * session lifecycle AND feeds the shared context, and {@link useAuth}.
  */
-export interface Register {}
-
-/** The contract from {@link Register}. `never` until you declare one. */
-export type RegisteredContract = Register extends { contract: infer C extends Contract } ? C : never
-/** The authed role from {@link Register}. `never` until you declare one. */
-export type RegisteredRole = Register extends { role: infer R extends string }
-  ? R extends RoleOf<RegisteredContract>
-    ? R
-    : never
-  : never
-
-/**
- * Makes an unregistered app fail at the provider — the one place every app touches — with the property name as
- * the message, instead of leaving a trail of cryptic `never`s at each hook.
- */
-type RegisterGuard = Register extends { contract: Contract; role: string }
-  ? unknown
-  : {
-      /** ⛔ Declare `interface Register { contract; role }` on '@super-line/plugin-auth/react' first. */
-      __superLineRegisterMissing: never
-    }
-
-// The one client binding for the app, fed by the provider below. Module-level because `Register` is: there is
-// exactly one contract per app (ADR-0004 — one server, one client, one session, one identity).
-const line = createSuperLineHooks<RegisteredContract, RegisteredRole>()
-
-/**
- * Every re-export below is annotated with an indexed access into this — never left to inference. An inferred
- * type is RESOLVED when the `.d.ts` is emitted, i.e. while `Register` is still empty, which bakes `never` into
- * the published signatures and makes declaration merging silently useless. A written annotation is emitted
- * verbatim, so `RegisteredContract` stays lazy and re-resolves in the consumer's program.
- */
-type Hooks = ReturnType<typeof createSuperLineHooks<RegisteredContract, RegisteredRole>>
 
 const AuthCtx = createContext<AuthClient<RegisteredContract, RegisteredRole> | null>(null)
 
@@ -67,9 +37,18 @@ export type SuperLineAuthProviderProps = RegisterGuard & { children?: ReactNode 
     | { client: AuthClient<RegisteredContract, RegisteredRole> }
   )
 
+// The shared provider is guard-typed for APPS; inside this (unregistered) compilation the guard is
+// cast away at the one render site — the session's client flows into @super-line/react's singleton
+// context, which is what makes `useCollection` et al. work with no bridge (ADR-0026).
+const Feed = SuperLineProvider as unknown as (props: {
+  client: AuthClient<RegisteredContract, RegisteredRole>['client'] | null
+  children?: ReactNode
+}) => ReactNode
+
 /**
- * The app's single super-line provider: owns the auth lifecycle AND feeds the live client to every hook in this
- * module, so a session replacement (`reauthenticate`, `signIn`, `signOut`) propagates with no bridge to write.
+ * The app's single super-line provider: owns the auth lifecycle AND feeds the live client to
+ * `@super-line/react`'s shared module-level context, so a session replacement (`reauthenticate`,
+ * `signIn`, `signOut`) propagates to every hook with no bridge to write.
  *
  * Two forms — build one from options, or adopt an instance you already own (`authClient()` from
  * `@super-line/plugin-auth/client`, e.g. when non-React code drives the same session):
@@ -98,13 +77,13 @@ export function SuperLineAuthProvider(props: SuperLineAuthProviderProps): ReactN
     () => auth.state,
     () => auth.state,
   )
-  // Null until there is a CONFIRMED authed session, so the hooks idle rather than running against a guest
-  // connection whose every collection subscribe would be denied.
+  // Null until there is a CONFIRMED authed session, so the shared hooks idle rather than running
+  // against a guest connection whose every collection subscribe would be denied.
   const client = state.status === 'authed' ? auth.client : null
 
   return (
     <AuthCtx.Provider value={auth}>
-      <line.Provider client={client}>{children}</line.Provider>
+      <Feed client={client}>{children}</Feed>
     </AuthCtx.Provider>
   )
 }
@@ -124,18 +103,3 @@ export function useAuth(): AuthClient<RegisteredContract, RegisteredRole> {
   if (!auth) throw new Error('useAuth must be used within a <SuperLineAuthProvider>')
   return auth
 }
-
-/** The live client, or `null` while there is no confirmed session. Every hook below idles on that null. */
-export const useClient: Hooks['useMaybeClient'] = line.useMaybeClient
-/** Subscribe to a server-pushed event for the component's lifetime. Idle before authentication. */
-export const useEvent: Hooks['useEvent'] = line.useEvent
-/** Subscribe to a topic and track its latest value. Idle before authentication. */
-export const useSubscription: Hooks['useSubscription'] = line.useSubscription
-/** Wrap a request as `{ data, error, loading, refetch, call }`. `call` rejects `UNAUTHORIZED` before authentication. */
-export const useRequest: Hooks['useRequest'] = line.useRequest
-/** Open a CRDT document by id and track it reactively. Idle reads before authentication; writes throw. */
-export const useDoc: Hooks['useDoc'] = line.useDoc
-/** Subscribe to a collection subset and track its rows. Idle reads before authentication; writes reject. */
-export const useCollection: Hooks['useCollection'] = line.useCollection
-/** The connection's server-vended `env` (ADR-0012). `null` before authentication. */
-export const useEnv: Hooks['useEnv'] = line.useEnv

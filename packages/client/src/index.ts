@@ -184,6 +184,12 @@ export interface LiveRowSet<Row = unknown> {
 export interface CollectionHandle<Row = unknown> {
   /** Open a live subset subscription (omit the query for the whole collection, subject to server policy). */
   subscribe(query?: CollectionQuery): LiveRowSet<Row>
+  /**
+   * One-shot read: the subscription's initial snapshot (ordered + limited per the query) as a detached
+   * copy, with the subscription closed before the promise settles. Rejects on denial exactly like
+   * `subscribe().ready`. For anything that should stay live, use `subscribe`.
+   */
+  query(query?: CollectionQuery): Promise<Row[]>
   /** Insert a row (its key field becomes the id). Resolves on the server ack; rejects on conflict/denial. */
   insert(row: Row): Promise<void>
   /** Replace a row by its key (LWW). */
@@ -1200,7 +1206,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       if (typeof v !== 'string') throw new SuperLineError('VALIDATION', `Collection ${name} row is missing string key '${key}'`)
       return v
     }
-    return {
+    const handle: CollectionHandle = {
       subscribe(query = {}) {
         const subId = nextSubId++
         const sub: LiveSub = {
@@ -1234,6 +1240,15 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
           },
         }
       },
+      async query(query?: CollectionQuery) {
+        const sub = handle.subscribe(query)
+        try {
+          await sub.ready
+          return [...sub.rows()] // a detached copy — the live view array dies with the sub
+        } finally {
+          sub.close()
+        }
+      },
       insert: (row) => sendBatch([{ op: 'insert', n: name, id: idOf(row), d: row }]),
       update: (row) => sendBatch([{ op: 'update', n: name, id: idOf(row), d: row }]),
       delete: (id) => sendBatch([{ op: 'delete', n: name, id }]),
@@ -1242,6 +1257,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
           ops.map((o) => (o.type === 'delete' ? { op: 'delete', n: name, id: o.id } : { op: o.type, n: name, id: idOf(o.row), d: o.row })),
         ),
     }
+    return handle
   }
 
   connect()

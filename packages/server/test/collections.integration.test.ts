@@ -150,6 +150,61 @@ describe('collections — snapshot, filtering, live routing', () => {
   })
 })
 
+describe('collections — one-shot query()', () => {
+  it('returns the ordered, limited snapshot as a detached copy — no live subscription stays behind', async () => {
+    const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+      policies: {
+        users: { read: () => undefined, write: () => true },
+        messages: { read: () => undefined, write: authorOnly },
+      },
+    })
+    await srv.collection('messages').insert(msg('m1', 'general', 'u9', 1))
+    await srv.collection('messages').insert(msg('m2', 'random', 'u9', 2))
+    await srv.collection('messages').insert(msg('m3', 'general', 'u9', 3))
+
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    const rows = await client
+      .collection('messages')
+      .query({ filter: eq('channelId', 'general'), orderBy: [{ field: 'createdAt', dir: 'desc' }], limit: 1 })
+    expect(rows.map((r) => r.id)).toEqual(['m3'])
+
+    // One-shot means one-shot: a later matching write neither mutates the returned array nor reaches
+    // a lingering subscription (the sub was closed in the same call).
+    await srv.collection('messages').insert(msg('m5', 'general', 'u9', 5))
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(rows.map((r) => r.id)).toEqual(['m3'])
+  })
+
+  it('resolves [] when nothing matches', async () => {
+    const { url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+      policies: {
+        users: { read: () => undefined, write: () => true },
+        messages: { read: () => undefined, write: authorOnly },
+      },
+    })
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    const rows = await client.collection('messages').query({ filter: eq('channelId', 'nowhere') })
+    expect(rows).toEqual([])
+  })
+
+  it('rejects on a denied read exactly like subscribe().ready', async () => {
+    const { url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+      policies: { messages: { write: authorOnly } }, // no `read` ⇒ denied
+    })
+    const client = h.client(chat, { url, role: 'user', params: { userId: 'u1' } })
+    await expect(client.collection('messages').query()).rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+})
+
 describe('collections — row policies', () => {
   it('rejects a write that fails the write guard (author-only)', async () => {
     const { url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {

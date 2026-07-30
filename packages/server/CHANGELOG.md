@@ -3,6 +3,17 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [server-v0.21.0] — 2026-07-30
+
+### Features
+
+- **server:** Tell callers when a declared interest is live ([87e9d7e])
+
+### Testing
+
+- **server:** Wait for BOTH nodes before asserting a gossiped presence view ([e03e746])
+- One polling wait with backoff, and teardown that cannot hang ([e86664a])
+
 ## [server-v0.20.0] — 2026-07-29
 
 ### Features

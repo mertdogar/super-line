@@ -48,14 +48,22 @@ describe.skipIf(!dockerAvailable)('rabbitmq presence cross-process (slice 4)', (
     h.client(contract, { url: b.url, role: 'agent', params: { uid: 'u2' } })
     await ca.joinRoom({ room: 'lobby' })
 
-    await waitFor(async () => (await a.srv.cluster.count()) === 2, 8000)
+    // Gossip presence converges per NODE, so waiting on a's view says nothing about b's — assert only
+    // once BOTH have caught up, or this races (and the old accept ordering merely happened to win it).
+    await waitFor(async () => (await a.srv.cluster.count()) === 2 && (await b.srv.cluster.count()) === 2, {
+      timeout: 8000,
+      label: 'both nodes see both connections',
+    })
     expect(await b.srv.cluster.count()).toBe(2)
     expect(await a.srv.cluster.byUser('u1')).toHaveLength(1)
     expect(await a.srv.isOnline('u1')).toBe(true)
     expect(await a.srv.isOnline('ghost')).toBe(false)
 
-    const lobby = await b.srv.cluster.room('lobby')
-    expect(lobby.map((d) => d.userId)).toEqual(['u1'])
+    await waitFor(async () => (await b.srv.cluster.room('lobby')).length === 1, {
+      timeout: 8000,
+      label: 'node B sees u1 in the lobby',
+    })
+    expect((await b.srv.cluster.room('lobby')).map((d) => d.userId)).toEqual(['u1'])
     const topo = await a.srv.cluster.topology()
     expect(new Set(topo.map((n) => n.nodeId))).toEqual(new Set([a.srv.nodeId, b.srv.nodeId]))
     expect(topo.every((n) => n.alive)).toBe(true)

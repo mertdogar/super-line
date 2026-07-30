@@ -116,7 +116,12 @@ describe('zeromq adapter — cluster presence through the server (mesh)', () => 
     h.client(contract, { url: b.url, role: 'agent', params: { uid: 'u2' } })
     await ca.join({ room: 'lobby' })
 
-    await waitFor(async () => (await a.srv.cluster.count()) === 2, 25_000)
+    // Gossip presence converges per NODE, so waiting on a's view says nothing about b's — assert only
+    // once BOTH have caught up, or this races (and the old accept ordering merely happened to win it).
+    await waitFor(async () => (await a.srv.cluster.count()) === 2 && (await b.srv.cluster.count()) === 2, {
+      timeout: 25_000,
+      label: 'both nodes see both connections',
+    })
     expect(await b.srv.cluster.count()).toBe(2)
     expect(await a.srv.cluster.byUser('u1')).toHaveLength(1)
     expect(await a.srv.isOnline('u1')).toBe(true)

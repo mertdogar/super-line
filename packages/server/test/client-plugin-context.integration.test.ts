@@ -6,6 +6,7 @@ import { createLoopbackTransport } from '@super-line/transport-loopback'
 import { memoryCollections } from '@super-line/collections-memory'
 import { crdtMemoryCollections, crdtCollectionsClient } from '@super-line/collections-crdt-memory'
 import * as z from 'zod'
+import { waitFor } from '../../core/test/wait.js'
 
 const contract = defineContract({
   collections: {
@@ -18,14 +19,6 @@ const contract = defineContract({
   },
   roles: { user: {} },
 })
-
-async function waitFor(pred: () => boolean, timeout = 2000): Promise<void> {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await new Promise((r) => setTimeout(r, 5))
-  }
-}
 
 const teardown: Array<() => unknown> = []
 afterEach(async () => {

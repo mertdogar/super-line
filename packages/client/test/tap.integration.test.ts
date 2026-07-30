@@ -3,6 +3,7 @@ import { defineContract, type ClientTapEvent, type Schema } from '@super-line/co
 import { createSuperLineClient, type SuperLineClientPlugin } from '@super-line/client'
 import { createSuperLineServer, type SuperLineServer } from '@super-line/server'
 import { createLoopbackTransport } from '@super-line/transport-loopback'
+import { waitFor } from '../../core/test/wait.js'
 
 // passthrough Standard Schema (client package has no zod dep) — validate returns the value unchanged
 const s = (): Schema =>
@@ -25,14 +26,6 @@ const contract = defineContract({
   },
   roles: { user: {} },
 })
-
-async function waitFor(pred: () => boolean, timeout = 2000): Promise<void> {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await new Promise((r) => setTimeout(r, 5))
-  }
-}
 
 const servers: SuperLineServer<typeof contract, { role: 'user'; ctx: {} }>[] = []
 const clients: { close(): void }[] = []

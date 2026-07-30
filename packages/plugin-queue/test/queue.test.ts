@@ -6,15 +6,13 @@ import { createSuperLineServer, type SuperLineServer } from '@super-line/server'
 import { createSuperLineClient } from '@super-line/client'
 import { createLoopbackTransport } from '@super-line/transport-loopback'
 import { PermanentJobError, QUEUE_JOBS, queue } from '../src/index.js'
+import { waitFor as poll } from '../../core/test/wait.js'
 
-const waitFor = async <T>(read: () => Promise<T>, done: (value: T) => boolean): Promise<T> => {
-  const deadline = Date.now() + 3_000
-  while (Date.now() < deadline) {
-    const value = await read()
-    if (done(value)) return value
-    await new Promise((resolve) => setTimeout(resolve, 10))
-  }
-  throw new Error('timed out')
+// Value-returning wrapper over the shared poll: reads until `done`, then hands back what it read.
+const waitFor = async <T>(read: () => Promise<T>, done: (value: T) => boolean, label?: string): Promise<T> => {
+  let last!: T
+  await poll(async () => done((last = await read())), { timeout: 3_000, label })
+  return last
 }
 
 describe('queue kit', () => {

@@ -44,7 +44,7 @@ describe('rooms + events', () => {
     srv.implement({
       user: {
         join: async ({ room }, _ctx, conn) => {
-          srv.room(room).add(conn)
+          await srv.room(room).add(conn)
           return { ok: true }
         },
         say: async ({ room, text }, ctx) => {
@@ -77,7 +77,7 @@ describe('rooms + events', () => {
       user: {
         join: async ({ room }, _ctx, conn) => {
           connRef = conn
-          srv.room(room).add(conn)
+          await srv.room(room).add(conn)
           return { ok: true }
         },
         say: async ({ room, text }, ctx) => {

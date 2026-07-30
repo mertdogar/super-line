@@ -9,6 +9,7 @@ import { webSocketServerTransport, webSocketClientTransport } from '@super-line/
 import { memoryCollections } from '@super-line/collections-memory'
 import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
 import { superLineCollectionOptions } from '@super-line/tanstack-db'
+import { waitFor } from '../../core/test/wait.js'
 
 const contract = defineContract({
   collections: {
@@ -54,14 +55,6 @@ async function harness() {
     await new Promise<void>((r) => httpServer.close(() => r()))
   })
   return { srv, client }
-}
-
-const waitFor = async (pred: () => boolean | Promise<boolean>, timeout = 2000): Promise<void> => {
-  const start = Date.now()
-  while (!(await pred())) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await new Promise((r) => setTimeout(r, 5))
-  }
 }
 
 describe('@super-line/tanstack-db adapter', () => {

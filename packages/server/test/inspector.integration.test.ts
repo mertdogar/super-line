@@ -330,7 +330,7 @@ describe('inspector events topic (slice 5)', () => {
   it('pushes live connect / room / topic / disconnect events to subscribed inspectors', async () => {
     const { srv, url } = await h.server(eventsContract, { authenticate: eventsAuth, plugins: [inspector()] })
     srv.implement({
-      user: { join: async ({ room }, _ctx, conn) => (srv.room(room).add(conn), { ok: true }) },
+      user: { join: async ({ room }, _ctx, conn) => (await srv.room(room).add(conn), { ok: true }) },
     })
 
     const insp = await connectInspector(url)
@@ -476,7 +476,7 @@ describe('inspector message events (T3.2)', () => {
       user: {
         echo: async (_in, _ctx, conn) => {
           conn.emit('ping', { n: 3 })
-          srv.room('r').add(conn)
+          await srv.room('r').add(conn)
           srv.room('r').broadcast('ping', { n: 1 })
           srv.forRole('user').publish('feed', { n: 2 })
           return { ok: true }

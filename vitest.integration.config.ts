@@ -11,6 +11,7 @@ export default defineConfig({
   test: {
     include: heavy,
     testTimeout: 20_000,
+    hookTimeout: 60_000, // container boots live in beforeAll; see the ladder note in vitest.config.ts
     pool: 'forks',
     fileParallelism: false,
     globalSetup: './packages/server/test/global-docker.ts',

@@ -1,31 +1,17 @@
-import { execSync } from 'node:child_process'
 import { GenericContainer, Network, Wait, type StartedNetwork, type StartedTestContainer } from 'testcontainers'
 import type { CrdtCollectionStore, DocOptions } from '@super-line/core'
 import { crdtPgliteCollections } from '@super-line/collections-crdt-pglite'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, inject } from 'vitest'
+import { waitForWith } from '../../core/test/wait.js'
 
-// Real end-to-end: two `crdtPgliteCollections` nodes (each with its OWN in-memory PGlite replica) against ONE
-// central Postgres + a real ElectricSQL service. Unlike the unit suite (which hand-INSERTs op-log rows to fake
-// the feed), this exercises the actual cross-node bus — a co-writer's Yjs delta is appended to central, Electric
-// streams it to the other node's replica keyed by (collection, id), and that node folds it in. Proves the CRDT
-// claim: concurrent co-writes on different nodes MERGE, they don't clobber. Requires Docker; skipped when absent.
-let dockerAvailable = true
-try {
-  execSync('docker info', { stdio: 'ignore' })
-} catch {
-  dockerAvailable = false
-}
+const waitFor = waitForWith(15_000)
+
+// Docker is probed once for the whole lane in global-docker.ts.
+const dockerAvailable = inject('dockerAvailable')
 
 const docMode: DocOptions = { mode: 'document' }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
-async function waitFor(pred: () => boolean | Promise<boolean>, timeout = 15_000): Promise<void> {
-  const start = Date.now()
-  while (!(await pred())) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await sleep(50)
-  }
-}
 // CRDT merge converges on VALUE but not on key ORDER — canonicalize (recursively sort keys) before comparing.
 const canon = (v: unknown): unknown =>
   v && typeof v === 'object' && !Array.isArray(v)

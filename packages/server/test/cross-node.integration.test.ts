@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 import { MemoryBus, createInMemoryAdapter } from '@super-line/server'
-import { createHarness } from './harness.js'
+import { createHarness, waitFor } from './harness.js'
 
 const contract = defineContract({
   shared: {
@@ -23,15 +23,6 @@ const contract = defineContract({
 const h = createHarness()
 afterEach(() => h.dispose())
 
-const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms))
-async function waitFor(pred: () => boolean, timeout = 1000) {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await tick()
-  }
-}
-
 async function node(bus: MemoryBus) {
   const n = await h.server(contract, {
     authenticate: () => ({ role: 'user' as const, ctx: {} }),
@@ -40,7 +31,7 @@ async function node(bus: MemoryBus) {
   n.srv.implement({
     user: {
       join: async ({ room }, _ctx, conn) => {
-        n.srv.room(room).add(conn)
+        await n.srv.room(room).add(conn)
         return { ok: true }
       },
     },

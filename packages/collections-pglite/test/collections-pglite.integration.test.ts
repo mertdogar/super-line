@@ -1,32 +1,14 @@
-import { execSync } from 'node:child_process'
 import { GenericContainer, Network, Wait, type StartedNetwork, type StartedTestContainer } from 'testcontainers'
 import * as z from 'zod'
 import type { CollectionDef, RowChange, SelfCollectionStore } from '@super-line/core'
 import { pgliteCollections } from '@super-line/collections-pglite'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, inject } from 'vitest'
+import { waitForWith } from '../../core/test/wait.js'
 
-// Real end-to-end for the LWW row tier: two `pgliteCollections` nodes (each with its OWN in-memory PGlite
-// replica) against ONE central Postgres + a real ElectricSQL service. The unit suite hand-feeds the replica;
-// this exercises the actual bus — a write lands in central Postgres, Electric streams it to EVERY node's
-// replica, and each node's live.changes feed becomes onChange. It pins the contract typed-column work must
-// preserve (PLAN-collections-typed-tables.md Phase 2a): `next` is always the COMPLETE row (the server's
-// enter/leave routing and TanStack's rowUpdateMode:'full' both depend on it), origin survives the round-trip,
-// and deletes arrive prev-less. Requires Docker; skipped when absent.
-let dockerAvailable = true
-try {
-  execSync('docker info', { stdio: 'ignore' })
-} catch {
-  dockerAvailable = false
-}
+const waitFor = waitForWith(15_000)
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
-async function waitFor(pred: () => boolean | Promise<boolean>, timeout = 15_000): Promise<void> {
-  const start = Date.now()
-  while (!(await pred())) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await sleep(50)
-  }
-}
+// Docker is probed once for the whole lane in global-docker.ts.
+const dockerAvailable = inject('dockerAvailable')
 
 let network: StartedNetwork
 let pg: StartedTestContainer

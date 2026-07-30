@@ -7,6 +7,9 @@ import { defineContract } from '@super-line/core'
 import { createSuperLineServer } from '@super-line/server'
 import { createSuperLineClient, type SuperLineClient } from '@super-line/client'
 import { httpServerTransport, httpClientTransport } from '@super-line/transport-http'
+import { waitForWith } from '../../core/test/wait.js'
+
+const waitFor = waitForWith(4000)
 
 // Proves the CORE works over the HTTP transport (SSE + long-poll) — the interface proof for Step 2.
 const contract = defineContract({
@@ -28,7 +31,6 @@ afterEach(async () => {
   for (const fn of cleanups.splice(0)) await fn()
 })
 
-const tick = (ms = 20): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 async function boot(
   mode: 'sse' | 'longpoll',
@@ -50,14 +52,6 @@ async function boot(
   cleanups.unshift(() => client.close())
   cleanups.push(() => srv.close())
   return { srv, client }
-}
-
-async function waitFor(pred: () => boolean, timeout = 4000): Promise<void> {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await tick(10)
-  }
 }
 
 for (const mode of ['sse', 'longpoll'] as const) {

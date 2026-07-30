@@ -52,7 +52,7 @@ describe('presence registry + cluster surface (slice 3)', () => {
   it('tracks room membership in the registry', async () => {
     const { srv, url } = await h.server(contract, { authenticate: auth, identify, describeConn })
     srv.implement({
-      shared: { joinRoom: async ({ room }, _c, conn) => (srv.room(room).add(conn), { ok: true }) },
+      shared: { joinRoom: async ({ room }, _c, conn) => (await srv.room(room).add(conn), { ok: true }) },
       user: {},
       agent: {},
     })

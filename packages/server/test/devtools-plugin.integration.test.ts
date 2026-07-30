@@ -6,20 +6,13 @@ import { createLoopbackTransport } from '@super-line/transport-loopback'
 import { memoryCollections } from '@super-line/collections-memory'
 import { DEVTOOLS_GLOBAL, devtoolsPlugin, devtoolsRegistry } from '@super-line/plugin-devtools'
 import * as z from 'zod'
+import { waitFor } from '../../core/test/wait.js'
 
 const contract = defineContract({
   collections: { notes: { schema: z.object({ id: z.string(), done: z.boolean() }), key: 'id' } },
   shared: { clientToServer: { hello: { input: z.object({}), output: z.object({ ok: z.boolean() }) } } },
   roles: { user: {} },
 })
-
-async function waitFor(pred: () => boolean, timeout = 2000): Promise<void> {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await new Promise((r) => setTimeout(r, 5))
-  }
-}
 
 const resetPage = () => void delete (globalThis as Record<string, unknown>)[DEVTOOLS_GLOBAL]
 beforeEach(resetPage)

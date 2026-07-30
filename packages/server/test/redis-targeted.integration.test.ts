@@ -1,16 +1,11 @@
-import { execSync } from 'node:child_process'
 import { afterEach, describe, expect, inject, it } from 'vitest'
 import * as z from 'zod'
 import { defineContract, SuperLineError } from '@super-line/core'
 import { createRedisAdapter } from '@super-line/adapter-redis'
 import { createHarness, waitFor } from './harness.js'
 
-let dockerAvailable = true
-try {
-  execSync('docker info', { stdio: 'ignore' })
-} catch {
-  dockerAvailable = false
-}
+// Docker is probed once for the whole lane in global-docker.ts.
+const dockerAvailable = inject('dockerAvailable')
 
 const contract = defineContract({
   shared: {

@@ -7,6 +7,7 @@ import { authContract, type AuthSession, type AuthUserPresence } from '@super-li
 import { auth } from '@super-line/plugin-auth/server'
 import { createInMemoryAdapter, createSuperLineServer, MemoryBus, type SuperLinePlugin } from '@super-line/server'
 import { createLoopbackTransport } from '@super-line/transport-loopback'
+import { waitFor } from '../../core/test/wait.js'
 
 const app = defineContract({
   roles: {
@@ -344,11 +345,3 @@ describe('plugin-auth connection sessions', () => {
     expect(await base.snapshot('sessions', {})).toEqual([])
   })
 })
-
-async function waitFor(predicate: () => boolean | Promise<boolean>, timeout = 2000): Promise<void> {
-  const startedAt = Date.now()
-  while (!(await predicate())) {
-    if (Date.now() - startedAt > timeout) throw new Error('waitFor timeout')
-    await new Promise((resolve) => setTimeout(resolve, 5))
-  }
-}

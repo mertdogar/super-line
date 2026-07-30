@@ -36,6 +36,7 @@ async function startServer() {
   const { port } = httpServer.address() as AddressInfo
   cleanups.push(async () => {
     await srv.close()
+    httpServer.closeAllConnections() // inspector sockets outlive close(); drop them or teardown hangs
     await new Promise<void>((resolve) => httpServer.close(() => resolve()))
   })
   return { srv, url: `ws://127.0.0.1:${port}` }
@@ -72,6 +73,7 @@ async function startThingsServer(hold: () => Promise<void> | undefined = () => u
   const { port } = httpServer.address() as AddressInfo
   cleanups.push(async () => {
     await srv.close()
+    httpServer.closeAllConnections() // inspector sockets outlive close(); drop them or teardown hangs
     await new Promise<void>((resolve) => httpServer.close(() => resolve()))
   })
   return { srv, url: `ws://127.0.0.1:${port}` }
@@ -224,6 +226,7 @@ async function startAuthedServer() {
   const { port } = httpServer.address() as AddressInfo
   cleanups.push(async () => {
     await srv.close()
+    httpServer.closeAllConnections() // inspector sockets outlive close(); drop them or teardown hangs
     await new Promise<void>((resolve) => httpServer.close(() => resolve()))
   })
   return { srv, url: `ws://127.0.0.1:${port}` }

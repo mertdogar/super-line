@@ -38,7 +38,7 @@ describe('local introspection (slice 1)', () => {
     const before = Date.now()
     const { srv, url } = await h.server(contract, { authenticate })
     srv.implement({
-      shared: { joinRoom: async ({ room }, _ctx, conn) => (srv.room(room).add(conn), { ok: true }) },
+      shared: { joinRoom: async ({ room }, _ctx, conn) => (await srv.room(room).add(conn), { ok: true }) },
       user: {},
       agent: {},
     })
@@ -67,7 +67,7 @@ describe('local introspection (slice 1)', () => {
   it('reports rooms, room membership, and topics for this node', async () => {
     const { srv, url } = await h.server(contract, { authenticate })
     srv.implement({
-      shared: { joinRoom: async ({ room }, _ctx, conn) => (srv.room(room).add(conn), { ok: true }) },
+      shared: { joinRoom: async ({ room }, _ctx, conn) => (await srv.room(room).add(conn), { ok: true }) },
       user: {},
       agent: {},
     })

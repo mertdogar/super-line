@@ -6,6 +6,9 @@ import { yamux } from '@chainsafe/libp2p-yamux'
 import type { AuthOutcome, Handshake, RawConn } from '@super-line/core'
 import { libp2pServerTransport, libp2pClientTransport } from '../src/index.js'
 import { wrap } from '../src/framing.js'
+import { waitForWith } from '../../core/test/wait.js'
+
+const waitFor = waitForWith(5000)
 
 let memSeq = 0
 async function makeNode(listen: boolean): Promise<Libp2p> {
@@ -23,14 +26,6 @@ afterEach(async () => {
 })
 
 const tick = (ms = 20): Promise<void> => new Promise((r) => setTimeout(r, ms))
-async function waitFor(pred: () => boolean, timeout = 5000): Promise<void> {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await tick(10)
-  }
-}
-
 interface Accepted {
   raw: RawConn
   auth: AuthOutcome

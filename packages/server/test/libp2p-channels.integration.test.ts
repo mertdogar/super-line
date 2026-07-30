@@ -48,7 +48,7 @@ async function serverOn(node: PubSubLibp2p) {
     shared: {
       hello: async () => ({ ok: true }),
       join: async ({ room }, _ctx, conn) => {
-        n.srv.room(room).add(conn)
+        await n.srv.room(room).add(conn)
         return { ok: true }
       },
     },

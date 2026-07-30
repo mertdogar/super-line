@@ -72,7 +72,12 @@ export default defineConfig({
   test: {
     include: ['packages/**/test/**/*.test.ts'],
     exclude: [...configDefaults.exclude, ...heavy],
+    // The ladder, deliberately ordered: a `waitFor` ceiling is the innermost backstop, a test may
+    // exceed one wait, and a hook (booting a libp2p mesh, a PGlite instance) may take longer than any
+    // single test. `hookTimeout` was previously left at vitest's 10s default — BELOW testTimeout —
+    // so a slow beforeAll failed with a hook timeout before its own work had a chance to finish.
     testTimeout: 20_000,
+    hookTimeout: 60_000,
     // Native addons (better-sqlite3, libsql) aren't reliably multi-thread-safe in Vitest's
     // worker_threads, so run each file in a child process (`forks`). Files run SERIALLY:
     // this lane was tried at 10/5/3/2 parallel forks (2026-07-16) and flaked at every

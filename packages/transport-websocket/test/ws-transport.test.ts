@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 import { INSPECTOR_SUBPROTOCOL, type AuthOutcome, type Handshake, type RawConn, type ReservedConnection } from '@super-line/core'
 import { webSocketServerTransport, webSocketClientTransport, type WebSocketClientTransportOptions } from '../src/index.js'
+import { waitFor } from '../../core/test/wait.js'
 
 const dec = new TextDecoder()
 const cleanups: Array<() => Promise<void> | void> = []
@@ -188,11 +189,3 @@ describe('websocket transport', () => {
     expect(closes).toEqual([1006])
   })
 })
-
-async function waitFor(pred: () => boolean, timeout = 2000): Promise<void> {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await new Promise((r) => setTimeout(r, 5))
-  }
-}

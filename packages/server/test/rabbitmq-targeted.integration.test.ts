@@ -1,19 +1,11 @@
-import { execSync } from 'node:child_process'
 import { afterEach, describe, expect, inject, it } from 'vitest'
 import * as z from 'zod'
 import { defineContract, SuperLineError } from '@super-line/core'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
 import { createHarness, waitFor } from './harness.js'
 
-// Requires Docker (the shared per-run rabbitmq:4 from global-docker.ts); skipped cleanly when Docker is absent.
-// Targeted routing (c:/u:/reply:) does NOT depend on the presence directory — these tests use
-// local connection ids + retry loops, so they stand on their own ahead of the presence slice.
-let dockerAvailable = true
-try {
-  execSync('docker info', { stdio: 'ignore' })
-} catch {
-  dockerAvailable = false
-}
+// Docker is probed once for the whole lane in global-docker.ts.
+const dockerAvailable = inject('dockerAvailable')
 
 const contract = defineContract({
   shared: {

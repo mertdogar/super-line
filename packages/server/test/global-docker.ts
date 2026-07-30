@@ -7,11 +7,18 @@ import type { GlobalSetupContext } from 'vitest/node'
 // exactly while the next file's delivery budgets were counting down. rabbitmq-reconnect keeps
 // its own container — it restarts it mid-test.
 export default async function ({ provide }: GlobalSetupContext) {
+  // Asked ONCE for the lane. Every Docker-backed file used to run its own `execSync('docker info')`
+  // at module scope — 14 blocking subprocesses, ~0.3s each, hitting the daemon while the lane's own
+  // containers were live. Files that boot their own containers read `dockerAvailable`; the rest just
+  // check whether they were given a URL.
+  let dockerAvailable = true
   try {
     execSync('docker info', { stdio: 'ignore' })
   } catch {
-    return // no Docker: provide nothing; the files skip themselves via their own guard
+    dockerAvailable = false
   }
+  provide('dockerAvailable', dockerAvailable)
+  if (!dockerAvailable) return // provide no URLs; the files skip themselves
 
   const started: StartedTestContainer[] = []
   const [redis, rabbit] = await Promise.all([
@@ -38,6 +45,7 @@ export default async function ({ provide }: GlobalSetupContext) {
 
 declare module 'vitest' {
   interface ProvidedContext {
+    dockerAvailable: boolean
     redisUrl: string
     amqpUrl: string
   }

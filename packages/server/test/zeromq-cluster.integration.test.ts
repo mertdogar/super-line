@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 import type { Adapter } from '@super-line/core'
-import { createHarness, tick, waitFor } from './harness.js'
+import { createHarness, waitFor } from './harness.js'
 import { makeCluster, makeProxyCluster, type Cluster } from './zeromq-cluster.js'
 
-// Real-socket mesh + the redis testcontainers run in parallel worker threads; under that
-// contention the event loop can starve, so give these generous wall-clock headroom.
+// Real sockets, and the lane's redis + rabbitmq containers are live alongside them. The lane runs
+// serially (since 2026-07-16) but the machine is still shared, so give these generous headroom.
 vi.setConfig({ testTimeout: 30_000 })
 
 // Full-server parity suite for the ZeroMQ mesh adapter, over real loopback TCP (no Docker).
@@ -52,7 +52,7 @@ afterEach(async () => {
 async function serverOn(adapter: Adapter) {
   const n = await h.server(contract, { authenticate: auth, identify, adapter })
   n.srv.implement({
-    shared: { join: async ({ room }, _c, conn) => (n.srv.room(room).add(conn), { ok: true }) },
+    shared: { join: async ({ room }, _c, conn) => (await n.srv.room(room).add(conn), { ok: true }) },
     user: {},
     agent: {},
   })
@@ -68,10 +68,10 @@ describe('zeromq adapter — cross-node fan-out through the server (mesh)', () =
     const received: Array<{ symbol: string; price: number }> = []
     await client.subscribe('prices', (p) => received.push(p)).ready
 
-    for (let i = 0; i < 50 && received.length === 0; i++) {
+    await waitFor(async () => {
       b.srv.forRole('user').publish('prices', { symbol: 'NVDA', price: 9 })
-      await tick(100)
-    }
+      return received.length > 0
+    }, { timeout: 10_000, label: 'a topic publish on B reaches a subscriber on A' })
     expect(received[0]).toEqual({ symbol: 'NVDA', price: 9 })
   })
 
@@ -84,10 +84,10 @@ describe('zeromq adapter — cross-node fan-out through the server (mesh)', () =
     client.on('message', (m) => got.push(m))
     await client.join({ room: 'lobby' })
 
-    for (let i = 0; i < 50 && got.length === 0; i++) {
+    await waitFor(async () => {
       b.srv.room('lobby').broadcast('message', { text: 'hi-zmq' })
-      await tick(100)
-    }
+      return got.length > 0
+    }, { timeout: 10_000, label: 'a room broadcast on B reaches a member on A' })
     expect(got[0]).toEqual({ text: 'hi-zmq' })
   })
 
@@ -98,10 +98,10 @@ describe('zeromq adapter — cross-node fan-out through the server (mesh)', () =
     const got: Array<{ d: unknown; from: string }> = []
     a.srv.subscribe('announce', (d, m) => got.push({ d, from: m.from }))
 
-    for (let i = 0; i < 50 && got.length === 0; i++) {
+    await waitFor(async () => {
       b.srv.publish('announce', { n: 7 })
-      await tick(100)
-    }
+      return got.length > 0
+    }, { timeout: 10_000, label: 'a cluster-bus publish on B reaches a subscriber on A' })
     expect(got[0]?.d).toEqual({ n: 7 })
     expect(got[0]?.from).toBe(b.srv.nodeId)
   })
@@ -176,10 +176,10 @@ describe('zeromq adapter — through a central forwarder (mode: proxy)', () => {
     await client.join({ room: 'lobby' })
     h.client(contract, { url: b.url, role: 'agent', params: { uid: 'u2' } })
 
-    for (let i = 0; i < 50 && got.length === 0; i++) {
+    await waitFor(async () => {
       b.srv.room('lobby').broadcast('message', { text: 'via-proxy' })
-      await tick(100)
-    }
+      return got.length > 0
+    }, { timeout: 10_000, label: 'a room broadcast crosses the XSUB/XPUB proxy' })
     expect(got[0]).toEqual({ text: 'via-proxy' })
 
     await waitFor(async () => (await b.srv.cluster.count()) === 2, 25_000)

@@ -10,6 +10,7 @@ import {
 } from '@super-line/server'
 import { createSuperLineClient, type SuperLineClient, type SuperLineClientOptions } from '@super-line/client'
 import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
+import { tick, waitFor, waitForWith, type WaitForOptions } from '../../core/test/wait.js'
 
 // Spins up real loopback servers + clients and tears them down (clients first).
 export function createHarness() {
@@ -36,6 +37,10 @@ export function createHarness() {
     const { port } = httpServer.address() as AddressInfo
     cleanups.push(async () => {
       await srv.close() // closes conns, wss, and the adapter (e.g. redis connections)
+      // `close()` resolves only once every open connection has ended, so ONE socket that outlives
+      // srv.close() — a long-lived SSE response, a half-closed peer under load — hangs teardown until
+      // vitest's hook timeout. Drop the sockets first so this is bounded rather than hopeful.
+      httpServer.closeAllConnections()
       await new Promise<void>((resolve) => httpServer.close(() => resolve()))
     })
     return { srv, http: httpServer, url: `ws://127.0.0.1:${port}` }
@@ -54,8 +59,20 @@ export function createHarness() {
     return cl
   }
 
+  // Every cleanup runs, even after one throws. The previous `for (…of cleanups.splice(0)) await fn()`
+  // abandoned the rest on the first failure — and because `splice` had already emptied the array they
+  // were unrecoverable, so one bad client close leaked a server, its adapter subscriptions and its
+  // listening port into every later test in the file.
   async function dispose(): Promise<void> {
-    for (const fn of cleanups.splice(0)) await fn()
+    const errors: unknown[] = []
+    for (const fn of cleanups.splice(0)) {
+      try {
+        await fn()
+      } catch (err) {
+        errors.push(err)
+      }
+    }
+    if (errors.length > 0) throw new AggregateError(errors, `${errors.length} cleanup(s) failed during dispose`)
   }
 
   return { server, client, dispose }
@@ -181,15 +198,6 @@ export function connectInspector(url: string): Promise<Inspector> {
   })
 }
 
-export const tick = (ms = 10): Promise<void> => new Promise((r) => setTimeout(r, ms))
-
-export async function waitFor(
-  pred: () => boolean | Promise<boolean>,
-  timeout = 2000,
-): Promise<void> {
-  const start = Date.now()
-  while (!(await pred())) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await tick(5)
-  }
-}
+// The wait itself lives in core/test/wait.ts (no heavy imports); re-exported here because 55 files
+// already reach for it through the harness.
+export { tick, waitFor, waitForWith, type WaitForOptions }

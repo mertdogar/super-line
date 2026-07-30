@@ -7,17 +7,11 @@ import type { CollectionDef, CollectionStore, RowChange } from '@super-line/core
 import { pgliteCollections } from '@super-line/collections-pglite'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { runRowConformance } from '../../core/test/collection-store-conformance.js'
+import { waitForWith } from '../../core/test/wait.js'
+
+const waitFor = waitForWith(4000)
 
 const PORT = 5601
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
-async function waitFor(pred: () => boolean, timeout = 4000): Promise<void> {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await sleep(10)
-  }
-}
-
 // One PGLiteSocketServer is the "central Postgres" (pg-wire) for the whole file — no Docker/Electric.
 let host: PGlite
 let server: PGLiteSocketServer
@@ -54,6 +48,12 @@ async function makeStore() {
   cleanups.push(async () => {
     await store.close?.()
     await db.close()
+    // Hand the shared central instance back what this test took, so the last test in the file sees
+    // the same fixture as the first.
+    const tables = await host.query<{ name: string }>(
+      `SELECT table_name AS name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE '${tablePrefix}%'`,
+    )
+    for (const { name } of tables.rows) await host.exec(`DROP TABLE IF EXISTS "${name}" CASCADE`)
   })
   return { store, db, tablePrefix }
 }

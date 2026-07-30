@@ -6,6 +6,7 @@ import { createSuperLineClient, type SuperLineClient } from '@super-line/client'
 import { createLoopbackTransport } from '@super-line/transport-loopback'
 import { memoryCollections } from '@super-line/collections-memory'
 import { crdtCollectionsClient, crdtMemoryCollections } from '@super-line/collections-crdt-memory'
+import { waitFor } from '../../core/test/wait.js'
 
 // Characterization of the CROSS-NODE collection paths — the only part of collections with no other coverage.
 // Both families are `relay` here: every node keeps its own replica and the batch/delta travels over the Adapter.
@@ -28,14 +29,6 @@ type Client = SuperLineClient<typeof contract, 'user'>
 type Scene = { title?: string }
 
 const tick = (ms = 10): Promise<void> => new Promise((r) => setTimeout(r, ms))
-
-async function waitFor(pred: () => boolean, timeout = 2000): Promise<void> {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await tick(5)
-  }
-}
 
 const open = { read: () => undefined, write: () => true }
 

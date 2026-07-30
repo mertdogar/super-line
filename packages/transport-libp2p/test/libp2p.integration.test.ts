@@ -8,6 +8,9 @@ import { defineContract } from '@super-line/core'
 import { createSuperLineServer } from '@super-line/server'
 import { createSuperLineClient } from '@super-line/client'
 import { libp2pServerTransport, libp2pClientTransport } from '../src/index.js'
+import { waitForWith } from '../../core/test/wait.js'
+
+const waitFor = waitForWith(5000)
 
 // Proves the CORE works over a libp2p protocol stream — the interface proof for Step 3.
 const contract = defineContract({
@@ -38,15 +41,6 @@ const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
   for (const fn of cleanups.splice(0)) await fn()
 })
-
-const tick = (ms = 20): Promise<void> => new Promise((r) => setTimeout(r, ms))
-async function waitFor(pred: () => boolean, timeout = 5000): Promise<void> {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await tick(10)
-  }
-}
 
 async function boot(serverOpts: { heartbeat?: { interval?: number } } = {}) {
   const serverNode = await makeNode(true)

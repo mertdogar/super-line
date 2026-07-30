@@ -1,17 +1,11 @@
-import { execSync } from 'node:child_process'
 import { afterEach, describe, expect, inject, it } from 'vitest'
 import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
-import { createHarness, tick, waitFor } from './harness.js'
+import { createHarness, waitFor } from './harness.js'
 
-// Requires Docker (the shared per-run rabbitmq:4 from global-docker.ts); skipped cleanly when Docker is absent.
-let dockerAvailable = true
-try {
-  execSync('docker info', { stdio: 'ignore' })
-} catch {
-  dockerAvailable = false
-}
+// Docker is probed once for the whole lane in global-docker.ts.
+const dockerAvailable = inject('dockerAvailable')
 
 const contract = defineContract({
   shared: {
@@ -42,7 +36,7 @@ async function node() {
   n.srv.implement({
     user: {
       join: async ({ room }, _ctx, conn) => {
-        n.srv.room(room).add(conn)
+        await n.srv.room(room).add(conn)
         return { ok: true }
       },
     },
@@ -73,13 +67,12 @@ describe.skipIf(!dockerAvailable)('rabbitmq adapter cross-process fan-out', () =
     const got: Array<{ text: string }> = []
     client.on('message', (m) => got.push(m))
 
+    // The `join` handler awaits room.add, so the response carries readiness: by the time this
+    // resolves the queueBind has landed and ONE broadcast is enough.
     await client.join({ room: 'lobby' })
-    // room.add binds the channel fire-and-forget (no ack); retry the broadcast until it lands,
-    // tolerating the bind-propagation window (a non-issue in real apps).
-    for (let i = 0; i < 50 && got.length === 0; i++) {
-      nodeB.srv.room('lobby').broadcast('message', { text: 'hi-rabbitmq' })
-      await tick(100)
-    }
+    nodeB.srv.room('lobby').broadcast('message', { text: 'hi-rabbitmq' })
+
+    await waitFor(() => got.length === 1, { timeout: 10_000, label: 'a room broadcast on B reaches a member on A' })
     expect(got[0]).toEqual({ text: 'hi-rabbitmq' })
   })
 

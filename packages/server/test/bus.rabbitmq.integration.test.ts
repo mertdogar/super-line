@@ -1,17 +1,11 @@
-import { execSync } from 'node:child_process'
 import { afterEach, describe, expect, inject, it } from 'vitest'
 import * as z from 'zod'
 import { defineContract } from '@super-line/core'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
-import { createHarness, tick } from './harness.js'
+import { createHarness, tick, waitFor } from './harness.js'
 
-// Requires Docker (the shared per-run rabbitmq:4 from global-docker.ts); skipped cleanly when Docker is absent.
-let dockerAvailable = true
-try {
-  execSync('docker info', { stdio: 'ignore' })
-} catch {
-  dockerAvailable = false
-}
+// Docker is probed once for the whole lane in global-docker.ts.
+const dockerAvailable = inject('dockerAvailable')
 
 const contract = defineContract({
   shared: {
@@ -62,15 +56,10 @@ describe.skipIf(!dockerAvailable)('cluster event bus over rabbitmq', () => {
     const b = await node()
 
     const got: Array<{ msg: string; from: string }> = []
-    a.srv.subscribe('announce', (d, m) => got.push({ msg: d.msg, from: m.from }))
+    await a.srv.subscribe('announce', (d, m) => got.push({ msg: d.msg, from: m.from })).ready
 
-    // server.subscribe -> adapter.subscribe binds fire-and-forget; retry the publish until the
-    // queueBind has propagated (a non-issue in real apps where the two aren't co-timed).
-    for (let i = 0; i < 50 && got.length === 0; i++) {
-      b.srv.publish('announce', { msg: 'from-b' })
-      await tick(100)
-    }
-
+    b.srv.publish('announce', { msg: 'from-b' })
+    await waitFor(() => got.length === 1, { timeout: 10_000, label: 'a bus publish on B reaches a ready subscriber on A' })
     expect(got[0]).toEqual({ msg: 'from-b', from: b.srv.nodeId })
   })
 })

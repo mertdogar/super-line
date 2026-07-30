@@ -4,6 +4,7 @@ import { defineContract } from '@super-line/core'
 import { createSuperLineServer, type SuperLinePlugin } from '@super-line/server'
 import { createSuperLineClient } from '@super-line/client'
 import { createLoopbackTransport } from '@super-line/transport-loopback'
+import { waitFor } from '../../core/test/wait.js'
 
 // Proves the CORE works over a non-WebSocket transport — the interface proof (PLAN Q11).
 const contract = defineContract({
@@ -246,11 +247,3 @@ describe('super-line over the loopback transport', () => {
     await expect(client.echo({ text: 'after heartbeat' })).resolves.toEqual({ text: 'after heartbeat' })
   })
 })
-
-async function waitFor(pred: () => boolean, timeout = 2000): Promise<void> {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await tick(5)
-  }
-}

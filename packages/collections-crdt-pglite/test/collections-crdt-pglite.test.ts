@@ -6,17 +6,12 @@ import { SuperLineError, type DocChange } from '@super-line/core'
 import { StoreValue, type StoreMode } from '@super-store/store'
 import { crdtPgliteCollections, type CrdtPgliteCollectionsOptions } from '@super-line/collections-crdt-pglite'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { waitForWith } from '../../core/test/wait.js'
+
+const waitFor = waitForWith(4000)
 
 const PORT = 5602
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
-async function waitFor(pred: () => boolean | Promise<boolean>, timeout = 4000): Promise<void> {
-  const start = Date.now()
-  while (!(await pred())) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await sleep(10)
-  }
-}
-
 const b64 = (u: Uint8Array): string => {
   let s = ''
   for (const byte of u) s += String.fromCharCode(byte)
@@ -85,6 +80,10 @@ async function makeStore(compact: CrdtPgliteCollectionsOptions['compact'] = fals
   cleanups.push(async () => {
     await store.close?.()
     await db.close()
+    // Give the shared central instance back exactly what this test took. Without it the file left 2
+    // tables behind per test and the last one ran against 22 — monotonic growth in a fixture every
+    // test is supposed to see identically.
+    await host.exec(`DROP TABLE IF EXISTS "${table}", "${table}_updates"`)
   })
   return { store, db, table, ups: `${table}_updates` }
 }
@@ -257,8 +256,15 @@ describe('collections-crdt-pglite — fold robustness', () => {
 })
 
 describe('collections-crdt-pglite — compaction + materialized snapshot', () => {
-  // 20s cap: the debounced materialize is slow when this (last, heaviest) test runs under the shared
-  // PGLiteSocketServer's accumulated load — it's fast in isolation and over real Electric.
+  // Generous caps, and they are BACKSTOPS rather than budgets: the wait polls with backoff and returns
+  // the moment it passes, so a healthy run costs ~1.3s regardless. They are wide because this is
+  // in-process WASM Postgres competing for CPU with everything else on the machine, and a starved run
+  // legitimately takes an order of magnitude longer.
+  //
+  // The load is NOT the shared socket server's, despite the obvious guess: measured, `getStats()`
+  // reports activeConnections back to 0 after every test in this file, so nothing queues for a
+  // connection. What did accumulate was tables (2 per test, 22 by this one), which the per-test DROP
+  // now returns.
   it('folds the op-log into <table>.data and trims to a baseline', async () => {
     const { store, db, table, ups } = await makeStore({ everyNUpdates: 100, debounceMs: 60 })
     await store.create('scenes', 'c', { v: 0 }, docMode)
@@ -283,7 +289,7 @@ describe('collections-crdt-pglite — compaction + materialized snapshot', () =>
     await waitFor(async () => {
       const r = await host.query<{ data: unknown }>(`SELECT data FROM "${table}" WHERE collection='scenes' AND id='c'`)
       return JSON.stringify(r.rows[0]?.data) === JSON.stringify({ v: 4 })
-    }, 16_000)
+    }, { timeout: 16_000, label: 'the debounced compaction materializes <table>.data as { v: 4 }' })
 
     // and the op-log was trimmed to a baseline (was seed + 4 = 5 rows) that still folds to the same state.
     const rows = await host.query<{ update: string }>(`SELECT update FROM "${ups}" WHERE collection='scenes' AND res_id='c' ORDER BY seq`)
@@ -322,7 +328,7 @@ describe('collections-crdt-pglite — compaction + materialized snapshot', () =>
     await waitFor(async () => {
       const r = await host.query<{ data: unknown }>(`SELECT data FROM "${table}" WHERE collection='notes' AND id='n'`)
       return JSON.stringify(r.rows[0]?.data) === JSON.stringify({ v: 4 })
-    }, 16_000)
+    }, { timeout: 16_000, label: 'the debounced compaction materializes the native-root doc' })
 
     const rows = await host.query<{ update: string }>(`SELECT update FROM "${ups}" WHERE collection='notes' AND res_id='n' ORDER BY seq`)
     expect(rows.rows.length).toBeLessThan(9) // seed + 8 writes, trimmed to a baseline

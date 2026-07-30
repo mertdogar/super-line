@@ -3,6 +3,9 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AuthOutcome, Handshake, RawConn } from '@super-line/core'
 import { httpServerTransport, httpClientTransport } from '../src/index.js'
+import { waitForWith } from '../../core/test/wait.js'
+
+const waitFor = waitForWith(3000)
 
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
@@ -42,14 +45,6 @@ async function listen(
 }
 
 const ok = async (): Promise<AuthOutcome> => ({ role: 'user', ctx: {} })
-
-async function waitFor(pred: () => boolean, timeout = 3000): Promise<void> {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await new Promise((r) => setTimeout(r, 10))
-  }
-}
 
 describe('http transport — server endpoints', () => {
   it('passes a Handshake (transport + query) to authenticate', async () => {

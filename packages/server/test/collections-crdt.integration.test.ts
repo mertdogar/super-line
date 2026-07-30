@@ -5,6 +5,7 @@ import { createLoopbackTransport } from '@super-line/transport-loopback'
 import { crdtMemoryCollections, crdtCollectionsClient, yDocOf } from '@super-line/collections-crdt-memory'
 import * as z from 'zod'
 import { afterEach, describe, expect, it } from 'vitest'
+import { waitFor } from '../../core/test/wait.js'
 
 const contract = defineContract({
   collections: {
@@ -17,14 +18,6 @@ const contract = defineContract({
 })
 type Client = SuperLineClient<typeof contract, 'user'>
 type Scene = { title?: string; count?: number }
-
-async function waitFor(pred: () => boolean, timeout = 2000): Promise<void> {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await new Promise((r) => setTimeout(r, 5))
-  }
-}
 
 function setup(policyOverride?: { read?: boolean; write?: boolean }) {
   const loop = createLoopbackTransport()

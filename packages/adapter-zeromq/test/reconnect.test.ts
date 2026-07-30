@@ -6,6 +6,9 @@ import type { ConnDescriptor } from '@super-line/core'
 // Restart timing + real sockets under parallel-suite contention — give it headroom.
 vi.setConfig({ testTimeout: 30_000 })
 import { createZeroMqAdapter, type ZeroMqAdapter } from '../src/index.js'
+import { waitForWith } from '../../core/test/wait.js'
+
+const waitUntil = waitForWith(20_000)
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const SETTLE = 250
@@ -62,19 +65,11 @@ describe('zeromq mesh — operational stability', () => {
     b.presence!.beat('B')
     await b.presence!.set(desc('c2', 'B'))
 
-    for (let i = 0; i < 40 && !got.includes('after'); i++) {
+    await waitUntil(async () => {
       await b.publish('room', 'after')
-      await delay(100)
-    }
+      return got.includes('after')
+    }, { timeout: 10_000, label: 'fan-out resumes after the peer restarts' })
     expect(got).toContain('after') // fan-out resumed across the restart
     await waitUntil(async () => (await a.presence!.list()).some((d) => d.id === 'c2')) // presence self-healed
   })
 })
-
-async function waitUntil(pred: () => boolean | Promise<boolean>, timeout = 20_000): Promise<void> {
-  const start = Date.now()
-  while (!(await pred())) {
-    if (Date.now() - start > timeout) throw new Error('waitUntil timeout')
-    await delay(50)
-  }
-}

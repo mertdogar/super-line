@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import * as z from 'zod'
 import { defineContract } from '@super-line/core'
-import { createHarness } from './harness.js'
+import { createHarness, waitFor } from './harness.js'
 
 const contract = defineContract({
   shared: {
@@ -23,14 +23,6 @@ const h = createHarness()
 afterEach(() => h.dispose())
 
 const tick = (ms = 10) => new Promise((r) => setTimeout(r, ms))
-async function waitFor(pred: () => boolean, timeout = 1000) {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await tick(5)
-  }
-}
-
 describe('topics pub/sub', () => {
   it('delivers a role topic to subscribers and stops after unsubscribe', async () => {
     const { srv, url } = await h.server(contract, {

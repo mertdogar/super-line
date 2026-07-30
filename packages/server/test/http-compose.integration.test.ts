@@ -8,6 +8,9 @@ import { createSuperLineServer } from '@super-line/server'
 import { createSuperLineClient } from '@super-line/client'
 import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
 import { httpServerTransport, httpClientTransport } from '@super-line/transport-http'
+import { waitForWith } from '../../core/test/wait.js'
+
+const waitFor = waitForWith(4000)
 
 const contract = defineContract({
   roles: {
@@ -23,14 +26,6 @@ const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
   for (const fn of cleanups.splice(0)) await fn()
 })
-
-async function waitFor(pred: () => boolean, timeout = 4000): Promise<void> {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await new Promise((r) => setTimeout(r, 10))
-  }
-}
 
 describe('WS + HTTP transports compose on one http.Server', () => {
   it('serves a WebSocket client and an HTTP (SSE) client side by side', async () => {
@@ -55,6 +50,9 @@ describe('WS + HTTP transports compose on one http.Server', () => {
     cleanups.unshift(() => httpClient.close())
     cleanups.push(() => srv.close())
     cleanups.push(async () => {
+      // The SSE client holds a long-lived response; `close()` waits for it, so drop sockets first
+      // or teardown hangs until vitest's hook timeout.
+      httpServer.closeAllConnections()
       await new Promise<void>((r) => httpServer.close(() => r()))
     })
 

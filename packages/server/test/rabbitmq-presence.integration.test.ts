@@ -1,19 +1,11 @@
-import { execSync } from 'node:child_process'
 import { afterEach, describe, expect, inject, it } from 'vitest'
 import * as z from 'zod'
 import { defineContract, type Adapter } from '@super-line/core'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
 import { createHarness, waitFor } from './harness.js'
 
-// Requires Docker (the shared per-run rabbitmq:4 from global-docker.ts); skipped cleanly when Docker is absent.
-// Cluster presence through the full server, over the duplicated gossip directory. Reconcile edge
-// cases are unit-tested in adapter-rabbitmq/test/presence.reconcile.test.ts.
-let dockerAvailable = true
-try {
-  execSync('docker info', { stdio: 'ignore' })
-} catch {
-  dockerAvailable = false
-}
+// Docker is probed once for the whole lane in global-docker.ts.
+const dockerAvailable = inject('dockerAvailable')
 
 const contract = defineContract({
   shared: {
@@ -40,7 +32,7 @@ afterEach(() => h.dispose())
 async function serverOn(adapter: Adapter) {
   const n = await h.server(contract, { authenticate: auth, identify, adapter })
   n.srv.implement({
-    shared: { joinRoom: async ({ room }, _c, conn) => (n.srv.room(room).add(conn), { ok: true }) },
+    shared: { joinRoom: async ({ room }, _c, conn) => (await n.srv.room(room).add(conn), { ok: true }) },
     user: {},
     agent: {},
   })

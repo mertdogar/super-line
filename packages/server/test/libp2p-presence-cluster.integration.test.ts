@@ -35,7 +35,7 @@ afterEach(async () => {
 async function serverOn(adapter: Adapter) {
   const n = await h.server(contract, { authenticate: auth, identify, adapter })
   n.srv.implement({
-    shared: { joinRoom: async ({ room }, _c, conn) => (n.srv.room(room).add(conn), { ok: true }) },
+    shared: { joinRoom: async ({ room }, _c, conn) => (await n.srv.room(room).add(conn), { ok: true }) },
     user: {},
     agent: {},
   })

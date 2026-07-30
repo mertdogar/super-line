@@ -1,18 +1,12 @@
-import { execSync } from 'node:child_process'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, inject } from 'vitest'
 import * as z from 'zod'
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers'
 import { defineContract } from '@super-line/core'
 import { createRabbitmqAdapter } from '@super-line/adapter-rabbitmq'
 import { createHarness, tick, waitFor } from './harness.js'
 
-// Requires Docker (testcontainers spins up rabbitmq:4); skipped cleanly when Docker is absent.
-let dockerAvailable = true
-try {
-  execSync('docker info', { stdio: 'ignore' })
-} catch {
-  dockerAvailable = false
-}
+// Docker is probed once for the whole lane in global-docker.ts.
+const dockerAvailable = inject('dockerAvailable')
 
 const contract = defineContract({
   shared: {
@@ -60,7 +54,7 @@ async function node() {
   n.srv.implement({
     user: {
       join: async ({ room }, _ctx, conn) => {
-        n.srv.room(room).add(conn)
+        await n.srv.room(room).add(conn)
         return { ok: true }
       },
     },
@@ -79,10 +73,10 @@ describe.skipIf(!dockerAvailable)('rabbitmq adapter reconnect resilience', () =>
 
     // baseline: the `r:lobby` binding fans out before the restart
     await client.join({ room: 'lobby' })
-    for (let i = 0; i < 50 && !got.some((m) => m.text === 'before'); i++) {
+    await waitFor(async () => {
       nodeB.srv.room('lobby').broadcast('message', { text: 'before' })
-      await tick(100)
-    }
+      return got.some((m) => m.text === 'before')
+    }, { timeout: 10_000, label: 'a room broadcast lands before the broker restart' })
     expect(got.some((m) => m.text === 'before')).toBe(true)
 
     // Restart the broker: drops all AMQP connections, the exclusive queues, and the dynamic

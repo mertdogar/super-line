@@ -5,6 +5,7 @@ import { createLoopbackTransport } from '@super-line/transport-loopback'
 import { crdtMemoryCollections, crdtCollectionsClient } from '@super-line/collections-crdt-memory'
 import * as z from 'zod'
 import { afterEach, describe, expect, it } from 'vitest'
+import { waitFor } from '../../core/test/wait.js'
 
 // A record-of-full-objects schema (like ai-canvas-pglite's scene): every shape needs ALL fields, so a partial
 // write to a NON-existent shape produces an incomplete row that validate-before-commit rejects.
@@ -19,14 +20,6 @@ const contract = defineContract({
 })
 type Client = SuperLineClient<typeof contract, 'user'>
 type Scene = { shapes: Record<string, { x: number; y: number; color: string }> }
-
-async function waitFor(pred: () => boolean, timeout = 2000): Promise<void> {
-  const start = Date.now()
-  while (!pred()) {
-    if (Date.now() - start > timeout) throw new Error('waitFor timeout')
-    await new Promise((r) => setTimeout(r, 5))
-  }
-}
 
 function setup() {
   const loop = createLoopbackTransport()

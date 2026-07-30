@@ -1,6 +1,6 @@
 # ADR-0020: Auth owns the client, so it owns the session lifecycle and the React surface
 
-- Status: Accepted
+- Status: Accepted for §1–§3; **§4 superseded by [ADR-0026](0026-the-react-binding-is-registered-once-and-plugins-feed-it.md)** (2026-07-30) — the module-level `Register` surface moved to `@super-line/react`, with plugin providers feeding its one shared context
 - Date: 2026-07-25 — settled in a design session against the first real downstream consumer (Omma's `designer-core`); implementation lands in the same pass
 - Supersedes: decision **D5** of `docs/plans/PLAN-plugin-auth-server-minted-tokens.md` ("No `refresh`. … Account-switch = reconstruct the helper (cheap)")
 - Plan: `docs/plans/PLAN-plugin-auth-server-minted-tokens.md` (D3 `resolveToken`, D4 non-null client, D5 no-refresh)

@@ -30,11 +30,13 @@ Repo-internal: `docs/.vitepress/config.ts` excludes `adr/**` from the docs site,
 | 0017 | plugin-auth hooks cover server-invoked operations, not client requests | In force |
 | 0018 | Logging is app-configured (LogTape), not a per-instance option | In force |
 | 0019 | Plugins grow a contract-time half — typed fragments merged at `defineContract` | In force (recorded retroactively 2026-07-24; decision + code date to 2026-07-06, core 0.10.1) |
-| 0020 | Auth owns the client, so it owns the session lifecycle and the React surface | In force; **supersedes D5** of `docs/plans/PLAN-plugin-auth-server-minted-tokens.md` (no-`refresh`) and retires `createAuth` |
+| 0020 | Auth owns the client, so it owns the session lifecycle and the React surface | In force for §1–§3 (session lifecycle); **§4 superseded by 0026** (the React surface moved to `@super-line/react`). Also **supersedes D5** of `docs/plans/PLAN-plugin-auth-server-minted-tokens.md` (no-`refresh`) and retires `createAuth` |
 | 0021 | Column layout is derived from Standard JSON Schema, not a vendor's classes | In force; **amends 0013** (two consequences). Core now imports no schema library; fixes `instanceof` against a bundled zod that degenerated typed tables for *every* published consumer |
 | 0022 | A plugin authorizes admission to its own connection class | In force; **amends 0005** (phase 2 admitted reserved connections unconditionally). Closes the Control Center's total-read backdoor |
 | 0023 | A queue binds its worker late, and an unbound queue is skipped rather than failed | In force |
 | 0024 | The client observes itself, and emits frames rather than the inspector's taxonomy | In force; instruments the tap slot 0005 reserved on the client half, and retypes it away from the server's `TapEvent` |
+| 0025 | Collaborative text lives in a native root beside the described one, and ingress validation is per-collection | In force |
+| 0026 | The React binding is registered once, and plugins feed it | In force; **supersedes 0020 §4** (the React surface moves from plugin-auth to `@super-line/react`; 0020 §1–§3 stand) |
 
 ## 2. The standing position, by subsystem
 

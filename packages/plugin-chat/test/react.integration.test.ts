@@ -8,7 +8,16 @@ import { auth } from '@super-line/plugin-auth/server'
 import { chatContract } from '@super-line/plugin-chat'
 import { chatClient, type ChatClient } from '@super-line/plugin-chat/client'
 import { chat } from '@super-line/plugin-chat/server'
-import { createChatHooks } from '@super-line/plugin-chat/react'
+import {
+  createChatHooks,
+  type ChatBinding,
+  ChatProvider as SharedChatProvider,
+  useChat as sharedUseChat,
+  useChannels as sharedUseChannels,
+  useMe as sharedUseMe,
+} from '@super-line/plugin-chat/react'
+import { SuperLineProvider } from '@super-line/react'
+import type { SuperLineClient } from '@super-line/client'
 import { memoryCollections } from '@super-line/collections-memory'
 import { createHarness } from '../../server/test/harness.js'
 
@@ -19,6 +28,23 @@ const app = defineContract({
 
 const { ChatProvider, useMessages, useMessageParts, useMembers, useChannelResources, useMe, useChannelBusy } =
   createChatHooks<typeof app>()
+
+// The module-level surface, cast-bound to this test's contract (Register stays undeclared in the root
+// typecheck program — see the tripwire in packages/react/test/hooks.test.ts). The base context is fed
+// through @super-line/react's SuperLineProvider, exactly as SuperLineAuthProvider does in production.
+type ChatB = ChatBinding<typeof app>
+type Client = SuperLineClient<typeof app, 'user'>
+const BaseProvider = SuperLineProvider as unknown as (props: {
+  client: Client | null
+  children?: ReactNode
+}) => ReactNode
+const AutoChatProvider = SharedChatProvider as unknown as (props: {
+  chat?: ChatClient<typeof app>
+  children?: ReactNode
+}) => ReactNode
+const useBoundChat = sharedUseChat as unknown as () => ChatClient<typeof app> | null
+const useBoundChannels = sharedUseChannels as unknown as ChatB['useChannels']
+const useBoundMe = sharedUseMe as unknown as ChatB['useMe']
 
 const h = createHarness()
 afterEach(() => {
@@ -152,6 +178,78 @@ describe('plugin-chat/react — null-tolerant hooks under StrictMode', () => {
     const view = renderHook(() => useMe(), { wrapper: wrap(ann.chat) })
     await waitFor(() => expect(view.result.current.ready).toBe(true))
     expect(view.result.current.userId).toBe(ann.userId)
+    ann.chat.close()
+  })
+
+  it('module-level ChatProvider auto-builds from the shared context, resolves me via whoami, rebuilds on client swap, and idles on null', async () => {
+    const { url } = await boot()
+    const ann = await newChat(url, 'auto-ann@x.com')
+    await ann.chat.createChannel({ name: 'general' })
+    const bo = await newChat(url, 'auto-bo@x.com')
+
+    // Raw clients for the SHARED context — the auto-provider must build its own ChatClient (no userId
+    // passed anywhere: the omit→whoami path is what resolves identity).
+    const rawFor = async (email: string): Promise<Client> => {
+      const g = h.client(app, { url, role: 'guest' })
+      const { token } = await g.signIn({ email, password: 'passpass' })
+      g.close()
+      return h.client(app, { url, role: 'user', params: { token } })
+    }
+    const annRaw = await rawFor('auto-ann@x.com')
+    const boRaw = await rawFor('auto-bo@x.com')
+
+    // renderHook's initialProps feed the HOOK, not the wrapper — the changing client rides a box the
+    // wrapper reads on every render, and rerender() re-executes the wrapper.
+    const box = { client: annRaw as Client | null }
+    const view = renderHook(
+      () => ({ chat: useBoundChat(), channels: useBoundChannels(), me: useBoundMe() }),
+      {
+        wrapper: ({ children }: { children?: ReactNode }) =>
+          createElement(
+            StrictMode,
+            null,
+            createElement(BaseProvider, { client: box.client, children: createElement(AutoChatProvider, { children }) }),
+          ),
+      },
+    )
+
+    // Auto-built: hooks light up with no chat prop and no hand-rolled bridge.
+    await waitFor(() => expect(view.result.current.chat).not.toBeNull())
+    await waitFor(() => expect(view.result.current.channels.map((c) => (c as { name: string }).name)).toEqual(['general']))
+    await waitFor(() => expect(view.result.current.me.ready).toBe(true))
+    expect(view.result.current.me.userId).toBe(ann.userId)
+
+    // Client swap (session replacement) → the provider closes+rebuilds → identity flips.
+    box.client = boRaw
+    view.rerender()
+    await waitFor(() => expect(view.result.current.me.userId).toBe(bo.userId))
+
+    // Null client (signed out) → chat gone, hooks idle.
+    box.client = null
+    view.rerender()
+    await waitFor(() => expect(view.result.current.chat).toBeNull())
+    expect(view.result.current.channels).toEqual([])
+
+    ann.chat.close()
+    bo.chat.close()
+    annRaw.close()
+    boRaw.close()
+  })
+
+  it('module-level ChatProvider adopts an owned instance and never closes it on unmount', async () => {
+    const { url } = await boot()
+    const ann = await newChat(url, 'adopt@x.com')
+    const ch = await ann.chat.createChannel({ name: 'mine' })
+
+    const view = renderHook(() => useBoundChannels(), {
+      wrapper: ({ children }: { children?: ReactNode }) =>
+        createElement(AutoChatProvider, { chat: ann.chat, children }),
+    })
+    await waitFor(() => expect(view.result.current).toHaveLength(1))
+
+    view.unmount()
+    // The instance is the app's: still alive and usable after the provider is gone.
+    await ann.chat.send(ch.id, 'still alive')
     ann.chat.close()
   })
 

@@ -1831,6 +1831,9 @@ importers:
       '@super-line/plugin-auth':
         specifier: workspace:^
         version: link:../plugin-auth
+      '@super-line/react':
+        specifier: workspace:^
+        version: link:../react
       '@super-line/server':
         specifier: workspace:^
         version: link:../server

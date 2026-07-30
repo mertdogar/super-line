@@ -61,6 +61,7 @@ export const api = defineContract({
 | Broadcast to a room | `srv.room('room:42').broadcast('event', data)` — **shared events only** |
 | Publish a topic | `srv.forRole('user').publish('feed', data)` (role) / `srv.publish('announce', data)` (shared) — **server only** |
 | Cluster event bus | `srv.publish('announce', data)` (any node) · `srv.subscribe('announce', (data, { from }) => …)` (server-side, cluster-wide, **local echo**, returns unsubscribe) · `client.subscribe('announce', cb)` (over WS) — one shared topic. Self-exclude: `if (from === srv.nodeId) return` |
+| Readiness (server side) | The adapter must establish a channel before a publish from ANOTHER node can land. `await srv.room('r').add(conn)` · `await srv.subscribe('t', cb).ready` · `await ctx.channel('c').subscribe(cb).ready` · `await srv.ready`. Skip in app code; **await in tests** — a test subscribes and publishes in the same millisecond, an app never does |
 | Introspection | `srv.local.connections/.rooms/.topics` (sync, this node) · `await srv.cluster.count()/.connections()/.byUser(uid)/.topology()` · `await srv.isOnline(uid)` (needs `identify` + presence adapter) |
 | Targeted cross-node send | `srv.toConn(id).emit('ev', d)` / `srv.toUser(uid).emit('ev', d)` · `.close()` / `.disconnect()` to kick |
 | Ask a client | `await srv.toConn(id).request('confirm', input, { timeout? })`; client: `client.implement({ confirm: async (input) => output })` |

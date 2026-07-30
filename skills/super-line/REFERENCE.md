@@ -121,13 +121,15 @@ interface SuperLineServerOptions<C, A> {
 
 interface SuperLineServer<C, A> {
   readonly nodeId: string                                            // this process's stable id
+  readonly ready: Promise<void>                                      // reply channel subscribed + every transport started; rejects if one failed
   implement(handlers: Handlers<C, A>): SuperLineServer<C, A>             // chainable
   room(name: string): Room<C>                                        // mixed-role group
   publish<T extends keyof SharedTopics<C>>(topic: T, data): void      // SHARED topics — cluster event bus: fans out to server.subscribe (this + other nodes) AND subscribed clients
   forRole<R>(role: R): { publish<T extends keyof RoleTopics<C,R>>(topic: T, data): void }  // role topics
-  subscribe<T extends keyof SharedTopics<C>>(topic: T, cb: (data, meta: { from: string }) => void): () => void  // SHARED topics only; server-side, cluster-wide; returns unsubscribe
+  subscribe<T extends keyof SharedTopics<C>>(topic: T, cb: (data, meta: { from: string }) => void): Unsubscribe  // SHARED topics only; server-side, cluster-wide
   // server.subscribe fires for a publish from ANY node INCLUDING this one (local echo, in-process, NO Redis/WS hop).
   // meta.from = origin node id; self-exclude with: if (from === srv.nodeId) return. Role-scoped server.subscribe is deferred.
+  // The returned unsubscribe fn also carries `.ready` — see Readiness below.
   // introspection
   readonly local: LocalView                                          // sync, THIS node
   readonly cluster: ClusterView                                      // async, registry-backed (needs presence adapter)
@@ -173,11 +175,26 @@ Handlers<C, A> = { shared: { [K in keyof SharedRequests<C>]: SharedHandler } }  
 // SharedHandler: (input: InferOut<input>, ctx: <union of role ctx>,   conn: Conn<shared events, ctxUnion, role union>) => Awaitable<InferOut<output>>
 
 interface Room<C> {
-  add(conn: Conn): void                        // any role (mixed membership)
+  add(conn: Conn): void | Promise<void>        // any role (mixed membership); awaitable — see Readiness
   remove(conn: Conn): void
   broadcast<E extends keyof SharedEvents<C>>(event: E, data): void  // SHARED events only
   readonly size: number                        // LOCAL member count on this node
 }
+
+// ── Readiness ────────────────────────────────────────────────────────────────
+// Declaring an interest and holding it are two moments: the adapter has to reach the broker before
+// anything published on ANOTHER node can arrive. Three surfaces let you close that window.
+interface Unsubscribe { (): void; readonly ready: Promise<void> }
+
+await srv.room('lobby').add(conn)          // resolves when the room channel is live (first local member)
+const off = srv.subscribe('announce', cb); await off.ready
+const off = ctx.channel('feed').subscribe(cb); await off.ready   // plugin channels
+await srv.ready                            // reply channel + every transport.start()
+
+// Ignoring them is fine in an app — nothing real subscribes and publishes in the same millisecond.
+// Await them in TESTS, which always do, and in code that publishes immediately after subscribing.
+// `ready` says the channel is now delivered HERE. It does NOT say a peer has noticed: a gossip mesh
+// may still be forming, and no adapter reports that.
 
 type Middleware<A> = (ctx, info: MiddlewareInfo, next: () => Promise<void>) => void|Promise<void>
 interface MiddlewareInfo { kind: 'request' | 'subscribe'; name: string; conn: Conn }

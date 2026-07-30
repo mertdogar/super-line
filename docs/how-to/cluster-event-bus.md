@@ -33,6 +33,15 @@ off() // unsubscribe
 
 `data` is typed from the same shared `serverToClient` declaration the client subscribes to. `server.subscribe` is **shared topics only** — role-scoped server-side subscribe is deferred.
 
+The unsubscribe fn also carries `.ready`, which resolves once the adapter has actually established the channel:
+
+```ts
+const off = srv.subscribe('announce', applyAnnounce)
+await off.ready                   // now a publish from ANOTHER node will land here
+```
+
+The local echo never needs it — that path is in-process. It matters only for the cross-node half, and only when something publishes in the same breath as the subscribe. Application code almost never does; tests almost always do, and a broker drops what it receives for a channel nobody has subscribed yet.
+
 ## Publish from any node
 
 `server.publish` is the same `srv.publish` you already use on shared topics — any node may publish, and every subscriber (server-side and client-side, on every node) sees it:

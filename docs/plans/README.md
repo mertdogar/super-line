@@ -31,7 +31,8 @@ disagree, **the code is right**. For what the system does today, read the
 | [`PLAN-chat-mastra.md`](PLAN-chat-mastra.md) | The Mastra bridge, per-channel turn serialization, bot provisioning | Shipped |
 | [`PLAN-logtape.md`](PLAN-logtape.md) | Internal diagnostics through LogTape, configured by the app | Shipped ([ADR-0018](../adr/0018-logging-is-app-configured-not-per-instance.md)) |
 | [`PLAN-live-feed.md`](PLAN-live-feed.md) | The Control Center live feed — filters, magnitude bars, export | Shipped |
-| [`PLAN-traffic-lab.md`](PLAN-traffic-lab.md) | A multi-container traffic lab measuring cluster and client fan-out; the two fixes it proves | **Not started** — design settled 2026-07-29 |
+| [`PLAN-traffic-lab.md`](PLAN-traffic-lab.md) | A multi-container traffic lab measuring cluster and client fan-out; the two fixes it proves | Shipped |
+| [`PLAN-test-flakiness.md`](PLAN-test-flakiness.md) | Readiness on the server, and waits that survive a loaded machine | Shipped |
 | [`PLAN-transport-mux.md`](PLAN-transport-mux.md) | Two independent sessions multiplexed over one socket | **Deferred, never built** — composition answered the driving requirement ([ADR-0004](../adr/0004-composition-over-connection-namespaces.md)) |
 
 ## Deleted plans

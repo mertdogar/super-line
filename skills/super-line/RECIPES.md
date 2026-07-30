@@ -267,7 +267,9 @@ const bump = (room: string, d: number) => { const n = Math.max(0, (counts.get(ro
 srv.implement({
   user: {
     join: async ({ room }, _ctx, conn) => {
-      srv.room(room).add(conn)
+      await srv.room(room).add(conn)   // awaited: the response then means "subscribed", so a broadcast from
+                                       // another node right after this one lands. Bare `add` is fine when
+                                       // nothing publishes in the next millisecond.
       srv.forRole('user').publish('presence', { room, count: bump(room, +1) })   // role topic, server-only
       return { ok: true }
     },
@@ -1272,8 +1274,10 @@ it('one publish fires server.subscribe on both nodes exactly once', async () => 
   const b = await h.server(busApi, { authenticate: () => ({ role: 'user' as const, ctx: {} }), adapter: createInMemoryAdapter(bus) })
 
   const aGot: unknown[] = [], bGot: unknown[] = []
-  a.srv.subscribe('rebalance', (d, { from }) => { expect(from).toBe(a.srv.nodeId); aGot.push(d) }) // origin: local echo, in-process
-  b.srv.subscribe('rebalance', (d, { from }) => { expect(from).toBe(a.srv.nodeId); bGot.push(d) }) // peer: over the bus, inbound-validated
+  // await .ready: a test publishes in the same millisecond it subscribes, so the adapter's SUBSCRIBE
+  // may not have reached the broker yet — and a pub/sub frame sent into that window is simply gone.
+  await a.srv.subscribe('rebalance', (d, { from }) => { expect(from).toBe(a.srv.nodeId); aGot.push(d) }).ready // origin: local echo, in-process
+  await b.srv.subscribe('rebalance', (d, { from }) => { expect(from).toBe(a.srv.nodeId); bGot.push(d) }).ready // peer: over the bus, inbound-validated
   a.srv.publish('rebalance', { shard: 3 })
 
   await waitFor(() => aGot.length === 1 && bGot.length === 1)

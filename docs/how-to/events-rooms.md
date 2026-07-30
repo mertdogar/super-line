@@ -59,6 +59,24 @@ shared: {
 To push a *role-specific* event to a group, use a [topic](/how-to/topics) (`forRole(r).publish`) or iterate and `conn.emit`. `room.broadcast` is deliberately shared-only.
 :::
 
+### Adding the first member is asynchronous
+
+In a cluster, the first connection to join a room makes this node subscribe the room's channel on
+the adapter — a round trip to your broker. `add` hands that back, so you can wait for it:
+
+```ts
+await srv.room('room:42').add(conn)                 // resolves once the channel is live
+```
+
+Ignore it in application code: nothing real adds a member and broadcasts from *another node* in the
+same millisecond, and a later broadcast always arrives. Await it when something does — above all in
+tests, where the subscribe and the publish genuinely are adjacent, and a frame sent into that window
+is dropped by the broker with nothing to retry.
+
+The same applies to [the cluster bus](/how-to/cluster-event-bus): `srv.subscribe(topic, cb)` returns an
+unsubscribe function carrying `.ready`. And `srv.ready` resolves once every transport has started —
+worth awaiting before you dial a server you just constructed, since the constructor is synchronous.
+
 ## DM a user across nodes
 
 Don't stash a `conn` to DM a user — it's node-local. Put each connection in a **per-user room** and broadcast a shared event to it, which works across nodes:

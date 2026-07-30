@@ -73,6 +73,7 @@ Decide: **Need a reply?** request. **Pushing to recipients *you* pick?** event (
 | Client call | `await client.send(input, { timeoutMs?, signal? })` |
 | Client listen | `client.on('event', (d) => …)` → returns unsubscribe |
 | Client subscribe | `const sub = client.subscribe('feed', (d) => …); await sub.ready; sub.unsubscribe()` |
+| Readiness (server side) | A subscribe isn't live until the adapter says so. `await srv.room('r').add(conn)` · `await srv.subscribe('t', cb).ready` · `await ctx.channel('c').subscribe(cb).ready` · `await srv.ready` (transports started). Ignore them in an app; **await them in tests**, which publish in the same millisecond they subscribe |
 | Multi-node | pass an `adapter:` to every server — `createRedisAdapter('redis://…')` (or `-libp2p` / `-rabbitmq` / `-zeromq`, each has a `scaling-*` example). A `clustering:'self'` collection backend needs **none** (it owns its own sync) |
 | Transport | server `transports: [webSocketServerTransport({ server })]` · client `transport: webSocketClientTransport({ url })`; swap in `httpServerTransport`/`httpClientTransport` (SSE/long-poll), `libp2p*Transport` (BYO node), or `loopback*Transport` (tests) |
 | Control Center (debug) | `createSuperLineServer(api, { …, plugins: [inspector()] })` (from `@super-line/plugin-inspector`; `inspector({ redact: ['token'] })` to mask fields; **`SUPER_LINE_INSPECTOR_PASSWORD` or `inspector({ auth })` to lock it — unlocked otherwise**), then `npx @super-line/control-center` → cluster-wide live feed of `msg.*` + collection/CRDT traffic + topology |

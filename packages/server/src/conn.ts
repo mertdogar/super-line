@@ -31,6 +31,12 @@ export class Conn<
   transport?: string
   /** ACL identity for stores: `identify(conn) ?? conn.id`, set by the server at accept (always defined there). */
   principal?: string
+  /**
+   * Resolves once this connection's descriptor has been written to the cluster presence directory
+   * (set by the server at accept). Presence *mutations* — a room join or leave — chain on it, because
+   * they read-modify-write that descriptor and silently do nothing when it is not there yet.
+   */
+  registered?: Promise<void>
 
   /** When this connection was accepted (`Date.now()`). */
   readonly connectedAt = Date.now()

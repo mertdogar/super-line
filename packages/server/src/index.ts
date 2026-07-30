@@ -196,8 +196,15 @@ export type Middleware<A> = (
  * **shared** event to every member, regardless of their role.
  */
 export interface Room<C extends Contract> {
-  /** Add a connection to the room (server-controlled membership). */
-  add(conn: Conn): void
+  /**
+   * Add a connection to the room (server-controlled membership).
+   *
+   * Returns a promise when this is the room's FIRST local member, because the adapter has to
+   * establish the channel before a broadcast from another node can reach it. Awaiting it closes
+   * that window; ignoring it is fine everywhere the subscribe and the publish aren't in the same
+   * millisecond, which is every real app and no test.
+   */
+  add(conn: Conn): void | Promise<void>
   /** Remove a connection from the room. */
   remove(conn: Conn): void
   /** Broadcast a shared event to all members. */
@@ -388,12 +395,33 @@ export interface PluginConnection {
   handlers?: (ctx: PluginContext) => Record<string, (input: unknown, conn: Conn) => Awaitable<unknown>>
 }
 
+/**
+ * An unsubscribe function that also reports when its subscription became live on the wire.
+ *
+ * Declaring interest and holding it are two different moments: the adapter has to reach a broker
+ * or a mesh before anything published elsewhere can arrive. `ready` closes that window for callers
+ * who publish immediately after subscribing — tests, mostly, since no real app subscribes and
+ * publishes in the same millisecond. It resolves immediately when the channel was already held.
+ *
+ * It says the channel will now be delivered here. It does NOT say any peer has noticed: a gossip
+ * mesh may still be forming, and no adapter reports that.
+ */
+export interface Unsubscribe {
+  (): void
+  readonly ready: Promise<void>
+}
+
+/** Attach `ready` to an unsubscribe fn. `established` is absent when the channel was already held — resolved. */
+function withReady(established: void | Promise<void>, off: () => void): Unsubscribe {
+  return Object.assign(off, { ready: Promise.resolve(established) })
+}
+
 /** A plugin-private adapter channel (reserved `x:<plugin>:` prefix), fanned out cluster-wide. */
 export interface PluginChannel {
   /** Publish to this channel; delivered to every node's subscribers (local echo included). */
   publish(data: unknown): void
-  /** Subscribe to this channel. `meta.from` is the publishing node. Returns an unsubscribe fn. */
-  subscribe(handler: (data: unknown, meta: BusMeta) => void): () => void
+  /** Subscribe to this channel. `meta.from` is the publishing node. Await `.ready` before publishing from elsewhere. */
+  subscribe(handler: (data: unknown, meta: BusMeta) => void): Unsubscribe
   /**
    * How many subscribers this channel has **on this node**, right now.
    *
@@ -448,15 +476,15 @@ export interface PluginContext {
   isOnline(userId: string): Promise<boolean>
   /** Publish a shared topic (server-only publish). */
   publish(topic: string, data: unknown): void
-  /** Subscribe server-side to a shared topic, cluster-wide (local echo). Returns an unsubscribe fn. */
-  subscribe(topic: string, handler: (data: unknown, meta: BusMeta) => void): () => void
+  /** Subscribe server-side to a shared topic, cluster-wide (local echo). Await `.ready` before publishing from elsewhere. */
+  subscribe(topic: string, handler: (data: unknown, meta: BusMeta) => void): Unsubscribe
   /** Target a single connection by id, on whatever node holds it. */
   toConn(id: string): { emit(event: string, data: unknown): void; close(): void; setEnv(env: unknown): void }
   /** Target all of a user's connections across nodes. */
   toUser(userId: string): { emit(event: string, data: unknown): void; disconnect(): void; setEnv(env: unknown): void }
   /** Server-controlled room membership + broadcast (loosely typed, mirroring toConn/toUser). */
   room(name: string): {
-    add(conn: Conn): void
+    add(conn: Conn): void | Promise<void>
     remove(conn: Conn): void
     broadcast(event: string, data: unknown): void
     readonly size: number
@@ -588,7 +616,7 @@ export interface SuperLineServer<C extends Contract, A extends AuthResult<C>, HK
   subscribe<T extends keyof SharedTopics<C>>(
     topic: T,
     handler: (data: EventData<SharedTopics<C>[T]>, meta: BusMeta) => void,
-  ): () => void
+  ): Unsubscribe
   /** Lens for role-scoped sends, e.g. forRole('user').publish('feed', data). */
   forRole<R extends RoleOf<C>>(role: R): RoleLens<C, R>
   /**
@@ -600,6 +628,16 @@ export interface SuperLineServer<C extends Contract, A extends AuthResult<C>, HK
   collection<N extends CollectionName<C>>(
     name: N,
   ): N extends CrdtCollectionName<C> ? ServerCrdtCollectionHandle<DocOf<C, N>> : ServerCollectionHandle<RowOf<C, N>>
+  /**
+   * Resolves once everything construction started has landed: the reply channel is subscribed and every
+   * transport has finished `start()`. Rejects if one of them failed.
+   *
+   * `createSuperLineServer` is synchronous, so a node can be handed back before it is listening — which is
+   * real for a transport whose `start` is async (libp2p awaits `node.handle`), and harmless for one where
+   * the host owns the socket (a WebSocket transport over your own `http.Server`). Await this before dialing
+   * a server you just built.
+   */
+  readonly ready: Promise<void>
   close(): Promise<void>
 }
 
@@ -816,8 +854,14 @@ export function createSuperLineServer<
     if (busSet) deliverBus(payload, busSet)
   })
 
+  // Everything construction fires off that must land before the server is usable. `createSuperLineServer`
+  // is synchronous, so without collecting these a caller has no way to know the node is listening — and a
+  // transport whose `start` is genuinely async (libp2p awaits `node.handle`) had not registered its
+  // protocol when the constructor returned.
+  const readyParts: Array<void | Promise<void>> = []
+
   // the server→client request feature subscribes its reply channel up front (one per node)
-  void adapter.subscribe(replyChannel)
+  readyParts.push(adapter.subscribe(replyChannel))
   // (the Collection runtime subscribes COLL_CHANNEL itself, once it exists — see below)
 
   // personal (c:/u:) channels carry a control envelope, not a raw frame to forward verbatim
@@ -971,11 +1015,18 @@ export function createSuperLineServer<
 
   for (const p of plugins) if (p.onEvent) taps.push(p.onEvent) // taps: plugin observers (the inspector is one)
 
+  // A connection's presence writes are ORDERED. `addRoom`/`removeRoom` read-modify-write the
+  // descriptor and silently no-op when it is absent, so they must follow the initial `set` — which
+  // now waits for the conn's channels, so a room joined in that window would otherwise vanish.
+  const afterRegistered = (conn: Conn, write: () => void | Promise<void>): void => {
+    void (conn.registered ? conn.registered.then(write) : write())
+  }
+
   function joinChannel(conn: Conn, channel: string): void | Promise<void> {
     conn.channels.add(channel)
     if (channel.startsWith(ROOM)) {
       const room = channel.slice(ROOM.length)
-      void adapter.presence?.addRoom(conn.id, room)
+      afterRegistered(conn, () => adapter.presence?.addRoom(conn.id, room))
       emitTap({ type: 'room.add', connId: conn.id, room })
     } else if (channel.startsWith(TOPIC)) {
       emitTap({ type: 'topic.sub', connId: conn.id, topic: channel.slice(channel.indexOf(':', TOPIC.length) + 1) })
@@ -997,7 +1048,7 @@ export function createSuperLineServer<
     conn.channels.delete(channel)
     if (channel.startsWith(ROOM)) {
       const room = channel.slice(ROOM.length)
-      void adapter.presence?.removeRoom(conn.id, room)
+      afterRegistered(conn, () => adapter.presence?.removeRoom(conn.id, room))
       emitTap({ type: 'room.remove', connId: conn.id, room })
     } else if (channel.startsWith(TOPIC)) {
       emitTap({ type: 'topic.unsub', connId: conn.id, topic: channel.slice(channel.indexOf(':', TOPIC.length) + 1) })
@@ -1159,11 +1210,18 @@ export function createSuperLineServer<
     }
     fireConnection(conn, ctx) // may seed conn.data (or call conn.setEnv again) before the snapshot
     const descriptor = buildDescriptor(conn) // snapshot (reads conn.data)
-    void adapter.presence?.set(descriptor)
     emitTap({ type: 'connect', descriptor })
-    void joinChannel(conn, CONN + conn.id) // personal channel for targeted cross-node send
+    // Subscribe the channels that make this conn REACHABLE before presence advertises it. Announcing
+    // first meant another node could read presence, `toConn(id).emit(...)` immediately, and publish to
+    // a `c:<id>` nobody had subscribed yet — silently lost. Local delivery is unaffected either way:
+    // `members` is populated synchronously inside joinChannel, before the adapter is touched.
     const uid = opts.identify?.(conn)
-    if (uid !== undefined) void joinChannel(conn, USER + uid)
+    const reachable = Promise.all([
+      joinChannel(conn, CONN + conn.id), // personal channel for targeted cross-node send
+      uid === undefined ? undefined : joinChannel(conn, USER + uid),
+    ])
+    conn.registered = reachable.then(() => adapter.presence?.set(descriptor)).then(() => undefined)
+    void conn.registered.catch(() => {}) // presence is best-effort; an unawaited failure is not an unhandled rejection
   }
 
   async function onMessage(conn: Conn, bytes: Uint8Array): Promise<void> {
@@ -1201,8 +1259,10 @@ export function createSuperLineServer<
   }
 
   for (const transport of opts.transports) {
-    void transport.start({ authenticate: authHook, onConnection: acceptConn, reserved })
+    readyParts.push(transport.start({ authenticate: authHook, onConnection: acceptConn, reserved }))
   }
+  const ready = Promise.all(readyParts).then(() => undefined)
+  void ready.catch(() => {}) // an unawaited `ready` must not surface as an unhandled rejection
 
   function runMiddleware(info: MiddlewareInfo, terminal: () => Promise<void>): Promise<void> {
     const chain = middlewareChain
@@ -1347,7 +1407,7 @@ export function createSuperLineServer<
     const channel = ROOM + name
     return {
       add(conn) {
-        void joinChannel(conn, channel)
+        return joinChannel(conn, channel)
       },
       remove(conn) {
         leaveChannel(conn, channel)
@@ -1437,14 +1497,15 @@ export function createSuperLineServer<
       },
       subscribe(handler) {
         let set = pluginChannels.get(channel)
+        let established: void | Promise<void> = undefined
         if (!set) {
           set = new Set()
           pluginChannels.set(channel, set)
-          void adapter.subscribe(channel)
+          established = adapter.subscribe(channel)
         }
         set.add(handler)
         announceSubscribers(channel)
-        return () => {
+        return withReady(established, () => {
           const current = pluginChannels.get(channel)
           if (!current) return
           current.delete(handler)
@@ -1453,7 +1514,7 @@ export function createSuperLineServer<
             void adapter.unsubscribe(channel)
           }
           announceSubscribers(channel)
-        }
+        })
       },
       onSubscribersChanged(cb) {
         let set = pluginChannelObservers.get(channel)
@@ -1567,6 +1628,7 @@ export function createSuperLineServer<
     nodeId: instanceId,
     nodeName,
     nodeKey,
+    ready,
     get local(): LocalView {
       return {
         connections: [...conns],
@@ -1641,14 +1703,15 @@ export function createSuperLineServer<
     subscribe(topic, handler) {
       const channel = TOPIC + 'shared:' + String(topic)
       let set = busListeners.get(channel)
+      let established: void | Promise<void> = undefined
       if (!set) {
         set = new Set()
         busListeners.set(channel, set)
-        if (!members.has(channel)) void adapter.subscribe(channel) // first local member of either kind
+        if (!members.has(channel)) established = adapter.subscribe(channel) // first local member of either kind
       }
       const cb = handler as (data: unknown, meta: BusMeta) => void
       set.add(cb)
-      return () => {
+      return withReady(established, () => {
         const current = busListeners.get(channel)
         if (!current) return
         current.delete(cb)
@@ -1656,7 +1719,7 @@ export function createSuperLineServer<
           busListeners.delete(channel)
           if (!members.has(channel)) void adapter.unsubscribe(channel)
         }
-      }
+      })
     },
     forRole(role) {
       return {
@@ -1686,9 +1749,27 @@ export function createSuperLineServer<
       if (hbTimer) clearInterval(hbTimer)
       for (const conn of conns) conn.close()
       for (const conn of reservedConns) conn.close()
-      await adapter.presence?.clearNode(instanceId) // remove this node's registry entries before disconnecting
-      await adapter.close?.()
-      for (const transport of opts.transports) await transport.stop()
+      // Each step is isolated: shutdown must reach the end even when an earlier step fails. A broker
+      // that hiccups during `clearNode` used to abandon the rest of close(), leaking the adapter's
+      // connections AND the transport's listening socket — the process kept a port open for a server
+      // the caller believed was gone.
+      try {
+        await adapter.presence?.clearNode(instanceId) // remove this node's registry entries before disconnecting
+      } catch {
+        // best-effort: the node's liveness key expires on its own
+      }
+      try {
+        await adapter.close?.()
+      } catch {
+        // nothing left to salvage — keep going so the transports still stop
+      }
+      for (const transport of opts.transports) {
+        try {
+          await transport.stop()
+        } catch {
+          // one transport failing to stop must not strand the others
+        }
+      }
     },
   }
 

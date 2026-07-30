@@ -8,7 +8,12 @@ import * as z from 'zod'
 import { defineContract, eq } from '@super-line/core'
 import { createSuperLineServer, type SuperLineServer } from '@super-line/server'
 import { createSuperLineClient, type SuperLineClient } from '@super-line/client'
-import { createSuperLineHooks } from '@super-line/react'
+import {
+  createSuperLineHooks,
+  SuperLineProvider,
+  useCollection as boundUseCollection,
+  useMaybeClient as boundUseMaybeClient,
+} from '@super-line/react'
 import { memoryCollections } from '@super-line/collections-memory'
 import { webSocketServerTransport, webSocketClientTransport } from '@super-line/transport-websocket'
 
@@ -33,6 +38,22 @@ const contract = defineContract({
 })
 
 const { Provider, useRequest, useCollection } = createSuperLineHooks<typeof contract, 'user'>()
+
+// Bind the module-level surface to this test's concrete contract BY CAST. Deliberate: `Register` is a
+// program-wide singleton and the root typecheck program must stay unregistered (a second declaration
+// anywhere is an interface merge conflict), so runtime tests narrow the never-typed exports by hand.
+type Bound = ReturnType<typeof createSuperLineHooks<typeof contract, 'user'>>
+const BoundProvider = SuperLineProvider as unknown as Bound['Provider']
+const useBoundCollection = boundUseCollection as unknown as Bound['useCollection']
+const useBoundMaybeClient = boundUseMaybeClient as unknown as Bound['useMaybeClient']
+
+// Compile-time tripwire: in an unregistered program the provider props carry the guard marker. If this
+// line ever errors, some root-typechecked file declared `Register` — which claims the ONE registration
+// the whole program gets and silently rebinds every module-level consumer in it.
+const _guardActive: '__superLineRegisterMissing' extends keyof Parameters<typeof SuperLineProvider>[0]
+  ? true
+  : false = true
+void _guardActive
 
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
@@ -128,6 +149,40 @@ describe('react hooks', () => {
       await result.current.insert({ id: 'm4', channelId: 'general', text: 'mine' })
     })
     await waitFor(() => expect(result.current.rows.map((r) => r.id).sort()).toEqual(['m1', 'm3', 'm4']))
+  })
+
+  it('module-level hooks read the singleton context SuperLineProvider feeds', async () => {
+    const { client, srv } = await boot()
+    await srv.collection('messages').insert({ id: 'g1', channelId: 'general', text: 'seed' })
+
+    const { result } = renderHook(
+      () => ({
+        rows: useBoundCollection('messages', { filter: eq('channelId', 'general') }),
+        client: useBoundMaybeClient(),
+      }),
+      { wrapper: ({ children }: { children: ReactNode }) => createElement(BoundProvider, { client, children }) },
+    )
+
+    // Both hooks see the SAME provider: the client lands and the subscription flows through it.
+    expect(result.current.client).toBe(client)
+    await waitFor(() => expect(result.current.rows.rows.map((r) => r.id)).toEqual(['g1']))
+
+    await act(async () => {
+      await result.current.rows.insert({ id: 'g2', channelId: 'general', text: 'mine' })
+    })
+    await waitFor(() => expect(result.current.rows.rows.map((r) => r.id).sort()).toEqual(['g1', 'g2']))
+  })
+
+  it('module-level hooks idle with no provider mounted at all', async () => {
+    const { result } = renderHook(() => ({
+      rows: useBoundCollection('messages'),
+      client: useBoundMaybeClient(),
+    }))
+    expect(result.current.client).toBeNull()
+    expect(result.current.rows.rows).toEqual([])
+    await expect(result.current.rows.insert({ id: 'x', channelId: 'c', text: 't' })).rejects.toMatchObject({
+      code: 'UNAUTHORIZED',
+    })
   })
 
   it('useCollection survives StrictMode double-mounting (subscribe/close is re-entrant)', async () => {

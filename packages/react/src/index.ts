@@ -307,3 +307,102 @@ export function createSuperLineHooks<C extends Contract, R extends RoleOf<C>>() 
 
   return { Provider, useClient, useMaybeClient, useEvent, useSubscription, useRequest, useDoc, useCollection, useEnv }
 }
+
+// ── the registered, module-level binding (ADR-0026) ──────────────────────────────────────────────
+//
+// One app, one contract, one binding: declare `Register` once by declaration merging and every export
+// below is typed by it — no factory call, no destructuring, no generic threading at call sites. The
+// factory above stays the escape hatch for multi-contract apps and tests; note that a factory instance
+// is a SEPARATE world (its own context) — mixing its hooks with this registered provider (or vice
+// versa) yields silently-empty hooks, so pick one surface per app and use it end to end.
+
+/**
+ * Declare your contract and role ONCE, by declaration merging, and the module-level hooks in this
+ * package are typed by it:
+ *
+ * @example
+ * ```ts
+ * declare module '@super-line/react' {
+ *   interface Register {
+ *     contract: typeof app
+ *     role: 'user'
+ *   }
+ * }
+ * ```
+ *
+ * `Register` is a PROGRAM-WIDE singleton: exactly one declaration per TypeScript program (a second one
+ * is an interface merge conflict). Note for LIBRARY authors: this is a global augmentation — keep the
+ * declaration in a source-only ambient file your `.d.ts` build does not emit, or every consumer
+ * inherits it and one with its own contract cannot override it.
+ */
+export interface Register {}
+
+/** The contract from {@link Register}. `never` until you declare one. */
+export type RegisteredContract = Register extends { contract: infer C extends Contract } ? C : never
+/** The role from {@link Register}. `never` until you declare one. */
+export type RegisteredRole = Register extends { role: infer R extends string }
+  ? R extends RoleOf<RegisteredContract>
+    ? R
+    : never
+  : never
+
+/**
+ * Makes an unregistered app fail at the provider — the one place every app touches — with the property
+ * name as the message, instead of leaving a trail of cryptic `never`s at each hook.
+ */
+type RegisterGuard = Register extends { contract: Contract; role: string }
+  ? unknown
+  : {
+      /** ⛔ Declare `interface Register { contract; role }` on '@super-line/react' first. */
+      __superLineRegisterMissing: never
+    }
+
+// The one binding instance behind every module-level export. Module-level because `Register` is: there
+// is exactly one contract per app (ADR-0004), so plugin providers (plugin-auth's session owner, chat's
+// auto-builder) can feed THIS context and every hook below sees the same client.
+const line = createSuperLineHooks<RegisteredContract, RegisteredRole>()
+
+/**
+ * Every re-export below is annotated with an indexed access into this — never left to inference. An
+ * inferred type is RESOLVED when the `.d.ts` is emitted, i.e. while `Register` is still empty, which
+ * bakes `never` into the published signatures and makes declaration merging silently useless. A written
+ * annotation is emitted verbatim, so `RegisteredContract` stays lazy and re-resolves in the consumer's
+ * program.
+ */
+type Hooks = ReturnType<typeof createSuperLineHooks<RegisteredContract, RegisteredRole>>
+
+export type SuperLineProviderProps = RegisterGuard & {
+  /** The app's client, or `null` for "not connected yet" — the hooks idle rather than throw on null. */
+  client: SuperLineClient<RegisteredContract, RegisteredRole> | null
+  children?: ReactNode
+}
+
+/**
+ * The registered app's provider: feeds the one module-level context every hook below reads. An
+ * auth-owned app mounts `<SuperLineAuthProvider>` from `@super-line/plugin-auth/react` instead, which
+ * feeds this same context with the live session's client (ADR-0026).
+ */
+export function SuperLineProvider(props: SuperLineProviderProps): ReactNode {
+  const { client, children } = props as {
+    client: SuperLineClient<RegisteredContract, RegisteredRole> | null
+    children?: ReactNode
+  }
+  return createElement(line.Provider, { client }, children)
+}
+
+/** Access the registered client (throws outside a provider, or while it holds no client). */
+export const useClient: Hooks['useClient'] = line.useClient
+/** The registered client, or `null` while there is none — the idle-tolerant accessor. */
+export const useMaybeClient: Hooks['useMaybeClient'] = line.useMaybeClient
+/** Subscribe to a server-pushed event for the component's lifetime. Idle with no client. */
+export const useEvent: Hooks['useEvent'] = line.useEvent
+/** Subscribe to a topic and track its latest value. Idle with no client. */
+export const useSubscription: Hooks['useSubscription'] = line.useSubscription
+/** Wrap a request as `{ data, error, isLoading, call }`. `call` rejects `UNAUTHORIZED` with no client. */
+export const useRequest: Hooks['useRequest'] = line.useRequest
+/** Open a CRDT document by id and track it reactively. Idle reads with no client; writes throw. */
+export const useDoc: Hooks['useDoc'] = line.useDoc
+/** Subscribe to a collection subset and track its rows. Idle reads with no client; writes reject. */
+export const useCollection: Hooks['useCollection'] = line.useCollection
+/** The connection's server-vended `env` (ADR-0012). `null` with no client. */
+export const useEnv: Hooks['useEnv'] = line.useEnv

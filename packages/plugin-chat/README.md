@@ -88,11 +88,13 @@ The read APIs are deliberately separate:
 There is no channel-wide parts window and no silent parts truncation. A reload can reconstruct the
 entire supervisor and subagent tree for any message.
 
-React bindings expose the same split:
+React bindings expose the same split — module-level, typed by the `Register` your app declared on
+`@super-line/react`. `<ChatProvider>` with no props auto-builds its chat client from the shared
+context (pass `chat={…}` to adopt an instance you own; `createChatHooks<typeof app>()` remains the
+factory escape hatch):
 
 ```tsx
-const { ChatProvider, useMessages, useChatHistory, useMessageParts } =
-  createChatHooks<typeof app>();
+import { ChatProvider, useMessages, useChatHistory, useMessageParts } from '@super-line/plugin-chat/react';
 ```
 
 ## Producing a streamed message

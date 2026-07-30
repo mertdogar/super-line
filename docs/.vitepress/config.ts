@@ -160,6 +160,7 @@ export default defineConfig({
           collapsed: true,
           items: [
             { text: 'Use the React hooks', link: '/how-to/react' },
+            { text: 'Migrate to the one React binding', link: '/how-to/react-one-binding-migration' },
             { text: 'Configure serialization', link: '/how-to/serialization' },
           ],
         },

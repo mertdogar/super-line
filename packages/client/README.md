@@ -42,7 +42,7 @@ sub.subscribe((ev) => { /* { type: 'insert' | 'update' | 'delete', id, row } */ 
 await messages.insert({ id: 'm2', channelId: 'general', authorId: 'me', text: 'hi', createdAt: Date.now() })
 ```
 
-Row writes are **non-optimistic** — a write lands in `rows()` once the server confirms it; for joins, live queries, and optimism, pair a collection with [TanStack DB](https://super-line.dogar.biz/collections/tanstack-db). For a collaborative document, pass `crdtCollections: crdtCollectionsClient()` and use `client.collection(name).open(id)` (`getSnapshot` / `subscribe` / `update`). See the [Collections guide](https://super-line.dogar.biz/collections/).
+Row writes are **non-optimistic** — a write lands in `rows()` once the server confirms it; for a one-shot read without a lasting subscription, `await messages.query({ filter, orderBy, limit })` resolves the snapshot and closes behind itself. For joins, live queries, and optimism, pair a collection with [TanStack DB](https://super-line.dogar.biz/collections/tanstack-db). For a collaborative document, pass `crdtCollections: crdtCollectionsClient()` and use `client.collection(name).open(id)` (`getSnapshot` / `subscribe` / `update`). See the [Collections guide](https://super-line.dogar.biz/collections/).
 
 - 📖 Docs: <https://super-line.dogar.biz/>
 - 📚 Guides: [requests](https://super-line.dogar.biz/how-to/requests), [reconnection & delivery](https://super-line.dogar.biz/concepts/reconnection-delivery)

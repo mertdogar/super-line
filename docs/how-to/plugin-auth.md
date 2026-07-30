@@ -59,14 +59,15 @@ A stable `nodeKey` is required — the plugin keys per-node session reconciliati
 
 ### 3 · Client (React)
 
-`<SuperLineAuthProvider>` owns the guest↔authed lifecycle **and** feeds the live client to every hook, so there is
-no bridge to write. Type the hooks once by declaring `Register`:
+`<SuperLineAuthProvider>` owns the guest↔authed lifecycle **and** feeds the app's one shared React
+binding, so there is no bridge to write. Type the binding once by declaring `Register` — on
+`@super-line/react`, where the data hooks live:
 
 ```ts
-// superline.d.ts — one declaration, and every hook below is typed by your contract
+// superline.d.ts — one declaration, and every module-level hook is typed by your contract
 import type { app } from './contract'
 
-declare module '@super-line/plugin-auth/react' {
+declare module '@super-line/react' {
   interface Register {
     contract: typeof app
     role: 'user'
@@ -90,7 +91,8 @@ createRoot(el).render(
 ```
 
 ```tsx
-import { useAuth, useCollection } from '@super-line/plugin-auth/react'
+import { useAuth } from '@super-line/plugin-auth/react'
+import { useCollection } from '@super-line/react'
 
 function App() {
   const { state, signIn, signUp, signOut } = useAuth()
@@ -102,9 +104,10 @@ function App() {
 }
 ```
 
-Every data hook comes from the same import and needs no client passed in — `useClient` (`null` until
-authenticated), `useCollection`, `useDoc`, `useEvent`, `useSubscription`, `useRequest`, `useEnv`. Before there is a
-session they go **idle**: reads return empty, writes reject `UNAUTHORIZED` rather than silently succeeding.
+The data hooks come from `@super-line/react` and need no client passed in — `useMaybeClient` (`null`
+until authenticated), `useCollection`, `useDoc`, `useEvent`, `useSubscription`, `useRequest`, `useEnv`.
+Before there is a session they go **idle**: reads return empty, writes reject `UNAUTHORIZED` rather than
+silently succeeding. This module exports only what is auth's: the provider and `useAuth`.
 
 Already own an `authClient()` instance (a script driving the same session, say)? Hand it over instead:
 `<SuperLineAuthProvider client={auth}>`. The provider never closes an instance it did not build. Nesting a second

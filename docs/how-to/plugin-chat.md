@@ -124,14 +124,24 @@ Await `chat.ready` before you depend on live delivery — it resolves once the c
 known and its membership watcher is armed. Pass `userId` if you already have it (from
 [`authClient`](/how-to/plugin-auth)), or omit it to let the client resolve it with a `whoami` round-trip.
 
-React bindings come from `@super-line/plugin-chat/react`:
+React bindings come from `@super-line/plugin-chat/react`, typed by the same `Register` your app
+declared on `@super-line/react` (see [the React hooks](/how-to/react)). Mount `<ChatProvider>` inside
+`<SuperLineAuthProvider>` with **no props**: it builds its own `chatClient` from the shared context,
+closes it on session swap or unmount, and rebuilds for the next session — the hand-written
+build-and-rebuild bridge is the library's job now.
 
 ```tsx
-const { ChatProvider, useChat, useChannels, useMembers, useMessages } = createChatHooks<typeof app>()
-// <ChatProvider chat={chatClient(client, { userId })}> … </ChatProvider>
+import { ChatProvider, useChannels, useMembers, useMessages, useChat } from '@super-line/plugin-chat/react'
+
+// <ChatProvider> … </ChatProvider>        — auto-builds; pass chat={…} to adopt an instance you own
 const messages = useMessages(channelId)
 const members = useMembers(channelId)
+const chat = useChat()                     // ChatClient | null — null until the session's chat client exists
 ```
+
+`ChatClientOptions` (`userId`, `messageLimit`, `presenceTimeoutMs`) pass through as provider props, and
+`chat={instance}` adopts an instance you own (the provider never closes it). The factory form,
+`createChatHooks<typeof app>()`, remains for multi-contract apps and tests.
 
 `members()` and `useMembers()` return each membership with `displayName`, `online`, `connectedAt`,
 and `lastSeenAt`. `online` expires locally 90 seconds after the last confirmed heartbeat, even when
@@ -145,8 +155,9 @@ message is selected and they idle at `[]` with no subscription. `useMe()` return
 message in the channel is still `streaming` — derive custom variants from `useMessages` directly).
 
 Each hook owns its store's lifecycle (created in a committed effect, closed on unmount / channel
-switch); the re-subscribe-on-membership dance lives in the client, not the hook. Rebuild the `chatClient` (and remount `ChatProvider`) whenever
-the auth client swaps connections — one `chatClient` wraps exactly one connected client.
+switch); the re-subscribe-on-membership dance lives in the client, not the hook. The hooks are
+null-tolerant on the *session* too: before the provider has a chat client they idle at `[]`, and
+`useChat()` returns `null`.
 
 ## The membership model
 

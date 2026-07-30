@@ -496,9 +496,10 @@ await a.signOut()
 ```
 
 ```tsx
-// React — one provider owns the session AND feeds every data hook. Type them once:
-//   declare module '@super-line/plugin-auth/react' { interface Register { contract: typeof app; role: 'user' } }
-import { SuperLineAuthProvider, useAuth, useCollection } from '@super-line/plugin-auth/react'
+// React — one provider owns the session AND feeds the shared binding. Type it once:
+//   declare module '@super-line/react' { interface Register { contract: typeof app; role: 'user' } }
+import { SuperLineAuthProvider, useAuth } from '@super-line/plugin-auth/react'
+import { useCollection } from '@super-line/react'
 createRoot(el).render(<SuperLineAuthProvider authedRole="user" connect={connect}><Gate /></SuperLineAuthProvider>)
 function Gate() {
   const { state, signIn, signOut } = useAuth()
@@ -1298,6 +1299,7 @@ import { createSuperLineHooks } from '@super-line/react'
 import { createHarness } from './harness'
 import { api } from './api'
 
+// tests use the FACTORY form: each instance is a private context, so no app-wide Register is touched
 const { Provider, useRequest } = createSuperLineHooks<typeof api, 'user'>()
 const h = createHarness()
 afterEach(() => { cleanup(); return h.dispose() })
@@ -1312,7 +1314,7 @@ it('useRequest performs a typed call and exposes state', async () => {
 
   await act(async () => { await result.current.call({ text: 'hi' }) })
   expect(result.current.data).toEqual({ text: 'hi' })
-  expect(result.current.isLoading).toBe(false)
+  expect(result.current.loading).toBe(false)
 })
 ```
 

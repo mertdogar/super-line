@@ -260,7 +260,7 @@ type SuperLineClient<C, R> = {
   on<E extends keyof Events<C, R>>(event: E, handler: (data) => void): () => void   // returns unsubscribe
   subscribe<T extends keyof Topics<C, R>>(topic: T, handler: (data) => void): Subscription
   implement(handlers: { [K in keyof ServerRequests<C, R>]?: (input) => Awaitable<output> }): void  // answer server→client requests; throw SuperLineError for typed failure
-  collection(name: string): CollectionHandle | DocHandle   // typed by the contract: a row collection → query handle (subscribe/insert/update/delete/batch); a CRDT collection → open-by-id DocHandle. See Collections.
+  collection(name: string): CollectionHandle | DocHandle   // typed by the contract: a row collection → query handle (subscribe/query one-shot/insert/update/delete/batch); a CRDT collection → open-by-id DocHandle. See Collections.
   close(): void
   readonly connected: boolean
   readonly role: R
@@ -329,33 +329,65 @@ Redis: Pub/Sub (two connections) + a presence store. All adapters are at-most-on
 
 ## @super-line/react
 
+**Registered module-level binding (the default).** Declare `Register` ONCE (one declaration per TS
+program) and import hooks directly — no factory, no destructuring:
+
 ```ts
-createSuperLineHooks<C, R extends keyof C['roles']>(): {
-  Provider: ({ client: SuperLineClient<C, R>; children }) => ReactNode
-  useClient(): SuperLineClient<C, R>
-  useEvent<E extends keyof Events<C, R>>(event: E, handler: (data) => void): void
-  useSubscription<T extends keyof Topics<C, R>>(topic: T): data | undefined  // latest value
-  useRequest<M extends keyof Requests<C, R>>(method: M): {
-    data?; error?: unknown; isLoading: boolean
-    call: (input) => Promise<output>
-  }
-  useCollection<N>(name: N, query?: CollectionQuery): {   // live row-set for a ROW collection; subscribes + closes on unmount
-    rows: RowOf<C, N>[]                                    // current rows, ordered + limited by the query
-    insert: (row: RowOf<C, N>) => Promise<void>
-    update: (row: RowOf<C, N>) => Promise<void>
-    delete: (id: string) => Promise<void>
-  }
-  useDoc<N>(name: N, id: string): {                        // open a CRDT DOCUMENT by id; closes on unmount
-    data: SnapshotOf<C, N> | undefined                     // undefined until ready
-    deleted: boolean                                       // true once the doc is deleted server-side
-    set: (value) => void                                   // whole-doc replace
-    update: (partial) => void                              // merge keys
-    delete: (path: (string | number)[]) => void            // surgical key removal
-  }
-  useEnv(): EnvOf<C, R> | null   // reactive client.env.current; null until the first server push / for a role with no env
+declare module '@super-line/react' {                       // an ambient .ts in the app source
+  interface Register { contract: typeof api; role: 'user' }
 }
+
+// then, module-level (all typed by Register; unregistered app = hard type error at the provider):
+SuperLineProvider: ({ client: SuperLineClient | null; children }) => ReactNode   // null = hooks idle
+useSuperLineClient(make: () => SuperLineClient, deps?: unknown[]): SuperLineClient | null
+  // StrictMode-safe ownership: builds in a committed effect, closes in its cleanup, rebuilds on deps
+  // change; null until the first commit. NEVER build a client in useState(() => …) — construction
+  // connects and close() is terminal, so a discarded double-render leaks a live socket.
+useClient(): SuperLineClient           // throws with no client
+useMaybeClient(): SuperLineClient | null
+useEvent(event, handler): void
+useSubscription(topic): data | undefined                   // latest value
+useRequest(method, input?, opts?: { enabled?: boolean }): {
+  data?; error?: unknown; loading: boolean
+  refetch: () => Promise<output>       // re-runs with the hook's input; rejects in manual mode
+  call: (input) => Promise<output>     // the manual path
+}
+  // ARITY IS THE MODE SWITCH: with an input it AUTO-FETCHES (mount + JSON-stable input change +
+  // client swap; exactly once per (client, input) even under StrictMode); without one nothing ever
+  // auto-fires (mutation form). No-input methods opt in with an explicit `undefined` input;
+  // enabled: false holds fire (enabled: !!id covers "wait until known").
+useCollection(name, query?: CollectionQuery | null): {     // live row-set; query: null = explicit idle
+  rows: RowOf<C, N>[]                  // ordered + limited by the query
+  ready: boolean                       // initial snapshot applied ("loading" vs "genuinely empty")
+  error?: unknown                      // denied subscribe
+  insert / update / delete             // write-through
+  batch: (ops) => Promise<void>        // ONE atomic batch
+  handle: CollectionHandle | undefined // underlying handle (stable; handle.query(q) = one-shot read)
+  sub: LiveRowSet | undefined          // underlying live set — windows, not ownership
+}
+useDoc(name, id, deps?): {             // id: string | null | undefined | (() => id | Promise<id>)
+  data: SnapshotOf<C, N> | undefined   // pre-ready this may be a (possibly empty) LOCAL snapshot
+  ready: boolean                       // catch-up snapshot applied — THE gate (bind editors on this)
+  error: unknown                       // denied/absent open (NOT_FOUND/FORBIDDEN), resolver failure
+  deleted: boolean
+  handle: DocHandle | undefined        // reactive underlying handle
+  native: unknown                      // engine doc (yDocOf(...) for Yjs); identity-stable until replaced
+  set / update / delete                // whole-doc replace / merge keys / surgical key removal
+}
+  // null/undefined id = idle; a resolver re-runs when `deps` change (inline arrows safe)
+useEnv(): EnvOf<C, R> | null
+
+useLiveQuery<Row>(make: (() => LiveRowSet<Row>) | null, deps): { rows; ready; error?; sub }
+  // context-free LiveRowSet → React glue (what useCollection is built on); null make = idle
 ```
-Create the client once (e.g. `useState(() => createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user' }))`, `webSocketClientTransport` from `@super-line/transport-websocket`), wrap with `<Provider client={client}>`, then use the hooks inside.
+
+With plugin-auth, mount `<SuperLineAuthProvider>` instead of `SuperLineProvider` — it feeds this same
+context. StrictMode is supported everywhere (providers build clients in committed effects).
+
+**Factory escape hatch** — for multi-contract apps and tests (each instance is a PRIVATE context;
+never mix a factory's hooks with the registered provider): `createSuperLineHooks<C, R>()` returns
+`{ Provider, useClient, useMaybeClient, useEvent, useSubscription, useRequest, useDoc, useCollection, useEnv }`
+with the same shapes as above.
 
 ## Connection env
 
@@ -601,15 +633,14 @@ interface AuthClient<C, R> {
 // A replacement NEVER destroys a session it could not replace: the candidate is confirmed before the incumbent
 // closes, so a source that throws / a refused credential leaves you signed in with `error` set.
 
-// /react — the app's single provider; it owns the session AND feeds every data hook.
-declare module '@super-line/plugin-auth/react' {   // ONE declaration types them all
-  interface Register { contract: typeof app; role: 'user' }
-}
+// /react — the session owner; it feeds @super-line/react's SHARED registered binding. Register is
+// declared on '@super-line/react' (see the react section) — this module exports ONLY what is auth's:
 <SuperLineAuthProvider authedRole="user" connect={connect} tokenParam? resolveToken? storage?>
 <SuperLineAuthProvider client={existingAuthClientInstance}>   // adopt form; never closed by the provider
 useAuth(): AuthClient<C, R>                  // the STABLE instance — live .state/.client getters, re-renders
-useClient(): SuperLineClient<C, R> | null    // null until authed
-useCollection · useDoc · useEvent · useSubscription · useRequest · useEnv   // idle before auth; writes REJECT
+// Data hooks (useMaybeClient/useCollection/useDoc/useEvent/useSubscription/useRequest/useEnv) come
+// from '@super-line/react' and idle before auth: reads empty, writes REJECT. StrictMode-safe: the
+// provider builds its authClient in a committed effect and withholds children for that one commit.
 ```
 
 Shared requests (every role): `signOut` / `whoami` / `createApiKey` / `listApiKeys` / `revokeApiKey`. Guest-only: `signIn` / `signUp` / `requestPasswordReset` / `confirmPasswordReset`.
@@ -710,10 +741,14 @@ chatClient<C,R>(client, opts?: { userId?: string|null; messageLimit?: number; pa
 //   Events: part_start{key,partType,toolName?,parent?} · delta{key,text} · part_patch{key,args?,result?,isError?,state?} · part_end{key,text?}
 //   (tool part key === toolCallId). Old turns whose parts left the partsLimit recency window render via `content` (parts absent).
 
-// /react — ELEVEN hooks; each owns its store's lifecycle (closed on unmount / channel switch).
-createChatHooks<C>(): ChatBinding<C>
-//   <ChatProvider chat={chatClient(client,{userId})}>…</ChatProvider>   (rebuild the ChatClient when the auth client swaps)
-//   useChat(): ChatClient                               — request methods (send, join, …)
+// /react — registered MODULE-LEVEL binding (typed by @super-line/react's Register) + the factory
+// escape hatch createChatHooks<C>(): ChatBinding<C>. Each hook owns its store's lifecycle.
+//   <ChatProvider>…</ChatProvider>                      — AUTO-BUILDS chatClient from the shared context
+//     (userId via whoami unless passed; closes on session swap/unmount; ChatClientOptions ride as
+//     props; chat={instance} adopts and never closes). No hand-written build/rebuild bridge.
+//   useChat(): ChatClient | null                        — request methods (send, join, …); MODULE-LEVEL
+//     form is null until the session's chat client exists (factory's useChat still throws; factory
+//     also has useMaybeChat)
 //   useChannels(): Channel[]                            — live directory; re-subscribes on membership change
 //   useMembers(channelId): ChatMember[]                 — live member list
 //   useMessages(channelId, { limit? }): Message[]       — live chronological newest-N envelopes
@@ -803,8 +838,8 @@ announceResource(kind, docId, state: 'open'|'heartbeat'|'close'): Promise<void> 
 // the human edits the doc through the NATIVE surface — chat wraps nothing here:
 client.collection(n).open(id): DocHandle          // or react useDoc(n, id); id = the resource row's docId
 
-// /react
-createChatHooks<C>(): { …, useChannelResources, useResourcePresence }
+// /react (module-level, or via createChatHooks<C>())
+useChannelResources · useResourcePresence
 useChannelResources(channelId): ChatResource[]                                  // live registry rows
 useResourcePresence(row: { kind, collection, docId }): ResourcePresence[]       // announces open on mount, 20s heartbeat, close on unmount; recency-filtered rows
 

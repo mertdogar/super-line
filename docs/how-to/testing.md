@@ -108,7 +108,9 @@ For **real cross-process** tests use `testcontainers` + `createRedisAdapter(url)
 
 ## React hooks
 
-Render hooks against a real client with `renderHook` (jsdom):
+Render hooks against a real client with `renderHook` (jsdom). Tests are where the factory form
+shines — each `createSuperLineHooks` instance is a private context, so a test file binds hooks to its
+own contract without touching the app-wide `Register`:
 
 ```ts
 const { Provider, useRequest } = createSuperLineHooks<typeof api, 'user'>()

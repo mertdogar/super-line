@@ -42,8 +42,9 @@ createSuperLineServer(app, {
 ```
 
 ```ts
-// 3a · client (React) — type every hook once, by declaration merging.
-declare module '@super-line/plugin-auth/react' {
+// 3a · client (React) — type the app's ONE binding once, by declaration merging (on @super-line/react,
+// where the data hooks live).
+declare module '@super-line/react' {
   interface Register {
     contract: typeof app
     role: 'user'
@@ -66,8 +67,8 @@ createRoot(el).render(
   </SuperLineAuthProvider>,
 )
 
-// const { state, signIn, signUp, signOut, reauthenticate } = useAuth()
-// const rows = useCollection('messages').rows   // idle until authenticated; writes reject rather than vanish
+// const { state, signIn, signUp, signOut, reauthenticate } = useAuth()          — from plugin-auth/react
+// const { rows } = useCollection('messages')   // from @super-line/react — idle until authenticated; writes reject
 ```
 
 Not using React? `authClient()` from `@super-line/plugin-auth/client` is the same logic, framework-agnostic.

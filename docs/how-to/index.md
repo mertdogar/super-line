@@ -54,6 +54,7 @@ Authorize, extend, and observe the server-authoritative core.
 - [Connection env](/how-to/connection-env) — vend typed, server-owned per-connection state the client reads live.
 - [Chat backbone](/how-to/plugin-chat) — add channels, membership control, and messages via `@super-line/plugin-chat`.
 - [Plugin-chat 0.5 migration](/how-to/plugin-chat-0-5-migration) — move from assembled feeds and bot helpers to durable per-message parts and host-owned automation policy.
+- [Migrate to the one React binding](/how-to/react-one-binding-migration) — `Register` moved to `@super-line/react`, plugin-auth/react shrank to the session owner, chat auto-builds its client, `useRequest` unified.
 - [Chat streaming](/how-to/chat-streaming) — store an agent's whole turn as typed parts that stream live and survive reloads.
 - [Chat bots](/how-to/chat-bots) — run an LLM as a regular authenticated user over its own connection.
 - [Chat resources](/how-to/chat-resources) — attach your CRDT documents to channels with membership-gated access.

@@ -3,10 +3,15 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
-## Unreleased
+## [plugin-chat-v0.11.0] — 2026-07-30
+
+### Features
+
+- **plugin-chat:** Module-level react binding + auto-building ChatProvider ([52c9736])
 
 ### Documentation
 
+- The teaching surface teaches one registered React binding ([45187f4])
 - Stop citing internal design docs from published material ([4f7f7d7])
 
 ## [plugin-chat-v0.10.0] — 2026-07-27

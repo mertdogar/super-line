@@ -3,6 +3,19 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [react-v0.13.0] — 2026-07-30
+
+### Features
+
+- **react,plugin-auth:** StrictMode is supported — useSuperLineClient + committed-effect auth provider ([d56c759])
+- **plugin-auth:** React half feeds the shared binding — Register and re-exports removed ([d598faa])
+- **react:** Hook upgrades — useLiveQuery, lazy useDoc ids, readiness/error/handles, unified useRequest ([d618e52])
+- **react:** Registered module-level binding — Register, SuperLineProvider, module-level hooks ([1d2ee85])
+
+### Documentation
+
+- The teaching surface teaches one registered React binding ([45187f4])
+
 ## [react-v0.12.0] — 2026-07-29
 
 ### Features

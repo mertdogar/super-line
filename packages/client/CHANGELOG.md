@@ -3,6 +3,20 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [client-v0.16.0] — 2026-07-30
+
+### Features
+
+- **client:** One-shot CollectionHandle.query() — snapshot without a lasting subscription ([9ec3171])
+
+### Testing
+
+- One polling wait with backoff, and teardown that cannot hang ([e86664a])
+
+### Documentation
+
+- The teaching surface teaches one registered React binding ([45187f4])
+
 ## [client-v0.15.0] — 2026-07-29
 
 ### Features

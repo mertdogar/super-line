@@ -3,6 +3,22 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [plugin-auth-v0.10.0] — 2026-07-30
+
+### Features
+
+- **react,plugin-auth:** StrictMode is supported — useSuperLineClient + committed-effect auth provider ([d56c759])
+- **plugin-auth:** React half feeds the shared binding — Register and re-exports removed ([d598faa])
+- **react:** Hook upgrades — useLiveQuery, lazy useDoc ids, readiness/error/handles, unified useRequest ([d618e52])
+
+### Testing
+
+- One polling wait with backoff, and teardown that cannot hang ([e86664a])
+
+### Documentation
+
+- The teaching surface teaches one registered React binding ([45187f4])
+
 ## [plugin-auth-v0.9.1] — 2026-07-29
 
 ### Bug Fixes

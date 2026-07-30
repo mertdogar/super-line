@@ -1,6 +1,6 @@
 {
   "name": "@super-line/plugin-chat",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "type": "module",
   "description": "Chat backbone for super-line — channels, membership control, and messages backed by typed collections, with hookable server-authoritative requests. A paired plugin (contract · server). Requires @super-line/plugin-auth.",
   "license": "MIT",
@@ -109,7 +109,7 @@
     "@super-line/client": ">=0.12.0 <1.0.0",
     "@super-line/core": ">=0.16.0 <1.0.0",
     "@super-line/plugin-auth": ">=0.6.0 <1.0.0",
-    "@super-line/react": ">=0.11.0 <1.0.0",
+    "@super-line/react": ">=0.13.0 <1.0.0",
     "@super-line/server": ">=0.15.0 <1.0.0",
     "ai": ">=6",
     "react": ">=18"

@@ -11,7 +11,7 @@ export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
   // The briefs, ADRs and design plans are internal notes — keep the files, don't publish them.
-  srcExclude: ['PRODUCT.md', 'POSITIONING.md', 'adr/**', 'plans/**'],
+  srcExclude: ['PRODUCT.md', 'POSITIONING.md', 'adr/**', 'plans/**', 'agents/**'],
   head: [
     ['link', { rel: 'icon', href: '/mark.svg' }],
     [
@@ -134,7 +134,10 @@ export default defineConfig({
         {
           text: 'Collections',
           collapsed: true,
-          items: [{ text: 'Choose a collection backend', link: '/how-to/choose-a-collection-backend' }],
+          items: [
+            { text: 'Choose a collection backend', link: '/how-to/choose-a-collection-backend' },
+            { text: 'Run pg_durable beside super-line', link: '/how-to/pg-durable-beside-super-line' },
+          ],
         },
         {
           text: 'Queues & workers',

@@ -7,5 +7,5 @@ export default defineConfig({
   target: 'es2022',
   clean: true,
   shims: true,
-  external: ['@super-line/core', '@super-line/server', 'duroxide', 'zod'],
+  external: ['@logtape/logtape', '@super-line/core', '@super-line/server', 'duroxide', 'zod'],
 })

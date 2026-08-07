@@ -32,6 +32,22 @@ errors, schedules, cluster slots). This kit starts paying off when work is
 multi-step: checkpoints between steps, durable timers, human-in-the-loop
 signals.
 
+### Retry semantics vs plugin-queue
+
+The engine owns retries, and the kit deliberately does not paper over the
+differences:
+
+| | plugin-queue | this kit |
+| --- | --- | --- |
+| Permanent errors | `PermanentJobError` skips retries | same — throw a `PermanentJobError` (any error with that `name` works; the class is re-exported here) |
+| Backoff | configurable type/delay/cap | the engine's exponential curve, not configurable |
+| Jitter | 0.2 default | none |
+| Timeouts | count as an attempt, then retry | terminal — a timed-out attempt is never retried |
+| Config | nested `retry.backoff` | flat `maxAttempts` / `timeoutMs` / `totalTimeoutMs` |
+
+A failed run's reason lands in the `workflowRuns` row's `error` column, so
+failures are diagnosable from the collection alone.
+
 ## Usage
 
 ```ts
@@ -88,6 +104,14 @@ Rows are normalized before they land: statuses are lowercase, engine output is
 JSON-parsed, `customStatus` is cleared once a run is terminal, and a
 cancellation (which the engine reports as a failure with a `canceled:` error)
 becomes `status: 'cancelled'` with the reason in `error`.
+
+## Logging
+
+The engine's Rust tracing is routed to a temp file and tailed into LogTape
+under `['super-line', 'plugin-workflows', 'engine']` — quiet by default;
+`enableSuperLineLogging()` from `@super-line/core` (or your app's own LogTape
+config) surfaces it. If the app installed its own duroxide tracing subscriber
+before the first kit was built, the kit leaves it alone.
 
 ## Platforms
 

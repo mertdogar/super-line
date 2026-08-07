@@ -22,6 +22,7 @@
     "build": "tsup"
   },
   "dependencies": {
+    "@logtape/logtape": "^2.2.4",
     "duroxide": "0.1.28",
     "zod": "^4.2.0"
   },

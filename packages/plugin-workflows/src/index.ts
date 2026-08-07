@@ -1,4 +1,8 @@
+import { promises as fsp } from 'node:fs'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { getLogger } from '@logtape/logtape'
 import * as z from 'zod'
 import { defineContractPlugin } from '@super-line/core'
 import type { PluginContext, ServerCollectionHandle, SuperLinePlugin } from '@super-line/server'
@@ -51,6 +55,21 @@ export interface WorkflowQueueDefinition {
   worker: WorkflowActivity
   maxAttempts?: number
   timeoutMs?: number
+  totalTimeoutMs?: number
+}
+
+/**
+ * Thrown by a queue worker to fail the job immediately — no retries, regardless of `maxAttempts`.
+ * Detection is by `name`, so a `PermanentJobError` from `@super-line/plugin-queue` works verbatim.
+ */
+export class PermanentJobError extends Error {
+  readonly code?: string
+
+  constructor(message: string, code?: string) {
+    super(message)
+    this.name = 'PermanentJobError'
+    this.code = code
+  }
 }
 
 export interface WorkflowsOptions {
@@ -109,6 +128,10 @@ const JOB_ACTIVITY = 'job:'
 const TERMINAL = new Set(['completed', 'failed', 'cancelled'])
 // the engine reports cancellation as a failure whose error carries this prefix (its spelling, one l)
 const CANCEL_PREFIX = 'canceled:'
+// a worker's PermanentJobError rides back as a returned envelope (a return never triggers engine
+// retry); the wrapper generator converts it into an orchestration failure with this prefix
+const PERMANENT_PREFIX = 'permanent:'
+const PERMANENT_MARKER = '__slPermanent'
 // how long a watcher tolerates `notfound` (the engine hasn't taken the instance's first turn yet)
 // before declaring the run lost
 const NOTFOUND_GRACE_MS = 10_000
@@ -128,12 +151,17 @@ const parseEngineJson = (value: string): unknown => {
   }
 }
 
+// the engine stringifies a thrown error as `Error: <message>\n<stack>` — keep the message alone
+const normalizeError = (raw: string): string => raw.split('\n', 1)[0]!.replace(/^Error:\s*/, '')
+
 const normalizeStatus = (snapshot: WorkflowStatus): NormalizedStatus => {
   let status = String(snapshot.status ?? 'unknown').toLowerCase()
-  let error = snapshot.error
+  let error = snapshot.error === undefined ? undefined : normalizeError(snapshot.error)
   if (status === 'failed' && error?.startsWith(CANCEL_PREFIX)) {
     status = 'cancelled'
     error = error.slice(CANCEL_PREFIX.length).trim()
+  } else if (status === 'failed' && error?.startsWith(PERMANENT_PREFIX)) {
+    error = error.slice(PERMANENT_PREFIX.length).trim()
   }
   const terminal = TERMINAL.has(status)
   return {
@@ -163,6 +191,67 @@ const assertPositive = (name: string, value: number): void => {
   if (!Number.isFinite(value) || value <= 0) throw new TypeError(`${name} must be a positive number`)
 }
 
+const engineLog = getLogger(['super-line', 'plugin-workflows', 'engine'])
+
+const TRACE_LEVELS: Record<string, 'debug' | 'info' | 'warning' | 'error'> = {
+  TRACE: 'debug',
+  DEBUG: 'debug',
+  INFO: 'info',
+  WARN: 'warning',
+  ERROR: 'error',
+}
+
+const forwardTraceLine = (line: string): void => {
+  if (!line.trim()) return
+  try {
+    const record = JSON.parse(line) as { level?: string; target?: string; fields?: Record<string, unknown> }
+    const { message, ...rest } = record.fields ?? {}
+    const level = TRACE_LEVELS[record.level ?? ''] ?? 'info'
+    engineLog[level]('{message}', { message: String(message ?? line), target: record.target, ...rest })
+  } catch {
+    engineLog.info('{message}', { message: line })
+  }
+}
+
+let tracingBridged = false
+
+/**
+ * duroxide's Rust tracing owns a process-global subscriber and only writes to a file
+ * (`initTracing`), so the bridge routes it to a temp file and tails that into LogTape under
+ * `['super-line', 'plugin-workflows', 'engine']`. Unconfigured LogTape drops the records, so the
+ * default is quiet; `enableSuperLineLogging()` (or the app's own config) lights them up. If the
+ * host installed its own subscriber before the first kit was built, `initTracing` silently no-ops
+ * and the tail stays dormant.
+ */
+const startTracingBridge = (duroxide: Duroxide): void => {
+  if (tracingBridged) return
+  tracingBridged = true
+  const file = join(tmpdir(), `sl-workflows-trace-${process.pid}.log`)
+  duroxide.initTracing({ logFile: file, logFormat: 'json' })
+  let offset = 0
+  let remainder = ''
+  const timer = setInterval(async () => {
+    try {
+      const stat = await fsp.stat(file)
+      if (stat.size <= offset) return
+      const handle = await fsp.open(file, 'r')
+      try {
+        const length = stat.size - offset
+        const { buffer } = await handle.read({ buffer: Buffer.alloc(length), position: offset, length })
+        offset = stat.size
+        const lines = (remainder + buffer.toString('utf8')).split('\n')
+        remainder = lines.pop() ?? ''
+        for (const line of lines) forwardTraceLine(line)
+      } finally {
+        await handle.close()
+      }
+    } catch {
+      // the file may not exist yet this tick — try again on the next one
+    }
+  }, 500)
+  timer.unref()
+}
+
 interface NormalizedOptions {
   provider: WorkflowProvider
   activities: Record<string, WorkflowActivity>
@@ -175,12 +264,19 @@ interface NormalizedOptions {
 
 const jobWrapper = (name: string, definition: WorkflowQueueDefinition): WorkflowOrchestration =>
   function* (ctx, input) {
-    return yield ctx.scheduleActivityWithRetry(JOB_ACTIVITY + name, input, {
+    const raw = yield ctx.scheduleActivityWithRetry(JOB_ACTIVITY + name, input, {
       maxAttempts: definition.maxAttempts ?? 3,
       timeoutMs: definition.timeoutMs ?? 300_000,
+      ...(definition.totalTimeoutMs !== undefined ? { totalTimeoutMs: definition.totalTimeoutMs } : {}),
       // duroxide's .d.ts types backoff as a number, but the engine only accepts its string policy names.
       backoff: 'exponential' as unknown as number,
     })
+    const value = typeof raw === 'string' ? parseEngineJson(raw) : raw
+    if (value !== null && typeof value === 'object' && PERMANENT_MARKER in value) {
+      const marker = (value as Record<string, { message?: unknown }>)[PERMANENT_MARKER]
+      throw new Error(`${PERMANENT_PREFIX} ${String(marker?.message ?? 'permanent job error')}`)
+    }
+    return raw
   }
 
 class WorkflowsRuntime {
@@ -216,9 +312,10 @@ class WorkflowsRuntime {
     for (const [name, fn] of Object.entries(this.options.activities)) runtime.registerActivity(name, this.wrapActivity(fn))
     for (const [name, gen] of Object.entries(this.options.workflows)) runtime.registerOrchestration(name, gen)
     for (const [name, definition] of Object.entries(this.options.queues)) {
-      runtime.registerActivity(JOB_ACTIVITY + name, this.wrapActivity(definition.worker))
+      runtime.registerActivity(JOB_ACTIVITY + name, this.wrapWorker(definition.worker))
       runtime.registerOrchestration(JOB_WRAPPER + name, jobWrapper(name, definition))
     }
+    startTracingBridge(this.duroxide)
     await runtime.start()
     this.runtime = runtime
     this.client = new this.duroxide.Client(this.options.provider)
@@ -235,6 +332,19 @@ class WorkflowsRuntime {
         return await fn(input, { signal: controller.signal })
       } finally {
         clearInterval(poll)
+      }
+    }
+  }
+
+  private wrapWorker(fn: WorkflowActivity) {
+    const wrapped = this.wrapActivity(fn)
+    return async (actx: ActivityContext, input: unknown): Promise<unknown> => {
+      try {
+        return await wrapped(actx, input)
+      } catch (error) {
+        if (!(error instanceof Error) || error.name !== 'PermanentJobError') throw error
+        const code = 'code' in error && typeof error.code === 'string' ? error.code : undefined
+        return { [PERMANENT_MARKER]: { message: error.message, ...(code ? { code } : {}) } }
       }
     }
   }
@@ -435,6 +545,7 @@ export function workflows(options: WorkflowsOptions): WorkflowsKit {
     const maxAttempts = definition.maxAttempts ?? 3
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new TypeError(`${name}.maxAttempts must be at least 1`)
     assertPositive(`${name}.timeoutMs`, definition.timeoutMs ?? 300_000)
+    if (definition.totalTimeoutMs !== undefined) assertPositive(`${name}.totalTimeoutMs`, definition.totalTimeoutMs)
   }
 
   const runtime = new WorkflowsRuntime(duroxide, normalized)

@@ -1944,6 +1944,9 @@ importers:
 
   packages/plugin-workflows:
     dependencies:
+      '@logtape/logtape':
+        specifier: ^2.2.4
+        version: 2.2.4
       duroxide:
         specifier: 0.1.28
         version: 0.1.28

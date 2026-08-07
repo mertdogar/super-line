@@ -34,6 +34,7 @@
     "@super-line/collections-memory": "workspace:*",
     "@super-line/collections-sqlite": "workspace:*",
     "@super-line/core": "workspace:^",
-    "@super-line/server": "workspace:^"
+    "@super-line/server": "workspace:^",
+    "tsx": "^4.19.2"
   }
 }

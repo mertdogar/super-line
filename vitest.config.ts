@@ -61,6 +61,7 @@ export const heavy = [
   'packages/transport-libp2p/test/**/*.test.ts',
   'packages/collections-crdt-pglite/test/collections-crdt-pglite.integration.test.ts',
   'packages/collections-pglite/test/collections-pglite.integration.test.ts',
+  'packages/plugin-workflows/test/postgres.integration.test.ts',
   // in-process PGlite (WASM) is CPU-bound: its compaction waitFor starves under parallel forks
   'packages/collections-crdt-pglite/test/collections-crdt-pglite.test.ts',
   // same story since typed tables: N-table DDL + per-table live.changes per store starves parallel timing tests

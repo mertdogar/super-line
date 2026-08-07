@@ -1942,6 +1942,25 @@ importers:
         specifier: workspace:*
         version: link:../transport-loopback
 
+  packages/plugin-workflows:
+    dependencies:
+      duroxide:
+        specifier: 0.1.28
+        version: 0.1.28
+      zod:
+        specifier: ^4.2.0
+        version: 4.4.3
+    devDependencies:
+      '@super-line/collections-memory':
+        specifier: workspace:*
+        version: link:../collections-memory
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+      '@super-line/server':
+        specifier: workspace:^
+        version: link:../server
+
   packages/react:
     devDependencies:
       '@super-line/client':
@@ -5429,6 +5448,7 @@ packages:
   cron-parser@5.6.2:
     resolution: {integrity: sha512-yJ/G1LVir6CnlkLI40CsampPLKl1SprGGlUagWtGJxewytRVYezv5xVyzzbT+Pvzx+VIRvZVF7/a0eEMTxdnTA==}
     engines: {node: '>=18'}
+    deprecated: 'Published tarball was built from a stale dist/ and is missing the fixes from #414 and #415 — its contents are effectively v5.6.1. Upgrade to v5.7.0.'
 
   croner@10.0.1:
     resolution: {integrity: sha512-ixNtAJndqh173VQ4KodSdJEI6nuioBWI0V1ITNKhZZsO0pEMoDxz539T4FTTbSZ/xIOSuDnzxLVRqBVSvPNE2g==}
@@ -5625,6 +5645,42 @@ packages:
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
     engines: {node: '>= 0.4'}
+
+  duroxide-darwin-arm64@0.1.28:
+    resolution: {integrity: sha512-ELRU7iYaQZ0p2hrWz7AtwkQitTPaayemHuEjH9cUYYun69q00t/+XbHqbhdBn6hHA8BpvTz33/+7u28/pPUPUA==}
+    engines: {node: '>= 18'}
+    cpu: [arm64]
+    os: [darwin]
+
+  duroxide-darwin-x64@0.1.28:
+    resolution: {integrity: sha512-SRwyD206jCICJtFiQPDPRxfN0BKaW32Y0QWde3L8ALIwg/Wf90qQlzty6qejWBO3BmaAwhJptMJBKPUyW8lEcQ==}
+    engines: {node: '>= 18'}
+    cpu: [x64]
+    os: [darwin]
+
+  duroxide-linux-arm64-gnu@0.1.28:
+    resolution: {integrity: sha512-PC/Ly+vEh7G/weElntnNnkwFK5ey/oD29V5EG0HB56meLbmqWasTc45FW0QDIwG8Bvlt8j1tNiXHmQLOX4dNhw==}
+    engines: {node: '>= 18'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  duroxide-linux-x64-gnu@0.1.28:
+    resolution: {integrity: sha512-yj02z/OFqltRoLhmRe/RNT99sxczVQcoFDI3Chf0pgi6Qobj0/bJ5AuX1srxVccKSliAQU3cnx2I2UuC04TZqw==}
+    engines: {node: '>= 18'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  duroxide-windows-x64@0.1.28:
+    resolution: {integrity: sha512-EgIAhOUW2MJqFxv+MFknQC5oWz69T0ss+ivBffbrG9mgwblTnmNyDaqkJdFUp5TtPWgrbFacD9yLPOgAE2oURw==}
+    engines: {node: '>= 18'}
+    cpu: [x64]
+    os: [win32]
+
+  duroxide@0.1.28:
+    resolution: {integrity: sha512-n+71+Oo/ayVbSC9XnqM8lgPeDl3bkGeVFEO6rx0QYVsPWIBKertLRpTyG1+b7F4nDuE+3caVCjQ2C0clHy0S7w==}
+    engines: {node: '>= 18'}
 
   eastasianwidth@0.2.0:
     resolution: {integrity: sha512-I88TYZWc9XiYHRQ4/3c5rjjfgkjhLyW2luGIheGERbNQ6OY7yTybanSpDXZa8y7VUP9YmDcYa+eyq4ca7iLqWA==}
@@ -11961,6 +12017,29 @@ snapshots:
       call-bind-apply-helpers: 1.0.2
       es-errors: 1.3.0
       gopd: 1.2.0
+
+  duroxide-darwin-arm64@0.1.28:
+    optional: true
+
+  duroxide-darwin-x64@0.1.28:
+    optional: true
+
+  duroxide-linux-arm64-gnu@0.1.28:
+    optional: true
+
+  duroxide-linux-x64-gnu@0.1.28:
+    optional: true
+
+  duroxide-windows-x64@0.1.28:
+    optional: true
+
+  duroxide@0.1.28:
+    optionalDependencies:
+      duroxide-darwin-arm64: 0.1.28
+      duroxide-darwin-x64: 0.1.28
+      duroxide-linux-arm64-gnu: 0.1.28
+      duroxide-linux-x64-gnu: 0.1.28
+      duroxide-windows-x64: 0.1.28
 
   eastasianwidth@0.2.0: {}
 

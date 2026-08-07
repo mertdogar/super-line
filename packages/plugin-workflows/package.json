@@ -1,0 +1,37 @@
+{
+  "name": "@super-line/plugin-workflows",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Durable multi-step workflows and queues for super-line, backed by duroxide's deterministic-replay engine.",
+  "license": "MIT",
+  "author": "Mert",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+    }
+  },
+  "files": ["dist", "README.md", "CHANGELOG.md"],
+  "sideEffects": false,
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "tsup"
+  },
+  "dependencies": {
+    "duroxide": "0.1.28",
+    "zod": "^4.2.0"
+  },
+  "peerDependencies": {
+    "@super-line/core": ">=0.20.0 <1.0.0",
+    "@super-line/server": ">=0.21.0 <1.0.0"
+  },
+  "devDependencies": {
+    "@super-line/collections-memory": "workspace:*",
+    "@super-line/core": "workspace:^",
+    "@super-line/server": "workspace:^"
+  }
+}

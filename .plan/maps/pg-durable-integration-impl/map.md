@@ -60,6 +60,11 @@ super-line" how-to page live on the docs site.
   duck-typed `PermanentJobError`); jitter/timeout-retry adopt engine
   semantics, divergence documented; config stays the engine's shape, flat
   (`maxAttempts`/`timeoutMs` + `totalTimeoutMs` pass-through).
+- [Finish the surface: retry-parity implementation + LogTape bridge](tickets/06-finish-surface.md) —
+  `PermanentJobError` (duck-typed) + envelope + `permanent:` classification
+  in, one-attempt proven; error strings normalized to their message line;
+  engine tracing rerouted to a tmp file (stderr now silent) and tailed into
+  `['super-line', 'plugin-workflows', 'engine']`, quiet by default.
 
 ## Not yet specified
 

@@ -50,6 +50,16 @@ super-line" how-to page live on the docs site.
   load, deny-all `workflowRuns`, setup-owned runtime with boot recovery);
   typecheck/lint green, both demo scenarios re-ran on SQLite against a real
   server, prototype wiped. linux-arm64 shipped upstream in 0.1.28.
+- [Harden the lifecycle projection](tickets/04-harden-projection.md) — all
+  four frictions in: bounded notfound tolerance, durable-row recovery
+  (leaderless multi-node story documented), normalization (lowercase/parsed
+  output/terminal clears customStatus), cancellation → `cancelled` + reason
+  in the new `error` column. 4 focused tests on a real provider, ~4.3s.
+- [Retry-parity: reimplement plugin-queue semantics or document divergence?](tickets/05-retry-parity.md) —
+  permanent errors only, via a marker-envelope return (no hand retry loop;
+  duck-typed `PermanentJobError`); jitter/timeout-retry adopt engine
+  semantics, divergence documented; config stays the engine's shape, flat
+  (`maxAttempts`/`timeoutMs` + `totalTimeoutMs` pass-through).
 
 ## Not yet specified
 

@@ -51,7 +51,7 @@ const printRuns = async (label) => {
       name: r.name,
       status: r.status,
       custom: r.customStatus ?? '',
-      output: r.output === undefined ? '' : String(r.output).slice(0, 60),
+      output: r.output === undefined ? '' : JSON.stringify(r.output).slice(0, 60),
     })),
   )
 }

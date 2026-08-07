@@ -1954,6 +1954,9 @@ importers:
       '@super-line/collections-memory':
         specifier: workspace:*
         version: link:../collections-memory
+      '@super-line/collections-sqlite':
+        specifier: workspace:*
+        version: link:../collections-sqlite
       '@super-line/core':
         specifier: workspace:^
         version: link:../core

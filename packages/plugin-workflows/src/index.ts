@@ -17,9 +17,12 @@ export const workflowRunSchema = z.object({
   id: z.string(),
   kind: z.enum(['workflow', 'job']),
   name: z.string(),
+  // kept loose on purpose: an unknown engine status must degrade to an odd row, not a validation
+  // error that kills the projection watcher
   status: z.string(),
   customStatus: z.string().optional(),
   output: z.unknown().optional(),
+  error: z.string().optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
 })
@@ -103,7 +106,43 @@ export function workflowsContract() {
 
 const JOB_WRAPPER = 'jobWrapper:'
 const JOB_ACTIVITY = 'job:'
-const TERMINAL = new Set(['completed', 'failed'])
+const TERMINAL = new Set(['completed', 'failed', 'cancelled'])
+// the engine reports cancellation as a failure whose error carries this prefix (its spelling, one l)
+const CANCEL_PREFIX = 'canceled:'
+// how long a watcher tolerates `notfound` (the engine hasn't taken the instance's first turn yet)
+// before declaring the run lost
+const NOTFOUND_GRACE_MS = 10_000
+
+interface NormalizedStatus {
+  status: string
+  customStatus?: string
+  output?: unknown
+  error?: string
+}
+
+const parseEngineJson = (value: string): unknown => {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}
+
+const normalizeStatus = (snapshot: WorkflowStatus): NormalizedStatus => {
+  let status = String(snapshot.status ?? 'unknown').toLowerCase()
+  let error = snapshot.error
+  if (status === 'failed' && error?.startsWith(CANCEL_PREFIX)) {
+    status = 'cancelled'
+    error = error.slice(CANCEL_PREFIX.length).trim()
+  }
+  const terminal = TERMINAL.has(status)
+  return {
+    status,
+    ...(!terminal && snapshot.customStatus != null ? { customStatus: snapshot.customStatus } : {}),
+    ...(snapshot.output !== undefined ? { output: parseEngineJson(snapshot.output) } : {}),
+    ...(error ? { error } : {}),
+  }
+}
 
 type Duroxide = typeof import('duroxide')
 
@@ -150,7 +189,7 @@ class WorkflowsRuntime {
   private client?: DuroxideClient
   private runtime?: DuroxideRuntime
   private closing = false
-  private readonly watchers = new Map<string, ReturnType<typeof setInterval>>()
+  private readonly watchers = new Map<string, { timer: ReturnType<typeof setInterval>; notfoundSince?: number }>()
 
   constructor(
     private readonly duroxide: Duroxide,
@@ -210,12 +249,12 @@ class WorkflowsRuntime {
   private watch(id: string, kind: WorkflowRun['kind'], name: string): void {
     if (this.watchers.has(id) || this.closing) return
     const timer = setInterval(() => void this.observe(id, kind, name), this.options.pollIntervalMs)
-    this.watchers.set(id, timer)
+    this.watchers.set(id, { timer })
   }
 
   private unwatch(id: string): void {
-    const timer = this.watchers.get(id)
-    if (timer) clearInterval(timer)
+    const watcher = this.watchers.get(id)
+    if (watcher) clearInterval(watcher.timer)
     this.watchers.delete(id)
   }
 
@@ -228,28 +267,45 @@ class WorkflowsRuntime {
     } catch {
       return
     }
-    const status = String(snapshot.status ?? 'unknown').toLowerCase()
-    const customStatus = snapshot.customStatus ?? undefined
+    const normalized = normalizeStatus(snapshot)
+    const watcher = this.watchers.get(id)
+    if (normalized.status === 'notfound') {
+      if (!watcher) return
+      watcher.notfoundSince ??= Date.now()
+      if (Date.now() - watcher.notfoundSince > NOTFOUND_GRACE_MS) {
+        await this.project(id, kind, name, {
+          status: 'failed',
+          error: `instance was not visible to the engine within ${NOTFOUND_GRACE_MS}ms of starting`,
+        })
+        this.unwatch(id)
+      }
+      return
+    }
+    if (watcher) delete watcher.notfoundSince
+    await this.project(id, kind, name, normalized)
+    if (TERMINAL.has(normalized.status)) this.unwatch(id)
+  }
+
+  private async project(id: string, kind: WorkflowRun['kind'], name: string, normalized: NormalizedStatus): Promise<void> {
     try {
       const prev = await this.runs().read(id)
-      if (!prev || prev.status !== status || prev.customStatus !== customStatus) {
-        const now = Date.now()
-        const next: WorkflowRun = {
-          id,
-          kind,
-          name,
-          status,
-          createdAt: prev?.createdAt ?? now,
-          updatedAt: now,
-          ...(customStatus !== undefined ? { customStatus } : {}),
-          ...(snapshot.output !== undefined ? { output: snapshot.output } : {}),
-        }
-        if (prev) await this.runs().update(next)
-        else await this.runs().insert(next)
+      if (prev && prev.status === normalized.status && prev.customStatus === normalized.customStatus) return
+      const now = Date.now()
+      const next: WorkflowRun = {
+        id,
+        kind,
+        name,
+        status: normalized.status,
+        createdAt: prev?.createdAt ?? now,
+        updatedAt: now,
+        ...(normalized.customStatus !== undefined ? { customStatus: normalized.customStatus } : {}),
+        ...(normalized.output !== undefined ? { output: normalized.output } : {}),
+        ...(normalized.error !== undefined ? { error: normalized.error } : {}),
       }
-      if (TERMINAL.has(status)) this.unwatch(id)
+      if (prev) await this.runs().update(next)
+      else await this.runs().insert(next)
     } catch {
-      // a racing write (concurrent insert, teardown) — the next poll settles it
+      // a racing write (a peer node's insert, teardown) — the next poll settles it
     }
   }
 
@@ -309,31 +365,33 @@ class WorkflowsRuntime {
     return this.rearm()
   }
 
+  /**
+   * Multi-node note: every node with the plugin re-arms and watches independently — there is no
+   * leader. Projection writes are pure functions of engine state and terminal states are absorbing,
+   * so concurrent watchers converge on the same row; a lost race just retries on the next poll.
+   */
   private async rearm(): Promise<string[]> {
     const client = this.client
     if (!client) throw new Error('workflows plugin is not mounted on a super-line server')
     const rearmed: string[] = []
     for (const id of await client.listAllInstances()) {
       if (this.watchers.has(id)) continue
-      let status: string
+      let normalized: NormalizedStatus
       try {
-        status = String((await client.getStatus(id)).status ?? '').toLowerCase()
+        normalized = normalizeStatus(await client.getStatus(id))
       } catch {
         continue
       }
-      if (TERMINAL.has(status)) continue
+      if (TERMINAL.has(normalized.status)) continue
       const { kind, name } = await this.identify(client, id)
-      const prev = await this.runs().read(id)
-      if (!prev) {
-        const now = Date.now()
-        await this.runs().insert({ id, kind, name, status, createdAt: now, updatedAt: now })
-      }
+      if (normalized.status !== 'notfound') await this.project(id, kind, name, normalized)
       this.watch(id, kind, name)
       rearmed.push(id)
     }
     return rearmed
   }
 
+  /** Run metadata comes from the durable collection row when one survives; the engine is the fallback. */
   private async identify(client: DuroxideClient, id: string): Promise<Pick<WorkflowRun, 'kind' | 'name'>> {
     const prev = await this.runs().read(id)
     if (prev) return { kind: prev.kind, name: prev.name }
@@ -346,7 +404,7 @@ class WorkflowsRuntime {
 
   private async close(): Promise<void> {
     this.closing = true
-    for (const timer of this.watchers.values()) clearInterval(timer)
+    for (const watcher of this.watchers.values()) clearInterval(watcher.timer)
     this.watchers.clear()
     await this.ready.catch(() => undefined)
     await this.runtime?.shutdown(this.options.shutdownGraceMs)

@@ -31,6 +31,7 @@
   },
   "devDependencies": {
     "@super-line/collections-memory": "workspace:*",
+    "@super-line/collections-sqlite": "workspace:*",
     "@super-line/core": "workspace:^",
     "@super-line/server": "workspace:^"
   }

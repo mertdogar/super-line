@@ -78,6 +78,17 @@ file-backed or in-memory). The plugin's setup owns the engine runtime: it
 starts it, re-arms lifecycle projection for non-terminal instances on boot, and
 shuts it down with the server.
 
+**Multi-node**: point every node at the same Postgres schema and the engine
+distributes work between their runtimes. Projection needs no leader — every
+node watches the instances it knows about and writes rows that are pure
+functions of engine state, so concurrent watchers converge (terminal states
+are absorbing; a lost write race retries on the next poll).
+
+Rows are normalized before they land: statuses are lowercase, engine output is
+JSON-parsed, `customStatus` is cleared once a run is terminal, and a
+cancellation (which the engine reports as a failure with a `canceled:` error)
+becomes `status: 'cancelled'` with the reason in `error`.
+
 ## Platforms
 
 duroxide is a native (napi-rs) module with prebuilt binaries for

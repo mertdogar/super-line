@@ -65,6 +65,15 @@ super-line" how-to page live on the docs site.
   in, one-attempt proven; error strings normalized to their message line;
   engine tracing rerouted to a tmp file (stderr now silent) and tailed into
   `['super-line', 'plugin-workflows', 'engine']`, quiet by default.
+- [Test suite and lane placement](tickets/07-tests-lane.md) — SQLite suites
+  stay fast-lane (~8s); `postgres.integration.test.ts` joined the `heavy`
+  list: real-process SIGKILL crash-resume (counters prove replay), cancel +
+  permanent + signal on testcontainers Postgres. Full `pnpm test` green.
+
+**All tickets resolved — the destination is reached and the map is
+COMPLETE.** The kit sits in-repo, ready to publish but unpublished; the
+graduation gate (real consumer + upstream locking/replay/shutdown fixes) is
+a fresh effort when it opens, per Out of scope.
 
 ## Not yet specified
 

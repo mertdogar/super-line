@@ -4,7 +4,7 @@ title: Build examples/cloudflare and deploy it
 labels: [wayfinder:task]
 status: open
 assignee:
-blocked-by: [T07,T08,T09,T10]
+blocked-by: [T07,T09,T10]
 ---
 
 ## Question

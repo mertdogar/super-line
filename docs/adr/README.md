@@ -37,6 +37,8 @@ Repo-internal: `docs/.vitepress/config.ts` excludes `adr/**` from the docs site,
 | 0024 | The client observes itself, and emits frames rather than the inspector's taxonomy | In force; instruments the tap slot 0005 reserved on the client half, and retypes it away from the server's `TapEvent` |
 | 0025 | Collaborative text lives in a native root beside the described one, and ingress validation is per-collection | In force |
 | 0026 | The React binding is registered once, and plugins feed it | In force; **supersedes 0020 §4** (the React surface moves from plugin-auth to `@super-line/react`; 0020 §1–§3 stand) |
+| 0027 | A connection is reconstructible from its snapshot | Accepted 2026-10-14 (cloudflare-workers effort); the connection snapshot seam + the `end` frame |
+| 0028 | Liveness belongs to the transport, not a server timer | Accepted 2026-10-14 (cloudflare-workers effort); `liveness: 'socket'` + client `keepalive` |
 
 ## 2. The standing position, by subsystem
 

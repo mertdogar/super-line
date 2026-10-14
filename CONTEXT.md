@@ -67,6 +67,15 @@ Resolved 2026-07-15. How a node gets a cross-node message to its *own* subscribe
 
 A Cluster that quietly filtered own-messages would break every CRDT client's local delivery. The asymmetry is pinned by `packages/server/test/collections-cross-node.integration.test.ts`.
 
+### Connection snapshot
+Resolved 2026-10-14 (ADR-0027). The minimal record from which a connection's server-side state can be rebuilt on a fresh server instance: the authenticate outcome (with its connection id), the rooms it joined, and the live subscribe frames it sent net of their unsubscribes, plus any per-plugin contribution. **It is not the server's registries** — those are derived from it. The snapshot is kept current by the server and persisted by whichever [[Transport vs Adapter]] transport wants it. Distinct from the cluster presence descriptor (what other nodes see about a connection) and from `conn.data` (host scratch, never snapshotted).
+
+### Hibernation wake
+Resolved 2026-10-14. The moment a hibernated node is rebuilt while its sockets are still open. On wake the server **adopts** each surviving socket from its [[Connection snapshot]]: the ordinary accept path, the rooms re-added, the subscribe frames replayed with their acknowledgements muted. The client observes nothing. A replayed subscribe the server now refuses is reported with an `end` frame; a socket with no snapshot is closed so the client reconnects — the only case where a wake is visible.
+
+### Busy token
+Resolved 2026-10-14. A plugin's declaration that it is mid-activity on this node (`hold()` → release). A hibernating transport keeps the node awake while any token is outstanding. The one first-party holder is plugin-chat during a streaming message, whose in-memory state is neither frame-derived nor worth snapshotting.
+
 ### Relay-sync invariant
 Resolved 2026-07-15. A **`relay` backend's `apply` must be synchronous** — for both [[Collection runtime]] families. The relay ingress path fires-and-forgets (`void apply(...)`) so a cross-node race lands in a `try`/`catch`, and the CRDT side guards re-publish with a flag cleared in `finally`; an async `apply` escapes that catch and clears that guard before the change is emitted, turning one relayed write into a cluster-wide echo storm. [[Replica origin]] cannot substitute for the flag: it identifies the *writer* and survives the relay, so a receiving node cannot distinguish a relayed delta from a local write by that same writer. A `self` backend is exempt — it never relays. The rule was real and load-bearing but recorded only in `collections-crdt-libsql`'s private doc comment (that backend keeps its hot path sync and persists off `onChange` for exactly this reason); it now lives on `CollectionStore.apply` / `CrdtCollectionStore.apply`. Expressing it in the type system — splitting each seam into a discriminated union on `clustering`, which already discriminates — is the real fix and is still open (breaking; core + 6 backends; wants an ADR).
 

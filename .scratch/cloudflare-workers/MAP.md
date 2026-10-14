@@ -45,15 +45,17 @@ From the charting session (2026-10-14, all recommendations accepted):
 
 - [Decide: upgrade vitest repo-wide or pin the deprecated workers pool](tickets/T14-vitest-upgrade-vs-pinned-pool.md) — **RESOLVED**: upgrade root vitest `^2.1.8 → ^4.1.11` (fast lane 89/844 green with zero changes; heavy lane green after fixing a latent orphaned-`tsx`-launcher bug in the plugin-workflows crash-resume test that vitest 4 made deterministic) as its own preparatory `chore(deps)` commit on main before Cloudflare work; workers lane = separate `vitest.workers.config.ts` + `pnpm test:workers` on `@cloudflare/vitest-plugin` (`--max-workers=1 --no-isolate`); `pnpm test` runs all three lanes.
 
+- [Lock PLAN-cloudflare](tickets/T05-lock-plan-cloudflare.md) — **RESOLVED**: `docs/plans/PLAN-cloudflare.md` locked; ADR-0027 (connection snapshot seam, `end` frame) + ADR-0028 (transport-owned liveness, client `keepalive`); busy token for chat streams; `routeToNode`/`createDurableNode` with singleton default and `nodeKey = ctx.id`; CRDT snapshot-per-doc; crypto = verification only (T08 folded into T06); new T15 builds the core half on loopback before T07; Control Center needs nothing special; queue-on-alarms ruled out of scope.
+- [Port node:crypto users to WebCrypto where nodejs_compat falls short](tickets/T08-port-crypto.md) — **CLOSED (folded)**: no port needed; the verification test lives in the workers-lane ticket.
+
 ## Not yet specified
 
-- **Queue cron on DO alarms** — `plugin-queue` polls on timers; an alarm-driven schedule tick would let a queue-running node hibernate. Graduates after the rows backend lands and the timer seam exists.
-- **Typed-table drift vs DO storage migrations** — `col_meta` fingerprints refuse to boot on incompatible drift; inside a DO "refuse to boot" means every request fails. Needs a story once the rows backend's shape is known.
-- **Control Center against a DO node** — the inspector's reserved connection should ride the same transport, but a Worker-hosted node has no `process` to introspect and no stable public URL for the CC to dial outside a deploy. Revisit after the transport exists.
-- **Client reconnect interplay** — sharpened by T04: the only wake-time failure is a *replayed subscribe being refused* (policy/collection changed). T05 decides between a new "subscription ended" server→client frame (routed to `onStoreError('resubscribe')`) and closing the socket; if the latter, which close code the client treats as "reconnect silently".
-- **DO id routing** — how the Worker picks the DO instance (one named singleton per deployment vs an id from the URL/host for multi-tenant). Likely a transport option; sharpen at plan lock.
+- **Chat stream snapshot/restore** — the busy token keeps a node awake during a stream (max 15 min of platform wall time); persisting stream bookkeeping through `snapshotConnection`/`restoreConnection` would let a long-idle stream survive a hibernation. Revisit after T07 proves the hook end to end.
+- **Typed-table drift vs DO storage migrations** — T05 fixed the failure mode (lazy construction, readable failing operations, never a constructor throw); what a host *does* about drift on a deployed object (rename, migrate in code, `wrangler` migration) is sharpened once T09 lands.
 
 ## Out of scope
+
+- **Queue cron on DO alarms** — plugin-queue polls on `setInterval`, so a queue-running node never hibernates; running is in scope, hibernating while running is a scheduler redesign → fresh effort (T05 decision 14). Documented as a known limitation.
 
 - **Stateless Worker hosting** (no DO) — the server holds connection state; not viable with its design.
 - **Multi-DO clustering / a Cloudflare-native `Adapter`** — single node is the destination; a fresh effort if wanted.

@@ -78,8 +78,12 @@ describe.skipIf(!dockerAvailable)('plugin-workflows over real Postgres', () => {
 
   it('resumes a SIGKILLed process: completed activities replay, only the rest execute', async () => {
     const schema = 'slwf_crash'
-    const tsx = join(here, '..', 'node_modules', '.bin', 'tsx')
-    child = spawn(tsx, [join(here, 'crash-worker.ts'), pgUrl, schema], { stdio: ['ignore', 'pipe', 'inherit'] })
+    // node directly with the tsx loader, NOT the `tsx` bin: that bin is a launcher around a node child, so
+    // SIGKILLing it orphans the real worker, which then races this process for the post-timer step.
+    child = spawn(process.execPath, ['--import', 'tsx', join(here, 'crash-worker.ts'), pgUrl, schema], {
+      cwd: join(here, '..'),
+      stdio: ['ignore', 'pipe', 'inherit'],
+    })
     await new Promise<void>((resolve, reject) => {
       const deadline = setTimeout(() => reject(new Error('crash worker never reached MID-TIMER')), 60_000)
       child!.stdout!.on('data', (chunk: Buffer) => {

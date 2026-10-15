@@ -4,7 +4,8 @@ import { cloudflareServerTransport, createDurableNode } from '@super-line/transp
 import { createSuperLineServer } from '@super-line/server'
 import { cloudflareCollections } from '@super-line/collections-cloudflare'
 import { crdtCloudflareCollections } from '@super-line/collections-crdt-cloudflare'
-import { appContract } from './app.js'
+import { auth } from '@super-line/plugin-auth/server'
+import { appContract, authApp } from './app.js'
 
 // Smoke Durable Object for the workers lane. Counts its own constructions in SQLite so a test can
 // prove the constructor reran after eviction while the hibernated socket stayed open.
@@ -118,6 +119,19 @@ export class AppNode extends createDurableNode((ctx, _env, base) => {
       },
     },
   })
+}) {}
+
+// A node running plugin-auth, its sessions and presence on the object's SQLite.
+export class AuthNode extends createDurableNode((ctx, _env, base) => {
+  const collections = cloudflareCollections(ctx.storage, authApp.collections)
+  const authKit = auth({ contract: authApp, collections, defaultRoles: ['user'] })
+  return createSuperLineServer(authApp, {
+    ...base,
+    collections,
+    authenticate: authKit.authenticate,
+    identify: authKit.identify,
+    plugins: [authKit.plugin],
+  }).implement({ user: { ping: async () => null } })
 }) {}
 
 // A bare object: the collection-backend tests drive its storage through `runInDurableObject`.

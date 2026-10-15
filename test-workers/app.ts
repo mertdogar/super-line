@@ -1,5 +1,6 @@
 import { defineContract } from '@super-line/core'
 import type { ClientTransport, RawConn } from '@super-line/core'
+import { authContract } from '@super-line/plugin-auth'
 import * as z from 'zod'
 
 // The app the hibernation tests run: one topic, and requests to publish on it, to flip a lock the
@@ -23,6 +24,12 @@ export const appContract = defineContract({
       },
     },
   },
+})
+
+/** A node running plugin-auth: one request, so a signed-in client has something to send. */
+export const authApp = defineContract({
+  roles: { user: { clientToServer: { ping: { input: z.void(), output: z.null() } } } },
+  plugins: [authContract()],
 })
 
 const enc = new TextEncoder()

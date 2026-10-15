@@ -465,9 +465,12 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
       )
       pluginCtx = ctx
       initialization = (async () => {
+        // A previous instance's sessions end here — except those whose socket outlived it and was taken back (ADR-0027).
+        await ctx.ready
+        const live = new Set(ctx.conns.map((conn) => conn.id))
         const now = Date.now()
         const rows = (await ctx.collection('sessions').snapshot({ filter: eq('nodeKey', ctx.nodeKey!) })) as AuthSession[]
-        const unfinished = rows.filter((row) => row.endedAt === null)
+        const unfinished = rows.filter((row) => row.endedAt === null && !live.has(row.id))
         await Promise.all(unfinished.map((row) => ctx.collection('sessions').update({ ...row, endedAt: now })))
         await Promise.all([...new Set(unfinished.map((row) => row.userId))].map((userId) => refreshPresence(userId)))
       })()
@@ -711,7 +714,7 @@ export function auth<C extends Contract>(opts: AuthServerOptions<C>): AuthServer
       if (!row || row.endedAt !== null) return
       await col('sessions').update({
         ...row,
-        lastSeenAt: lastPongAt === undefined ? row.lastSeenAt : Math.max(row.lastSeenAt, lastPongAt),
+        lastSeenAt: Math.max(row.lastSeenAt, lastPongAt ?? Date.now()), // no pong ever: the close itself was the last sign
         endedAt: Date.now(),
       })
       logSession.debug('session {sessionId} ended for {userId}', { sessionId: authCtx.sessionId, userId: authCtx.userId })

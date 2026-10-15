@@ -398,6 +398,25 @@ The core half shipped smaller than §1–§3 specify. Each cut removes surface w
   log redaction of query strings is heuristic — the 32-hex inspector password showed as `REDACTED`, a short one in
   clear, and the Control Center sends its credentials in the query string.
 
+## As built (T16, 2026-10-15) — plugin-auth sessions and presence survive a wake
+
+- **Found at T12, reproduced in the workers lane:** plugin-auth's boot sweep ended every unfinished session for its
+  `nodeKey` — and a wake re-runs it while the sessions' sockets are being adopted, so every wake ended every live
+  session. `lastSeenAt` only advanced on `onHeartbeat`, which a `liveness: 'socket'` transport never fires.
+- **Adoption moved into `start()`.** The Cloudflare transport resumes from the promise `start()` returns (a microtask
+  after the synchronous construction, so the host's handlers exist), so `srv.ready` now means "every surviving socket
+  is back". `CloudflareServerTransport.resume()` is gone (never published); `createDurableNode` and a hand-written
+  class just `blockConcurrencyWhile(() => server.ready)`. Corollary: a host's own `blockConcurrencyWhile` that awaits
+  `server.ready` (the example's `#general` seed) now runs after the resume, not before — harmless, and the docs no
+  longer claim otherwise.
+- **`PluginContext.ready`** (= `srv.ready`). plugin-auth's sweep awaits it and spares every session whose id is a
+  live connection (`connectionId === sessionId`). Steady-state wake = zero session/presence writes. A socket that
+  didn't come back (4409) keeps its session open until the sweep, which then ends it.
+- **Presence is opt-in "trust the socket"** (decided with the user over a server-declared `expiresAt` column):
+  `chatClient({ presenceTimeoutMs: Infinity })` reads an open session as online; `endSession` stamps the close time
+  when no pong was ever seen (`lastPongAt ?? now`), so "last seen" is the disconnect, not the connect. Unverified and
+  documented as such: how long Cloudflare takes to report a vanished client's socket closed.
+
 ## Ticket order after the lock
 
 T15 seam on loopback → T06 workers lane (+ crypto verification) → T07 DO transport → T09 rows → T10 docs →

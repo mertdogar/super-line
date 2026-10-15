@@ -11,13 +11,15 @@
       { "name": "SMOKE", "class_name": "SmokeNode" },
       { "name": "RAW", "class_name": "RawNode" },
       { "name": "APP", "class_name": "AppNode" },
-      { "name": "STORE", "class_name": "StoreNode" }
+      { "name": "STORE", "class_name": "StoreNode" },
+      { "name": "AUTH", "class_name": "AuthNode" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["SmokeNode"] },
     { "tag": "v2", "new_sqlite_classes": ["RawNode"] },
     { "tag": "v3", "new_sqlite_classes": ["AppNode"] },
-    { "tag": "v4", "new_sqlite_classes": ["StoreNode"] }
+    { "tag": "v4", "new_sqlite_classes": ["StoreNode"] },
+    { "tag": "v5", "new_sqlite_classes": ["AuthNode"] }
   ]
 }

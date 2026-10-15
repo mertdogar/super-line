@@ -226,13 +226,23 @@ A hold is a pending timer, not a guarantee. An object that receives no event at 
 
 ## Presence on a hibernating node
 
-Liveness works differently here, and three readings change meaning:
+`plugin-auth`'s sessions and `userPresence` track who's connected here as on any host: a wake keeps the session of every socket it resumes, and a socket's close ends its session. A session whose socket didn't survive — after a deploy, for example — ends once the woken server is ready.
 
-- **`conn.lastPongAt`** never advances: the server sends no pings, and the platform answers the client's.
-- **`plugin-auth`'s `lastSeenAt`** is refreshed by the server heartbeat, which doesn't run, so it stays at the time the session started.
-- **`plugin-auth`'s sessions and `userPresence`** don't survive a wake: the plugin closes every unfinished session for its node when the server starts, and a wake starts the server again. After the first wake, connected users read as offline.
+What changes is liveness. The server sends no heartbeat, and Cloudflare answers the client's `keepalive` pings without waking the object, so two readings change meaning:
 
-Don't build online indicators on `userPresence` or `lastSeenAt` on this host yet. Who is connected *now* is still the server's own view, `srv.local.connections`, which the wake rebuilds from the resumed sockets.
+- **`conn.lastPongAt`** never advances.
+- **`lastSeenAt`** isn't refreshed while a session is open. It holds the time the session started, and the time of the close once the session ends.
+
+The default online test — a `lastSeenAt` within the last 90 seconds — therefore marks every user offline 90 seconds after they connect. Read an open session as online instead. In the chat client, pass `presenceTimeoutMs: Infinity`, as a provider prop or to `chatClient`:
+
+```tsx
+<ChatProvider presenceTimeoutMs={Infinity}>{children}</ChatProvider>
+// or: chatClient(client, { presenceTimeoutMs: Infinity })
+```
+
+Reading `userPresence` yourself, count a row as online while its `connectedAt` isn't `null`.
+
+A client that vanishes without closing its socket — a laptop that sleeps, a network that drops — reads as online until Cloudflare reports that socket closed, and Cloudflare doesn't document how long that takes.
 
 ## Store rows and documents
 
@@ -284,7 +294,7 @@ crdtCollections: crdtCloudflareCollections(ctx.storage, contract.collections, { 
 
 All four first-party plugins run in a Durable Object under `nodejs_compat`:
 
-- **`plugin-auth`** needs a stable `nodeKey`, and `base` already carries one — the object's id. Password hashing runs in the object; read [Presence on a hibernating node](#presence-on-a-hibernating-node) before you show who's online.
+- **`plugin-auth`** needs a stable `nodeKey`, and `base` already carries one — the object's id. Password hashing runs in the object. Sessions survive a wake; read [Presence on a hibernating node](#presence-on-a-hibernating-node) before you show who's online.
 - **`plugin-chat`** works unchanged. A streaming message keeps the node awake until it settles.
 - **`plugin-queue`** works, but its polling interval means the node never hibernates.
 - **`plugin-inspector`** accepts the Control Center on the same socket path: `npx @super-line/control-center --url wss://my-app.example.workers.dev/ws`. Each wake gives the node a new node id, so the Control Center shows a new id after a quiet spell; it's still the same object.

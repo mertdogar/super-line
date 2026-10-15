@@ -313,10 +313,32 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
             'SUPER_LINE_INSPECTOR_PASSWORD, or pass inspector({ auth }).',
         )
 
+      // Keepalive + expiry, not a lone "watcher left" message: delivery is at-most-once, and a dropped
+      // announcement has to cost a node a few seconds of over-reporting, never permanent silence. It runs only
+      // while something watches, here or on a peer: an unwatched node holds no timer, so a Durable Object
+      // hosting it can hibernate.
+      let timer: ReturnType<typeof setInterval> | undefined
+      const pace = (): void => {
+        const watched = localWatchers > 0 || remoteWatchers.size > 0
+        if (watched && !timer) {
+          timer = setInterval(() => {
+            const now = Date.now()
+            for (const [node, seen] of remoteWatchers) if (now - seen > WATCHER_TTL_MS) remoteWatchers.delete(node)
+            if (localWatchers > 0) watchers.publish({ w: true })
+            pace()
+          }, KEEPALIVE_MS)
+          timer.unref?.()
+        } else if (!watched && timer) {
+          clearInterval(timer)
+          timer = undefined
+        }
+      }
+
       const off = watchers.subscribe((data, meta) => {
         if (meta.from === originNodeId) return // our own echo; the local subscriber count is the truth here
         if ((data as { w?: boolean }).w) remoteWatchers.set(meta.from, Date.now())
         else remoteWatchers.delete(meta.from)
+        pace()
       })
 
       // Announce on the EDGE, the instant a Control Center attaches or leaves. Polling here would open a
@@ -327,16 +349,9 @@ export function inspector(opts: InspectorOptions = {}): SuperLinePlugin {
         const was = localWatchers > 0
         localWatchers = count
         if (count > 0 !== was) watchers.publish({ w: count > 0 })
+        pace()
       })
-
-      // Keepalive + expiry, not a lone "watcher left" message: delivery is at-most-once, and a dropped
-      // announcement has to cost a node a few seconds of over-reporting, never permanent silence.
-      const timer = setInterval(() => {
-        const now = Date.now()
-        for (const [node, seen] of remoteWatchers) if (now - seen > WATCHER_TTL_MS) remoteWatchers.delete(node)
-        if (localWatchers > 0) watchers.publish({ w: true })
-      }, KEEPALIVE_MS)
-      timer.unref?.()
+      pace()
 
       return () => {
         clearInterval(timer)

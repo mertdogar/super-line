@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as z from 'zod'
 import { defineContract, defineContractPlugin, INSPECTOR_SUBPROTOCOL } from '@super-line/core'
 import type { InspectedContract, Schema } from '@super-line/core'
@@ -447,6 +447,24 @@ describe('inspector events topic (slice 5)', () => {
     await u2.join({ room: 'y' })
     await tick(50)
     expect(published.length).toBe(afterClose) // the watcher left, so B went quiet again
+  })
+
+  // A Durable Object hibernates only with no timer pending, so the watcher keepalive must not outlive the watch.
+  it('holds a timer only while a Control Center is attached', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      const node = await h.server(eventsContract, { authenticate: eventsAuth, heartbeat: false, plugins: [inspector()] })
+      expect(vi.getTimerCount()).toBe(0)
+
+      const insp = await connectInspector(node.url)
+      await insp.subscribeEvents()
+      await waitFor(() => vi.getTimerCount() === 1)
+
+      insp.close()
+      await waitFor(() => vi.getTimerCount() === 0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

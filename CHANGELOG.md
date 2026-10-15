@@ -5,6 +5,17 @@ run `pnpm changelog` rather than editing by hand.
 
 ## 2026-10-15
 
+### Bug Fixes
+
+- **client:** A second open of an open document waits for its own seed ([df908fa])
+
+### Documentation
+
+- **plan:** The cloudflare-workers map is complete — released ([4cbd550])
+- **changelog:** Regenerate the root aggregate ([f2bd4c5])
+
+## 2026-10-15
+
 ### Features
 
 - **plugin-chat:** PresenceTimeoutMs accepts Infinity ([bcdb55b])

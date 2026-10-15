@@ -3,6 +3,21 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [server-v0.22.0] — 2026-10-15
+
+### Features
+
+- **server:** Ready waits for the connections a transport resumes ([dc6989f])
+- **transport-cloudflare:** A Durable Object is a super-line node ([fc912e8])
+- Resume a connection on a fresh server instance from its snapshot ([e37187c])
+- **client:** One-shot CollectionHandle.query() — snapshot without a lasting subscription ([9ec3171])
+
+### Bug Fixes
+
+- **plugin-inspector:** Run the watcher keepalive only while watched ([86c77ad])
+- **test:** Bind test servers to 127.0.0.1, the address their clients dial ([6727757])
+- **test:** Vitest 4 renamed GlobalSetupContext to TestProject ([2d25402])
+
 ## [server-v0.21.0] — 2026-07-30
 
 ### Features

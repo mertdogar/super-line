@@ -3,6 +3,13 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [plugin-chat-v0.12.0] — 2026-10-15
+
+### Features
+
+- **plugin-chat:** PresenceTimeoutMs accepts Infinity ([bcdb55b])
+- Resume a connection on a fresh server instance from its snapshot ([e37187c])
+
 ## [plugin-chat-v0.11.0] — 2026-07-30
 
 ### Features

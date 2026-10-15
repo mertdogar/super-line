@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [plugin-inspector-v0.5.1] — 2026-10-15
+
+### Bug Fixes
+
+- **plugin-inspector:** Run the watcher keepalive only while watched ([86c77ad])
+
 ## [plugin-inspector-v0.5.0] — 2026-07-29
 
 ### Bug Fixes

@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [collections-sqlite-v0.4.1] — 2026-10-15
+
+### Refactor
+
+- **collections-sqlite:** Extract the engine-free SQL layer to src/sql.ts ([e13ddbe])
+
 ## [collections-sqlite-v0.4.0] — 2026-07-28
 
 ### Features

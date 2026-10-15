@@ -45,10 +45,12 @@
     "@logtape/logtape": "^2.2.4"
   },
   "peerDependencies": {
-    "@super-line/core": ">=0.20.0 <1.0.0"
+    "@super-line/core": ">=0.21.0 <1.0.0",
+    "@super-line/server": ">=0.22.0 <1.0.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261013.1",
-    "@super-line/core": "workspace:^"
+    "@super-line/core": "workspace:^",
+    "@super-line/server": "workspace:^"
   }
 }

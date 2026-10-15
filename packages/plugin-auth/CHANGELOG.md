@@ -3,6 +3,16 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [plugin-auth-v0.10.1] — 2026-10-15
+
+### Bug Fixes
+
+- **plugin-auth:** Sessions and presence survive a hibernation wake ([1e75f64])
+
+### Testing
+
+- Add the workers lane on @cloudflare/vitest-plugin ([3d84e7b])
+
 ## [plugin-auth-v0.10.0] — 2026-07-30
 
 ### Features

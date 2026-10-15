@@ -3,6 +3,18 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [core-v0.21.0] — 2026-10-15
+
+### Features
+
+- **server:** Ready waits for the connections a transport resumes ([dc6989f])
+- **transport-cloudflare:** A Durable Object is a super-line node ([fc912e8])
+- Resume a connection on a fresh server instance from its snapshot ([e37187c])
+
+### Testing
+
+- One polling wait with backoff, and teardown that cannot hang ([e86664a])
+
 ## [core-v0.20.0] — 2026-07-29
 
 ### Features

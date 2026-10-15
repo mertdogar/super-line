@@ -2,8 +2,8 @@
 id: T13
 title: Release wave
 labels: [wayfinder:task]
-status: open
-assignee:
+status: closed
+assignee: session_01CAGnLSs3WJLSaww41tSX5T (2026-10-15)
 blocked-by: [T12, T16]
 ---
 
@@ -17,4 +17,14 @@ Stage the release: versions for every touched package (core/server for the seam 
 
 > From T11: `plugin-inspector` changed source (watcher keepalive runs only while watched) → patch release. `examples/cloudflare` is private (no release).
 
-> From T16: `server` gains `PluginContext.ready` (feature → in the server minor already owed). `plugin-auth` changed source (boot sweep awaits `ctx.ready` and spares live connections; close stamps `lastSeenAt`) → release, and its `@super-line/server` peer floor must rise to the server minor that ships `PluginContext.ready` (it reads it unconditionally). `plugin-chat` changed source (`presenceTimeoutMs: Infinity` allowed) → patch. `transport-cloudflare`'s public `resume()` is gone (never published) — nothing to deprecate.
+> From T16: `server` gains `PluginContext.ready` (feature → in the server minor already owed). `plugin-auth` changed source (boot sweep awaits `ctx.ready` and spares live connections; close stamps `lastSeenAt`) → release, (its server peer floor can stay: `await ctx.ready` is `await undefined` on an older server, which behaves exactly as before). `plugin-chat` changed source (`presenceTimeoutMs: Infinity` allowed) → patch. `transport-cloudflare`'s public `resume()` is gone (never published) — nothing to deprecate.
+
+## Resolution
+
+**STAGED** (2026-10-15), local main only — push and publish are the user's call.
+
+- Released: core 0.21.0 · server 0.22.0 · client 0.17.0 · plugin-chat 0.12.0 · plugin-auth 0.10.1 · plugin-inspector 0.5.1 · collections-sqlite 0.4.1 · transport-cloudflare 0.1.0 · collections-cloudflare 0.1.0 · collections-crdt-cloudflare 0.1.0. One `chore(release)` commit, ten lightweight `<pkg>-v<ver>` tags on it, then `docs(changelog)` for the root aggregate.
+- Peer floors raised only where a package now needs a newer sibling: plugin-chat → server ≥0.22.0 (calls `hold()` unconditionally); transport-cloudflare → core ≥0.21.0 + server ≥0.22.0 (new `server` devDependency mirror; against an older server it would close every socket on each wake and never hibernate). plugin-auth's floor stays (`await ctx.ready` on an older server is `await undefined`).
+- Left out on purpose: packages whose only changes since their last tag are tests or READMEs (tarball unchanged) — they pick those entries up at their next real release. `devtools-extension` (private, GitHub-zip distribution) has a small `end`-frame label change pending → its own release, by hand.
+- Green: `check-changelog` for all ten, `check-manifest` across 28 published manifests, `pnpm build`, typecheck, lint, fast 857/857, workers 71/71; integration 158 (6 skipped) on the same source.
+- **Owed to the user:** push main + the ten tags together (an unpushed tag makes a fresh clone's changelog differ and the prepublish guard fail there), then `pnpm publish` per package — new packages first need nothing special (`publishConfig.access: public`).

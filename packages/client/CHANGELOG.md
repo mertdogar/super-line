@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [client-v0.17.0] — 2026-10-15
+
+### Features
+
+- Resume a connection on a fresh server instance from its snapshot ([e37187c])
+
 ## [client-v0.16.0] — 2026-07-30
 
 ### Features

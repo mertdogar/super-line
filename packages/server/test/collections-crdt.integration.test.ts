@@ -64,6 +64,16 @@ describe('CRDT document collections (ADR-0007)', () => {
     expect(doc.getSnapshot()).toMatchObject({ title: 'hello' })
   })
 
+  it('a second open of a document the client already has open is caught up by the time its ready resolves', async () => {
+    env = setup()
+    await env.srv.collection('scenes').create('s1', { title: 'hello' })
+    const scenes = env.makeClient('alice').collection('scenes')
+    await scenes.open('s1').ready
+    const second = scenes.open('s1')
+    await second.ready
+    expect(second.getSnapshot()).toMatchObject({ title: 'hello' })
+  })
+
   it('opening a non-existent document rejects (NOT_FOUND) — creation is server-only', async () => {
     env = setup()
     const doc = env.makeClient('alice').collection('scenes').open('nope')

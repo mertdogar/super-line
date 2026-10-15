@@ -599,7 +599,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     n: string
     id: string
     replicas: Set<ResourceReplica>
-    ready: Deferred
+    waiting: Deferred[] // handles not yet seeded: the next `cdopen` reply seeds every replica, then settles these
     settled: boolean
     deleted: boolean
   }
@@ -1024,16 +1024,15 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
           if (reset && replica.reset) replica.reset(snapshot) // reject→resync: discard the optimistic edit
           else replica.seed(snapshot) // catch-up / reconnect: merge
         }
-        if (!entry.settled) {
-          entry.settled = true
-          entry.ready.resolve()
-        }
+        entry.settled = true
+        for (const ready of entry.waiting.splice(0)) ready.resolve()
       })
       .catch((err) => {
         if (err instanceof SuperLineError && err.code === 'DISCONNECTED') return // reconnect retries
-        if (!entry.settled) {
-          entry.settled = true
-          entry.ready.reject(err)
+        entry.settled = true
+        const waiting = entry.waiting.splice(0)
+        if (waiting.length) {
+          for (const ready of waiting) ready.reject(err)
           return
         }
         routeError(err, 'resubscribe', { collection: entry.n, id: entry.id }) // settled: see sendCollectionSub
@@ -1049,10 +1048,12 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     const key = docKey(n, id)
     let entry = openDocs.get(key)
     if (!entry) {
-      entry = { n, id, replicas: new Set(), ready: deferred(), settled: false, deleted: false }
+      entry = { n, id, replicas: new Set(), waiting: [], settled: false, deleted: false }
       openDocs.set(key, entry)
     }
     entry.replicas.add(replica)
+    const ready = deferred()
+    entry.waiting.push(ready)
     sendDocOpen(entry)
     // Every local change writes through here, whoever produced it: `set`/`update`/`delete` below, or a direct
     // mutation of the replica's native handle (a rich-text editor bound to a native root). Registered once per
@@ -1065,7 +1066,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       set: (data) => replica.set(data),
       update: (partial) => replica.update(partial),
       delete: (path) => replica.delete(path),
-      ready: entry.ready.promise,
+      ready: ready.promise,
       get deleted() {
         return entry.deleted
       },

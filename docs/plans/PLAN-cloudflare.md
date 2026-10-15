@@ -375,6 +375,29 @@ The core half shipped smaller than §1–§3 specify. Each cut removes surface w
   list, delete, the 2 MB refusal, a real eviction, and end to end: `AppNode` carries a `boards` CRDT collection —
   an open doc survives a wake and a write after it reaches every holder, zero client lifecycle events.
 
+## As built (T11, 2026-10-15) — the example, deployed once
+
+- **`examples/cloudflare`**: one `ChatNode` Durable Object (auth + chat + inspector, rows on `cloudflareCollections`), a
+  vanilla-TS page built by Vite into `dist` and served as Workers static assets, `wrangler.jsonc` with `nodejs_compat`,
+  `new_sqlite_classes` and `observability`. Scripts: `pnpm dev` (`vite build && wrangler dev`), `pnpm run deploy`
+  (`pnpm deploy` is pnpm's own command), `pnpm tail`.
+- **plugin-inspector held the node awake forever**: its watcher keepalive was an unconditional 2 s `setInterval`. It now
+  runs only while a Control Center watches, here or on a peer. Measured under `wrangler dev`: with the old inspector an
+  idle node never re-constructed; with the fix it hibernates and the next message wakes a new instance. plugin-inspector
+  owes a patch release.
+- **Only `/ws` reaches the node.** Every request a Durable Object receives wakes it; on the first deploy a stray
+  `/favicon.ico` constructed the node. The Worker answers other paths with a 404 itself.
+- `#general` is seeded inside the host's own `blockConcurrencyWhile` (runs before the resume one), and joining awaits
+  that promise, because a wake re-runs `onConnection` for every adopted socket.
+- **Deployed** to `https://<name>.<subdomain>.workers.dev`, verified, then deleted: two users signed up (scrypt, no CPU
+  limit hit), chatted, idled 20 s — a new instance was constructed on the next message and delivery carried on with no
+  reconnect; the inspector connected with the secret password, and a wrong one closed `4401`. The inspector's reserved
+  connection also survives a wake (`wrangler dev`).
+- Platform facts for the docs: `wrangler tail` shows hibernatable WebSocket events as `Unknown Event`, and a log line
+  attaches to the event that triggered it, so a constructor log on a WebSocket upgrade prints when that socket closes;
+  log redaction of query strings is heuristic — the 32-hex inspector password showed as `REDACTED`, a short one in
+  clear, and the Control Center sends its credentials in the query string.
+
 ## Ticket order after the lock
 
 T15 seam on loopback → T06 workers lane (+ crypto verification) → T07 DO transport → T09 rows → T10 docs →

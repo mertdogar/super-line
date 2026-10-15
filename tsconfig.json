@@ -10,6 +10,7 @@
     "packages/transport-cloudflare",
     "packages/collections-cloudflare",
     "packages/collections-crdt-cloudflare",
+    "examples/cloudflare/src/worker.ts",
     "examples/collections-chat",
     "examples/chat-supervisor",
     "examples/react-chat-transports"

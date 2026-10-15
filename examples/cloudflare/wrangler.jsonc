@@ -1,0 +1,17 @@
+// One Worker, one Durable Object class. The Worker serves the browser client from ./dist and forwards every
+// other request — the WebSocket upgrade on /ws — to the Durable Object that is the super-line node.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "super-line-cloudflare-example",
+  "main": "./src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  // plugin-auth and plugin-inspector use node:crypto
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "./dist" },
+  "durable_objects": {
+    "bindings": [{ "name": "NODE", "class_name": "ChatNode" }]
+  },
+  // SQLite-backed (the only kind on the Workers Free plan); the node keeps its rows and connection snapshots here
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ChatNode"] }],
+  "observability": { "enabled": true }
+}

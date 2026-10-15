@@ -22,6 +22,7 @@ import {
   type RawConn,
   type Handshake,
   type AuthOutcome,
+  type ConnectionSnapshot,
   type ReservedConnection,
   type ClientFrame,
   type ReqFrame,
@@ -49,7 +50,8 @@ import {
   type AnyEnv,
 } from '@super-line/core'
 import { getLogger } from '@logtape/logtape'
-import { Conn, resolvePrincipal } from './conn.js'
+import { Conn, replyHooks, resolvePrincipal } from './conn.js'
+import { endOf, REPLAY_BASE, SubscribeSet } from './snapshot.js'
 import { createInMemoryAdapter } from './memory-adapter.js'
 
 const logConn = getLogger(['super-line', 'server', 'conn'])
@@ -506,6 +508,11 @@ export interface PluginContext {
   connectionById(id: string): Promise<ConnDescriptor | undefined>
   /** A plugin-private, cluster-wide adapter channel under the reserved `x:<plugin>:` prefix. */
   channel(name: string): PluginChannel
+  /**
+   * Busy token: declare work in flight on this node that only lives in memory (an open stream, say). A transport
+   * whose host can hibernate keeps it awake until every hold is released. Returns the release (idempotent).
+   */
+  hold(): () => void
 }
 
 /** Options for {@link createSuperLineServer}. */
@@ -976,8 +983,10 @@ export function createSuperLineServer<
     else void adapter.publish(REPLY + r.origin, serializer.encode(env))
   }
 
-  // one heartbeat timer: ping every conn (for lastPongAt liveness) + optional reaping
-  const hb = opts.heartbeat === false ? null : opts.heartbeat ?? {}
+  // one heartbeat timer: ping every conn (for lastPongAt liveness) + optional reaping. None when every transport
+  // detects dead connections itself (ADR-0028): a pending timer would keep a hibernating host awake for good.
+  const socketLiveness = opts.transports.length > 0 && opts.transports.every((t) => t.liveness === 'socket')
+  const hb = opts.heartbeat === false || socketLiveness ? null : opts.heartbeat ?? {}
   let hbTimer: ReturnType<typeof setInterval> | undefined
   if (hb) {
     hbTimer = setInterval(() => {
@@ -1025,6 +1034,7 @@ export function createSuperLineServer<
   function joinChannel(conn: Conn, channel: string): void | Promise<void> {
     conn.channels.add(channel)
     if (channel.startsWith(ROOM)) {
+      snapshotChanged(conn)
       const room = channel.slice(ROOM.length)
       afterRegistered(conn, () => adapter.presence?.addRoom(conn.id, room))
       emitTap({ type: 'room.add', connId: conn.id, room })
@@ -1047,6 +1057,7 @@ export function createSuperLineServer<
     set.delete(conn)
     conn.channels.delete(channel)
     if (channel.startsWith(ROOM)) {
+      snapshotChanged(conn)
       const room = channel.slice(ROOM.length)
       afterRegistered(conn, () => adapter.presence?.removeRoom(conn.id, room))
       emitTap({ type: 'room.remove', connId: conn.id, room })
@@ -1138,15 +1149,21 @@ export function createSuperLineServer<
 
   // A transport accepted (and authenticated) a connection — wire it up. Reserved conns (a role the server
   // declared in `reserved`, set by the transport) are observer-invisible and dispatch against a parallel contract.
-  function acceptConn(raw: RawConn, auth: AuthOutcome): void {
+  function acceptConn(
+    raw: RawConn,
+    auth: AuthOutcome,
+    transport: ServerTransport,
+    restored?: ConnectionSnapshot,
+  ): Conn | undefined {
     const role = auth.role
     const ctx = auth.ctx
     const isReserved = reservedRoles.has(role) // a plugin-declared reserved role (e.g. the inspector's)
     const connId = auth.connectionId ?? randomUUID()
     if ([...conns, ...reservedConns].some((conn) => conn.id === connId)) {
       raw.close(1008, 'duplicate connection id')
-      return
+      return undefined
     }
+    const persist = transport.onSnapshotChanged?.bind(transport)
     const conn = new Conn(
       raw,
       connId,
@@ -1157,8 +1174,15 @@ export function createSuperLineServer<
         ? (event, data) => emitTap({ type: 'msg.event', target: connId, name: event, data })
         : undefined,
       contract.roles[role]?.env, // the role's `env` schema — conn.setEnv validates against it (ADR-0012)
-      taps.length ? (env) => emitTap({ type: 'env.set', connId, nodeId: instanceId, env }) : undefined,
+      taps.length || persist
+        ? (env) => {
+            if (taps.length) emitTap({ type: 'env.set', connId, nodeId: instanceId, env })
+            snapshotChanged(conn)
+          }
+        : undefined,
     )
+    if (restored) Object.assign(conn, { connectedAt: restored.connectedAt })
+    if (persist) trackSnapshot(conn, { ...auth, connectionId: connId }, persist)
     conn.transport = auth.transport
     conn.principal = resolvePrincipal(conn, opts.identify) // ACL identity for stores; always defined
     raw.onMessage((bytes) => {
@@ -1169,6 +1193,7 @@ export function createSuperLineServer<
       // observer-invisible: not in conns/presence/heartbeat, no lifecycle hooks
       reservedConns.add(conn)
       raw.onClose(() => {
+        snapshots.delete(conn)
         reservedConns.delete(conn)
         const bridges = reservedBridges.get(conn) // plugin-owned conns bridge topics to plugin channels
         if (bridges) {
@@ -1177,7 +1202,8 @@ export function createSuperLineServer<
         }
         for (const channel of conn.channels) leaveChannel(conn, channel) // inline inspector's i:events sub
       })
-      return
+      snapshotChanged(conn)
+      return conn
     }
 
     conns.add(conn)
@@ -1188,6 +1214,7 @@ export function createSuperLineServer<
     })
     raw.onClose((code) => {
       logConn.debug('connection closed {connId} ({code})', { connId, code })
+      snapshots.delete(conn) // the socket is gone; nothing left to resume, so teardown must not re-persist
       conns.delete(conn)
       for (const channel of conn.channels) leaveChannel(conn, channel)
       collections.detach(conn) // drop this conn's collection subscriptions from the routing registry
@@ -1222,6 +1249,66 @@ export function createSuperLineServer<
     ])
     conn.registered = reachable.then(() => adapter.presence?.set(descriptor)).then(() => undefined)
     void conn.registered.catch(() => {}) // presence is best-effort; an unawaited failure is not an unhandled rejection
+    snapshotChanged(conn)
+    return conn
+  }
+
+  // ---- Busy tokens: the transports learn how much in-memory work is in flight ----
+  let holds = 0
+  function setHolds(n: number): void {
+    holds = n
+    for (const t of opts.transports) t.onHold?.(n)
+  }
+  function hold(): () => void {
+    setHolds(holds + 1)
+    let held = true
+    return () => {
+      if (!held) return
+      held = false
+      setHolds(holds - 1)
+    }
+  }
+
+  // ---- Connection snapshots (ADR-0027) ------------------------------------------------------------------
+  // Only for connections on a transport that declares `onSnapshotChanged`; everyone else pays one WeakMap miss.
+  const snapshots = new WeakMap<Conn, { subs: SubscribeSet; persist: () => void }>()
+
+  function trackSnapshot(
+    conn: Conn,
+    auth: ConnectionSnapshot['auth'],
+    persist: NonNullable<ServerTransport['onSnapshotChanged']>,
+  ): void {
+    const subs = new SubscribeSet()
+    snapshots.set(conn, {
+      subs,
+      persist: () => {
+        const rooms: string[] = []
+        for (const ch of conn.channels) if (ch.startsWith(ROOM)) rooms.push(ch.slice(ROOM.length))
+        persist(conn.id, { auth: { ...auth, env: conn.env }, connectedAt: conn.connectedAt, rooms, frames: subs.frames() })
+      },
+    })
+    replyHooks.set(conn, (frame) => {
+      const sub = subs.settle(frame)
+      if (!sub) return false
+      if (frame.t === 'res') snapshotChanged(conn)
+      if (frame.i! < REPLAY_BASE) return false
+      if (frame.t === 'err') conn.send(endOf(sub, frame)) // refused on adoption: the client must not think it is live
+      return true // a replayed subscribe was never asked for by this client — its ack has nowhere to go
+    })
+  }
+
+  function snapshotChanged(conn: Conn): void {
+    snapshots.get(conn)?.persist()
+  }
+
+  // A socket that outlived an earlier server instance: accept it from its snapshot, rejoin its rooms, and replay
+  // its live subscribes through the ordinary handlers (policies re-evaluated) with their acks withheld.
+  function adoptConn(raw: RawConn, snapshot: ConnectionSnapshot, transport: ServerTransport): void {
+    const conn = acceptConn(raw, snapshot.auth, transport, snapshot)
+    if (!conn) return
+    for (const r of snapshot.rooms)
+      void Promise.resolve(joinChannel(conn, ROOM + r)).catch((err) => fireError(err, { kind: 'connect', name: 'adopt', conn }))
+    snapshot.frames.forEach((frame, k) => void onFrame(conn, { ...frame, i: REPLAY_BASE + k }))
   }
 
   async function onMessage(conn: Conn, bytes: Uint8Array): Promise<void> {
@@ -1231,6 +1318,12 @@ export function createSuperLineServer<
     } catch {
       return
     }
+    await onFrame(conn, frame)
+  }
+
+  async function onFrame(conn: Conn, frame: ClientFrame): Promise<void> {
+    const snap = snapshots.get(conn)
+    if (snap?.subs.inbound(frame)) snap.persist()
     if (reservedConns.has(conn)) {
       await onReservedFrame(conn, frame) // dispatch against the plugin's parallel contract
       return
@@ -1250,6 +1343,8 @@ export function createSuperLineServer<
       await handleClientReply(conn, frame.i, { ok: true, d: frame.d })
     } else if (frame.t === 'serr') {
       await handleClientReply(conn, frame.i, { ok: false, code: frame.code, m: frame.m, d: frame.d })
+    } else if (frame.t === 'ping') {
+      conn.send({ t: 'pong' }) // client keepalive (ADR-0028)
     } else if (frame.t === 'pong') {
       const now = Date.now()
       conn.lastPongAt = now
@@ -1259,7 +1354,14 @@ export function createSuperLineServer<
   }
 
   for (const transport of opts.transports) {
-    readyParts.push(transport.start({ authenticate: authHook, onConnection: acceptConn, reserved }))
+    readyParts.push(
+      transport.start({
+        authenticate: authHook,
+        onConnection: (raw, auth) => void acceptConn(raw, auth, transport),
+        adoptConnection: (raw, snapshot) => adoptConn(raw, snapshot, transport),
+        reserved,
+      }),
+    )
   }
   const ready = Promise.all(readyParts).then(() => undefined)
   void ready.catch(() => {}) // an unawaited `ready` must not surface as an unhandled rejection
@@ -1823,6 +1925,7 @@ export function createSuperLineServer<
       describe: (conn) => buildDescriptor(conn),
       connectionById: (id) => Promise.resolve(presenceOrThrow().get(id)),
       channel: (name) => pluginChannel(pluginName, name),
+      hold,
     }
   }
 

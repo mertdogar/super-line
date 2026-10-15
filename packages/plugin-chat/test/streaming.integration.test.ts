@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import * as z from 'zod'
-import { defineContract, SuperLineError } from '@super-line/core'
+import { defineContract, SuperLineError, type ServerTransport } from '@super-line/core'
+import { createSuperLineServer } from '@super-line/server'
 import { memoryCollections } from '@super-line/collections-memory'
 import { authContract } from '@super-line/plugin-auth'
 import { auth } from '@super-line/plugin-auth/server'
@@ -694,5 +695,35 @@ describe('plugin-chat — host-typed data parts', () => {
     await messages.ready
     await waitFor(() => (messages.rows() as ChatMessage[])[0]?.status === 'aborted')
     client.close()
+  })
+})
+
+describe('plugin-chat — streams keep a hibernating host awake', () => {
+  it('an open stream holds a busy token until it settles, finalized or aborted', async () => {
+    const holds: number[] = []
+    const recorder: ServerTransport = { start() {}, stop() {}, onHold: (n) => void holds.push(n) }
+    const backend = memoryCollections()
+    const authKit = auth({ contract: app, collections: backend, defaultRoles: ['user'] })
+    const chatKit = chat({ contract: app })
+    const srv = createSuperLineServer(app, {
+      transports: [recorder],
+      nodeKey: 'chat-hold-test',
+      authenticate: authKit.authenticate,
+      identify: authKit.identify,
+      collections: backend,
+      plugins: [authKit.plugin, chatKit.plugin],
+    } as never)
+    try {
+      const bot = await authKit.users.create({ displayName: 'Bot' })
+      const ch = await chatKit.channels.create({ name: 'ops', owner: bot.id })
+      const first = await chatKit.messages.stream({ channelId: ch.id, authorId: bot.id })
+      const second = await chatKit.messages.stream({ channelId: ch.id, authorId: bot.id })
+      expect(holds).toEqual([1, 2])
+      await first.finalize()
+      await second.abort('stopped')
+      expect(holds).toEqual([1, 2, 1, 0])
+    } finally {
+      await srv.close()
+    }
   })
 })

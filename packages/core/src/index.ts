@@ -126,6 +126,7 @@ export type {
   CDCloseFrame,
   CDChangeFrame,
   CDDeleteFrame,
+  EndFrame,
   PingFrame,
   PongFrame,
 } from './wire.js'
@@ -172,6 +173,7 @@ export type {
   RawConn,
   Handshake,
   AuthOutcome,
+  ConnectionSnapshot,
   ReservedConnection,
   ServerTransport,
   ClientTransport,

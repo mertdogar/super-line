@@ -175,6 +175,19 @@ export interface CDDeleteFrame {
   id: string
   nd?: string
 }
+// a server→client notice that ONE subscription ended while the connection stays open: the server refused it
+// when re-establishing it on a fresh instance (ADR-0027). Identifies a topic (`c`), a row subscription (`n` + `s`)
+// or an open document (`n` + `id`); `code`/`m` are the refusal.
+export interface EndFrame {
+  t: 'end'
+  kind: 'topic' | 'collection' | 'doc'
+  c?: string
+  n?: string
+  s?: number
+  id?: string
+  code: string
+  m: string
+}
 export type ServerFrame =
   | ResFrame
   | ErrFrame
@@ -185,6 +198,7 @@ export type ServerFrame =
   | CChangeFrame
   | CDChangeFrame
   | CDDeleteFrame
+  | EndFrame
   | PingFrame
   | PongFrame
 

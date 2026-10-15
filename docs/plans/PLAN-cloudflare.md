@@ -283,6 +283,24 @@ the workers-lane ticket.
   `liveness`, `hold`), plugin-chat minor (holds), transport-loopback minor (hibernating variant), three new
   packages at 0.1.0; `chore(release)` + tags + root aggregate; push/publish only on the user's go.
 
+## As built (T15, 2026-10-15) — deviations from the lock
+
+The core half shipped smaller than §1–§3 specify. Each cut removes surface with no current caller:
+
+- **No `snapshotOf` hook.** Push (`onSnapshotChanged`) is the only path; nothing ever pulled.
+- **No plugin `snapshotConnection`/`restoreConnection`, no `plugins` field on `ConnectionSnapshot`.** Chat's only
+  in-memory per-connection state uses the busy token instead, so the hook had no implementer and no test. It
+  returns with the "chat stream snapshot/restore" fog item if that graduates.
+- **`onHold(count)` is a `ServerTransport` member**, like `onSnapshotChanged` (§3 put it on the start hooks, which
+  flow the other way).
+- **The transport names the connection id**: it passes `auth.connectionId` (kept, else minted) to `onConnection`
+  so it can tag its socket; the server needed no write-back.
+- **A refused topic drops its client listeners**, as a denied subscribe already does, and reports `{ topic }`.
+- **The hibernating loopback is a server test helper** (`packages/server/test/hibernating-loopback.ts`), not a
+  `transport-loopback` export, so `transport-loopback` needs no release.
+- `end` needed no client-tap vocabulary change: every inbound frame is already tapped as `frame`. The devtools
+  panel labels it.
+
 ## Ticket order after the lock
 
 T15 seam on loopback → T06 workers lane (+ crypto verification) → T07 DO transport → T09 rows → T10 docs →

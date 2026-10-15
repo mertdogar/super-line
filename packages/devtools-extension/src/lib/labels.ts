@@ -103,6 +103,11 @@ export function frameName(f: Frame, answers?: string): Named {
       return { label: `${f.n}/${f.id} deleted`, wire: 'cddel' }
     case 'cdclose':
       return { label: `close ${f.n}/${f.id}`, wire: 'cdclose' }
+    // the server stopped one subscription (refused while resuming the connection); the socket stays open
+    case 'end': {
+      const what = f.kind === 'topic' ? f.c : f.kind === 'doc' ? `${f.n}/${f.id}` : f.n
+      return { label: `${what} ended`, wire: 'end', detail: `${f.code} — ${f.m}` }
+    }
     case 'ping':
       return { label: 'heartbeat', wire: 'ping' }
     case 'pong':
@@ -173,6 +178,7 @@ const FRAME_CATEGORY: Record<Frame['t'], Category> = {
   cdchg: 'documents',
   cddel: 'documents',
   cdclose: 'documents',
+  end: 'subscriptions',
   env: 'connection',
   ping: 'heartbeat',
   pong: 'heartbeat',

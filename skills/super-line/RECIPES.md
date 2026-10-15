@@ -973,6 +973,17 @@ catch (e) {
 - Make handlers **idempotent**; after a reconnect the client auto-re-subscribes topics but must **re-run room joins**.
 - In-flight requests reject `DISCONNECTED` on drop; calls during reconnect are queued and flushed.
 - A 401 looks like any drop over the WS API, so a bad-credential client retries forever unless you set `reconnect: false`.
+- Against a server whose transport runs no heartbeat (a hibernating host), set `keepalive` so the client notices a dead socket, and watch `onError` for a subscription the server stopped on a wake:
+
+```ts
+const client = createSuperLineClient(api, {
+  transport, role: 'user',
+  keepalive: 15_000,                                   // ping; silence until the next ping → reconnect
+  onError: (err, info) => {
+    if (info.kind === 'resubscribe') showStale(info.topic ?? info.collection, (err as SuperLineError).code)
+  },
+})
+```
 
 ## Control Center (live inspector)
 

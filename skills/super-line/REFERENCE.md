@@ -63,7 +63,7 @@ interface Adapter {                          // cross-node fan-out seam
 //   SharedRequests<C>, RoleRequests<C,R>, SharedEvents<C>, SharedTopics<C>, RoleTopics<C,R>,
 //   ServerRequests<C,R>, SharedServerRequests<C>, DataOf<C,R>, AnyData<C>, EnvOf<C,R>, AnyEnv<C>
 // presence: PresenceStore, ConnDescriptor, NodeStat
-// transport interfaces: RawConn, Handshake, AuthOutcome, ServerTransport, ClientTransport, PingFrame, PongFrame
+// transport interfaces: RawConn, Handshake, AuthOutcome, ServerTransport, ClientTransport, ConnectionSnapshot, PingFrame, PongFrame, EndFrame
 //   (the WS transport is @super-line/transport-websocket; HTTP/SSE + libp2p transports are separate packages)
 // extractors (guarded): ClientInput<T>, ServerInput<T>, Output<T>, EventData<T>, EmitData<T>
 // InferIn<S>, InferOut<S>
@@ -191,6 +191,10 @@ const off = srv.subscribe('announce', cb); await off.ready
 const off = ctx.channel('feed').subscribe(cb); await off.ready   // plugin channels
 await srv.ready                            // reply channel + every transport.start()
 
+// A plugin holding work that lives only in memory (an open stream) takes a busy token, so a transport whose
+// host can hibernate keeps it awake until release. plugin-chat holds one per open streaming message.
+const release = ctx.hold(); try { /* … */ } finally { release() }   // release is idempotent
+
 // Ignoring them is fine in an app — nothing real subscribes and publishes in the same millisecond.
 // Await them in TESTS, which always do, and in code that publishes immediately after subscribing.
 // `ready` says the channel is now delivered HERE. It does NOT say a peer has noticed: a gossip mesh
@@ -247,6 +251,8 @@ interface SuperLineClientOptions<C, R> {
   reconnectBaseMs?: number                      // default 500
   reconnectMaxMs?: number                       // default 30000
   reconnectFactor?: number                      // default 2
+  keepalive?: number                            // ms, off by default: ping every N ms; nothing heard back by the next ping → drop the socket and reconnect. Use against a transport that runs no server heartbeat
+  onError?: (error, info: ClientErrorInfo) => void  // a lifecycle hook threw, or kind 'resubscribe': a subscription is no longer live — info { collection } (rows) · { collection, id } (doc) · { topic }
   crdtCollections?: CrdtCollectionClient       // universal client CRDT engine — `crdtCollectionsClient()`; REQUIRED to open any CRDT document collection. Row collections need no client backend (driven by the contract + server).
   onStoreError?: (error, info: { store: string; id: string }) => void   // a rejected CRDT-doc write (schema/policy); the client then hard-resyncs its replica
 }
@@ -283,6 +289,7 @@ Client behavior:
 - Auto-reconnect (backoff + jitter); topics auto-re-subscribe on reconnect.
 - In-flight requests reject `DISCONNECTED` on drop; calls made while reconnecting are queued and flushed.
 - At-most-once: messages sent while offline are not replayed.
+- A server resuming this connection on a fresh instance (a hibernation wake) may refuse one subscription while the socket stays open: it arrives as `onError(err, { kind: 'resubscribe', … })`. A refused topic also drops its listeners.
 
 ## Transports (client↔server wire — pluggable)
 
@@ -304,6 +311,27 @@ libp2pClientTransport(opts: { node: Libp2p; multiaddr: Multiaddr | Multiaddr[] |
 
 // @super-line/transport-loopback — in-memory, zero-dependency, for tests
 createLoopbackTransport(): { server: ServerTransport; client(): ClientTransport }
+```
+
+Writing a transport for a host that hibernates (sockets outlive the server instance, e.g. a Durable Object) uses three optional `ServerTransport` members and one start hook:
+
+```ts
+interface ServerTransport {
+  liveness?: 'server' | 'socket'   // 'socket' on EVERY started transport → the server runs no heartbeat timer (it would keep the host awake)
+  onSnapshotChanged?(connId: string, snapshot: ConnectionSnapshot): void   // declaring it turns snapshots on; called synchronously from accept onward — persist before returning, forget on close
+  onHold?(count: number): void     // outstanding plugin busy tokens; stay awake while > 0
+}
+// start(hooks): hooks.adoptConnection(raw, snapshot) hands a surviving socket to the NEW server instance. Its live
+// subscriptions are re-run through the ordinary handlers (policies re-evaluated) without acks to the client; a
+// refused one reaches the client as onError 'resubscribe'. Pass `auth.connectionId` (keep the one authenticate
+// returned, else mint one) to hooks.onConnection so the transport knows which id to tag the socket with.
+interface ConnectionSnapshot {
+  auth: AuthOutcome & { connectionId: string }   // env as currently vended
+  connectedAt: number
+  rooms: string[]                                // host-joined rooms
+  frames: Array<SubFrame | CSubFrame | CDOpenFrame>   // acknowledged, still-live subscribes
+}
+// A snapshot is JSON-safe only when ctx and env are. conn.data is NOT kept; onConnection runs again on adoption.
 ```
 
 ## Adapters (server↔server fan-out — pluggable)

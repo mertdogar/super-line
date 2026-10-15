@@ -1,5 +1,8 @@
 import { validateSync } from '@super-line/core'
-import type { Serializer, ServerFrame, ServerMessageDef, EmitData, RawConn, Schema } from '@super-line/core'
+import type { Serializer, ServerFrame, ServerMessageDef, EmitData, RawConn, Schema, ResFrame, ErrFrame } from '@super-line/core'
+
+/** Package-internal: sees each res/err a connection is about to send; returning true withholds it (ADR-0027). */
+export const replyHooks = new WeakMap<object, (frame: ResFrame | ErrFrame) => boolean>()
 
 /**
  * A single client connection, passed to handlers as the third argument.
@@ -24,7 +27,8 @@ export class Conn<
    * Server-vended, CLIENT-VISIBLE per-connection state, typed per role by the contract's `env` schema
    * (ADR-0012). Seeded at connect (from `authenticate`'s `env`), mutated via {@link Conn.setEnv}, and
    * mirrored to the client as `client.env`. `null` when the role declares no `env`. Holds live external
-   * credentials — never persisted.
+   * credentials — never written to the cluster presence directory. A transport that keeps connection
+   * snapshots (ADR-0027) does store it, server-side, so a resumed connection keeps its env.
    */
   env: Env = null as Env
   /** The client↔server transport (wire) this connection was accepted on (set by the server at accept). */
@@ -80,6 +84,7 @@ export class Conn<
 
   /** Encode and send a frame (unicast, e.g. req/res). */
   send(frame: ServerFrame): void {
+    if ((frame.t === 'res' || frame.t === 'err') && replyHooks.get(this)?.(frame)) return
     if (!this.raw.writable) return
     this.raw.send(this.serializer.encode(frame))
   }

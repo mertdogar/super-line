@@ -21,8 +21,8 @@ registry and the client saw nothing — no disconnect, no reconnect, live delive
 ## Decision
 
 **A connection's server-side state is reconstructible from a `ConnectionSnapshot` = the authenticate outcome
-(with a mandatory `connectionId`), `connectedAt`, the rooms joined, the live subscribe frames net of their
-unsubscribes, and optional per-plugin blobs.** The server keeps it current at frame ingress and pushes it to
+(with a mandatory `connectionId`), `connectedAt`, the rooms joined, and the live subscribe frames net of their
+unsubscribes.** The server keeps it current at frame ingress and pushes it to
 the transport synchronously on every change; a transport that wants it persists it, and on wake hands it
 back through `adoptConnection(raw, snapshot)`, which is the normal accept path plus room re-adds plus a muted
 replay. Snapshots live wherever the transport chooses; on Cloudflare that is DO SQLite keyed by connection
@@ -38,9 +38,11 @@ Consequences the code must honour:
   directory, not server-private storage.
 - A hibernated single-node object cannot have changed, so adopt never re-snapshots rows or docs. A
   multi-node design could not rely on this; it is one reason clustering across objects is out of scope.
-- Per-connection plugin state must be either frame-derived, contributed through
-  `snapshotConnection`/`restoreConnection`, or kept alive with the busy token (`PluginContext.hold()`), which
-  is what plugin-chat does for an open stream.
+- Per-connection plugin state must be either frame-derived or kept alive with the busy token
+  (`PluginContext.hold()`), which is what plugin-chat does for an open stream. A plugin snapshot hook was
+  designed and deliberately not built: no plugin needs one yet, and a hook nobody calls cannot be tested.
+- The transport names the connection: it passes `auth.connectionId` (kept from `authenticate`, else minted) to
+  `onConnection`, so it can tag the socket with the id its snapshot is stored under.
 
 ## Considered and rejected
 

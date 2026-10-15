@@ -1008,6 +1008,8 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     lane: Promise<void>
     flushTimer?: ReturnType<typeof setTimeout>
     lastCheckpointAt: number
+    /** Releases the busy token that keeps a hibernating host awake while this in-memory stream is open. */
+    release?: () => void
   }
 
   const streams = new Map<string, OpenStream>()
@@ -1026,6 +1028,7 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
     streams.delete(s.messageId)
     if (s.connId) connStreams.get(s.connId)?.delete(s.messageId)
     if (s.flushTimer) clearTimeout(s.flushTimer)
+    s.release?.()
   }
 
   const partRowOf = (s: OpenStream, p: LivePart, now: number): ChatMessagePart => {
@@ -1296,6 +1299,7 @@ export function chat<C extends Contract>(opts: ChatServerOptions<C>): ChatServer
       nextIdx: 0,
       lane: Promise.resolve(),
       lastCheckpointAt: Date.now(),
+      ...(pluginCtx ? { release: pluginCtx.hold() } : {}),
     }
     streams.set(message.id, s)
     if (args.connId !== undefined) {

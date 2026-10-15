@@ -5,6 +5,8 @@
  * transport — a transport never inspects a frame, it only carries bytes.
  */
 
+import type { CDOpenFrame, CSubFrame, SubFrame } from './wire.js'
+
 /** A live logical connection, from the core's point of view. Symmetric across server + client. */
 export interface RawConn {
   /** Send already-encoded bytes. A no-op when not {@link RawConn.writable}. */
@@ -77,6 +79,20 @@ export interface ReservedConnection {
 }
 
 /**
+ * Everything a fresh server instance needs to take over a still-open connection (ADR-0027): the outcome it
+ * was accepted with, the rooms host code joined it to, and the subscribe frames that are still live (net of
+ * their unsubscribes, and only those the server acknowledged). The server's per-connection registries are
+ * all derived from these. JSON-safe as long as the connection's `ctx` and `env` are.
+ */
+export interface ConnectionSnapshot {
+  /** The accept outcome, `env` as currently vended. `connectionId` is always present here. */
+  auth: AuthOutcome & { connectionId: string }
+  connectedAt: number
+  rooms: string[]
+  frames: Array<SubFrame | CSubFrame | CDOpenFrame>
+}
+
+/**
  * Server side: the transport listens, authenticates each inbound connection at its
  * native moment, and surfaces only the accepted ones — so the core never holds an
  * unauthenticated connection.
@@ -88,6 +104,12 @@ export interface ServerTransport {
     /** Fires ONLY for accepted connections. */
     onConnection: (raw: RawConn, auth: AuthOutcome) => void
     /**
+     * Take over a connection whose socket outlived an earlier server instance (ADR-0027), from the last
+     * snapshot {@link ServerTransport.onSnapshotChanged} handed out. Rebuilds every subscription without
+     * acknowledging it to the client; one the server now refuses reaches the client as an `end` frame.
+     */
+    adoptConnection?: (raw: RawConn, snapshot: ConnectionSnapshot) => void
+    /**
      * Reserved connection classes the core declares (from `inspector` + plugin connection classes). A
      * transport that supports them advertises/matches these and short-circuits `authenticate`, accepting
      * with the matched `role` and empty ctx. Transports without negotiation ignore this. See {@link ReservedConnection}.
@@ -96,6 +118,19 @@ export interface ServerTransport {
   }): void | Promise<void>
   /** Stop listening and drop in-flight connections. */
   stop(): void | Promise<void>
+  /**
+   * Who detects dead connections (ADR-0028). `'socket'`: the transport does, so when every started transport
+   * says so the server runs no heartbeat timer — a timer would keep a hibernating host awake. Default `'server'`.
+   */
+  liveness?: 'server' | 'socket'
+  /**
+   * Declaring this turns on connection snapshots (ADR-0027). Called synchronously whenever a connection's
+   * snapshot changes, from accept onward; persist it before returning if the instance may vanish. Forget it
+   * when the socket closes.
+   */
+  onSnapshotChanged?(connId: string, snapshot: ConnectionSnapshot): void
+  /** Called with the number of outstanding plugin busy tokens whenever it changes (`PluginContext.hold`). */
+  onHold?(count: number): void
 }
 
 /** Client side: dial the server, encoding `handshakeParams` (role + params) in the transport's native form. */

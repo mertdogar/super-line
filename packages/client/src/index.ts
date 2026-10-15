@@ -254,6 +254,8 @@ export interface ClientErrorInfo {
    *
    * A `resubscribe` error means that subscription is no longer live: the failure itself triggers no retry, and
    * nothing else will until the next transport reopen. Treat it as dead — resubscribe, or fail the process.
+   * The same report arrives, with the connection still open, when a server resuming this connection on a fresh
+   * instance (a hibernation wake) refuses one of its subscriptions; for a topic, its listeners are dropped.
    *
    * `tap` is a plugin's `onClientSideEvent` throwing. It is isolated here rather than propagated, so an
    * observer can never fail the operation it was observing.
@@ -263,6 +265,8 @@ export interface ClientErrorInfo {
   collection?: string
   /** For `resubscribe`: the document id, when it was a CRDT `open` rather than a row subscription. */
   id?: string
+  /** For `resubscribe`: the topic, when it was a topic subscription. */
+  topic?: string
 }
 
 /** One request the client is still waiting on. */
@@ -423,6 +427,12 @@ export interface SuperLineClientOptions<C extends Contract, R extends RoleOf<C>>
   reconnectMaxMs?: number
   /** Backoff growth factor. Defaults to `2`. */
   reconnectFactor?: number
+  /**
+   * Liveness from this side (ADR-0028), in ms; off by default. The client pings every `keepalive` ms, and when
+   * nothing at all has arrived from the server by the next ping it drops the socket and reconnects. Use it when
+   * the server's transport runs no heartbeat — a hibernating host answers these pings without waking.
+   */
+  keepalive?: number
 }
 
 interface Request {
@@ -532,7 +542,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   let envCurrent: unknown = null
   const envReady = deferred()
   const envListeners = new Set<(env: unknown) => void>()
-  function routeError(error: unknown, kind: ClientErrorInfo['kind'], where?: { collection?: string; id?: string }): void {
+  function routeError(error: unknown, kind: ClientErrorInfo['kind'], where?: Omit<ClientErrorInfo, 'kind'>): void {
     if (opts.onError) {
       try {
         opts.onError(error, { kind, ...where })
@@ -541,7 +551,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       }
     } else if (kind === 'resubscribe') {
       // Loud by default: with no sink this would otherwise be a silently deaf subscription on a live client.
-      const what = where?.id ? `${where.collection}/${where.id}` : where?.collection
+      const what = where?.topic ?? (where?.id ? `${where.collection}/${where.id}` : where?.collection)
       console.error(`[super-line] client failed to re-subscribe ${what} — it is no longer live`, error)
     } else console.error(`[super-line] client ${kind} handler threw`, error)
   }
@@ -630,6 +640,26 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   let closed = false
   let attempt = 0
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+  let keepaliveTimer: ReturnType<typeof setInterval> | undefined
+  let heard = true // anything from the server since the last keepalive ping
+
+  function startKeepalive(): void {
+    if (!opts.keepalive) return
+    heard = true
+    keepaliveTimer = setInterval(() => {
+      if (!heard) {
+        logConn.debug('keepalive: no answer in {ms}ms, dropping the socket', { ms: opts.keepalive })
+        rawConn?.terminate()
+        return
+      }
+      heard = false
+      sendFrame({ t: 'ping' })
+    }, opts.keepalive)
+  }
+  function stopKeepalive(): void {
+    clearInterval(keepaliveTimer)
+    keepaliveTimer = undefined
+  }
 
   function connect(): void {
     rawConn = opts.transport.connect(handshakeParams, {
@@ -642,6 +672,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
 
   function onOpen(): void {
     attempt = 0
+    startKeepalive()
     if (tapping) tap({ k: 'conn', phase: 'open' })
     for (const op of requests.values()) {
       if (!op.sent) {
@@ -670,6 +701,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   }
 
   function onClose(code = 1006): void {
+    stopKeepalive()
     logConn.debug('connection closed ({code})', { code })
     if (tapping) tap({ k: 'conn', phase: 'close', code })
     fireLifecycle(disconnectHooks, 'disconnect', code)
@@ -700,6 +732,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   }
 
   function onMessage(data: Uint8Array): void {
+    heard = true
     let frame: ServerFrame
     try {
       frame = serializer.decode(data) as ServerFrame
@@ -792,6 +825,13 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
         entry.deleted = true
         for (const replica of entry.replicas) replica.applyDelete()
       }
+    } else if (frame.t === 'end') {
+      const err = new SuperLineError(frame.code, frame.m)
+      if (frame.kind === 'topic') {
+        topicListeners.delete(frame.c!) // as when a subscribe is denied
+        readyByTopic.delete(frame.c!)
+        routeError(err, 'resubscribe', { topic: frame.c! })
+      } else routeError(err, 'resubscribe', frame.kind === 'doc' ? { collection: frame.n!, id: frame.id! } : { collection: frame.n! })
     }
   }
 
@@ -1287,6 +1327,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     },
     close(): void {
       closed = true
+      stopKeepalive()
       if (reconnectTimer) clearTimeout(reconnectTimer)
       rawConn?.close()
       for (const dispose of disposers.splice(0)) {

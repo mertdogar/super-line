@@ -1,0 +1,13 @@
+// The Worker the workers lane runs tests against. `main` hosts the Durable Object classes the
+// lane needs; packages add their own classes here as they gain workerd tests.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "super-line-workers-lane",
+  "main": "./worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "SMOKE", "class_name": "SmokeNode" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SmokeNode"] }]
+}

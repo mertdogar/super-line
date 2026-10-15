@@ -47,6 +47,7 @@ From the charting session (2026-10-14, all recommendations accepted):
 
 - [Lock PLAN-cloudflare](tickets/T05-lock-plan-cloudflare.md) — **RESOLVED**: `docs/plans/PLAN-cloudflare.md` locked; ADR-0027 (connection snapshot seam, `end` frame) + ADR-0028 (transport-owned liveness, client `keepalive`); busy token for chat streams; `routeToNode`/`createDurableNode` with singleton default and `nodeKey = ctx.id`; CRDT snapshot-per-doc; crypto = verification only (T08 folded into T06); new T15 builds the core half on loopback before T07; Control Center needs nothing special; queue-on-alarms ruled out of scope.
 - [Port node:crypto users to WebCrypto where nodejs_compat falls short](tickets/T08-port-crypto.md) — **CLOSED (folded)**: no port needed; the verification test lives in the workers-lane ticket.
+- [Build the test:workers lane](tickets/T06-build-test-workers-lane.md) — **BUILT**: `pnpm test:workers` on `@cloudflare/vitest-plugin` (`*.workers.test.ts`, serial non-isolated), smoke test proves eviction → new instance over the same socket, plugin crypto verified under `nodejs_compat` (T08 fold, no port); `pnpm test` runs all three lanes; typecheck/lint cover `test-workers/`.
 
 ## Not yet specified
 

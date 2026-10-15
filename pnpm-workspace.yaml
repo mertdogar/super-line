@@ -14,6 +14,10 @@ allowBuilds:
   node-datachannel: true
   protobufjs: false
   ssh2: false
+  workerd: true
   zeromq: true
 minimumReleaseAgeExclude:
   - '@super-store/store'
+  - '@cloudflare/vitest-plugin@1.4.2'
+  - miniflare@5.20261012.0-beta
+  - wrangler@4.151.0

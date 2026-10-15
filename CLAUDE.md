@@ -5,11 +5,12 @@ Strictly-typed realtime data bus for TypeScript — one contract for every patte
 ## Commands (run from repo ROOT)
 
 ```bash
-pnpm test         # the REAL suite: fast lane + integration lane. `pnpm -r test` runs NOTHING.
+pnpm test         # the REAL suite: fast lane + integration lane + workers lane. `pnpm -r test` runs NOTHING.
 pnpm test:fast    # fast lane only — no Docker; the inner loop
 pnpm test:integration  # heavy lane — Docker brokers (one shared redis+rabbitmq via global-docker.ts), zeromq/libp2p sockets
+pnpm test:workers # workers lane — `*.workers.test.ts` run INSIDE workerd (Miniflare) via @cloudflare/vitest-plugin; no Docker
 pnpm test:watch   # fast lane, watch mode
-pnpm typecheck    # root tsc — the REAL check. `pnpm -r typecheck` only covers control-center.
+pnpm typecheck    # root tsc + test-workers tsc — the REAL check. `pnpm -r typecheck` only covers control-center.
 pnpm lint         # oxlint (NOT eslint)
 pnpm build        # pnpm -r build (tsup)
 pnpm changelog    # regenerate CHANGELOG.md from conventional commits (git-cliff); `pnpm changelog <pkg> [ver]` for one
@@ -32,6 +33,7 @@ pnpm docs:build
 - **Tests and typecheck only work from root**, not via `pnpm -r` (no package has a `test` script; only `control-center` has `typecheck`). `pnpm -r test` silently passes while running nothing.
 - Root `pnpm typecheck` spans `packages/*/{src,test}` + `examples/*/src` but **excludes** `packages/control-center` and `packages/devtools-extension` (own `typecheck` scripts — run them there) and `examples/{collections-chat,chat-supervisor,react-chat-transports}` (React 19). A type break in those five surfaces only on build, so check them by hand when you touch them. Their *tests* are unaffected — vitest globs `packages/*/test`, so the extension's 81 run in the fast lane.
 - `packages/server/test/reconnect.integration.test.ts` → "auto-reconnects after an abrupt drop" is timing-flaky on a busy machine; it passes in isolation. Don't chase it as a regression. (It's in the `heavy` list for exactly this reason.)
+- **Workers lane** (`vitest.workers.config.ts`, `test-workers/wrangler.jsonc` is the Worker under test): a file is in it by the `*.workers.test.ts` suffix, which the fast lane excludes. It runs `--max-workers=1 --no-isolate` because Durable Object WebSockets don't work with per-file storage isolation — so DO storage is NOT reset between files (use fresh `idFromName`s or `reset()` from `cloudflare:test`). Only static imports inside DO handlers. `test-workers/env.d.ts` types the bindings; add a DO class to `worker.ts` + `wrangler.jsonc` when a package gains workerd tests.
 - The lane split is the `heavy` list in `vitest.config.ts` (Docker/socket/timing-sensitive files), NOT the `.integration.test.ts` suffix — most integration-named files are loopback tests and run in the fast lane. To run one heavy file: `pnpm test:integration <name>`.
 - **Both lanes run serially** (`pool: 'forks'`, `fileParallelism: false`). Forks because native addons (better-sqlite3, libsql) aren't multi-thread-safe under Vitest; serial because the fast lane was tried at 10/5/3/2 parallel forks and flaked at every width — the loopback suites' delivery budgets (2–5s `waitFor`, debounced persistence, SSE polling) assume a quiet machine. Re-enabling parallelism means auditing those budgets per file first.
 - ESM-only packages. Lint/format is oxlint/oxfmt, not ESLint/Prettier.

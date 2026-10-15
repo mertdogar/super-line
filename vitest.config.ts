@@ -72,7 +72,7 @@ export default defineConfig({
   resolve: { alias },
   test: {
     include: ['packages/**/test/**/*.test.ts'],
-    exclude: [...configDefaults.exclude, ...heavy],
+    exclude: [...configDefaults.exclude, ...heavy, '**/*.workers.test.ts'], // workerd-only files belong to the workers lane
     // The ladder, deliberately ordered: a `waitFor` ceiling is the innermost backstop, a test may
     // exceed one wait, and a hook (booting a libp2p mesh, a PGlite instance) may take longer than any
     // single test. `hookTimeout` was previously left at vitest's 10s default — BELOW testTimeout —

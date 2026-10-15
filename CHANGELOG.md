@@ -3,6 +3,60 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## 2026-10-15
+
+### Features
+
+- **plugin-chat:** PresenceTimeoutMs accepts Infinity ([bcdb55b])
+- **server:** Ready waits for the connections a transport resumes ([dc6989f])
+- **examples:** Cloudflare example, a super-line node in a Durable Object ([c399848])
+- **collections-crdt-cloudflare:** CRDT documents on Durable Object SQLite ([7515910])
+- **collections-cloudflare:** Row collections on Durable Object SQLite ([6b1f3eb])
+- **transport-cloudflare:** A Durable Object is a super-line node ([fc912e8])
+- Resume a connection on a fresh server instance from its snapshot ([e37187c])
+- **plugin-workflows:** Permanent-error short-circuit + LogTape engine bridge ([6f1774b])
+- **plugin-workflows:** Harden the lifecycle projection ([aab7bd5])
+- **plugin-workflows:** Scaffold the duroxide-backed workflow kit ([c1d75bf])
+
+### Bug Fixes
+
+- **plugin-auth:** Sessions and presence survive a hibernation wake ([1e75f64])
+- **plugin-inspector:** Run the watcher keepalive only while watched ([86c77ad])
+- **test:** Bind test servers to 127.0.0.1, the address their clients dial ([6727757])
+- **test:** Vitest 4 renamed GlobalSetupContext to TestProject ([2d25402])
+
+### Refactor
+
+- **collections-sqlite:** Extract the engine-free SQL layer to src/sql.ts ([e13ddbe])
+
+### Testing
+
+- Add the workers lane on @cloudflare/vitest-plugin ([3d84e7b])
+- **plugin-workflows:** Spawn the crash worker as a node process so SIGKILL reaches it ([9e65419])
+- **plugin-workflows:** Postgres heavy-lane suite with real-process crash-resume ([61db09f])
+
+### Chores
+
+- **deps:** Vitest 4 ([10fdf03])
+
+### CI
+
+- **docs:** Build collections-crdt-memory before the docs site — the CRDT tutorial demo imports it ([5877bed])
+
+### Documentation
+
+- Teach hosting a node on Cloudflare Durable Objects ([a893f83])
+- **plan:** Lock PLAN-cloudflare (ADR-0027/0028) ([ba15ec6])
+- **plan:** Chart the cloudflare-workers wayfinder map ([ce22ae5])
+- **plan:** Resolve tests-lane ticket — the pg_durable impl map is COMPLETE ([ff2464f])
+- **plan:** Resolve finish-surface ticket on the pg_durable impl map ([1c8714b])
+- **plan:** Resolve projection-hardening + retry-parity tickets on the pg_durable impl map ([bf49a2b])
+- **plan:** Resolve package-identity + scaffold tickets on the pg_durable impl map ([3a171c4])
+- **plan:** Pg_durable integration wayfinder maps + report, chartr tracker doc ([cd98527])
+- **how-to:** Run pg_durable beside super-line — coexistence + Electric shape recipe ([53a4375])
+- **tutorials:** Rebuild the learning path — 7 steps, each opening with a live in-page demo ([de116d3])
+- **changelog:** Regenerate the root aggregate ([092ae46])
+
 ## 2026-07-30
 
 ### Features

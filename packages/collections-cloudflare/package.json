@@ -1,0 +1,50 @@
+{
+  "name": "@super-line/collections-cloudflare",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Durable Object SQLite CollectionStore backend for super-line — typed row collections stored in the object that is the node, with IR→SQL snapshot pushdown.",
+  "license": "MIT",
+  "author": "Mert",
+  "keywords": [
+    "super-line",
+    "collections",
+    "cloudflare",
+    "durable-objects",
+    "sqlite",
+    "rows"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mertdogar/super-line.git",
+    "directory": "packages/collections-cloudflare"
+  },
+  "homepage": "https://mertdogar.github.io/super-line/",
+  "bugs": "https://github.com/mertdogar/super-line/issues",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
+  },
+  "peerDependencies": {
+    "@super-line/core": ">=0.17.0 <1.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261013.1",
+    "@super-line/core": "workspace:^"
+  }
+}

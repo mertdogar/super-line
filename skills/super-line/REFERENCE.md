@@ -318,9 +318,12 @@ createDurableNode((ctx, env, base: { transports; nodeKey }) => server): DurableO
 routeToNode(request, namespace, { name?: (req) => string }): Promise<Response>               // Worker fetch → the node object (default name 'super-line')
 cloudflareServerTransport(ctx): ServerTransport & { fetch, webSocketMessage, webSocketClose, webSocketError, resume() }   // for a hand-written DO class
 CLOSE_NOT_RESUMABLE  // 4409: a socket whose connection could not be resumed on wake; the client reconnects as on any drop
+
+// @super-line/collections-cloudflare — row collections in the node object's own SQLite (relay; single node)
+cloudflareCollections(ctx.storage, contract.collections): RelayCollectionStore   // build it in createDurableNode's build
 ```
 
-On Cloudflare the object hibernates between events while sockets stay open; on wake the server resumes every connection (subscriptions, open docs, rooms, env) and the client sees nothing. The server runs no heartbeat there (pings are answered by the platform without waking it), so give browser clients `keepalive`. In-memory state does not survive a wake: `conn.data`, and anything in a memory collection backend. A plugin running timers (plugin-queue's polls) keeps the object awake.
+On Cloudflare the object hibernates between events while sockets stay open; on wake the server resumes every connection (subscriptions, open docs, rooms, env) and the client sees nothing. The server runs no heartbeat there (pings are answered by the platform without waking it), so give browser clients `keepalive`. In-memory state does not survive a wake: `conn.data`, and anything in a memory collection backend — use `cloudflareCollections` for rows. It lays tables out exactly as `sqliteCollections` does, opens them on first use, and within Durable Object SQLite's limits: at most 98 schema fields per collection, 2 MB per row. A collection whose schema changed non-additively (a field changed type or was removed, a required field added) fails its own operations with an `INTERNAL` error naming it, without touching the rest of the object; rename the collection or migrate its table yourself. A plugin running timers (plugin-queue's polls) keeps the object awake.
 
 Writing a transport for a host that hibernates (sockets outlive the server instance, e.g. a Durable Object) uses three optional `ServerTransport` members and one start hook:
 
@@ -481,7 +484,7 @@ defineContract({
 
 // SERVER — ONE backend serves all collections (single tx domain → atomic cross-collection batches) + row policies:
 createSuperLineServer(api, {
-  collections: memoryCollections(),            // or sqliteCollections({ file, collections: api.collections }) (relay) · await pgliteCollections({ pgUrl, electricUrl?, collections: api.collections }) (self)
+  collections: memoryCollections(),            // or sqliteCollections({ file, collections: api.collections }) (relay) · cloudflareCollections(ctx.storage, api.collections) (relay, in a Durable Object) · await pgliteCollections({ pgUrl, electricUrl?, collections: api.collections }) (self)
   // SQL backends derive one typed table per collection by reading the schema's Standard JSON Schema
   // — works with Zod 4.2+, Zod Mini 4.2+, ArkType 2.1.28+, VineJS 4.3+, Sury 11+, stnl 2.1+, and
   // Valibot 1.2+ via toStandardJsonSchema() from @valibot/to-json-schema. A validator whose library
@@ -518,7 +521,7 @@ const users = createCollection(superLineCollectionOptions(client, api, 'users'))
 createLiveQueryCollection((q) => q.from({ m: messages }).join({ u: users }, ({ m, u }) => teq(u.id, m.authorId), 'inner').select(({ m, u }) => ({ id: m.id, text: m.text, author: u.name })))
 ```
 
-Backends (all drop-in, one line to swap): `@super-line/collections-memory` (in-memory · relay) · `collections-sqlite` (SQLite · relay, IR→SQL snapshot pushdown) · `collections-pglite` (central Postgres + Electric→PGlite · **self**, no adapter). Inspector: `listCollections` / `queryCollection` + a Control Center **Collections** view (schema graph + row browser). Guide: `/collections/`; example: `examples/collections`.
+Backends (all drop-in, one line to swap): `@super-line/collections-memory` (in-memory · relay) · `collections-sqlite` (SQLite · relay, IR→SQL snapshot pushdown) · `collections-cloudflare` (Durable Object SQLite · relay, same pushdown) · `collections-pglite` (central Postgres + Electric→PGlite · **self**, no adapter). Inspector: `listCollections` / `queryCollection` + a Control Center **Collections** view (schema graph + row browser). Guide: `/collections/`; example: `examples/collections`.
 
 ### CRDT document collections
 

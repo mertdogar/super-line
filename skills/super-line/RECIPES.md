@@ -368,9 +368,14 @@ const client = createSuperLineClient(api, { transport: httpClientTransport({ url
 // a durable_objects binding NODE → class Node, and Node under "new_sqlite_classes" in migrations.
 import { createSuperLineServer } from '@super-line/server'
 import { createDurableNode, routeToNode } from '@super-line/transport-cloudflare'
+import { cloudflareCollections } from '@super-line/collections-cloudflare'   // rows in the object's own SQLite
 
 export class Node extends createDurableNode((ctx, env: Env, base) =>       // runs on first use AND every wake: keep it cheap
-  createSuperLineServer(api, { ...base, authenticate }).implement({ user: { ping: async ({ n }) => ({ n }) } }),
+  createSuperLineServer(api, {
+    ...base, authenticate, policies,
+    collections: cloudflareCollections(ctx.storage, api.collections),
+  })
+    .implement({ user: { ping: async ({ n }) => ({ n }) } }),
 ) {}
 export default { fetch: (req: Request, env: Env) => routeToNode(req, env.NODE) }   // { name: (req) => tenantOf(req) } for one object per tenant
 
@@ -416,7 +421,7 @@ export const api = defineContract({
 
 ```ts
 // server.ts — ONE backend for ALL row collections + deny-by-default policies
-import { memoryCollections } from '@super-line/collections-memory'  // or sqliteCollections({ file, collections }) · await pgliteCollections({ pgUrl, collections })
+import { memoryCollections } from '@super-line/collections-memory'  // or sqliteCollections({ file, collections }) · cloudflareCollections(ctx.storage, collections) · await pgliteCollections({ pgUrl, collections })
 import { isIn, eq } from '@super-line/core'
 const srv = createSuperLineServer(api, {
   transports: [webSocketServerTransport({ server })],
@@ -456,7 +461,7 @@ const enriched = createLiveQueryCollection((q) =>
 
 - **Deny-by-default.** Omit a collection's `read`/`write` and that op is server-only. `read` returns an IR filter (ANDed into snapshots + live routing); `write` returns a bool.
 - **One backend, atomic batches.** All row collections share one `collections:` backend (one transaction domain), so a cross-collection `batch([...])` is atomic.
-- **Backends:** `collections-memory` (relay) · `collections-sqlite` (durable · relay, IR→SQL pushdown) · `collections-pglite` (**self**: central Postgres + Electric→PGlite, no adapter). Runnable: `examples/collections` · `examples/collections-chat`.
+- **Backends:** `collections-memory` (relay) · `collections-sqlite` (durable · relay, IR→SQL pushdown) · `collections-cloudflare` (the same typed tables in a Durable Object's SQLite · relay) · `collections-pglite` (**self**: central Postgres + Electric→PGlite, no adapter). Runnable: `examples/collections` · `examples/collections-chat`.
 
 ## First-party auth (`@super-line/plugin-auth`)
 

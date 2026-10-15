@@ -1548,6 +1548,15 @@ importers:
         specifier: workspace:^
         version: link:../core
 
+  packages/collections-cloudflare:
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^5.20261013.1
+        version: 5.20261013.1
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+
   packages/collections-crdt-libsql:
     dependencies:
       '@libsql/client':

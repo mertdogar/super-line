@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { INSPECTOR_SUBPROTOCOL, type AuthOutcome, type Handshake } from '@super-line/core'
 import { cloudflareServerTransport, createDurableNode } from '@super-line/transport-cloudflare'
 import { createSuperLineServer } from '@super-line/server'
+import { cloudflareCollections } from '@super-line/collections-cloudflare'
 import { appContract } from './app.js'
 
 // Smoke Durable Object for the workers lane. Counts its own constructions in SQLite so a test can
@@ -89,6 +90,10 @@ export class AppNode extends createDurableNode((ctx, _env, base) => {
   const locked = () => sql.exec("SELECT v FROM app_state WHERE k = 'locked'").toArray().length > 0
   const srv = createSuperLineServer(appContract, {
     ...base,
+    collections: cloudflareCollections(ctx.storage, appContract.collections),
+    policies: {
+      notes: { read: () => undefined, write: () => true },
+    },
     authenticate: (h) => ({ role: 'user' as const, ctx: { uid: h.query.uid } }),
     identify: (conn) => (conn.ctx as { uid: string }).uid,
     authorizeSubscribe: () => !locked(),
@@ -107,6 +112,9 @@ export class AppNode extends createDurableNode((ctx, _env, base) => {
     },
   })
 }) {}
+
+// A bare object: the collection-backend tests drive its storage through `runInDurableObject`.
+export class StoreNode extends DurableObject<Cloudflare.Env> {}
 
 export default {
   fetch: (request: Request, env: Cloudflare.Env) =>

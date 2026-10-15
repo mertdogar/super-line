@@ -321,6 +321,31 @@ The core half shipped smaller than §1–§3 specify. Each cut removes surface w
   be sent by an endpoint); an un-resumable socket is closed with `CLOSE_NOT_RESUMABLE` (4409).
 - Peer range on core is `>=0.20.0` for now; the release ticket raises it to the core minor that ships the seam.
 
+## As built (T09, 2026-10-15) — rows on Durable Object SQLite
+
+- **Extract, not copy.** The SQL text layer separated cleanly from the better-sqlite3 calls, so it moved to
+  `collections-sqlite/src/sql.ts` (table/statement text, filter + order compilation, row encode/decode, fingerprint
+  drift) and both backends run it. `collections-cloudflare` imports it by relative path and tsup **bundles** it —
+  a dependency on `collections-sqlite` would install better-sqlite3, a native addon no Worker can load. Each
+  backend keeps only its engine glue (~150 lines). `collections-sqlite` changed source, so it owes a patch release.
+- **`cloudflareCollections(storage, collections)`**, positional as §4 sketched; no `close`.
+- **Lazy, per-collection failure.** Nothing runs until the first operation. A collection that cannot open (non-additive
+  drift, more than 98 planned columns, a bad name/index/schema) is recorded and fails *its own* operations with a
+  `SuperLineError('INTERNAL', "cloudflareCollections: collection 'x' is unusable: …")` naming the fix (rename it, or
+  migrate `col_x` and its `col_meta` row in code); every other collection works. Additive drift ALTERs in as sqlite does.
+- **The 100-bound-value cap is not chunked in snapshots** — chunking `IN` cannot lower one statement's count. A
+  filter needing more than 98 values (2 kept for LIMIT/OFFSET) scans the table and filters in JS (correct, the
+  evaluator is authoritative). `rowMeta` does chunk, 100 ids per query.
+- **`conditionalApply` is one `transactionSync`** that checks then applies. Nested `transactionSync` turned out to
+  work in workerd, but nothing relies on it. A `SuperLineError` thrown inside keeps its identity and code.
+- **Verified under workerd (Miniflare)**: `NULLS FIRST/LAST`, the 100-variable limit (`too many SQL variables`
+  without the cap), a 98-column row (100 bound values). `RETURNING` is unused, so nothing to verify. A row over 2 MB
+  fails with the platform's error, which the server masks to `INTERNAL` — a documented ceiling (T12), not wrapped.
+- Tests: the shared row conformance suite plus sqlite's own pushdown checks run inside `runInDurableObject` via
+  vitest 4.1's `aroundEach` (DO storage is bound to its object; using it from the test body throws "Cannot perform
+  I/O on behalf of a different Durable Object"). End to end, `AppNode` now carries a `notes` collection: a live row
+  subscription survives eviction and the woken node still has every row.
+
 ## Ticket order after the lock
 
 T15 seam on loopback → T06 workers lane (+ crypto verification) → T07 DO transport → T09 rows → T10 docs →

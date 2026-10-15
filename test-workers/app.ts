@@ -3,8 +3,11 @@ import type { ClientTransport, RawConn } from '@super-line/core'
 import * as z from 'zod'
 
 // The app the hibernation tests run: one topic, and requests to publish on it, to flip a lock the
-// subscribe guard reads from storage, and to round-trip.
+// subscribe guard reads from storage, and to round-trip; one row collection on the object's SQLite.
 export const appContract = defineContract({
+  collections: {
+    notes: { schema: z.object({ id: z.string(), text: z.string() }), key: 'id' },
+  },
   roles: {
     user: {
       clientToServer: {

@@ -35,7 +35,7 @@ async function listen(
       accepted.push(rec)
     },
   })
-  await new Promise<void>((r) => server.listen(0, r))
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
   const { port } = server.address() as AddressInfo
   cleanups.push(async () => {
     await transport.stop()
@@ -108,7 +108,7 @@ describe('http transport — server endpoints', () => {
     })
     const transport = httpServerTransport({ server })
     transport.start({ authenticate: ok, onConnection: (raw, auth) => accepted.push({ raw, auth, messages: [], closes: [] }) })
-    await new Promise<void>((r) => server.listen(0, r))
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
     const { port } = server.address() as AddressInfo
     cleanups.push(async () => {
       await transport.stop()

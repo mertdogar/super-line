@@ -20,7 +20,7 @@ async function listen(
   const server = http.createServer()
   const transport = webSocketServerTransport({ server })
   await transport.start({ authenticate, onConnection, reserved })
-  await new Promise<void>((r) => server.listen(0, r))
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
   const { port } = server.address() as AddressInfo
   cleanups.push(async () => {
     await transport.stop()
@@ -176,7 +176,7 @@ describe('websocket transport', () => {
   it('reports a real refused dial as a close', async () => {
     // bind and immediately release a port, so nothing is listening on an address that was valid a moment ago
     const probe = http.createServer()
-    await new Promise<void>((r) => probe.listen(0, r))
+    await new Promise<void>((r) => probe.listen(0, '127.0.0.1', r))
     const { port } = probe.address() as AddressInfo
     await new Promise<void>((r) => probe.close(() => r()))
 

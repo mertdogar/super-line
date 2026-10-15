@@ -27,7 +27,7 @@ async function boot(plugins: SuperLinePlugin[]): Promise<string> {
     authenticate: () => ({ role: 'user' as const, ctx: {} }),
     plugins,
   })
-  await new Promise<void>((r) => httpServer.listen(0, r))
+  await new Promise<void>((r) => httpServer.listen(0, '127.0.0.1', r))
   const { port } = httpServer.address() as AddressInfo
   cleanups.push(async () => {
     await srv.close()

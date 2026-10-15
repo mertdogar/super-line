@@ -42,7 +42,7 @@ async function harness() {
       messages: { read: () => undefined, write: () => true },
     },
   })
-  await new Promise<void>((r) => httpServer.listen(0, r))
+  await new Promise<void>((r) => httpServer.listen(0, '127.0.0.1', r))
   const { port } = httpServer.address() as AddressInfo
   const client = createSuperLineClient(contract, {
     transport: webSocketClientTransport({ url: `ws://127.0.0.1:${port}` }),

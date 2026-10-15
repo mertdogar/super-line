@@ -42,7 +42,7 @@ async function boot(
     authenticate: (h) => ({ role: 'user' as const, ctx: { name: h.query.name ?? 'anon' } }),
     ...serverOpts,
   })
-  await new Promise<void>((r) => httpServer.listen(0, r))
+  await new Promise<void>((r) => httpServer.listen(0, '127.0.0.1', r))
   const { port } = httpServer.address() as AddressInfo
   const client = createSuperLineClient(contract, {
     transport: httpClientTransport({ url: `http://127.0.0.1:${port}`, mode, EventSource }),

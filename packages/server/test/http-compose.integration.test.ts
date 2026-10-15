@@ -35,7 +35,7 @@ describe('WS + HTTP transports compose on one http.Server', () => {
       authenticate: () => ({ role: 'user' as const, ctx: {} }),
     })
     srv.implement({ user: { echo: async ({ text }) => ({ text: text.toUpperCase() }) } })
-    await new Promise<void>((r) => httpServer.listen(0, r))
+    await new Promise<void>((r) => httpServer.listen(0, '127.0.0.1', r))
     const { port } = httpServer.address() as AddressInfo
 
     const wsClient = createSuperLineClient(contract, {

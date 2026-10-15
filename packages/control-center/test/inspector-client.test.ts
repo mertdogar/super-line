@@ -32,7 +32,7 @@ async function startServer() {
     plugins: [inspector()],
   })
   srv.implement({ user: { ping: async () => 1 } })
-  await new Promise<void>((resolve) => httpServer.listen(0, resolve))
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve))
   const { port } = httpServer.address() as AddressInfo
   cleanups.push(async () => {
     await srv.close()
@@ -69,7 +69,7 @@ async function startThingsServer(hold: () => Promise<void> | undefined = () => u
     collections: heldCollections(hold),
     plugins: [inspector()],
   })
-  await new Promise<void>((resolve) => httpServer.listen(0, resolve))
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve))
   const { port } = httpServer.address() as AddressInfo
   cleanups.push(async () => {
     await srv.close()
@@ -222,7 +222,7 @@ async function startAuthedServer() {
     plugins: [inspector({ auth: { username: 'admin', password: 's3cret' } })],
   })
   srv.implement({ user: { ping: async () => 1 } })
-  await new Promise<void>((resolve) => httpServer.listen(0, resolve))
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve))
   const { port } = httpServer.address() as AddressInfo
   cleanups.push(async () => {
     await srv.close()

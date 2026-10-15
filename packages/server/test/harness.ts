@@ -33,7 +33,11 @@ export function createHarness() {
       ...opts,
       transports: [webSocketServerTransport({ server: httpServer })],
     } as unknown as SuperLineServerOptions<C, A, []>) // harness forgoes subtraction typing; plugins flow through at runtime
-    await new Promise<void>((resolve) => httpServer.listen(0, resolve))
+    // Bind the interface the url below advertises. A bare `listen(0)` binds the IPv6 wildcard `[::]`,
+    // and macOS lets an unrelated IPv4 socket hold `127.0.0.1` on that same port — so a client dialing
+    // 127.0.0.1 lands on the stranger, never on this server: an endless 1006/reconnect loop and a test
+    // that hangs on whatever it awaited. Rare per port, routine across a whole suite's worth of them.
+    await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve))
     const { port } = httpServer.address() as AddressInfo
     cleanups.push(async () => {
       await srv.close() // closes conns, wss, and the adapter (e.g. redis connections)

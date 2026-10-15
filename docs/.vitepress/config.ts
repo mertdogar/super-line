@@ -113,6 +113,7 @@ export default defineConfig({
             { text: 'WebSocket', link: '/how-to/transport-websocket' },
             { text: 'HTTP — SSE & long-poll', link: '/how-to/transport-http' },
             { text: 'libp2p & WebRTC', link: '/how-to/transport-libp2p' },
+            { text: 'Cloudflare Durable Objects', link: '/how-to/cloudflare-durable-objects' },
             { text: 'Loopback (for tests)', link: '/how-to/transport-loopback' },
           ],
         },

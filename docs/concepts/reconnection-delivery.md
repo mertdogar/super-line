@@ -23,6 +23,19 @@ const client = createSuperLineClient(api, {
 
 The backoff math is exported as a pure function, `backoffDelay(attempt, opts)`, if you want to reuse or test the same schedule elsewhere.
 
+### Detect a dead socket from the client
+
+Reconnecting starts only once the client knows the socket is gone. Normally the server finds dead connections with its heartbeat; the client has no liveness check of its own. Set `keepalive` (milliseconds, off by default) to add one: the client pings every N ms, and when nothing has come back by the next ping it drops the socket and reconnects.
+
+```ts
+const client = createSuperLineClient(api, {
+  transport: webSocketClientTransport({ url }), role: 'user',
+  keepalive: 30_000,
+})
+```
+
+Turn it on against a server that runs no heartbeat — a [node on Cloudflare Durable Objects](/how-to/cloudflare-durable-objects), where a heartbeat timer would stop the node from ever hibernating. Cloudflare answers these pings without waking the node.
+
 ## When a re-subscribe fails
 
 A replayed subscription can be *rejected*, and this is the one reconnect failure you have to handle yourself. The read policy is re-evaluated on **every** (re)subscribe, so a principal who lost authorization during the outage gets `FORBIDDEN` on the way back; a slow server can produce `TIMEOUT`. Either way `ready` resolved long ago, on the first subscribe — it cannot reject twice — so the failure surfaces on the client's `onError` sink instead:
@@ -40,6 +53,8 @@ const client = createSuperLineClient(api, {
 ```
 
 Treat a `resubscribe` error as **that subscription being dead**: the failure itself triggers no retry, and nothing re-attempts it until the next transport reopen. The subscription stays registered, so a *later* drop-and-reconnect would replay it — but nothing forces one, and until then the handle looks healthy while receiving nothing. For a long-lived process this is the failure worth being loud about: `client.connected` is still `true` and the rows simply stop. Resubscribe explicitly, or fail the process and let it restart. (With no `onError` sink the client logs the failure rather than swallowing it.)
+
+The same sink reports a subscription that ends **without** any drop. A server hosted on a [Durable Object](/how-to/cloudflare-durable-objects) rebuilds every connection when it wakes from hibernation and runs each subscription's policy again; one it now refuses ends while the socket stays open. `info` names the topic (`info.topic`), the collection (`info.collection`), or the document (`info.collection` + `info.id`). Handle it the same way.
 
 ## Client-controlled vs server-controlled state
 

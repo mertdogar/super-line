@@ -20,6 +20,7 @@ If you want the answer and not the reasoning:
 | One node; state may vanish on restart | `memoryCollections()` | `crdtMemoryCollections()` |
 | One node; state must survive a restart | `sqliteCollections(…)` | `await crdtLibsqlCollections(…)` |
 | Several nodes that must **coordinate** | `await pgliteCollections(…)` | `await crdtPgliteCollections(…)` |
+| The node is a Cloudflare Durable Object | `cloudflareCollections(…)` | `crdtCloudflareCollections(…)` |
 
 Start on memory. It is the zero-dependency default and it is not a toy — it applies batches atomically and replicates across a cluster like every other `relay` backend. Move off it when state must outlive the process.
 
@@ -36,7 +37,7 @@ super-line names this on the backend itself as `coordination`, alongside `cluste
 
 | | `coordination: 'local'` | `coordination: 'cluster'` |
 | --- | --- | --- |
-| Backends | memory · sqlite | pglite |
+| Backends | memory · sqlite · cloudflare | pglite |
 | Conditional writes are checked | per node | across the whole cluster |
 | Two nodes racing for one slot | both can win | exactly one wins |
 
@@ -72,6 +73,7 @@ must collection state survive a restart?
 | **`@super-line/collections-memory`** | in-memory | `relay` | `local` | development, tests, and any state you're content to rebuild on boot |
 | **`@super-line/collections-sqlite`** | SQLite file (WAL) | `relay` | `local` | one node whose state must survive a restart — the common single-server production pick |
 | **`@super-line/collections-pglite`** | central Postgres + Electric→PGlite | **`self`** | **`cluster`** | several nodes that must agree at write time, not merely eventually |
+| **`@super-line/collections-cloudflare`** | the Durable Object's own SQLite | `relay` | `local` | a node [hosted on Cloudflare](/how-to/cloudflare-durable-objects) — the same typed tables as SQLite, inside the object |
 
 ```ts
 // the backend is the only line that changes
@@ -93,6 +95,7 @@ The two SQL backends need the contract's post-merge `collections` map, because e
 | **`@super-line/collections-crdt-memory`** | in-memory | `relay` | development and tests; also exports the client engine every tier pairs with |
 | **`@super-line/collections-crdt-libsql`** | libsql / Turso, snapshot per document | `relay` | durable documents on one node, local file or hosted Turso |
 | **`@super-line/collections-crdt-pglite`** | central Postgres Yjs op-log + Electric→PGlite | **`self`** | documents shared across a cluster with no adapter |
+| **`@super-line/collections-crdt-cloudflare`** | the Durable Object's own SQLite, one row per document | `relay` | documents on a node [hosted on Cloudflare](/how-to/cloudflare-durable-objects) |
 
 CRDT backends expose `clustering` but **no `coordination` flag** — there are no conditional writes to serialize, because merge *is* the conflict-resolution model. The choice here is durability and reach, nothing more.
 
@@ -117,6 +120,7 @@ The real cost difference between tiers is infrastructure, not API surface.
 | memory · crdt-memory | **nothing** | no dependencies, no files, no services |
 | sqlite | a writable file path | `better-sqlite3` is a native module — it needs a prebuild matching your Node version, or a toolchain to compile from source at install |
 | crdt-libsql | a file, or a Turso/sqld endpoint | `file:x.db` needs no service; `libsql://` or `http(s)://` points at hosted Turso or your own sqld |
+| cloudflare · crdt-cloudflare | **a SQLite-backed Durable Object** | declare the class under `new_sqlite_classes` in `wrangler.jsonc`; within Durable Object SQLite's limits — 98 typed columns per collection, 2 MB per row or document |
 | pglite · crdt-pglite | **Postgres + Electric** | Postgres must run with `wal_level=logical`; an [Electric](https://electric-sql.com) service streams shapes to each node's local replica |
 
 The `self` tier is two services, and that is the honest price of cluster-wide coordination. In exchange it needs no super-line adapter — Postgres and Electric *are* the fan-out. The [`queue-cluster`](https://github.com/mertdogar/super-line/tree/main/examples/queue-cluster) and [`ai-canvas-pglite`](https://github.com/mertdogar/super-line/tree/main/examples/ai-canvas-pglite) examples both boot the whole thing with Docker Compose if you'd rather read a working file than assemble one.
@@ -168,7 +172,16 @@ collections: await pgliteCollections({ pgUrl, electricUrl, collections: api.coll
 crdtCollections: await crdtPgliteCollections({ pgUrl, electricUrl, docOptions: (n) => api.collections[n]?.crdt }),
 ```
 
-Note the async factories: every durable tier except SQLite returns a promise, because it opens a connection and rehydrates before it can serve a read.
+Note the async factories: every durable tier except SQLite and Cloudflare returns a promise, because it opens a connection and rehydrates before it can serve a read.
+
+On Cloudflare both backends share the object's own storage, and both are synchronous — they open on first use, so a Durable Object's constructor can build them without waiting:
+
+```ts
+collections: cloudflareCollections(ctx.storage, api.collections),
+crdtCollections: crdtCloudflareCollections(ctx.storage, api.collections),
+```
+
+A memory backend is a poor fit there: a Durable Object leaves memory whenever it hibernates, so memory state is lost after every few idle seconds, not only on a restart.
 
 ## Next
 

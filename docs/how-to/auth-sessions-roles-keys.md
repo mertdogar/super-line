@@ -94,4 +94,8 @@ await presence.ready
 const online = presence.rows().filter((r) => Date.now() - (r.lastSeenAt ?? 0) < USER_PRESENCE_LIVE_MS)
 ```
 
+::: warning Not on a hibernating node
+On a node [hosted on Cloudflare Durable Objects](/how-to/cloudflare-durable-objects#presence-on-a-hibernating-node), sessions and `userPresence` don't track who is connected. No server heartbeat runs there, so `lastSeenAt` never advances; and the plugin closes its node's unfinished sessions whenever the server starts, which a wake from hibernation does, so connected users read as offline after the first wake.
+:::
+
 Next: [JWT & sealed tokens](/how-to/auth-jwt-sealed-tokens) · back to [Choose an auth strategy](/how-to/choose-an-auth-strategy).

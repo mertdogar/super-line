@@ -70,6 +70,9 @@ A library plugin ships alongside a [surface](/how-to/composition). Type the plug
 | `conns` · `local` · `cluster` | read-only connection views (node-local + cluster-wide) |
 | `publish` · `subscribe` · `toConn` · `toUser` · `room` · `collection` · `isOnline` | the public server capabilities |
 | `channel(name)` | a **plugin-private, cluster-wide** adapter channel under a reserved `x:<plugin>:` prefix |
+| `hold()` | a busy token: keeps a host that can hibernate awake until you call the returned release function (idempotent) — take one for in-memory work that spans events, release it in a `finally` |
+
+On a host that hibernates — a [Durable Object](/how-to/cloudflare-durable-objects) — the server is constructed again on every wake, so `setup` runs again too, and a timer it starts keeps the node from ever hibernating. Start timers only while there is work for them, and use `hold()` instead of a timer to keep the node in memory. On a Node server `hold()` costs nothing and does nothing.
 
 `channel(name)` is how a plugin fans its own data across nodes without touching the app's contract — a private lane on the same [adapter](/concepts/transports-and-adapters) that carries application fan-out, with local echo filtered by comparing `meta.from` against `ctx.nodeId`.
 

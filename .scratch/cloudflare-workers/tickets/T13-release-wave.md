@@ -4,7 +4,7 @@ title: Release wave
 labels: [wayfinder:task]
 status: open
 assignee:
-blocked-by: [T12]
+blocked-by: [T12, T16]
 ---
 
 ## Question

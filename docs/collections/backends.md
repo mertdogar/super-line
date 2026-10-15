@@ -30,27 +30,27 @@ Don't confuse `self` clustering with the [transport](/concepts/transports-and-ad
 
 Clustering says how a write *reaches* other nodes. Coordination says whether the cluster can *agree at the moment of the write* — which is a stronger and separate guarantee:
 
-- **`coordination: 'local'`** (memory · sqlite) — a conditional write is checked against **this node's** rows. Two nodes can each find the same condition satisfied and both proceed.
+- **`coordination: 'local'`** (memory · sqlite · cloudflare) — a conditional write is checked against **this node's** rows. Two nodes can each find the same condition satisfied and both proceed.
 - **`coordination: 'cluster'`** (pglite) — conditional writes are serialized through the central Postgres, so exactly one node wins a contested claim.
 
 Adding an adapter does not upgrade `local` to `cluster`: the adapter carries fan-out, not serialization. This distinction is what makes [`plugin-queue`](/how-to/plugin-queue) single-node on memory and sqlite, and cluster-wide on pglite.
 
 ## Row backends
 
-| | `collections-memory` | `collections-sqlite` | `collections-pglite` |
-| --- | --- | --- | --- |
-| **Durability** | process memory | SQLite file (WAL) | central Postgres |
-| **`clustering`** | `relay` | `relay` | **`self`** |
-| **`coordination`** | `local` | `local` | **`cluster`** |
-| **Survives a restart** | no | yes | yes |
-| **Converges across nodes** | via adapter | via adapter | via Electric |
-| **Cluster-wide conditional writes** | no | no | **yes** |
-| **A new node sees pre-existing state** | no | its own file only | **yes** |
-| **External infrastructure** | none | a writable path | Postgres + Electric |
-| **Factory** | sync | sync | **async** |
-| **Needs the contract `collections` map** | no | yes | yes |
-| **Query execution** | JS evaluator | SQL when compilable, else JS | SQL narrowing, JS authoritative |
-| **Row timestamps in Control Center** | yes | yes | yes |
+| | `collections-memory` | `collections-sqlite` | `collections-pglite` | `collections-cloudflare` |
+| --- | --- | --- | --- | --- |
+| **Durability** | process memory | SQLite file (WAL) | central Postgres | the Durable Object's SQLite |
+| **`clustering`** | `relay` | `relay` | **`self`** | `relay` |
+| **`coordination`** | `local` | `local` | **`cluster`** | `local` |
+| **Survives a restart** | no | yes | yes | yes — and every wake |
+| **Converges across nodes** | via adapter | via adapter | via Electric | — (one node) |
+| **Cluster-wide conditional writes** | no | no | **yes** | — (one node) |
+| **A new node sees pre-existing state** | no | its own file only | **yes** | — (one node) |
+| **External infrastructure** | none | a writable path | Postgres + Electric | a SQLite-backed Durable Object |
+| **Factory** | sync | sync | **async** | sync |
+| **Needs the contract `collections` map** | no | yes | yes | yes |
+| **Query execution** | JS evaluator | SQL when compilable, else JS | SQL narrowing, JS authoritative | as sqlite |
+| **Row timestamps in Control Center** | yes | yes | yes | yes |
 
 ```ts
 // swap the backend — nothing else changes
@@ -85,9 +85,20 @@ Synchronous. Sets `journal_mode = WAL` and `synchronous = NORMAL`.
 
 Postgres must run with `wal_level=logical` for Electric to replicate.
 
+### `cloudflareCollections(storage, collections)`
+
+Synchronous, positional, and only usable inside a SQLite-backed Durable Object — the node of a [Cloudflare deployment](/how-to/cloudflare-durable-objects). It lays tables out exactly as `sqliteCollections` does and pushes the same queries to SQL.
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `storage` | `DurableObjectStorage` | **Required.** The object's `ctx.storage`. |
+| `collections` | `Record<string, CollectionDef>` | **Required.** As above. |
+
+It opens lazily, on the first operation, so building it in the object's constructor never throws. A collection that can't open — its schema changed non-additively, or it plans more than 98 typed columns — fails only its own operations with an `INTERNAL` error naming it and the fix; additive drift is altered in as with SQLite. Every row must fit the platform's 2 MB, and a snapshot filter needing more than 98 bound values scans and filters in JS. See [change a schema on a deployed object](/how-to/cloudflare-durable-objects#change-a-schema-on-a-deployed-object).
+
 ### Typed tables
 
-The SQL backends store each LWW collection in its **own typed table** (`col_<name>`): scalar schema fields become real columns, everything else a per-field JSON column, derived from the contract — so both factories take the contract's `collections` map. `collections-sqlite` compiles the [query IR](/collections/row-collections#the-query-ir) against those columns (an exactly-compilable query runs entirely in SQL); `collections-pglite` is the self-clustering tier (central Postgres + one Electric shape per table streaming into each node's replica).
+The SQL backends store each LWW collection in its **own typed table** (`col_<name>`): scalar schema fields become real columns, everything else a per-field JSON column, derived from the contract — so every SQL factory takes the contract's `collections` map. `collections-cloudflare` runs the same table layout and query compiler as `collections-sqlite`. `collections-sqlite` compiles the [query IR](/collections/row-collections#the-query-ir) against those columns (an exactly-compilable query runs entirely in SQL); `collections-pglite` is the self-clustering tier (central Postgres + one Electric shape per table streaming into each node's replica).
 
 ::: tip Which validators get typed columns
 super-line reads a schema's shape through [Standard JSON Schema](https://standardschema.dev/json-schema), the companion spec to Standard Schema — so it never assumes a particular library and every implementer plans identically. That covers **Zod 4.2+**, **Zod Mini 4.2+**, **ArkType 2.1.28+**, **VineJS 4.3+**, **Sury 11+**, **stnl 2.1+**, and **Valibot 1.2+** (wrap the schema in `toStandardJsonSchema()` from `@valibot/to-json-schema`).
@@ -109,20 +120,20 @@ None of this affects correctness — the JS evaluator stays authoritative either
 
 ## CRDT backends
 
-| | `collections-crdt-memory` | `collections-crdt-libsql` | `collections-crdt-pglite` |
-| --- | --- | --- | --- |
-| **Durability** | process memory | libsql / Turso, snapshot per doc | central Postgres Yjs op-log |
-| **`clustering`** | `relay` | `relay` | **`self`** |
-| **Survives a restart** | no | yes | yes |
-| **Converges across nodes** | via adapter | via adapter | via Electric |
-| **External infrastructure** | none | a file, or Turso/sqld | Postgres + Electric |
-| **Factory** | sync | **async** | **async** |
-| **Boot cost** | none | rehydrates every document | replica sync |
-| **Write persistence** | — | debounced snapshot | op-log append |
+| | `collections-crdt-memory` | `collections-crdt-libsql` | `collections-crdt-pglite` | `collections-crdt-cloudflare` |
+| --- | --- | --- | --- | --- |
+| **Durability** | process memory | libsql / Turso, snapshot per doc | central Postgres Yjs op-log | the Durable Object's SQLite, snapshot per doc |
+| **`clustering`** | `relay` | `relay` | **`self`** | `relay` |
+| **Survives a restart** | no | yes | yes | yes — and every wake |
+| **Converges across nodes** | via adapter | via adapter | via Electric | — (one node) |
+| **External infrastructure** | none | a file, or Turso/sqld | Postgres + Electric | a SQLite-backed Durable Object |
+| **Factory** | sync | **async** | **async** | sync |
+| **Boot cost** | none | rehydrates every document | replica sync | none — each document loads on first touch |
+| **Write persistence** | — | debounced snapshot | op-log append | debounced snapshot |
 
 CRDT backends expose `clustering` but **no `coordination` flag**. There are no conditional writes to serialize — merge *is* the conflict-resolution model — so the axis doesn't apply.
 
-[Validate-before-commit](/collections/crdt-documents#validate-before-commit) isn't a backend axis either: all three behave identically, validating at the **ingress node** while relay nodes trust an already-checked delta. Whether a document is validated at all is declared on the contract per collection — `crdt: { validate: false }` makes the server pass no validator, so the backend skips the merge-and-check entirely. See [turning ingress validation off](/collections/crdt-documents#turning-ingress-validation-off).
+[Validate-before-commit](/collections/crdt-documents#validate-before-commit) isn't a backend axis either: all four behave identically, validating at the **ingress node** while relay nodes trust an already-checked delta. Whether a document is validated at all is declared on the contract per collection — `crdt: { validate: false }` makes the server pass no validator, so the backend skips the merge-and-check entirely. See [turning ingress validation off](/collections/crdt-documents#turning-ingress-validation-off).
 
 `collections-crdt-memory` also exports the universal [`crdtCollectionsClient()`](/collections/crdt-documents#client-open-a-document) — one client engine pairs with every backend tier (the client only merges opaque deltas).
 
@@ -159,6 +170,18 @@ A clean `close()` flushes pending edits; a hard kill loses at most `debounceMs` 
 | `onError` | `(err, ctx) => void` | Called when a background op-log append fails. Server co-writes are synchronous and can't reject to the caller, so this is the only place that failure is observable. Defaults to `console.error`. |
 
 See [validate-before-commit](/collections/crdt-documents#validate-before-commit) for why op-log compaction demands tolerant schemas.
+
+### `crdtCloudflareCollections(storage, collections, options?)`
+
+Synchronous, and only usable inside a SQLite-backed Durable Object. It wraps `crdtMemoryCollections`'s merge engine — so `@super-line/collections-crdt-memory` is a peer dependency — and snapshots each document to one row of `_sl_crdt` in the object's storage.
+
+| Argument | Type | Notes |
+| --- | --- | --- |
+| `storage` | `DurableObjectStorage` | **Required.** The object's `ctx.storage`. |
+| `collections` | `Record<string, CollectionDef>` | **Required.** The contract's `collections` map — each document is rebuilt with its collection's `crdt` options. |
+| `options.debounceMs` | `number?` | Coalesce rapid edits into one snapshot write. Defaults to `250`. |
+
+Unlike libsql it rehydrates nothing at boot: a document loads on its first touch, so a wake from hibernation costs nothing until a document is used. A pending write keeps the object awake until it lands, so hibernation never loses an edit; a deploy or crash loses at most `debounceMs`. A document whose encoded state outgrows the platform's 2 MB row is refused with an `INTERNAL` error naming it, and storage keeps the last state that fit — split large content across documents.
 
 ## Cold start & convergence
 

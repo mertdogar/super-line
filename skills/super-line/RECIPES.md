@@ -379,10 +379,19 @@ export class Node extends createDurableNode((ctx, env: Env, base) =>       // ru
   })
     .implement({ user: { ping: async ({ n }) => ({ n }) } }),
 ) {}
-export default { fetch: (req: Request, env: Env) => routeToNode(req, env.NODE) }   // { name: (req) => tenantOf(req) } for one object per tenant
+// Every request the object receives WAKES it — forward only the socket path, 404 the rest in the Worker itself.
+export default {
+  fetch: (req: Request, env: Env) =>
+    new URL(req.url).pathname === '/ws' ? routeToNode(req, env.NODE) : new Response('Not found', { status: 404 }),
+}   // routeToNode(req, env.NODE, { name: (req) => tenantOf(req) }) for one object per tenant
 
-// browser: the ordinary WebSocket client against the Worker URL, plus keepalive (the node runs no heartbeat)
-const client = createSuperLineClient(api, { transport: webSocketClientTransport({ url: 'wss://app.example.workers.dev' }), role: 'user', keepalive: 15_000 })
+// browser: the ordinary WebSocket client against the socket path, plus keepalive (the node runs no heartbeat)
+const client = createSuperLineClient(api, { transport: webSocketClientTransport({ url: 'wss://app.example.workers.dev/ws' }), role: 'user', keepalive: 15_000 })
+
+// The factory AND onConnection re-run on every wake. Seed once inside ctx.blockConcurrencyWhile (it finishes before
+// any event, the resume included) and make per-connection side effects tolerate a repeat:
+//   const general = ctx.blockConcurrencyWhile(async () => { await server.ready; return (await findGeneral()) ?? (await createGeneral()) })
+//   onConnection: (_c, cctx) => void general.then((id) => joinIfAbsent(id, cctx.userId))
 ```
 
 ```ts

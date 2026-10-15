@@ -47,7 +47,7 @@
 | ↔️ **Req/res** | Unary `await client.x()` with typed errors, timeout & `AbortSignal`. |
 | 📣 **Events & rooms** | Server-pushed events; server-controlled room broadcasts. |
 | 📡 **Topics** | Client-subscribed pub/sub streams, authorized server-side. |
-| 🧩 **Collections** | Typed persisted state declared on the contract, validated on every write. Two kinds: relational **rows** — row-level security + live subsets, with [TanStack DB](https://tanstack.com/db) joins & optimistic mutations via the first-party adapter — and CRDT **documents** — a single doc opened by id whose concurrent edits merge (validate-before-commit; keep schemas presence-tolerant — a concurrent merge can transiently drop a field). **Backends:** in-memory · SQLite/libSQL · self-clustering (Postgres + Electric). The typed successor to the retired Store family. |
+| 🧩 **Collections** | Typed persisted state declared on the contract, validated on every write. Two kinds: relational **rows** — row-level security + live subsets, with [TanStack DB](https://tanstack.com/db) joins & optimistic mutations via the first-party adapter — and CRDT **documents** — a single doc opened by id whose concurrent edits merge (validate-before-commit; keep schemas presence-tolerant — a concurrent merge can transiently drop a field). **Backends:** in-memory · SQLite/libSQL · Durable Object SQLite · self-clustering (Postgres + Electric). The typed successor to the retired Store family. |
 | ⏱️ **Queues & cron** | `queue({ queues })` (from `@super-line/plugin-queue`) — durable, at-least-once jobs with typed `input`/`result`, retries, leases, declarative per-queue concurrency, and cluster-wide cron schedules. Backed by collections, so no Redis and no separate worker service; point it at Postgres and every node coordinates. |
 | 🧹 **Cluster-wide delete** | Deleting a CRDT document fans out across every node (wire `cddel`); observe it via the client `collection(n).open(id)` `deleted` flag and React `useDoc().deleted` — until then a deleted doc reads as a silent empty snapshot. |
 | 🚌 **Cluster event bus** | `server.publish` / `server.subscribe` on a shared topic — cluster-wide pub/sub to server listeners (every node, local echo) and subscribed clients at once. |
@@ -59,6 +59,7 @@
 | 🔌 **Composable** | Attaches to your `http.Server`; lifecycle hooks + middleware. |
 | 🔁 **Resilient client** | Auto-reconnect, re-subscribe, in-flight reject, queue-and-flush. |
 | 📈 **Scales** | Rooms, topics, the cluster event bus & presence fan out across nodes via an adapter (Redis included). |
+| ☁️ **Runs on Cloudflare** | One [Durable Object](https://super-line.dogar.biz/how-to/cloudflare-durable-objects) is one node: its sockets hibernate between events and every subscription resumes on wake without the client noticing. Rows and CRDT documents live in the object's own SQLite; auth, chat, queues and the inspector run there too. |
 
 <br />
 
@@ -75,6 +76,7 @@ pnpm add @super-line/core @super-line/server @super-line/client @super-line/tran
 pnpm add @super-line/transport-http      # HTTP/SSE + long-poll
 pnpm add @super-line/transport-libp2p    # libp2p / WebRTC (bring-your-own node)
 pnpm add @super-line/transport-loopback  # in-memory, for tests
+pnpm add @super-line/transport-cloudflare  # the server inside a Cloudflare Durable Object (clients use WebSocket)
 
 # server↔server fan-out adapters (only needed for >1 node)
 pnpm add @super-line/adapter-redis     # central broker
@@ -86,6 +88,7 @@ pnpm add @super-line/adapter-libp2p    # decentralized gossip, broker-less
 pnpm add @super-line/collections-memory  # in-memory · relay
 pnpm add @super-line/collections-sqlite  # durable (better-sqlite3) · relay
 pnpm add @super-line/collections-pglite  # self-clustering (Postgres + Electric)
+pnpm add @super-line/collections-cloudflare  # durable, inside a Cloudflare Durable Object
 pnpm add @super-line/tanstack-db         # the TanStack DB adapter (joins, live queries)
 
 # durable server-side jobs and cron schedules (runs on a collections backend above —
@@ -97,7 +100,7 @@ pnpm add @super-line/react             # React hooks
 
 Every `@super-line/*` package declares `@super-line/core` as a **peer**, so install it once — the first line above does. pnpm and npm 7+ add missing peers for you; Yarn does not.
 
-Requirements: **Node 18+** (server). The WebSocket client uses the global `WebSocket` (browsers, and Node 22+); on older Node, pass `webSocketClientTransport({ url, WebSocket })`.
+Requirements: **Node 18+** (server), or a Cloudflare Durable Object with `nodejs_compat`. The WebSocket client uses the global `WebSocket` (browsers, and Node 22+); on older Node, pass `webSocketClientTransport({ url, WebSocket })`.
 
 ## Quickstart
 
@@ -217,7 +220,7 @@ See [Introspection & presence](https://super-line.dogar.biz/how-to/introspection
 The full docs live at **[super-line.dogar.biz](https://super-line.dogar.biz/)**:
 
 - **Learn** — [Your first typed round-trip](https://super-line.dogar.biz/tutorials/first-round-trip) · [Your first collection](https://super-line.dogar.biz/tutorials/first-collection) · [Go collaborative (CRDT)](https://super-line.dogar.biz/tutorials/go-collaborative) · [Assemble a chat backbone](https://super-line.dogar.biz/tutorials/chat-backbone) · [Put a live AI agent in the chat](https://super-line.dogar.biz/tutorials/ai-agent-chat) · [Co-edit a canvas with an agent](https://super-line.dogar.biz/tutorials/collaborative-canvas-with-agent) · [Run your first durable job](https://super-line.dogar.biz/tutorials/first-queue)
-- **How-to** — [Requests](https://super-line.dogar.biz/how-to/requests) · [Events & rooms](https://super-line.dogar.biz/how-to/events-rooms) · [Topics](https://super-line.dogar.biz/how-to/topics) · [Roles & auth](https://super-line.dogar.biz/how-to/roles-auth) · [Connection env](https://super-line.dogar.biz/how-to/connection-env) · [Middleware & lifecycle](https://super-line.dogar.biz/how-to/middleware-lifecycle) · [Errors](https://super-line.dogar.biz/how-to/errors) · [Serialization](https://super-line.dogar.biz/how-to/serialization) · [React](https://super-line.dogar.biz/how-to/react) · [Choose an adapter](https://super-line.dogar.biz/how-to/choose-an-adapter) · [Testing](https://super-line.dogar.biz/how-to/testing) · [Debug one tab with the DevTools panel](https://super-line.dogar.biz/how-to/devtools-panel)
+- **How-to** — [Requests](https://super-line.dogar.biz/how-to/requests) · [Events & rooms](https://super-line.dogar.biz/how-to/events-rooms) · [Topics](https://super-line.dogar.biz/how-to/topics) · [Roles & auth](https://super-line.dogar.biz/how-to/roles-auth) · [Connection env](https://super-line.dogar.biz/how-to/connection-env) · [Middleware & lifecycle](https://super-line.dogar.biz/how-to/middleware-lifecycle) · [Errors](https://super-line.dogar.biz/how-to/errors) · [Serialization](https://super-line.dogar.biz/how-to/serialization) · [React](https://super-line.dogar.biz/how-to/react) · [Choose an adapter](https://super-line.dogar.biz/how-to/choose-an-adapter) · [Host on Cloudflare Durable Objects](https://super-line.dogar.biz/how-to/cloudflare-durable-objects) · [Testing](https://super-line.dogar.biz/how-to/testing) · [Debug one tab with the DevTools panel](https://super-line.dogar.biz/how-to/devtools-panel)
 - **Plugins** — [Authentication](https://super-line.dogar.biz/how-to/plugin-auth) · [Queues & workers](https://super-line.dogar.biz/how-to/plugin-queue) · [Enqueue & observe jobs](https://super-line.dogar.biz/how-to/queue-jobs) · [Schedule periodic work](https://super-line.dogar.biz/how-to/queue-schedules) · [Run queues across a cluster](https://super-line.dogar.biz/how-to/queue-clusters) · [Chat backbone](https://super-line.dogar.biz/how-to/plugin-chat) · [Stream an agent's turn](https://super-line.dogar.biz/how-to/chat-streaming) · [Run an AI chat bot](https://super-line.dogar.biz/how-to/chat-bots) · [Channel resources](https://super-line.dogar.biz/how-to/chat-resources) · [Drive a channel from scripts](https://super-line.dogar.biz/how-to/chat-headless)
 - **Collections** — [Overview](https://super-line.dogar.biz/collections/) · [Row collections](https://super-line.dogar.biz/collections/row-collections) · [CRDT documents](https://super-line.dogar.biz/collections/crdt-documents) · [Policies](https://super-line.dogar.biz/collections/policies) · [TanStack DB](https://super-line.dogar.biz/collections/tanstack-db) · [Backends](https://super-line.dogar.biz/collections/backends)
 - **Concepts** — [Why super-line](https://super-line.dogar.biz/concepts/why-super-line) · [The contract](https://super-line.dogar.biz/concepts/the-contract) (roles, direction & the five flavors) · [Server-authoritative](https://super-line.dogar.biz/concepts/server-authoritative) · [Transports vs. adapters](https://super-line.dogar.biz/concepts/transports-and-adapters) · [Reconnection & delivery](https://super-line.dogar.biz/concepts/reconnection-delivery) · [Queues and workers](https://super-line.dogar.biz/concepts/queues-and-workers)
@@ -264,6 +267,10 @@ pnpm --filter @super-line/example-hono build && pnpm --filter @super-line/exampl
 
 # One contract over THREE transports at once — WS + HTTP + libp2p, three clients, identical results:
 pnpm --filter @super-line/example-transports start
+
+# A node inside a Cloudflare Durable Object — auth + chat + inspector, rows in the object's SQLite;
+# idle 15 s, send again: the node woke as a new instance and no browser reconnected:
+cd examples/cloudflare && pnpm dev   # http://localhost:8787 (after `pnpm build` at the root)
 
 # Token auth with roles (admin-only `secret`; user gets NOT_FOUND):
 pnpm --filter @super-line/example-auth start
@@ -378,6 +385,7 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 | [`@super-line/transport-http`](packages/transport-http) | HTTP transport — SSE or long-poll downstream + POST upstream (`httpServerTransport`/`httpClientTransport`) |
 | [`@super-line/transport-libp2p`](packages/transport-libp2p) | libp2p / WebRTC transport over a libp2p stream, bring-your-own node (`libp2pServerTransport`/`libp2pClientTransport`) |
 | [`@super-line/transport-loopback`](packages/transport-loopback) | In-memory transport (no socket) — for tests (`createLoopbackTransport`) |
+| [`@super-line/transport-cloudflare`](packages/transport-cloudflare) | The server inside a Cloudflare Durable Object — hibernatable WebSockets that resume on wake (`createDurableNode`/`routeToNode`) |
 | **Adapters** — server↔server fan-out ||
 | [`@super-line/adapter-redis`](packages/adapter-redis) | Redis Pub/Sub adapter for multi-node fan-out (central broker) |
 | [`@super-line/adapter-rabbitmq`](packages/adapter-rabbitmq) | RabbitMQ (AMQP) adapter for multi-node fan-out |
@@ -387,9 +395,11 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 | [`@super-line/collections-memory`](packages/collections-memory) | In-memory row-collection backend (`CollectionStore`) — the zero-dependency default |
 | [`@super-line/collections-sqlite`](packages/collections-sqlite) | Durable SQLite row-collection backend — rows survive a restart, IR→SQL snapshot pushdown |
 | [`@super-line/collections-pglite`](packages/collections-pglite) | Self-clustering row-collection backend — central Postgres + per-node Electric-synced PGlite replica, no adapter |
+| [`@super-line/collections-cloudflare`](packages/collections-cloudflare) | Row-collection backend in a Cloudflare Durable Object's SQLite — the same typed tables as SQLite |
 | [`@super-line/collections-crdt-memory`](packages/collections-crdt-memory) | In-memory CRDT document-collection backend (Yjs) — plus `crdtCollectionsClient`, the universal client engine |
 | [`@super-line/collections-crdt-libsql`](packages/collections-crdt-libsql) | Durable CRDT document-collection backend — snapshot-per-doc to libSQL/Turso |
 | [`@super-line/collections-crdt-pglite`](packages/collections-crdt-pglite) | Self-clustering CRDT document-collection backend — Yjs op-log in central Postgres, Electric→PGlite replica, validate-before-commit at ingress |
+| [`@super-line/collections-crdt-cloudflare`](packages/collections-crdt-cloudflare) | CRDT document-collection backend in a Cloudflare Durable Object's SQLite — snapshot-per-doc, loaded on first touch |
 | [`@super-line/tanstack-db`](packages/tanstack-db) | [TanStack DB](https://tanstack.com/db) adapter — super-line collections as a sync source, with client-side live queries, joins & optimistic mutations |
 | **Plugins** — paired contract + runtime bundles ||
 | [`@super-line/plugin-inspector`](packages/plugin-inspector) | The Control Center inspector as a plugin — taps + a plugin-owned CC connection |
@@ -400,7 +410,7 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 
 ## Status
 
-Pre-1.0. **Implemented:** role-scoped contracts, req/res, events, rooms, topics, Collections (typed rows with row-level security + CRDT document collections, across in-memory, durable SQLite/libSQL, and self-clustering Postgres+Electric backends — with the TanStack DB client engine, a server-side co-writer, and cluster-wide deletion fan-out), contract-fragment plugins (inspector · auth · queue · chat), durable server-side queues and cluster-wide cron schedules, connection env (server-vended, client-visible per-connection state), the cluster event bus (`server.publish`/`server.subscribe`), pluggable client↔server transports (WebSocket · HTTP/SSE · libp2p · loopback), auth, reconnect, middleware, heartbeat + WebSocket backpressure policies, in-memory + Redis + RabbitMQ + ZeroMQ + libp2p adapters, React hooks. **Not yet:** fire-and-forget client→server signals (every client→server is req/res today), NATS adapter, wildcard/retained topics, session resume/replay, parameterized-topic type inference (topics are typed by exact contract key for now).
+Pre-1.0. **Implemented:** role-scoped contracts, req/res, events, rooms, topics, Collections (typed rows with row-level security + CRDT document collections, across in-memory, durable SQLite/libSQL, Durable Object SQLite, and self-clustering Postgres+Electric backends — with the TanStack DB client engine, a server-side co-writer, and cluster-wide deletion fan-out), contract-fragment plugins (inspector · auth · queue · chat), durable server-side queues and cluster-wide cron schedules, connection env (server-vended, client-visible per-connection state), the cluster event bus (`server.publish`/`server.subscribe`), pluggable client↔server transports (WebSocket · HTTP/SSE · libp2p · loopback), a node inside a Cloudflare Durable Object with hibernation-transparent connections, auth, reconnect, middleware, heartbeat + WebSocket backpressure policies, in-memory + Redis + RabbitMQ + ZeroMQ + libp2p adapters, React hooks. **Not yet:** fire-and-forget client→server signals (every client→server is req/res today), NATS adapter, wildcard/retained topics, session resume/replay, parameterized-topic type inference (topics are typed by exact contract key for now).
 
 ## License
 

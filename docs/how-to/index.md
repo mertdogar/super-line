@@ -15,10 +15,11 @@ The three wire patterns declared on one contract, plus the cross-node bus.
 
 The pluggable client↔server wire. Pick one, then wire it on both ends.
 
-- [Choose a transport](/how-to/choose-a-transport) — decide between WebSocket, HTTP, libp2p, and loopback.
+- [Choose a transport](/how-to/choose-a-transport) — decide between WebSocket, HTTP, libp2p, Cloudflare, and loopback.
 - [WebSocket transport](/how-to/transport-websocket) — the default duplex transport for server and client.
 - [HTTP transport](/how-to/transport-http) — SSE plus long-poll where a socket won't do.
 - [libp2p transport](/how-to/transport-libp2p) — bring your own libp2p node for peer-to-peer reach.
+- [Cloudflare Durable Objects](/how-to/cloudflare-durable-objects) — host a node in a Durable Object whose sockets hibernate and resume transparently.
 - [Loopback transport](/how-to/transport-loopback) — in-memory client↔server for fast tests.
 
 ## Authentication

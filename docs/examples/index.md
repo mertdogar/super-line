@@ -119,6 +119,18 @@ pnpm --filter @super-line/example-transports start
 
 Demonstrates: [transports](/how-to/choose-a-transport), [the HTTP transport](/how-to/transport-http), [the libp2p transport](/how-to/transport-libp2p).
 
+## cloudflare — a node inside a Durable Object
+
+Sign-up and sign-in ([`plugin-auth`](/how-to/plugin-auth)), a live `#general` channel ([`plugin-chat`](/how-to/plugin-chat)), and the Control Center channel, all in **one Cloudflare Durable Object**, with every row in the object's own SQLite. The page is plain TypeScript served by the same Worker as static assets. Stay idle for 15 seconds and send again: the node was evicted and woke as a new instance, and neither browser window reconnected.
+
+```bash
+pnpm build                                   # from the repo root, once
+cd examples/cloudflare && pnpm dev           # vite build && wrangler dev → http://localhost:8787
+pnpm run deploy                              # to your Cloudflare account
+```
+
+Demonstrates: [hosting on Cloudflare Durable Objects](/how-to/cloudflare-durable-objects), [backends](/collections/backends), [plugin-auth](/how-to/plugin-auth), [plugin-chat](/how-to/plugin-chat). See the [cloudflare README](https://github.com/mertdogar/super-line/tree/main/examples/cloudflare).
+
 ## react-chat-transports — the whole plugin stack, on any wire
 
 A Slack-shaped React chat built almost entirely out of [`plugin-auth`](/how-to/plugin-auth) and [`plugin-chat`](/how-to/plugin-chat) — accounts, sessions, channels, membership control, row-level security, durable history — running over **WebSocket**, **HTTP (SSE)** or **libp2p**. This is the example that proves the plugins sit *above* the transport seam: the app's whole contract is `defineContract({ roles: { user: {} }, plugins: [authContract(), chatContract()] })`, and `srv.implement({})` asserts it added no surface of its own. Pick the wire per tab with `?transport=` (choosing one reloads; the access token persists, so you land back signed in on the new wire), and each message carries a badge showing which wire sent it. Single node by design: this is the *client*-transport axis, not server↔server fan-out (for that, see the `react-chat-cluster-*` examples). Needs Docker (or run the server + SPA locally).

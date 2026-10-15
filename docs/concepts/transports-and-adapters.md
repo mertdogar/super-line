@@ -27,11 +27,13 @@ Four wires, each for a different constraint:
 | **libp2p / WebRTC** | you want peer-to-peer, browser↔server with no signaling code |
 | **Loopback** | fast, deterministic tests with a real server + client in one process |
 
+A fifth server transport changes where the server runs rather than which wire the client speaks: **Cloudflare** hosts a node inside a Durable Object, and clients reach it over plain WebSocket. See [Host a node on Cloudflare Durable Objects](/how-to/cloudflare-durable-objects).
+
 Because WebSocket rides the HTTP `upgrade` channel and HTTP rides the `request` channel, both coexist on one server — a browser that can't open a WebSocket can fall back to HTTP against the very same process. The setup steps are in [Choose a transport](/how-to/choose-a-transport).
 
 ### One handshake, every wire
 
-`authenticate` always receives a normalized **Handshake** — the same `{ transport, headers, query, peer?, raw }` shape regardless of which transport carried the connection — so your auth code is written once and doesn't branch on the wire. The transport hides *physical* churn (HTTP's many requests, SSE reconnects, peer re-dials) beneath a single *logical* connection that re-authenticates and re-subscribes on drop — there is no session resume. See [Reconnection & delivery](/concepts/reconnection-delivery).
+`authenticate` always receives a normalized **Handshake** — the same `{ transport, headers, query, peer?, raw }` shape regardless of which transport carried the connection — so your auth code is written once and doesn't branch on the wire. The transport hides *physical* churn (HTTP's many requests, SSE reconnects, peer re-dials) beneath a single *logical* connection that re-authenticates and re-subscribes on drop — there is no session resume across a dropped socket. The one exception runs the other way round: on Cloudflare the *socket* outlives the *server instance*, and the server rebuilds each connection when the object wakes, so the client sees nothing at all. See [Reconnection & delivery](/concepts/reconnection-delivery).
 
 ## The adapter — the server↔server fan-out
 

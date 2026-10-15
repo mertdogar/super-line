@@ -1,12 +1,12 @@
 import { execSync } from 'node:child_process'
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers'
-import type { GlobalSetupContext } from 'vitest/node'
+import type { TestProject } from 'vitest/node'
 
 // One broker per image for the whole integration lane. The per-file boots this replaces were
 // the lane's dominant wall-clock AND its flake source: every boot loaded the Docker daemon
 // exactly while the next file's delivery budgets were counting down. rabbitmq-reconnect keeps
 // its own container — it restarts it mid-test.
-export default async function ({ provide }: GlobalSetupContext) {
+export default async function ({ provide }: TestProject) {
   // Asked ONCE for the lane. Every Docker-backed file used to run its own `execSync('docker info')`
   // at module scope — 14 blocking subprocesses, ~0.3s each, hitting the daemon while the lane's own
   // containers were live. Files that boot their own containers read `dockerAvailable`; the rest just

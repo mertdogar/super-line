@@ -43,27 +43,31 @@ async function newUser(url: string, email: string, name: string) {
   return { c, userId }
 }
 
+// A client whose stores hold one member, connected and last seen at 1_000_000.
+function presenceClient() {
+  const rows = {
+    memberships: [{ id: 'channel:user', channelId: 'channel', userId: 'user', role: 'member', joinedAt: 1 }],
+    users: [{ id: 'user', displayName: 'User', roles: ['user'], createdAt: 1 }],
+    userPresence: [{ userId: 'user', connectedAt: 1_000_000, lastSeenAt: 1_000_000 }],
+  }
+  const live = (name: keyof typeof rows) => ({
+    ready: Promise.resolve(),
+    rows: () => rows[name],
+    subscribe: () => () => {},
+    close: () => {},
+  })
+  return {
+    collection: (name: keyof typeof rows) => ({ subscribe: () => live(name) }),
+    on: () => () => {},
+    onReconnect: () => () => {},
+  }
+}
+
 describe('plugin-chat/client — live stores', () => {
   it('expires stale presence on its own timer and cleans the timer up on close', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000_000)
-    const rows = {
-      memberships: [{ id: 'channel:user', channelId: 'channel', userId: 'user', role: 'member', joinedAt: 1 }],
-      users: [{ id: 'user', displayName: 'User', roles: ['user'], createdAt: 1 }],
-      userPresence: [{ userId: 'user', connectedAt: 1_000_000, lastSeenAt: 1_000_000 }],
-    }
-    const live = (name: keyof typeof rows) => ({
-      ready: Promise.resolve(),
-      rows: () => rows[name],
-      subscribe: () => () => {},
-      close: () => {},
-    })
-    const client = {
-      collection: (name: keyof typeof rows) => ({ subscribe: () => live(name) }),
-      on: () => () => {},
-      onReconnect: () => () => {},
-    }
-    const chat = chatClient(client as never, { userId: 'user', presenceTimeoutMs: 100 })
+    const chat = chatClient(presenceClient() as never, { userId: 'user', presenceTimeoutMs: 100 })
     try {
       await chat.ready
       const members = chat.members('channel')
@@ -83,6 +87,29 @@ describe('plugin-chat/client — live stores', () => {
       chat.close()
       vi.useRealTimers()
     }
+  })
+
+  it('with presenceTimeoutMs: Infinity an open session reads online however old its lastSeenAt', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    const chat = chatClient(presenceClient() as never, { userId: 'user', presenceTimeoutMs: Infinity })
+    try {
+      await chat.ready
+      const members = chat.members('channel')
+      await members.ready
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000)
+      expect(members.rows()[0]).toMatchObject({ online: true, lastSeenAt: 1_000_000 })
+      expect(vi.getTimerCount()).toBe(0)
+      members.close()
+    } finally {
+      chat.close()
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects a presenceTimeoutMs that is not positive', () => {
+    for (const presenceTimeoutMs of [0, -1, Number.NaN])
+      expect(() => chatClient(presenceClient() as never, { userId: 'user', presenceTimeoutMs })).toThrow('presenceTimeoutMs must be positive')
   })
 
   it('stores deliver the snapshot and stream live changes; request wrappers round-trip', async () => {

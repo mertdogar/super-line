@@ -146,9 +146,9 @@ const chat = useChat()                     // ChatClient | null — null until t
 `members()` and `useMembers()` return each membership with `displayName`, `online`, `connectedAt`,
 and `lastSeenAt`. `online` expires locally 90 seconds after the last confirmed heartbeat, even when
 no new collection event arrives. Configure another window with
-`chatClient(client, { presenceTimeoutMs })`; keep it above the server heartbeat interval. With
-heartbeats disabled — as on a [node hosted on Cloudflare](/how-to/cloudflare-durable-objects#presence-on-a-hibernating-node) —
-a connection cannot keep its presence fresh.
+`chatClient(client, { presenceTimeoutMs })`; keep it above the server heartbeat interval. On a
+server with no heartbeat — a [node hosted on Cloudflare](/how-to/cloudflare-durable-objects#presence-on-a-hibernating-node) —
+pass `presenceTimeoutMs: Infinity`, so a member is online for as long as their session is open.
 
 `useMessages`/`useMessageParts` are null-tolerant — pass `null`/`undefined` while no channel or
 message is selected and they idle at `[]` with no subscription. `useMe()` returns the signed-in

@@ -104,7 +104,11 @@ export interface ChatClientOptions {
   userId?: string | null
   /** The live message window per channel store (initial snapshot AND maintained window). Default 200. */
   messageLimit?: number
-  /** Presence freshness window in milliseconds. Default 90 seconds; keep it above the server heartbeat interval. */
+  /**
+   * Presence freshness window in milliseconds. Default 90 seconds; keep it above the server heartbeat interval.
+   * `Infinity` reads every open session as online: for a server with no heartbeat, whose transport closes dead
+   * sockets itself (a Durable Object).
+   */
   presenceTimeoutMs?: number
 }
 
@@ -239,7 +243,7 @@ export function chatClient<C extends Contract, R extends RoleOf<C>>(
   const dyn = client as unknown as Dyn
   const defaultLimit = opts?.messageLimit ?? 200
   const presenceTimeoutMs = opts?.presenceTimeoutMs ?? USER_PRESENCE_LIVE_MS
-  if (!Number.isFinite(presenceTimeoutMs) || presenceTimeoutMs <= 0) throw new Error('presenceTimeoutMs must be positive')
+  if (!(presenceTimeoutMs > 0)) throw new Error('presenceTimeoutMs must be positive')
 
   interface Handle {
     rekey(): void

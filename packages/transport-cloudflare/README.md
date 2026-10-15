@@ -66,7 +66,7 @@ For durable state in the same object, pair it with [`@super-line/collections-clo
 | --- | --- |
 | `createDurableNode(build)` | A Durable Object class that is one node. `build(ctx, env, base)` returns the server built with `...base`; the class forwards `fetch` and the WebSocket handlers to the transport and resumes every surviving connection before any event is delivered. Exposes `this.server` and `this.transport`. |
 | `routeToNode(request, namespace, { name? })` | Forward a Worker request to the node object — `'super-line'` by default; `name(request)` picks one object per tenant. |
-| `cloudflareServerTransport(ctx)` | The transport itself, for a Durable Object class you write by hand: forward `fetch` / `webSocketMessage` / `webSocketClose` / `webSocketError`, and call `resume()` once inside `blockConcurrencyWhile` after the server is built. |
+| `cloudflareServerTransport(ctx)` | The transport itself, for a Durable Object class you write by hand: forward `fetch` / `webSocketMessage` / `webSocketClose` / `webSocketError`, and await `server.ready` inside `blockConcurrencyWhile`: on a wake it resolves once every surviving socket is back. |
 | `CLOSE_NOT_RESUMABLE` | `4409` — closes a socket whose connection could not be resumed on wake; the client reconnects as after any drop. |
 
 ## Behavior notes

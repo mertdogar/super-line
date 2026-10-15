@@ -456,6 +456,11 @@ export interface PluginContext {
   readonly nodeName: string
   /** Stable replica identity supplied by the host, if configured. */
   readonly nodeKey?: string
+  /**
+   * Resolves once every transport has started (equals `srv.ready`). A transport that resumes connections across
+   * restarts (ADR-0027) has taken back every surviving one by then, so {@link PluginContext.conns} is complete.
+   */
+  readonly ready: Promise<void>
   /** Alias of {@link PluginContext.nodeId} — the per-process instance id used to tag cluster fan-out. */
   readonly instanceId: string
   /** The wire serializer configured on the server. */
@@ -1884,6 +1889,7 @@ export function createSuperLineServer<
       nodeId: instanceId,
       nodeName,
       nodeKey,
+      ready,
       instanceId,
       serializer,
       contract: c,

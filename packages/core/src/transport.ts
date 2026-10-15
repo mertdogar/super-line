@@ -107,7 +107,8 @@ export interface ServerTransport {
      * Take over a connection whose socket outlived an earlier server instance (ADR-0027), from the last
      * snapshot {@link ServerTransport.onSnapshotChanged} handed out. Rebuilds every subscription without
      * acknowledging it to the client; one the server now refuses reaches the client as an `end` frame.
-     * Resolves once every subscription is re-established — await it before letting new events in.
+     * Resolves once every subscription is re-established — await it before letting new events in. Adopt from the
+     * promise `start` returns, so the server's `ready` covers every surviving connection.
      */
     adoptConnection?: (raw: RawConn, snapshot: ConnectionSnapshot) => Promise<void>
     /**

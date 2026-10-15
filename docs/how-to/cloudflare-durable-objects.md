@@ -166,7 +166,7 @@ Treat it exactly like a [failed re-subscribe after a reconnect](/concepts/reconn
 
 The factory you pass to `createDurableNode` is the object's constructor. It runs on first use **and on every wake**, and the server's `onConnection` hook runs again for every resumed socket. Keep both cheap and idempotent:
 
-- **Seed inside `ctx.blockConcurrencyWhile`.** Work you start there finishes before any event reaches the object, including the resumption itself, so two first connections can't both create the same row.
+- **Seed inside `ctx.blockConcurrencyWhile`.** Work you start there finishes before any event reaches the object, so two first connections can't both create the same row.
 - **Make `onConnection` side effects tolerate a repeat.** A "join the default channel" step must accept a membership that already exists.
 
 ```ts
@@ -311,11 +311,8 @@ export class Node extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
-    // resume every surviving socket before any event is delivered
-    void ctx.blockConcurrencyWhile(async () => {
-      await this.server.ready
-      await this.transport.resume()
-    })
+    // `ready` resolves once every surviving socket is back; hold events until then
+    void ctx.blockConcurrencyWhile(() => this.server.ready)
   }
 
   fetch(request: Request) {
@@ -333,7 +330,7 @@ export class Node extends DurableObject<Env> {
 }
 ```
 
-Call `resume()` exactly once, after the server is built and inside `blockConcurrencyWhile`, so no message lands before every subscription is back.
+On a wake, the server's `ready` resolves only after the transport has handed it every surviving socket and each socket's subscriptions are back. Await it inside `blockConcurrencyWhile`, so no message lands before then.
 
 ## Debug a deployed node
 

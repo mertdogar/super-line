@@ -37,10 +37,7 @@ export function createDurableNode<Env = Cloudflare.Env, S extends { readonly rea
       super(ctx, env)
       this.transport = cloudflareServerTransport(ctx)
       this.server = build(ctx, env, { transports: [this.transport], nodeKey: ctx.id.toString() })
-      void ctx.blockConcurrencyWhile(async () => {
-        await this.server.ready
-        await this.transport.resume()
-      })
+      void ctx.blockConcurrencyWhile(() => this.server.ready)
     }
 
     override fetch(request: Request): Promise<Response> {

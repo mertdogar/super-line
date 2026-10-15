@@ -16,12 +16,6 @@ export interface CloudflareServerTransport extends ServerTransport {
   webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void
   webSocketClose(ws: WebSocket, code: number, reason: string): void
   webSocketError(ws: WebSocket, error: unknown): void
-  /**
-   * Hand every socket that outlived the previous instance to the server started on this transport, from the
-   * snapshot persisted for it. Call once, after the server is constructed, inside `blockConcurrencyWhile` so no
-   * event lands before every subscription is back. Never throws: a socket that cannot be resumed is closed 4409.
-   */
-  resume(): Promise<void>
 }
 
 type Hooks = Parameters<ServerTransport['start']>[0]
@@ -32,9 +26,10 @@ const encoder = new TextEncoder()
 /**
  * A super-line transport over the Durable Object WebSocket Hibernation API. Sockets are accepted with
  * `ctx.acceptWebSocket`, so the object can hibernate while they stay open; each connection's snapshot is kept in
- * the object's SQLite storage (the object must be a SQLite-backed class), and {@link CloudflareServerTransport.resume}
- * rebuilds every connection when the object wakes. Liveness is the socket's: client pings are answered by the
- * platform without waking the object, so the server runs no heartbeat.
+ * the object's SQLite storage (the object must be a SQLite-backed class). When the object wakes, the server's
+ * `ready` resolves only after every surviving socket is back with its subscriptions (one that cannot be resumed is
+ * closed 4409) — await it inside `blockConcurrencyWhile` so no event lands before then. Liveness is the socket's:
+ * client pings are answered by the platform without waking the object, so the server runs no heartbeat.
  */
 export function cloudflareServerTransport(ctx: DurableObjectState): CloudflareServerTransport {
   let hooks: Hooks | undefined
@@ -119,6 +114,8 @@ export function cloudflareServerTransport(ctx: DurableObjectState): CloudflareSe
     liveness: 'socket',
     start(h) {
       hooks = h
+      // after the synchronous construction that called us, so the host's handlers exist before a replay needs them
+      return Promise.resolve().then(resume)
     },
     stop() {
       hooks = undefined
@@ -134,7 +131,6 @@ export function cloudflareServerTransport(ctx: DurableObjectState): CloudflareSe
       }
     },
     fetch,
-    resume,
     webSocketMessage(ws, message) {
       const conn = conns.get(ws)
       if (!conn) {

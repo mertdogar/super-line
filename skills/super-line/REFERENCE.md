@@ -316,7 +316,7 @@ createLoopbackTransport(): { server: ServerTransport; client(): ClientTransport 
 // Needs a SQLite-backed class (wrangler `new_sqlite_classes`) and the `nodejs_compat` flag for plugin-auth/inspector.
 createDurableNode((ctx, env, base: { transports; nodeKey }) => server): DurableObject class   // extend + export it; build reruns on EVERY wake
 routeToNode(request, namespace, { name?: (req) => string }): Promise<Response>               // Worker fetch → the node object (default name 'super-line')
-cloudflareServerTransport(ctx): ServerTransport & { fetch, webSocketMessage, webSocketClose, webSocketError, resume() }   // for a hand-written DO class
+cloudflareServerTransport(ctx): ServerTransport & { fetch, webSocketMessage, webSocketClose, webSocketError }   // for a hand-written DO class: blockConcurrencyWhile(() => server.ready) — on a wake `ready` waits for every surviving socket
 CLOSE_NOT_RESUMABLE  // 4409: a socket whose connection could not be resumed on wake; the client reconnects as on any drop
 
 // @super-line/collections-cloudflare — row collections in the node object's own SQLite (relay; single node)
@@ -336,7 +336,8 @@ interface ServerTransport {
   onSnapshotChanged?(connId: string, snapshot: ConnectionSnapshot): void   // declaring it turns snapshots on; called synchronously from accept onward — persist before returning, forget on close
   onHold?(count: number): void     // outstanding plugin busy tokens; stay awake while > 0
 }
-// start(hooks): hooks.adoptConnection(raw, snapshot) hands a surviving socket to the NEW server instance. Its live
+// start(hooks): hooks.adoptConnection(raw, snapshot) hands a surviving socket to the NEW server instance; do it from the
+// promise start() returns, so `srv.ready` (and PluginContext.ready) mean every surviving socket is back. Its live
 // subscriptions are re-run through the ordinary handlers (policies re-evaluated) without acks to the client; a
 // refused one reaches the client as onError 'resubscribe'. Pass `auth.connectionId` (keep the one authenticate
 // returned, else mint one) to hooks.onConnection so the transport knows which id to tag the socket with.

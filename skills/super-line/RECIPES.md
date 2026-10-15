@@ -389,7 +389,7 @@ export default {
 const client = createSuperLineClient(api, { transport: webSocketClientTransport({ url: 'wss://app.example.workers.dev/ws' }), role: 'user', keepalive: 15_000 })
 
 // The factory AND onConnection re-run on every wake. Seed once inside ctx.blockConcurrencyWhile (it finishes before
-// any event, the resume included) and make per-connection side effects tolerate a repeat:
+// any event) and make per-connection side effects tolerate a repeat:
 //   const general = ctx.blockConcurrencyWhile(async () => { await server.ready; return (await findGeneral()) ?? (await createGeneral()) })
 //   onConnection: (_c, cctx) => void general.then((id) => joinIfAbsent(id, cctx.userId))
 ```

@@ -369,11 +369,13 @@ const client = createSuperLineClient(api, { transport: httpClientTransport({ url
 import { createSuperLineServer } from '@super-line/server'
 import { createDurableNode, routeToNode } from '@super-line/transport-cloudflare'
 import { cloudflareCollections } from '@super-line/collections-cloudflare'   // rows in the object's own SQLite
+import { crdtCloudflareCollections } from '@super-line/collections-crdt-cloudflare'   // CRDT docs, same SQLite
 
 export class Node extends createDurableNode((ctx, env: Env, base) =>       // runs on first use AND every wake: keep it cheap
   createSuperLineServer(api, {
     ...base, authenticate, policies,
     collections: cloudflareCollections(ctx.storage, api.collections),
+    crdtCollections: crdtCloudflareCollections(ctx.storage, api.collections),   // only if the contract has crdt collections
   })
     .implement({ user: { ping: async ({ n }) => ({ n }) } }),
 ) {}

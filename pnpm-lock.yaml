@@ -1557,6 +1557,22 @@ importers:
         specifier: workspace:^
         version: link:../core
 
+  packages/collections-crdt-cloudflare:
+    dependencies:
+      '@logtape/logtape':
+        specifier: ^2.2.4
+        version: 2.2.4
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^5.20261013.1
+        version: 5.20261013.1
+      '@super-line/collections-crdt-memory':
+        specifier: workspace:^
+        version: link:../collections-crdt-memory
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+
   packages/collections-crdt-libsql:
     dependencies:
       '@libsql/client':

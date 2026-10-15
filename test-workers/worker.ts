@@ -3,6 +3,7 @@ import { INSPECTOR_SUBPROTOCOL, type AuthOutcome, type Handshake } from '@super-
 import { cloudflareServerTransport, createDurableNode } from '@super-line/transport-cloudflare'
 import { createSuperLineServer } from '@super-line/server'
 import { cloudflareCollections } from '@super-line/collections-cloudflare'
+import { crdtCloudflareCollections } from '@super-line/collections-crdt-cloudflare'
 import { appContract } from './app.js'
 
 // Smoke Durable Object for the workers lane. Counts its own constructions in SQLite so a test can
@@ -91,8 +92,10 @@ export class AppNode extends createDurableNode((ctx, _env, base) => {
   const srv = createSuperLineServer(appContract, {
     ...base,
     collections: cloudflareCollections(ctx.storage, appContract.collections),
+    crdtCollections: crdtCloudflareCollections(ctx.storage, appContract.collections),
     policies: {
       notes: { read: () => undefined, write: () => true },
+      boards: { read: () => true, write: () => true },
     },
     authenticate: (h) => ({ role: 'user' as const, ctx: { uid: h.query.uid } }),
     identify: (conn) => (conn.ctx as { uid: string }).uid,
@@ -107,6 +110,10 @@ export class AppNode extends createDurableNode((ctx, _env, base) => {
       },
       lock: async () => {
         sql.exec("INSERT OR REPLACE INTO app_state (k, v) VALUES ('locked', 1)")
+        return null
+      },
+      createBoard: async ({ id, title }) => {
+        await srv.collection('boards').create(id, { title })
         return null
       },
     },

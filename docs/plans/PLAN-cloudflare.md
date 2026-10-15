@@ -346,6 +346,35 @@ The core half shipped smaller than §1–§3 specify. Each cut removes surface w
   I/O on behalf of a different Durable Object"). End to end, `AppNode` now carries a `notes` collection: a live row
   subscription survives eviction and the woken node still has every row.
 
+## As built (T10, 2026-10-15) — CRDT docs on Durable Object SQLite
+
+- **`crdtCloudflareCollections(storage, collections, { debounceMs? })`** — synchronous, positional like the rows
+  backend. It takes the contract's `collections` map (not libsql's `docOptions` callback) because a doc must be
+  rebuilt with its collection's `DocOptions` on `read`, which receives none.
+- **Lazy per doc, not rehydrate-all.** libsql rehydrates every doc in an async factory; here that would run on every
+  wake. A doc loads from `_sl_crdt` on its first touch (`read`/`open`/`apply`/`create`), synchronously, since DO SQL
+  is. The replay into the engine is suppressed from `onChange`, so a wake never re-broadcasts a full doc state to the
+  adopted connections.
+- **Debounced write-through, 250 ms**, as locked: per-keystroke full `encodeState` is the cost `crdt.validate: false`
+  exists to avoid. A pending write is a timer, so it holds the object out of hibernation for that window; only a
+  forced reset (deploy, crash, `evictDurableObject`) loses it. `create` writes immediately; `delete` cancels the
+  pending write. `close()` flushes, for parity — nothing calls it inside a Durable Object.
+- **`list` reads storage** (`id`, `created_at`, `updated_at` columns; filter/sort/page in SQL), so `createdAt`
+  survives wakes and listing loads no docs. `updatedAt` lags a pending write by up to the debounce. Sorting by id is
+  SQLite's byte order — identical to the memory backend's for ids without astral characters.
+- **2 MB**: local workerd does not enforce the row limit (a 5 MB BLOB inserts fine), so the backend checks the
+  encoded state itself: `create` throws `INTERNAL` "document n/id is N bytes, over the 2 MB a Durable Object row
+  holds — split it into smaller documents"; an edit that grows a doc past it fails its write-through, is logged under
+  `['super-line', 'collections-crdt-cloudflare']`, and every later write to that doc throws the same error (the
+  writer resyncs) while storage keeps the last state that fit. The rows backend relies on the platform's own error,
+  which therefore only shows on a real deploy.
+- **State is a BLOB** (raw Yjs bytes, read back as `ArrayBuffer`) — a third more headroom than base64 TEXT.
+- Tests: a shared CRDT conformance suite now exists (`collections-crdt-memory/test/crdt-store-conformance.ts`,
+  extracted from the memory backend's tests, which now run through it) and runs inside `runInDurableObject`; plus
+  durability across instances (Yjs history kept, so an old replica keeps merging), no fan-out on load, debounce,
+  list, delete, the 2 MB refusal, a real eviction, and end to end: `AppNode` carries a `boards` CRDT collection —
+  an open doc survives a wake and a write after it reaches every holder, zero client lifecycle events.
+
 ## Ticket order after the lock
 
 T15 seam on loopback → T06 workers lane (+ crypto verification) → T07 DO transport → T09 rows → T10 docs →

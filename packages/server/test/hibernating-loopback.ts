@@ -121,7 +121,7 @@ export function hibernatingLoopback() {
         s.evicting = false
         s.msgCb = undefined
         s.closeCb = undefined
-        hooks.adoptConnection(s, JSON.parse(snapshots.get(id)!) as ConnectionSnapshot)
+        void hooks.adoptConnection(s, JSON.parse(snapshots.get(id)!) as ConnectionSnapshot)
       }
     },
     /** Every live socket stops delivering to the server, which so never answers again (a dead peer). */

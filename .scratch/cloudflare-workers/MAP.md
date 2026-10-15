@@ -49,10 +49,11 @@ From the charting session (2026-10-14, all recommendations accepted):
 - [Port node:crypto users to WebCrypto where nodejs_compat falls short](tickets/T08-port-crypto.md) — **CLOSED (folded)**: no port needed; the verification test lives in the workers-lane ticket.
 - [Build the test:workers lane](tickets/T06-build-test-workers-lane.md) — **BUILT**: `pnpm test:workers` on `@cloudflare/vitest-plugin` (`*.workers.test.ts`, serial non-isolated), smoke test proves eviction → new instance over the same socket, plugin crypto verified under `nodejs_compat` (T08 fold, no port); `pnpm test` runs all three lanes; typecheck/lint cover `test-workers/`.
 - [Build the connection snapshot seam on loopback](tickets/T15-build-snapshot-seam-loopback.md) — **BUILT**: `ConnectionSnapshot` + `adoptConnection` + `onSnapshotChanged`/`liveness`/`onHold` in core; server records acknowledged subscribes and replays them muted, refusals become `end`; client `keepalive` + `end` → `onError('resubscribe')`; chat holds a busy token per stream. Built smaller than the lock: no `snapshotOf`, no plugin snapshot hooks (see the plan's "As built").
+- [Build @super-line/transport-cloudflare](tickets/T07-build-transport-cloudflare.md) — **BUILT**: `cloudflareServerTransport` / `createDurableNode` / `routeToNode`; a real eviction wakes a new instance that resumes subscriptions invisibly, refusals reach `onError`, a lost snapshot closes 4409; platform answers pings. Found: `waitUntil` is a no-op in DOs, so the busy token holds a timer (idle non-hibernatable objects still evict after 70–140 s).
 
 ## Not yet specified
 
-- **Chat stream snapshot/restore** — the busy token keeps a node awake during a stream (max 15 min of platform wall time). Surviving a longer stream needs a plugin snapshot hook, which T15 deliberately did not build (no implementer). Revisit after T07, only if 15 min proves too short.
+- **Chat stream snapshot/restore** — the busy token keeps a node out of hibernation during a stream, but an object idle 70–140 s with no event is evicted anyway (T07). Surviving a longer stream needs a plugin snapshot hook, which T15 deliberately did not build (no implementer). Revisit after T07, only if 15 min proves too short.
 - **Typed-table drift vs DO storage migrations** — T05 fixed the failure mode (lazy construction, readable failing operations, never a constructor throw); what a host *does* about drift on a deployed object (rename, migrate in code, `wrangler` migration) is sharpened once T09 lands.
 
 ## Out of scope

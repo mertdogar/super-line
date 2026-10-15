@@ -1303,12 +1303,15 @@ export function createSuperLineServer<
 
   // A socket that outlived an earlier server instance: accept it from its snapshot, rejoin its rooms, and replay
   // its live subscribes through the ordinary handlers (policies re-evaluated) with their acks withheld.
-  function adoptConn(raw: RawConn, snapshot: ConnectionSnapshot, transport: ServerTransport): void {
+  async function adoptConn(raw: RawConn, snapshot: ConnectionSnapshot, transport: ServerTransport): Promise<void> {
     const conn = acceptConn(raw, snapshot.auth, transport, snapshot)
     if (!conn) return
-    for (const r of snapshot.rooms)
-      void Promise.resolve(joinChannel(conn, ROOM + r)).catch((err) => fireError(err, { kind: 'connect', name: 'adopt', conn }))
-    snapshot.frames.forEach((frame, k) => void onFrame(conn, { ...frame, i: REPLAY_BASE + k }))
+    await Promise.all([
+      ...snapshot.rooms.map((r) =>
+        Promise.resolve(joinChannel(conn, ROOM + r)).catch((err) => fireError(err, { kind: 'connect', name: 'adopt', conn })),
+      ),
+      ...snapshot.frames.map((frame, k) => onFrame(conn, { ...frame, i: REPLAY_BASE + k })),
+    ])
   }
 
   async function onMessage(conn: Conn, bytes: Uint8Array): Promise<void> {

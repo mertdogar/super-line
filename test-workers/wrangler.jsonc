@@ -7,7 +7,15 @@
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": {
-    "bindings": [{ "name": "SMOKE", "class_name": "SmokeNode" }]
+    "bindings": [
+      { "name": "SMOKE", "class_name": "SmokeNode" },
+      { "name": "RAW", "class_name": "RawNode" },
+      { "name": "APP", "class_name": "AppNode" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SmokeNode"] }]
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SmokeNode"] },
+    { "tag": "v2", "new_sqlite_classes": ["RawNode"] },
+    { "tag": "v3", "new_sqlite_classes": ["AppNode"] }
+  ]
 }

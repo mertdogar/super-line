@@ -311,7 +311,16 @@ libp2pClientTransport(opts: { node: Libp2p; multiaddr: Multiaddr | Multiaddr[] |
 
 // @super-line/transport-loopback — in-memory, zero-dependency, for tests
 createLoopbackTransport(): { server: ServerTransport; client(): ClientTransport }
+
+// @super-line/transport-cloudflare — the server runs INSIDE a Durable Object (one object = one node; no adapter).
+// Needs a SQLite-backed class (wrangler `new_sqlite_classes`) and the `nodejs_compat` flag for plugin-auth/inspector.
+createDurableNode((ctx, env, base: { transports; nodeKey }) => server): DurableObject class   // extend + export it; build reruns on EVERY wake
+routeToNode(request, namespace, { name?: (req) => string }): Promise<Response>               // Worker fetch → the node object (default name 'super-line')
+cloudflareServerTransport(ctx): ServerTransport & { fetch, webSocketMessage, webSocketClose, webSocketError, resume() }   // for a hand-written DO class
+CLOSE_NOT_RESUMABLE  // 4409: a socket whose connection could not be resumed on wake; the client reconnects as on any drop
 ```
+
+On Cloudflare the object hibernates between events while sockets stay open; on wake the server resumes every connection (subscriptions, open docs, rooms, env) and the client sees nothing. The server runs no heartbeat there (pings are answered by the platform without waking it), so give browser clients `keepalive`. In-memory state does not survive a wake: `conn.data`, and anything in a memory collection backend. A plugin running timers (plugin-queue's polls) keeps the object awake.
 
 Writing a transport for a host that hibernates (sockets outlive the server instance, e.g. a Durable Object) uses three optional `ServerTransport` members and one start hook:
 

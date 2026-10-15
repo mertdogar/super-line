@@ -301,6 +301,26 @@ The core half shipped smaller than §1–§3 specify. Each cut removes surface w
 - `end` needed no client-tap vocabulary change: every inbound frame is already tapped as `frame`. The devtools
   panel labels it.
 
+## As built (T07, 2026-10-15) — the Cloudflare half
+
+- **The busy token is a pending timer, not `waitUntil`.** The Durable Object docs state `waitUntil` has no effect
+  in an object (T01's research had it wrong); hibernation is blocked by a scheduled timer, so while any hold is
+  outstanding the transport keeps one no-op `setInterval`. The object still goes from "idle, non-hibernatable"
+  to evicted after 70–140 s with no incoming event, so a hold buys that much idle tolerance, not 15 minutes.
+- **`adoptConnection` returns a promise** that settles once every replayed subscribe has; `resume()` awaits each
+  inside `blockConcurrencyWhile`, so the event that woke the object never races a half-rebuilt connection.
+- **`routeToNode(req, ns, { name })`** picks the object with `getByName` (the documented deterministic route)
+  instead of a `selectId` returning an id.
+- **`createDurableNode(build)`**: `build(ctx, env, base)` returns the server built with `...base`
+  (`{ transports, nodeKey: ctx.id }`), so the host calls `createSuperLineServer` itself and keeps full typing; the
+  class exposes `transport` and `server`.
+- **The auto-response pair is installed unconditionally**: it can only match the JSON ping text, so a custom
+  serializer's pings simply reach the server (waking it) — no serializer check needed.
+- **Snapshot rows whose socket is gone are deleted on every resume** (a deploy drops sockets without close events).
+- Close on refusal paths: reserved-class refusal is 4401 after the upgrade; `terminate()` sends 1011 (1006 cannot
+  be sent by an endpoint); an un-resumable socket is closed with `CLOSE_NOT_RESUMABLE` (4409).
+- Peer range on core is `>=0.20.0` for now; the release ticket raises it to the core minor that ships the seam.
+
 ## Ticket order after the lock
 
 T15 seam on loopback → T06 workers lane (+ crypto verification) → T07 DO transport → T09 rows → T10 docs →

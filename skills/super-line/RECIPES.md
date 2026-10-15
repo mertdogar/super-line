@@ -364,6 +364,21 @@ const client = createSuperLineClient(api, { transport: httpClientTransport({ url
 ```
 
 ```ts
+// Cloudflare — the node IS a Durable Object. wrangler.jsonc: "compatibility_flags": ["nodejs_compat"],
+// a durable_objects binding NODE → class Node, and Node under "new_sqlite_classes" in migrations.
+import { createSuperLineServer } from '@super-line/server'
+import { createDurableNode, routeToNode } from '@super-line/transport-cloudflare'
+
+export class Node extends createDurableNode((ctx, env: Env, base) =>       // runs on first use AND every wake: keep it cheap
+  createSuperLineServer(api, { ...base, authenticate }).implement({ user: { ping: async ({ n }) => ({ n }) } }),
+) {}
+export default { fetch: (req: Request, env: Env) => routeToNode(req, env.NODE) }   // { name: (req) => tenantOf(req) } for one object per tenant
+
+// browser: the ordinary WebSocket client against the Worker URL, plus keepalive (the node runs no heartbeat)
+const client = createSuperLineClient(api, { transport: webSocketClientTransport({ url: 'wss://app.example.workers.dev' }), role: 'user', keepalive: 15_000 })
+```
+
+```ts
 // libp2p — bring your own started node on both ends; the server handles a protocol stream per connection
 import { libp2pServerTransport } from '@super-line/transport-libp2p'  // npm i @super-line/transport-libp2p
 const srv = createSuperLineServer(api, { transports: [libp2pServerTransport({ node: serverNode })], authenticate })

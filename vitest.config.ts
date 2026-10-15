@@ -41,6 +41,7 @@ export const alias = {
   '@super-line/transport-loopback': src('packages/transport-loopback/src/index.ts'),
   '@super-line/transport-http': src('packages/transport-http/src/index.ts'),
   '@super-line/transport-libp2p': src('packages/transport-libp2p/src/index.ts'),
+  '@super-line/transport-cloudflare': src('packages/transport-cloudflare/src/index.ts'),
 }
 
 // The heavy lane: Docker brokers (testcontainers), real ZeroMQ/libp2p sockets, and the

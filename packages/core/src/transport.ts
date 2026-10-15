@@ -107,8 +107,9 @@ export interface ServerTransport {
      * Take over a connection whose socket outlived an earlier server instance (ADR-0027), from the last
      * snapshot {@link ServerTransport.onSnapshotChanged} handed out. Rebuilds every subscription without
      * acknowledging it to the client; one the server now refuses reaches the client as an `end` frame.
+     * Resolves once every subscription is re-established — await it before letting new events in.
      */
-    adoptConnection?: (raw: RawConn, snapshot: ConnectionSnapshot) => void
+    adoptConnection?: (raw: RawConn, snapshot: ConnectionSnapshot) => Promise<void>
     /**
      * Reserved connection classes the core declares (from `inspector` + plugin connection classes). A
      * transport that supports them advertises/matches these and short-circuits `authenticate`, accepting

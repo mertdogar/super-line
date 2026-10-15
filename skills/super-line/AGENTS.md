@@ -32,7 +32,7 @@ export const api = defineContract({
 
 - A **connection has a role**, decided at the upgrade from auth, fixed for its life. Each role gets a different typed surface *and* a different `ctx`.
 - **Direction is the axis** (named keys, never positional generics). Per `serverToClient` entry: `{ payload }` = **event** (server push); `{ payload, subscribe: true }` = **topic** (client opts in). A **shared** topic also serves as a **cluster event bus channel** (`server.publish`/`server.subscribe`/`client.subscribe`). `clientToServer` entries are `{ input, output }` **requests**.
-- **Server**: `createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate })`, then `srv.implement({ shared, user, agent })`. WS transport from `@super-line/transport-websocket`; alternatives: `transport-http` (SSE/long-poll), `transport-libp2p` (libp2p/WebRTC, BYO node), `transport-loopback` (in-memory, for tests) — see the Transports guide.
+- **Server**: `createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate })`, then `srv.implement({ shared, user, agent })`. WS transport from `@super-line/transport-websocket`; alternatives: `transport-http` (SSE/long-poll), `transport-libp2p` (libp2p/WebRTC, BYO node), `transport-cloudflare` (one Durable Object = one node, hibernating sockets resume transparently; `createDurableNode` + `routeToNode`), `transport-loopback` (in-memory, for tests) — see the Transports guide.
 - **Client**: `createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user' })` → a typed proxy narrowed to that role's surface.
 
 ## The interaction flavors

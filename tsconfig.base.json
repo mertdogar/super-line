@@ -44,7 +44,8 @@
       "@super-line/transport-websocket": ["./packages/transport-websocket/src/index.ts"],
       "@super-line/transport-loopback": ["./packages/transport-loopback/src/index.ts"],
       "@super-line/transport-http": ["./packages/transport-http/src/index.ts"],
-      "@super-line/transport-libp2p": ["./packages/transport-libp2p/src/index.ts"]
+      "@super-line/transport-libp2p": ["./packages/transport-libp2p/src/index.ts"],
+      "@super-line/transport-cloudflare": ["./packages/transport-cloudflare/src/index.ts"]
     }
   }
 }

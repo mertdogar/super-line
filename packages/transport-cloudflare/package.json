@@ -1,0 +1,54 @@
+{
+  "name": "@super-line/transport-cloudflare",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Cloudflare Durable Object transport for super-line: one Durable Object is one node, with hibernatable WebSockets that resume transparently on wake.",
+  "license": "MIT",
+  "author": "Mert",
+  "keywords": [
+    "super-line",
+    "transport",
+    "cloudflare",
+    "durable-objects",
+    "websocket",
+    "hibernation",
+    "realtime"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mertdogar/super-line.git",
+    "directory": "packages/transport-cloudflare"
+  },
+  "homepage": "https://mertdogar.github.io/super-line/",
+  "bugs": "https://github.com/mertdogar/super-line/issues",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
+  },
+  "dependencies": {
+    "@logtape/logtape": "^2.2.4"
+  },
+  "peerDependencies": {
+    "@super-line/core": ">=0.20.0 <1.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261013.1",
+    "@super-line/core": "workspace:^"
+  }
+}

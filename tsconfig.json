@@ -7,6 +7,7 @@
   "exclude": [
     "packages/control-center",
     "packages/devtools-extension",
+    "packages/transport-cloudflare",
     "examples/collections-chat",
     "examples/chat-supervisor",
     "examples/react-chat-transports"

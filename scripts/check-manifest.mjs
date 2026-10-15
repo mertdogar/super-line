@@ -67,7 +67,8 @@ for (const pkg of published) {
 // up inside core, making `instanceof` false for every consumer. Type-only imports are erased
 // at build and never reach the bundler, so they are exempt.
 const FROM = /^[ \t]*(?:import|export)\s+([\s\S]*?)\s*from\s*['"]([^'"]+)['"]/gm
-const bare = (spec) => !spec.startsWith('.') && !spec.startsWith('node:')
+// runtime modules, not packages: Node's builtins and workerd's (`cloudflare:workers`)
+const bare = (spec) => !spec.startsWith('.') && !spec.startsWith('node:') && !spec.startsWith('cloudflare:')
 const pkgRoot = (spec) => (spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0])
 const typeOnly = (clause) => {
   const c = clause.trim()

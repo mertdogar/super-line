@@ -1,4 +1,8 @@
 import { DurableObject } from 'cloudflare:workers'
+import { INSPECTOR_SUBPROTOCOL, type AuthOutcome, type Handshake } from '@super-line/core'
+import { cloudflareServerTransport, createDurableNode } from '@super-line/transport-cloudflare'
+import { createSuperLineServer } from '@super-line/server'
+import { appContract } from './app.js'
 
 // Smoke Durable Object for the workers lane. Counts its own constructions in SQLite so a test can
 // prove the constructor reran after eviction while the hibernated socket stayed open.
@@ -30,6 +34,79 @@ export class SmokeNode extends DurableObject<Cloudflare.Env> {
     ws.close(code, reason)
   }
 }
+
+// The bare transport inside a Durable Object, started with recording hooks — the Cloudflare counterpart of
+// transport-websocket's own tests. Accepts `user` unless the query says `reject`; echoes bytes upper-cased.
+export class RawNode extends DurableObject<Cloudflare.Env> {
+  readonly transport = cloudflareServerTransport(this.ctx)
+  readonly handshakes: Handshake[] = []
+  readonly accepted: AuthOutcome[] = []
+
+  constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
+    super(ctx, env)
+    void this.transport.start({
+      authenticate: async (h) => {
+        this.handshakes.push(h)
+        if (h.query.reject) throw new Error('rejected by test')
+        return { role: 'user', ctx: { uid: h.query.uid } }
+      },
+      onConnection: (raw, auth) => {
+        this.accepted.push(auth)
+        raw.onMessage((bytes) => raw.send(new TextDecoder().decode(bytes).toUpperCase()))
+      },
+      reserved: [
+        {
+          role: 'inspector',
+          subprotocol: INSPECTOR_SUBPROTOCOL,
+          authenticate: (h) => {
+            if (h.query.pw !== 'open sesame') throw new Error('bad inspector password')
+            return { admin: true }
+          },
+        },
+      ],
+    })
+  }
+
+  override fetch(request: Request): Promise<Response> {
+    return this.transport.fetch(request)
+  }
+  override webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
+    this.transport.webSocketMessage(ws, message)
+  }
+  override webSocketClose(ws: WebSocket, code: number, reason: string): void {
+    this.transport.webSocketClose(ws, code, reason)
+  }
+  override webSocketError(ws: WebSocket, error: unknown): void {
+    this.transport.webSocketError(ws, error)
+  }
+}
+
+// A whole super-line node. Counts its constructions, so a test can tell a real wake from a warm instance.
+export class AppNode extends createDurableNode((ctx, _env, base) => {
+  const sql = ctx.storage.sql
+  sql.exec('CREATE TABLE IF NOT EXISTS app_state (k TEXT PRIMARY KEY, v INTEGER NOT NULL)')
+  sql.exec("INSERT INTO app_state (k, v) VALUES ('boots', 1) ON CONFLICT(k) DO UPDATE SET v = v + 1")
+  const locked = () => sql.exec("SELECT v FROM app_state WHERE k = 'locked'").toArray().length > 0
+  const srv = createSuperLineServer(appContract, {
+    ...base,
+    authenticate: (h) => ({ role: 'user' as const, ctx: { uid: h.query.uid } }),
+    identify: (conn) => (conn.ctx as { uid: string }).uid,
+    authorizeSubscribe: () => !locked(),
+  })
+  return srv.implement({
+    user: {
+      ping: async ({ n }) => ({ n }),
+      shout: async ({ msg }) => {
+        srv.forRole('user').publish('announce', { msg })
+        return null
+      },
+      lock: async () => {
+        sql.exec("INSERT OR REPLACE INTO app_state (k, v) VALUES ('locked', 1)")
+        return null
+      },
+    },
+  })
+}) {}
 
 export default {
   fetch: (request: Request, env: Cloudflare.Env) =>

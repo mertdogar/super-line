@@ -35,7 +35,7 @@ export const api = defineContract({
   - `clientToServer: { name: { input, output } }` → **request** (awaited, typed errors, timeout).
   - `serverToClient: { name: { payload } }` → **event** (server pushes to chosen recipients).
   - `serverToClient: { name: { payload, subscribe: true } }` → **topic** (client opts in via `subscribe`). A **shared** topic doubles as a **cluster event bus channel** — see below.
-- **Server**: `createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate })`, then `srv.implement({ shared, user, agent })`. The WS transport comes from `@super-line/transport-websocket`; alternatives are `@super-line/transport-http` (SSE/long-poll), `@super-line/transport-libp2p` (libp2p/WebRTC, BYO node), and `@super-line/transport-loopback` (in-memory, for tests) — see the Transports guide.
+- **Server**: `createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate })`, then `srv.implement({ shared, user, agent })`. The WS transport comes from `@super-line/transport-websocket`; alternatives are `@super-line/transport-http` (SSE/long-poll), `@super-line/transport-libp2p` (libp2p/WebRTC, BYO node), `@super-line/transport-cloudflare` (the server IS a Cloudflare Durable Object; sockets hibernate and resume transparently), and `@super-line/transport-loopback` (in-memory, for tests) — see the Transports guide.
 - **Client**: `createSuperLineClient(api, { transport: webSocketClientTransport({ url }), role: 'user' })` → a typed proxy narrowed to that role's surface.
 - **No codegen.** Put the contract in a module both import. Never re-declare types on one side.
 

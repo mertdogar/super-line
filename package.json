@@ -32,7 +32,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:workers": "vitest run --config vitest.workers.config.ts --max-workers=1 --no-isolate",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test-workers/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test-workers/tsconfig.json && tsc --noEmit -p packages/transport-cloudflare/tsconfig.json",
     "lint": "oxlint packages examples test-workers",
     "changelog": "node scripts/changelog.mjs",
     "docs:packages": "pnpm --filter @super-line/core --filter @super-line/client --filter @super-line/server --filter @super-line/react --filter @super-line/transport-loopback --filter @super-line/collections-memory --filter @super-line/collections-crdt-memory --filter @super-line/plugin-auth --filter @super-line/plugin-chat --filter @super-line/plugin-queue build",
@@ -49,6 +49,7 @@
     "testcontainers": "^10.28.0",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "zod": "^4.6.5"
   }
 }

@@ -2,7 +2,7 @@
 
 Run a super-line server inside a Cloudflare [Durable Object](https://developers.cloudflare.com/durable-objects/). One object is one node: it accepts WebSocket connections, runs your handlers and plugins, and keeps rows and CRDT documents in its own SQLite storage. Clients connect with the ordinary WebSocket client — nothing on the client side is Cloudflare-specific.
 
-The object **hibernates** between events. After about ten idle seconds it leaves memory while every socket stays open; the next message wakes a fresh instance that resumes every connection before it handles anything. Subscriptions, open documents, rooms, and `env` all come back, and the client never sees a disconnect.
+The object **hibernates** between events. After about ten idle seconds it leaves memory while every socket stays open; the next message wakes a fresh instance that resumes every connection before it handles anything. Subscriptions, open documents, rooms, and `env` all come back, and the client never sees a disconnect. [Hibernation & resumption](/concepts/hibernation) explains how, and what it costs.
 
 Three packages, one per seam:
 
@@ -110,7 +110,7 @@ const client = createSuperLineClient(contract, {
 })
 ```
 
-A node that hibernates can't run a heartbeat timer — a pending timer is exactly what keeps an object awake — so the server runs none here. `keepalive` moves liveness to the client: it pings every N milliseconds, and when nothing comes back before the next ping it drops the socket and reconnects. Cloudflare answers those pings itself, without waking the object.
+The server runs no heartbeat here, so `keepalive` is how a dead socket gets noticed: the client pings every N milliseconds and reconnects when nothing comes back before the next ping. Cloudflare answers those pings without waking the object. [Liveness moves to the transport](/concepts/hibernation#liveness-moves-to-the-transport) explains why.
 
 ## Run and deploy
 
@@ -128,7 +128,7 @@ A deploy restarts every object and closes its sockets. Clients reconnect through
 
 ## What a wake keeps, and what it loses
 
-The server rebuilds each connection from a snapshot it keeps in the object's SQLite: who the connection authenticated as (`ctx` and the current `env`), its rooms, and the subscribes it made. On a wake, each surviving socket is handed to the new server instance, which replays those subscribes through the ordinary handlers without answering the client. Policies run again, so a subscription the woken node now refuses ends — see [below](#a-subscription-can-end-with-the-socket-open).
+A woken node rebuilds each connection from a snapshot in the object's SQLite and replays its subscribes without answering the client — [A connection is rebuilt from its snapshot](/concepts/hibernation#a-connection-is-rebuilt-from-its-snapshot) walks the mechanism.
 
 | Survives a wake | Lost on a wake |
 | --- | --- |
@@ -140,14 +140,14 @@ The server rebuilds each connection from a snapshot it keeps in the object's SQL
 
 Two consequences for your code:
 
-- **Keep `ctx` and `env` JSON-serializable.** The snapshot is stored as JSON, so a `Date` in `ctx` comes back as a string after a wake. Every connection's snapshot is rewritten on each subscribe, so a large `ctx` costs storage writes per connection.
+- **Keep `ctx` and `env` small and JSON-serializable.** A `Date` in `ctx` comes back as a string after a wake, and every subscribe rewrites the connection's snapshot, so a large `ctx` costs storage writes per connection.
 - **Never rely on a memory backend.** `memoryCollections()` and `crdtMemoryCollections()` start empty on every wake, not only on a deploy. Use `cloudflareCollections` and `crdtCloudflareCollections`.
 
 A socket whose snapshot is missing — rare, for example when a deploy raced a connect — is closed with code `4409` (`CLOSE_NOT_RESUMABLE`), and the client reconnects as it would after any drop.
 
 ### A subscription can end with the socket open
 
-On every other host, a subscription ends only with its socket. Here a wake re-checks each one, so a principal who lost access while the node slept loses that subscription with the socket still open. The client reports it on `onError` with `kind: 'resubscribe'`, naming the topic, the collection, or the collection and document id:
+A wake runs each subscription's policy again, so a principal who lost access while the node slept loses that subscription with the socket still open. The client reports it on `onError` with `kind: 'resubscribe'`, naming the topic, the collection, or the collection and document id:
 
 ```ts
 const client = createSuperLineClient(contract, {
@@ -199,7 +199,7 @@ export class Node extends createDurableNode((ctx, env: Env, base) => {
 
 ## What keeps a node awake
 
-An object hibernates only when nothing is pending: no timer, no request in flight, no event being handled. Anything that holds a timer keeps the node in memory, and an awake node is billed for its duration.
+An object hibernates only when nothing is pending, and an awake node is billed for its duration. [An awake node is billed](/concepts/hibernation#an-awake-node-is-billed) explains the trade behind each row:
 
 | Keeps the node awake | For how long |
 | --- | --- |
@@ -222,13 +222,13 @@ try {
 }
 ```
 
-A hold is a pending timer, not a guarantee. An object that receives no event at all for roughly 70–140 seconds is evicted even while held, so a streaming message that goes quiet for longer than that is lost with the instance that held it.
+A hold is a pending timer, not a guarantee: an object that receives no event for roughly 70–140 seconds is evicted even while held.
 
 ## Presence on a hibernating node
 
 `plugin-auth`'s sessions and `userPresence` track who's connected here as on any host: a wake keeps the session of every socket it resumes, and a socket's close ends its session. A session whose socket didn't survive — after a deploy, for example — ends once the woken server is ready.
 
-What changes is liveness. The server sends no heartbeat, and Cloudflare answers the client's `keepalive` pings without waking the object, so two readings change meaning:
+What changes is liveness: the server hears no heartbeat between events, so two readings change meaning:
 
 - **`conn.lastPongAt`** never advances.
 - **`lastSeenAt`** isn't refreshed while a session is open. It holds the time the session started, and the time of the close once the session ends.
@@ -365,6 +365,7 @@ To watch a wake, log a line from your factory: it prints once on first use and a
 
 ## Next
 
+- [Hibernation & resumption](/concepts/hibernation) — why a wake is invisible, and what the design gives up.
 - [`examples/cloudflare`](https://github.com/mertdogar/super-line/tree/main/examples/cloudflare) — auth, chat, and the inspector in one Durable Object, ready to deploy.
 - [Choose a transport](/how-to/choose-a-transport) — every wire super-line speaks.
 - [Backends & clustering](/collections/backends) — how the Cloudflare backends compare with the others.

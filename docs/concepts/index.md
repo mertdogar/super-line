@@ -9,6 +9,7 @@ The surface is small, but the ideas behind it — one contract for every wire pa
 - [Server-authoritative](/concepts/server-authoritative) — why the server owns rooms, topics, validation, and the role boundary.
 - [Transports and adapters](/concepts/transports-and-adapters) — the two independent seams: the client↔server wire versus node↔node fan-out.
 - [Reconnection and delivery](/concepts/reconnection-delivery) — what survives a drop, how resubscription works, and what `await sub.ready` guarantees.
+- [Hibernation and resumption](/concepts/hibernation) — how a node in a Cloudflare Durable Object sleeps between events and resumes every connection without its clients noticing.
 - [Plugins](/concepts/plugins) — the contract-time and runtime halves of a plugin, and how they compose into a host.
 - [Queues and workers](/concepts/queues-and-workers) — durable server-only jobs, leases, cluster-wide slots, and cron schedules.
 - [Comparison and FAQ](/concepts/comparison-faq) — how super-line differs from Socket.IO, tRPC, and the alternatives.

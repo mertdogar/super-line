@@ -210,6 +210,7 @@ export default defineConfig({
             { text: 'Server-authoritative design', link: '/concepts/server-authoritative' },
             { text: 'Transports vs. adapters', link: '/concepts/transports-and-adapters' },
             { text: 'Reconnection & delivery', link: '/concepts/reconnection-delivery' },
+            { text: 'Hibernation & resumption', link: '/concepts/hibernation' },
             { text: 'The plugin model', link: '/concepts/plugins' },
             { text: 'Queues and workers', link: '/concepts/queues-and-workers' },
             { text: 'Auth lifecycle & sealed tokens', link: '/concepts/auth-lifecycle-sealed-tokens' },

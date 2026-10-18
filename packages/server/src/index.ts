@@ -641,6 +641,16 @@ export interface SuperLineServer<C extends Contract, A extends AuthResult<C>, HK
     name: N,
   ): N extends CrdtCollectionName<C> ? ServerCrdtCollectionHandle<DocOf<C, N>> : ServerCollectionHandle<RowOf<C, N>>
   /**
+   * Apply several row writes, across row collections, as ONE atomic batch: every op is schema-validated
+   * (policy-free, like a co-write) and either all commit or none do. CRDT document collections can't join.
+   */
+  batch(ops: ServerCollectionOp[]): Promise<void>
+  /**
+   * Like {@link SuperLineServer.batch}, but only while every condition's stored row still matches its filter.
+   * Resolves `false` and applies nothing when one doesn't.
+   */
+  conditionalBatch(conditions: ServerRowCondition[], ops: ServerCollectionOp[]): Promise<boolean>
+  /**
    * Resolves once everything construction started has landed: the reply channel is subscribed and every
    * transport has finished `start()`. Rejects if one of them failed.
    *
@@ -1844,6 +1854,8 @@ export function createSuperLineServer<
       type Ret = N extends CrdtCollectionName<C> ? ServerCrdtCollectionHandle<DocOf<C, N>> : ServerCollectionHandle<RowOf<C, N>>
       return collections.handle(name) as Ret
     },
+    batch: collections.batch,
+    conditionalBatch: collections.conditionalBatch,
     async close() {
       if (closing) return
       closing = true

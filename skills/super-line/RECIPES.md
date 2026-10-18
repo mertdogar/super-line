@@ -448,6 +448,10 @@ const srv = createSuperLineServer(api, {
   },
 })
 await srv.collection('messages').insert({ id: nano(), channelId: 'general', authorId: 'system', text: 'welcome', createdAt: Date.now() }) // co-write: policy-free, still schema-validated
+await srv.batch([                                                  // several co-writes as ONE atomic batch — all commit or none
+  { op: 'delete', collection: 'messages', id: 'old' },
+  { op: 'insert', collection: 'messages', row: { id: nano(), channelId: 'general', authorId: 'system', text: 'replaced', createdAt: Date.now() } },
+])
 ```
 
 ```ts

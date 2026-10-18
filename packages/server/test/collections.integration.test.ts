@@ -265,6 +265,42 @@ describe('collections — atomic batches & filter transitions', () => {
     expect(await srv.collection('messages').read('ok')).toBeUndefined() // rolled back
   })
 
+  it('srv.batch applies server ops atomically across collections', async () => {
+    const { srv } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+    })
+    await srv.batch([
+      { op: 'insert', collection: 'users', row: { id: 'u1', name: 'Ada' } },
+      { op: 'insert', collection: 'messages', row: msg('m1', 'general', 'u1', 1) },
+    ])
+    expect(await srv.collection('messages').read('m1')).toEqual(msg('m1', 'general', 'u1', 1))
+
+    await expect(
+      srv.batch([
+        { op: 'delete', collection: 'messages', id: 'm1' },
+        { op: 'insert', collection: 'users', row: { id: 'u1', name: 'again' } }, // already exists → the batch fails
+      ]),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(await srv.collection('messages').read('m1')).toBeDefined() // the delete rolled back with it
+  })
+
+  it('srv.conditionalBatch applies only while every condition still holds', async () => {
+    const { srv } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+      authenticate,
+      identify,
+      collections: memoryCollections(),
+    })
+    await srv.collection('users').insert({ id: 'u1', name: 'Ada' })
+    const rename = [{ op: 'update' as const, collection: 'users', row: { id: 'u1', name: 'Grace' } }]
+
+    expect(await srv.conditionalBatch([{ collection: 'users', id: 'u1', filter: eq('name', 'Bob') }], rename)).toBe(false)
+    expect(await srv.collection('users').read('u1')).toEqual({ id: 'u1', name: 'Ada' })
+    expect(await srv.conditionalBatch([{ collection: 'users', id: 'u1', filter: eq('name', 'Ada') }], rename)).toBe(true)
+    expect(await srv.collection('users').read('u1')).toEqual({ id: 'u1', name: 'Grace' })
+  })
+
   it('an update that moves a row out of the filter arrives as a delete', async () => {
     const { url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
       authenticate,

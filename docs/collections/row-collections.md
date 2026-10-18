@@ -68,6 +68,19 @@ await srv.collection('messages').insert({
 })
 ```
 
+Several co-writes, across collections, commit as one atomic batch with `srv.batch` — all of them or none. `srv.conditionalBatch` applies its batch only while every condition's stored row still matches its filter, and resolves `false` otherwise:
+
+```ts
+await srv.batch([
+  { op: 'delete', collection: 'messages', id: 'm1' },
+  { op: 'insert', collection: 'messages', row: { id: 'm2', channelId: 'general', authorId: 'system', text: 'hello', createdAt: Date.now() } },
+])
+const moved = await srv.conditionalBatch(
+  [{ collection: 'messages', id: 'm2', filter: eq('channelId', 'general') }],
+  [{ op: 'update', collection: 'messages', row: { id: 'm2', channelId: 'random', authorId: 'system', text: 'hello', createdAt: Date.now() } }],
+)
+```
+
 ## Client: subscribe to subsets, mutate in batches
 
 `client.collection(name)` is typed by the contract. `subscribe(query)` opens a **live row-set** — an initial snapshot, then per-row change events, auto-resubscribed and re-diffed across reconnects:

@@ -138,6 +138,8 @@ interface SuperLineServer<C, A> {
   toConn(id: string): ConnTarget<C>                                  // one connection, any node
   toUser(userId: string): UserTarget<C>                              // all of a user's connections, any node
   collection(name: string): ServerCollectionHandle                   // server-authoritative: co-write rows (insert/update/delete/read/snapshot) or create+open CRDT docs; typed by the contract. See Collections.
+  batch(ops: ServerCollectionOp[]): Promise<void>                    // ONE atomic, schema-validated, policy-free batch across row collections (all or none)
+  conditionalBatch(conditions: ServerRowCondition[], ops: ServerCollectionOp[]): Promise<boolean>  // same, only while every condition's row still matches its filter; false = nothing applied
   close(): Promise<void>                                              // idempotent; closes conns + cleans registry + adapter + ws
 }
 
@@ -505,6 +507,11 @@ createSuperLineServer(api, {
   },
 })
 srv.collection('messages').insert/update/delete/read/snapshot   // server co-write: policy-free, schema-validated
+await srv.batch([                                               // several co-writes, across row collections, as ONE atomic batch
+  { op: 'delete', collection: 'messages', id: 'm1' },
+  { op: 'insert', collection: 'messages', row: { /* … */ } },
+])
+await srv.conditionalBatch([{ collection: 'messages', id: 'm2', filter: eq('channelId', 'general') }], ops) // false = a condition failed, nothing applied
 
 // CLIENT — client.collection(name), typed by the contract:
 const sub = client.collection('messages').subscribe({ filter: eq('channelId', 'general'), orderBy: [{ field: 'createdAt', dir: 'asc' }], limit: 50 })

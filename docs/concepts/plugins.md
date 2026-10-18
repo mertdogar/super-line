@@ -68,7 +68,7 @@ A library plugin ships alongside a [surface](/how-to/composition). Type the plug
 | `nodeId` · `nodeName` · `instanceId` | node identity |
 | `serializer` · `contract` | the wire serializer and raw contract (for reflection) |
 | `conns` · `local` · `cluster` | read-only connection views (node-local + cluster-wide) |
-| `publish` · `subscribe` · `toConn` · `toUser` · `room` · `collection` · `isOnline` | the public server capabilities |
+| `publish` · `subscribe` · `toConn` · `toUser` · `room` · `collection` · `batch` · `conditionalBatch` · `isOnline` | the public server capabilities |
 | `channel(name)` | a **plugin-private, cluster-wide** adapter channel under a reserved `x:<plugin>:` prefix |
 | `hold()` | a busy token: keeps a host that can hibernate awake until you call the returned release function (idempotent) — take one for in-memory work that spans events, release it in a `finally` |
 

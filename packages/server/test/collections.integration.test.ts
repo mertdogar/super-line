@@ -150,6 +150,40 @@ describe('collections — snapshot, filtering, live routing', () => {
   })
 })
 
+describe('collections — an update that changes nothing', () => {
+  const backends = {
+    memory: () => memoryCollections(),
+    sqlite: () => sqliteCollections({ file: ':memory:', collections: chat.collections }),
+  }
+  for (const [name, make] of Object.entries(backends)) {
+    it(`sends no change frame (${name})`, async () => {
+      const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {
+        authenticate,
+        identify,
+        collections: make(),
+        policies: { messages: { read: () => undefined, write: authorOnly } },
+      })
+      const changes: string[] = []
+      const client = h.client(chat, {
+        url,
+        role: 'user',
+        params: { userId: 'u1' },
+        plugins: [
+          { name: 'frames', onClientSideEvent: (e) => void (e.k === 'frame' && e.dir === 'in' && e.f.t === 'cchg' && changes.push(e.f.k)) },
+        ],
+      })
+      const sub = client.collection('messages').subscribe({ filter: eq('channelId', 'general') })
+      await sub.ready
+
+      await srv.collection('messages').insert(msg('m1', 'general', 'u1', 1))
+      await srv.collection('messages').update(msg('m1', 'general', 'u1', 1))
+      await srv.collection('messages').update({ ...msg('m1', 'general', 'u1', 1), text: 'edited' })
+      await waitFor(() => sub.rows()[0]?.text === 'edited')
+      expect(changes).toEqual(['insert', 'update'])
+    })
+  }
+})
+
 describe('collections — one-shot query()', () => {
   it('returns the ordered, limited snapshot as a detached copy — no live subscription stays behind', async () => {
     const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {

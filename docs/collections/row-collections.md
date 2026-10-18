@@ -81,6 +81,8 @@ const moved = await srv.conditionalBatch(
 )
 ```
 
+An update that leaves a row exactly as it was reaches no subscriber. `pgliteCollections` is the exception: its change feed carries no prior row to compare against.
+
 ## Client: subscribe to subsets, mutate in batches
 
 `client.collection(name)` is typed by the contract. `subscribe(query)` opens a **live row-set** — an initial snapshot, then per-row change events, auto-resubscribed and re-diffed across reconnects:

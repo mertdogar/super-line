@@ -512,6 +512,7 @@ await srv.batch([                                               // several co-wr
   { op: 'insert', collection: 'messages', row: { /* … */ } },
 ])
 await srv.conditionalBatch([{ collection: 'messages', id: 'm2', filter: eq('channelId', 'general') }], ops) // false = a condition failed, nothing applied
+// An update that leaves a row exactly as it was reaches no subscriber (pglite excepted: its feed has no prior row).
 
 // CLIENT — client.collection(name), typed by the contract:
 const sub = client.collection('messages').subscribe({ filter: eq('channelId', 'general'), orderBy: [{ field: 'createdAt', dir: 'asc' }], limit: 50 })

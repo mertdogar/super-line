@@ -38,6 +38,22 @@ export interface CollRelay {
   origin: string
 }
 
+// Structural equality over row values, blind to key order (backends rebuild rows in their own order). Anything
+// but a plain object or array counts as different, so a value this can't judge still goes out.
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (!isPlain(a) || !isPlain(b) || Array.isArray(a) !== Array.isArray(b)) return false
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length) return false
+  return keys.every((k) => Object.hasOwn(b, k) && sameValue(a[k], b[k]))
+}
+
+function isPlain(v: unknown): v is Record<string, unknown> {
+  if (typeof v !== 'object' || v === null) return false
+  const proto = Object.getPrototypeOf(v)
+  return proto === Object.prototype || proto === Array.prototype || proto === null
+}
+
 type ConnCollState = {
   subs: Map<string, Map<number, CollectionQuery>>
   policy: Map<string, Expr | undefined>
@@ -285,6 +301,7 @@ export function createRowCollections(config: CollectionRuntimeConfig, host: Coll
   // The single fan-out source: route one applied row change to local subscribers whose effective filter admits
   // it (pre-op OR post-op — so a row that leaves a filter on update is delivered too, and the client removes it).
   function route(change: RowChange): void {
+    if (change.k === 'update' && sameValue(change.prev, change.next)) return // nothing changed, so nothing to send
     host.tap(() => ({
       type: 'collection.change',
       n: change.n,

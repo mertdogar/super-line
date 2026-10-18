@@ -3,6 +3,18 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [server-v0.23.0] — 2026-10-18
+
+### Features
+
+- **server:** Srv.batch and srv.conditionalBatch for hosts that aren't plugins ([094eb10])
+
+### Bug Fixes
+
+- **server:** An update that changes nothing sends no change ([8396c9c])
+- **server:** A hibernation wake reads no rows and rewrites no unchanged snapshot ([24f8f83])
+- **client:** A second open of an open document waits for its own seed ([df908fa])
+
 ## [server-v0.22.0] — 2026-10-15
 
 ### Features

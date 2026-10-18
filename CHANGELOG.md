@@ -5,6 +5,21 @@ run `pnpm changelog` rather than editing by hand.
 
 ## 2026-10-18
 
+### Features
+
+- **server:** Srv.batch and srv.conditionalBatch for hosts that aren't plugins ([094eb10])
+
+### Bug Fixes
+
+- **server:** An update that changes nothing sends no change ([8396c9c])
+- **server:** A hibernation wake reads no rows and rewrites no unchanged snapshot ([24f8f83])
+
+### Documentation
+
+- **changelog:** Regenerate the root aggregate ([9dc4714])
+
+## 2026-10-18
+
 ### Bug Fixes
 
 - **core:** Plan typed columns for a schema with a root .meta({ id }) ([457ecba])

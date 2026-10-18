@@ -492,9 +492,10 @@ createSuperLineServer(api, {
   // SQL backends derive one typed table per collection by reading the schema's Standard JSON Schema
   // — works with Zod 4.2+, Zod Mini 4.2+, ArkType 2.1.28+, VineJS 4.3+, Sury 11+, stnl 2.1+, and
   // Valibot 1.2+ via toStandardJsonSchema() from @valibot/to-json-schema. A validator whose library
-  // lacks the companion spec still works: that collection falls back to key + one _sl_data JSON
-  // column (correct, just no SQL column typing or pushdown). Same per-field fallback for anything
-  // JSON Schema can't express, e.g. a .transform().
+  // lacks the companion spec, or a root that isn't an object (a union), still works: that collection
+  // falls back to key + one _sl_data JSON column (correct, just no SQL column typing or pushdown).
+  // Same per-field fallback for anything JSON Schema can't express, e.g. a .transform(). A root
+  // .meta({ id }) plans like the object without one.
   checkReferences: true,                        // opt-in advisory FK existence check (no cascades)
   policies: {                                   // DENY-BY-DEFAULT: omit read/write ⇒ that op is server-only
     messages: {

@@ -104,3 +104,24 @@ against the pre-fix tree it reports `@super-line/core: src/column-plan.ts value-
   `standard-json` converts only one way, zod has no `fromJSONSchema`, and the reconstruction would
   become the thing that *validates* — silently dropping refinements, transforms and brands, so a
   value failing the host's real validation would be accepted.
+
+## Amendment — 2026-10-18: a root `$ref` is unwrapped
+
+Zod 4.5.0 changed what `~standard.jsonSchema.output()` returns for a root `.meta({ id })`: Zod 4.4
+inlined the object, Zod 4.5+ returns only `{ $ref: '#/$defs/<id>', $defs }`. `planColumns` reads a
+root `type: 'object'`, so every collection whose schema carried a root id degraded to
+`key + _sl_data`. Ids are common wherever the same schemas also generate an OpenAPI spec, which
+names its components after them.
+
+`jsonSchemaOf` now replaces a root that is only a local `$ref` (`#/$defs/X`, or `#/definitions/X`)
+with its target and keeps the definitions beside it. Both callers benefit: `planColumns`, and
+plugin-chat's `hostSchema`, whose embedded `.meta()` would otherwise hold a `$ref` into `$defs` that
+the composed row schema doesn't have at its root.
+
+- A collection deployed with core ≤ 0.21 and Zod 4.5+ stored `v2:degenerate`; it now plans `v2`,
+  which the drift gate refuses. Rename the collection, or drop its table and its `col_meta` row
+  (`<prefix>meta` on pglite) before the store opens. One deployed with Zod ≤ 4.4 was already typed
+  and keeps its layout — and is no longer refused when its host upgrades Zod past 4.4.
+- A `$ref` on a *property* is deliberately not followed. A tagged enum or scalar property plans
+  `json` as before. Following it would flip layouts for collections whose root has no id.
+- A union root stays degenerate. That is a shape decision, unrelated to ids.

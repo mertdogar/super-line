@@ -103,7 +103,7 @@ The SQL backends store each LWW collection in its **own typed table** (`col_<nam
 ::: tip Which validators get typed columns
 super-line reads a schema's shape through [Standard JSON Schema](https://standardschema.dev/json-schema), the companion spec to Standard Schema — so it never assumes a particular library and every implementer plans identically. That covers **Zod 4.2+**, **Zod Mini 4.2+**, **ArkType 2.1.28+**, **VineJS 4.3+**, **Sury 11+**, **stnl 2.1+**, and **Valibot 1.2+** (wrap the schema in `toStandardJsonSchema()` from `@valibot/to-json-schema`).
 
-A validator whose library hasn't implemented the companion spec still works — it just can't be introspected, so its collection falls back to the key column plus one `_sl_data` JSON column. Everything is still validated, stored and queried correctly; you only lose SQL-level column typing and pushdown. The same fallback applies per-field to anything JSON Schema can't express, such as a `.transform()`.
+A schema whose shape can't be read as one object still works — its collection falls back to the key column plus one `_sl_data` JSON column. That happens when the validator's library hasn't implemented the companion spec, or when the root isn't an object (a union, such as `z.discriminatedUnion`). Everything is still validated, stored and queried correctly; you only lose SQL-level column typing and pushdown. The same fallback applies per-field to anything JSON Schema can't express, such as a `.transform()`. A root `.meta({ id })` doesn't count: it plans the same columns as the object without one.
 :::
 
 ::: warning What disqualifies a query

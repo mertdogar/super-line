@@ -162,6 +162,45 @@ describe('planColumns — fingerprint', () => {
   })
 })
 
+describe('planColumns — schemas with an id', () => {
+  const shape = { id: z.string(), name: z.string(), status: z.enum(['a', 'b']).nullable() }
+
+  it('plans a root .meta({ id }) like the untagged object', () => {
+    const untagged = planColumns({ schema: z.object(shape), key: 'id' })
+    const tagged = planColumns({ schema: z.object(shape).meta({ id: 'Thing' }), key: 'id' })
+    expect(tagged.degenerate).toBe(false)
+    expect(tagged.fingerprint).toBe(untagged.fingerprint)
+  })
+
+  it('unwraps a draft-07 root ref into definitions', () => {
+    const draft07 = {
+      '~standard': {
+        version: 1,
+        vendor: 'test',
+        validate: (value: unknown) => ({ value }),
+        jsonSchema: {
+          input: () => ({}),
+          output: () => ({
+            $ref: '#/definitions/Thing',
+            definitions: { Thing: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } },
+          }),
+        },
+      },
+    } as unknown as Schema
+    expect(planColumns({ schema: draft07, key: 'id' }).fingerprint).toBe('v2;key=id;id:text')
+  })
+
+  it('keeps a tagged discriminated union root degenerate', () => {
+    const union = z
+      .discriminatedUnion('type', [
+        z.object({ id: z.string(), type: z.literal('a') }),
+        z.object({ id: z.string(), type: z.literal('b') }),
+      ])
+      .meta({ id: 'Part' })
+    expect(planColumns({ schema: union, key: 'id' }).degenerate).toBe(true)
+  })
+})
+
 describe('planColumns — rejections', () => {
   it('rejects a key that is missing, non-string, or optional/nullable', () => {
     expect(() => planColumns({ schema: z.object({ id: z.string() }), key: 'nope' })).toThrow(/not a field/)

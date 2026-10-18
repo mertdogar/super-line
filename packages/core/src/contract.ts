@@ -494,6 +494,9 @@ const JSON_SCHEMA_OPTIONS = {
  * the companion spec, or the conversion threw (the spec permits that for unrepresentable schemas).
  * Callers treat both the same way — no shape, so fall back rather than fail.
  *
+ * A root that is only a local `$ref` (Zod 4.5+ emits one for a root `.meta({ id })`) is replaced by
+ * its target, with the definitions kept beside it, so the shape is readable at the root.
+ *
  * @param schema - any Standard Schema validator.
  * @returns the validated OUTPUT shape as JSON Schema, or `undefined` if it cannot be produced.
  */
@@ -501,10 +504,17 @@ export function jsonSchemaOf(schema: unknown): Record<string, unknown> | undefin
   const std = (schema as Partial<StandardJSONSchemaV1> | undefined)?.['~standard']
   if (!std || typeof std !== 'object' || !('jsonSchema' in std)) return undefined
   try {
-    return std.jsonSchema.output(JSON_SCHEMA_OPTIONS) as Record<string, unknown>
+    return unwrapRootRef(std.jsonSchema.output(JSON_SCHEMA_OPTIONS) as Record<string, unknown>)
   } catch {
     return undefined
   }
+}
+
+function unwrapRootRef(js: Record<string, unknown>): Record<string, unknown> {
+  const m = typeof js.$ref === 'string' ? /^#\/(\$defs|definitions)\/(.+)$/.exec(js.$ref) : null
+  const defs = m ? (js[m[1]!] as Record<string, Record<string, unknown>> | undefined) : undefined
+  const target = m && defs?.[m[2]!]
+  return target ? { ...target, [m[1]!]: defs } : js
 }
 
 /**

@@ -20,6 +20,11 @@ export class SubscribeSet {
   private readonly live = new Map<string, LiveFrame>()
   private readonly pending = new Map<number, LiveFrame>() // awaiting the server's answer, by correlation id
 
+  /** Seeded with a restored snapshot's frames, which its replays then confirm or refuse. */
+  constructor(frames: LiveFrame[] = []) {
+    for (const f of frames) this.live.set(keyOf(f)!, f)
+  }
+
   /** An inbound frame. True when the live set changed. */
   inbound(frame: ClientFrame): boolean {
     const key = keyOf(frame)
@@ -38,7 +43,9 @@ export class SubscribeSet {
     const sub = this.pending.get(frame.i)
     if (!sub) return undefined
     this.pending.delete(frame.i)
-    if (frame.t === 'res') this.live.set(keyOf(sub)!, sub)
+    const key = keyOf(sub)!
+    if (frame.t === 'res' && !this.live.has(key)) this.live.set(key, sub)
+    if (frame.t === 'err' && frame.i >= REPLAY_BASE) this.live.delete(key) // a replay the server now refuses
     return sub
   }
 

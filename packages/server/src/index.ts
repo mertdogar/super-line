@@ -1197,7 +1197,7 @@ export function createSuperLineServer<
         : undefined,
     )
     if (restored) Object.assign(conn, { connectedAt: restored.connectedAt })
-    if (persist) trackSnapshot(conn, { ...auth, connectionId: connId }, persist)
+    if (persist) trackSnapshot(conn, { ...auth, connectionId: connId }, persist, restored)
     conn.transport = auth.transport
     conn.principal = resolvePrincipal(conn, opts.identify) // ACL identity for stores; always defined
     raw.onMessage((bytes) => {
@@ -1286,22 +1286,22 @@ export function createSuperLineServer<
 
   // ---- Connection snapshots (ADR-0027) ------------------------------------------------------------------
   // Only for connections on a transport that declares `onSnapshotChanged`; everyone else pays one WeakMap miss.
-  const snapshots = new WeakMap<Conn, { subs: SubscribeSet; persist: () => void }>()
+  // While `adopting`, the restored snapshot is the source being rebuilt, not a state to persist.
+  const snapshots = new WeakMap<Conn, { subs: SubscribeSet; build: () => ConnectionSnapshot; persist: () => void; adopting: boolean }>()
 
   function trackSnapshot(
     conn: Conn,
     auth: ConnectionSnapshot['auth'],
     persist: NonNullable<ServerTransport['onSnapshotChanged']>,
+    restored?: ConnectionSnapshot,
   ): void {
-    const subs = new SubscribeSet()
-    snapshots.set(conn, {
-      subs,
-      persist: () => {
-        const rooms: string[] = []
-        for (const ch of conn.channels) if (ch.startsWith(ROOM)) rooms.push(ch.slice(ROOM.length))
-        persist(conn.id, { auth: { ...auth, env: conn.env }, connectedAt: conn.connectedAt, rooms, frames: subs.frames() })
-      },
-    })
+    const subs = new SubscribeSet(restored?.frames)
+    const build = (): ConnectionSnapshot => {
+      const rooms: string[] = []
+      for (const ch of conn.channels) if (ch.startsWith(ROOM)) rooms.push(ch.slice(ROOM.length))
+      return { auth: { ...auth, env: conn.env }, connectedAt: conn.connectedAt, rooms, frames: subs.frames() }
+    }
+    snapshots.set(conn, { subs, build, persist: () => persist(conn.id, build()), adopting: restored !== undefined })
     replyHooks.set(conn, (frame) => {
       const sub = subs.settle(frame)
       if (!sub) return false
@@ -1313,7 +1313,8 @@ export function createSuperLineServer<
   }
 
   function snapshotChanged(conn: Conn): void {
-    snapshots.get(conn)?.persist()
+    const snap = snapshots.get(conn)
+    if (snap && !snap.adopting) snap.persist()
   }
 
   // A socket that outlived an earlier server instance: accept it from its snapshot, rejoin its rooms, and replay
@@ -1327,6 +1328,10 @@ export function createSuperLineServer<
       ),
       ...snapshot.frames.map((frame, k) => onFrame(conn, { ...frame, i: REPLAY_BASE + k })),
     ])
+    const snap = snapshots.get(conn)
+    if (!snap) return // closed while adopting
+    snap.adopting = false
+    if (JSON.stringify(snap.build()) !== JSON.stringify(snapshot)) snap.persist() // only a refusal or a hook changed it
   }
 
   async function onMessage(conn: Conn, bytes: Uint8Array): Promise<void> {
@@ -1340,8 +1345,7 @@ export function createSuperLineServer<
   }
 
   async function onFrame(conn: Conn, frame: ClientFrame): Promise<void> {
-    const snap = snapshots.get(conn)
-    if (snap?.subs.inbound(frame)) snap.persist()
+    if (snapshots.get(conn)?.subs.inbound(frame)) snapshotChanged(conn)
     if (reservedConns.has(conn)) {
       await onReservedFrame(conn, frame) // dispatch against the plugin's parallel contract
       return

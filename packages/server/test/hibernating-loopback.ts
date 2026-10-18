@@ -56,6 +56,7 @@ export function hibernatingLoopback() {
   const sockets = new Map<string, End>() // connection id → server end
   const snapshots = new Map<string, string>() // connection id → persisted JSON
   const holds: number[] = []
+  let writes = 0
 
   const server: ServerTransport = {
     liveness: 'socket',
@@ -66,6 +67,7 @@ export function hibernatingLoopback() {
       hooks = undefined
     },
     onSnapshotChanged(connId, snapshot) {
+      writes++
       snapshots.set(connId, JSON.stringify(snapshot))
     },
     onHold(count) {
@@ -114,15 +116,17 @@ export function hibernatingLoopback() {
     evict() {
       for (const s of sockets.values()) s.evicting = true
     },
-    /** Hand every surviving socket to the server started since `evict()`. */
-    wake() {
-      if (!hooks?.adoptConnection) throw new Error('no server with adoptConnection is listening')
-      for (const [id, s] of sockets) {
+    /** Hand every surviving socket to the server started since `evict()`; resolves once all are adopted. */
+    wake(): Promise<void> {
+      const adopt = hooks?.adoptConnection
+      if (!adopt) throw new Error('no server with adoptConnection is listening')
+      const adopted = [...sockets].map(([id, s]) => {
         s.evicting = false
         s.msgCb = undefined
         s.closeCb = undefined
-        void hooks.adoptConnection(s, JSON.parse(snapshots.get(id)!) as ConnectionSnapshot)
-      }
+        return adopt(s, JSON.parse(snapshots.get(id)!) as ConnectionSnapshot)
+      })
+      return Promise.all(adopted).then(() => undefined)
     },
     /** Every live socket stops delivering to the server, which so never answers again (a dead peer). */
     silence() {
@@ -133,5 +137,7 @@ export function hibernatingLoopback() {
       return json === undefined ? undefined : (JSON.parse(json) as ConnectionSnapshot)
     },
     connectionIds: () => [...sockets.keys()],
+    /** How many snapshots the server has handed this transport to persist. */
+    writes: () => writes,
   }
 }

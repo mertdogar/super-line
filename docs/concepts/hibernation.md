@@ -34,7 +34,7 @@ That list is the **connection snapshot**. The server keeps it current as frames 
 
 On a wake, the transport walks the surviving sockets, reads each one's snapshot, and hands both to the new server. The server accepts the socket as it would a fresh connection, keeping the original `connectedAt`, re-adds its rooms, and **replays** each stored subscribe through the ordinary handlers. The replies are muted: the client already holds that subscription, so it receives nothing and carries on. `server.ready` resolves only once every surviving socket is back, and `createDurableNode` holds incoming events until then, so the event that woke the object never meets a half-rebuilt connection.
 
-A reconnect works differently. After a dropped socket, a re-subscribe receives a full snapshot of rows or document state, because anything could have changed during the outage. A replay sends no snapshot. A single object can't change while it hibernates, since nothing in it runs, so the client's view is still current.
+A reconnect works differently. After a dropped socket, a re-subscribe receives a full snapshot of rows or document state, because anything could have changed during the outage. A replay sends no snapshot, and a replayed row subscription doesn't read its rows at all. A single object can't change while it hibernates, since nothing in it runs, so the client's view is still current. A wake also leaves the stored snapshot alone unless the rebuilt connection differs from it, for example because a replay was refused.
 
 Anything outside the snapshot is lost on a wake:
 

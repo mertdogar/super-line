@@ -25,6 +25,7 @@ import type {
   ServerRowCondition,
   WriteOp,
 } from './types.js'
+import { REPLAY_BASE } from '../snapshot.js'
 
 /** Fixed cluster channel carrying relayed row batches (compared by `===`, not a prefix). */
 export const COLL_CHANNEL = 'cbatch'
@@ -118,9 +119,10 @@ export function createRowCollections(config: CollectionRuntimeConfig, host: Coll
         let set = subscribers.get(frame.n)
         if (!set) subscribers.set(frame.n, (set = new Set()))
         set.add(conn)
-        let rows: unknown[]
+        let rows: unknown[] = []
         try {
-          rows = await store.snapshot(frame.n, { ...frame.q, filter: eff })
+          // a hibernation replay's reply is muted and the client's rows are still current, so skip the read
+          if (frame.i < REPLAY_BASE) rows = await store.snapshot(frame.n, { ...frame.q, filter: eff })
         } catch (e) {
           subs.delete(frame.s) // failed subscribe must not leave a live registration behind
           if (subs.size === 0) {

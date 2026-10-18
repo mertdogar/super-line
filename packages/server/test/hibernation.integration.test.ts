@@ -99,10 +99,10 @@ describe('hibernation wake (connection snapshot)', () => {
       await srv.close()
       servers.splice(servers.indexOf(srv), 1)
       const next = start(opts.deny)
-      loop.wake()
+      await loop.wake()
       return next
     }
-    return { loop, first, client, lifecycle, errors, inbound, hibernate }
+    return { loop, storage, first, client, lifecycle, errors, inbound, hibernate }
   }
 
   it('a topic subscription resumes on a fresh server instance without the client noticing', async () => {
@@ -137,6 +137,42 @@ describe('hibernation wake (connection snapshot)', () => {
     doc.update({ title: 'v2' }) // a client write lands on the new instance
     await waitFor(async () => (await b.collection('scenes').read('s1'))?.title === 'v2')
     expect(lifecycle).toEqual([])
+  })
+
+  it('a wake rebuilds a row subscription without reading its rows', async () => {
+    const { first: a, client, storage, hibernate } = setup()
+    const rows = client.collection('messages').subscribe({ filter: eq('channelId', 'general') })
+    const seen: string[] = []
+    rows.subscribe((ev) => seen.push(`${ev.type}:${ev.id}`))
+    await rows.ready
+    const snapshot = storage.rows.snapshot.bind(storage.rows)
+    let reads = 0
+    storage.rows.snapshot = (...args) => {
+      reads++
+      return snapshot(...args)
+    }
+
+    const b = await hibernate(a)
+    await b.collection('messages').insert({ id: 'm1', channelId: 'general', body: 'hi' })
+    await waitFor(() => seen.includes('insert:m1'))
+    expect(reads).toBe(0)
+  })
+
+  it('a wake that changes nothing writes no connection snapshot', async () => {
+    const { loop, first: a, client, hibernate } = setup()
+    await client.joinRoom({ room: 'lobby' })
+    await client.subscribe('announce', () => {}).ready
+    await client.collection('messages').subscribe({ filter: eq('channelId', 'general') }).ready
+    const [id] = loop.connectionIds()
+    const stored = loop.snapshot(id!)
+    const writes = loop.writes()
+
+    await hibernate(a)
+    expect(loop.writes()).toBe(writes)
+    expect(loop.snapshot(id!)).toEqual(stored)
+
+    await client.collection('messages').subscribe({ filter: eq('channelId', 'other') }).ready
+    expect(loop.snapshot(id!)!.frames).toHaveLength(3) // a subscribe after the wake is recorded as before
   })
 
   it('env and host-joined rooms survive the wake', async () => {

@@ -1,6 +1,6 @@
 {
   "name": "@super-line/transport-cloudflare",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Cloudflare Durable Object transport for super-line: one Durable Object is one node, with hibernatable WebSockets that resume transparently on wake.",
   "license": "MIT",

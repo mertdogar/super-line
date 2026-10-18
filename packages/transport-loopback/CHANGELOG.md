@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [transport-loopback-v0.7.0] — 2026-10-18
+
+### Features
+
+- A refused credential closes 4401, and the client stops retrying it ([35c6e25])
+
 ## [transport-loopback-v0.6.0] — 2026-07-23
 
 ### Features

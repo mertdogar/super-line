@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [client-v0.18.0] — 2026-10-18
+
+### Features
+
+- A refused credential closes 4401, and the client stops retrying it ([35c6e25])
+
 ## [client-v0.17.1] — 2026-10-15
 
 ### Bug Fixes

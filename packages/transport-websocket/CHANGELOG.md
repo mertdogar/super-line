@@ -3,6 +3,20 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [transport-websocket-v0.10.0] — 2026-10-18
+
+### Features
+
+- A refused credential closes 4401, and the client stops retrying it ([35c6e25])
+
+### Bug Fixes
+
+- **test:** Bind test servers to 127.0.0.1, the address their clients dial ([6727757])
+
+### Testing
+
+- One polling wait with backoff, and teardown that cannot hang ([e86664a])
+
 ## [transport-websocket-v0.9.1] — 2026-07-29
 
 ### Bug Fixes

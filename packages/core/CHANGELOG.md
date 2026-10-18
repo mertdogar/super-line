@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [core-v0.22.0] — 2026-10-18
+
+### Bug Fixes
+
+- **core:** Plan typed columns for a schema with a root .meta({ id }) ([457ecba])
+
 ## [core-v0.21.0] — 2026-10-15
 
 ### Features

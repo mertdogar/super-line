@@ -79,9 +79,20 @@ Over a single live connection, delivery is **ordered and reliable** — the unde
 
 Session resume and server-push replay are **not built** — there is no log the client rejoins to fill the gap. See the project status in the README.
 
-## The 401-looks-like-a-drop caveat
+## A refused credential closes 4401
 
-Over the WebSocket transport, a rejected upgrade — bad credentials, a failed `authenticate` — is indistinguishable on the wire from any other drop. A client with bad credentials and `reconnect: true` therefore **retries forever**, because from its side an auth rejection and a flaky network look identical. When you want an auth failure to surface immediately — tests, a login screen — turn reconnect off so the first rejection propagates:
+A browser `WebSocket` can't read the status of a refused upgrade: a `401` reaches it as a bare 1006, the same as a dead host. So when `authenticate` throws `new SuperLineError('UNAUTHORIZED', reason)`, the WebSocket and Cloudflare transports complete the upgrade and close it at once with **4401**, the reason riding the close. A client's credential is fixed when it's built, so a retry would be refused too: the client **stops reconnecting**, its requests reject `UNAUTHORIZED`, and `onDisconnect` fires with `4401`. Build a new client with a fresh credential (plugin-auth's `reauthenticate()` does this):
+
+```ts
+const client = createSuperLineClient(api, {
+  transport: webSocketClientTransport({ url }), role: 'user', params: { token },
+  onDisconnect: (code) => { if (code === 4401) signInAgain() },
+})
+```
+
+Because the upgrade completes, `onConnect` (or `onReconnect`) fires just before the 4401 close.
+
+Any other throw from `authenticate` may be transient — an auth store that is down — so it stays a `401`, which the client can't tell from a drop: it **keeps retrying** with backoff. To surface that at once (tests, a login screen), turn reconnect off and the first request rejects `DISCONNECTED`:
 
 ```ts
 const client = createSuperLineClient(api, {
@@ -90,7 +101,7 @@ const client = createSuperLineClient(api, {
 await client.whoami({}) // rejects DISCONNECTED right away instead of retrying
 ```
 
-This is a property of the WebSocket handshake, not of super-line's auth model — other [transports](/concepts/transports-and-adapters) surface rejection differently.
+The HTTP transport answers every throw with a `401`.
 
 ---
 

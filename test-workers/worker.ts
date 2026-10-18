@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
-import { INSPECTOR_SUBPROTOCOL, type AuthOutcome, type Handshake } from '@super-line/core'
+import { INSPECTOR_SUBPROTOCOL, SuperLineError, type AuthOutcome, type Handshake } from '@super-line/core'
 import { cloudflareServerTransport, createDurableNode } from '@super-line/transport-cloudflare'
 import { createSuperLineServer } from '@super-line/server'
 import { cloudflareCollections } from '@super-line/collections-cloudflare'
@@ -50,6 +50,7 @@ export class RawNode extends DurableObject<Cloudflare.Env> {
     void this.transport.start({
       authenticate: async (h) => {
         this.handshakes.push(h)
+        if (h.query.reject === 'unauthorized') throw new SuperLineError('UNAUTHORIZED', 'revoked')
         if (h.query.reject) throw new Error('rejected by test')
         return { role: 'user', ctx: { uid: h.query.uid } }
       },

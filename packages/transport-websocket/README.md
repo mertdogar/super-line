@@ -38,7 +38,8 @@ const client = createSuperLineClient(api, {
 
 - **Server** — attaches to your `http.Server` and handles the WebSocket `upgrade`, so it composes
   with Express/Fastify/Hono on the same port. The handshake (headers + query) is normalized to a
-  `Handshake` and passed to your server's `authenticate`; rejected handshakes get a `401` before upgrade.
+  `Handshake` and passed to your server's `authenticate`. A thrown `SuperLineError('UNAUTHORIZED')` is closed
+  `4401` after the upgrade, so the client stops retrying; any other throw gets a `401` before upgrade.
   Each accepted socket becomes a `RawConn`.
 - **Client** — dials one server URL per `connect`, sending handshake params as query string. Uses the
   global `WebSocket` (browser, or Node 22+); pass `WebSocket` to override.

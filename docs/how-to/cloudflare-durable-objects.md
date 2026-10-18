@@ -92,7 +92,7 @@ Objects never talk to each other: there is no adapter, so rooms, topics, and the
 Every request a Durable Object receives wakes it. A stray `/favicon.ico` or a crawler hitting the root would construct the node for nothing, so the Worker forwards only the WebSocket path and answers everything else itself. Serve static files with Workers [static assets](https://developers.cloudflare.com/workers/static-assets/), which never reach the Worker's `fetch`.
 :::
 
-The handshake your `authenticate` receives is the usual [normalized `Handshake`](/how-to/choose-a-transport#write-auth-once): `transport` is `'cloudflare'`, `query` is the URL's query string, `headers` are the request headers, and `raw` is the `Request`. A throw becomes a plain `401` before any socket opens.
+The handshake your `authenticate` receives is the usual [normalized `Handshake`](/how-to/choose-a-transport#write-auth-once): `transport` is `'cloudflare'`, `query` is the URL's query string, `headers` are the request headers, and `raw` is the `Request`. A thrown `SuperLineError('UNAUTHORIZED')` closes the socket 4401 right after the upgrade, so a browser can tell it from an outage and the client stops retrying; any other throw is a plain `401` before any socket opens.
 
 ## Connect a client
 

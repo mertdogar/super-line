@@ -3,6 +3,7 @@ import type { Duplex } from 'node:stream'
 import { getLogger } from '@logtape/logtape'
 import { WebSocketServer, type RawData, type WebSocket as WsServerSocket } from 'ws'
 import {
+  SuperLineError,
   type RawConn,
   type ServerTransport,
   type ClientTransport,
@@ -112,12 +113,16 @@ export function webSocketServerTransport(opts: WebSocketServerTransportOptions =
     try {
       auth = await hooks!.authenticate(buildHandshake(req))
     } catch (err) {
-      // A rejected authentication becomes a bare 401 on the wire — the reason never reaches the client. Log
-      // it (via LogTape, off by default) so a THROWN auth error (a config bug, a nodeKey mistake, a rejecting
-      // authenticate hook) is visible WHEN the operator enables logging, rather than silently discarded. Not
-      // console — an app whose authenticate throws per-attempt would otherwise flood stderr. Routine rejections
-      // (bad password, expired token) return a guest and never throw, so this is quiet under normal logins.
-      logAuth.warning('authenticate threw — rejecting connection with 401 {error}', { error: err })
+      // Logged via LogTape (off by default), not console — an app whose authenticate throws per-attempt would
+      // otherwise flood stderr.
+      logAuth.warning('authenticate threw — refusing the connection {error}', { error: err })
+      // A thrown UNAUTHORIZED refuses the credential: close 4401 after the upgrade, as for a reserved class, so
+      // the client can stop retrying it. Anything else may be transient (a down auth store), so it stays a 401
+      // the client keeps retrying.
+      if (err instanceof SuperLineError && err.code === 'UNAUTHORIZED') {
+        wss.handleUpgrade(req, socket, head, (ws) => ws.close(4401, truncateReason(err.message || 'unauthorized')))
+        return
+      }
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
       socket.destroy()
       return

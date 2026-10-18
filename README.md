@@ -138,6 +138,7 @@ export const chat = defineContract({
 
 ```ts
 import http from 'node:http'
+import { SuperLineError } from '@super-line/core'
 import { createSuperLineServer } from '@super-line/server'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { chat } from './contract'
@@ -147,7 +148,7 @@ const srv = createSuperLineServer(chat, {
   transports: [webSocketServerTransport({ server })],
   authenticate: (h) => {
     const name = h.query.name // the Handshake: { transport, headers, query, peer?, raw }
-    if (!name) throw new Error('unauthorized') // throw -> 401 at the upgrade, no socket
+    if (!name) throw new SuperLineError('UNAUTHORIZED', 'no name') // -> close 4401; the client stops retrying
     return { role: 'user' as const, ctx: { name } } // role + ctx; ctx in every handler
   },
 })
@@ -381,7 +382,7 @@ pnpm docs:dev    # run the docs site locally (VitePress + TypeDoc)
 | [`@super-line/react`](packages/react) | declare `Register` once → module-level `useRequest` / `useEvent` / `useSubscription` / `useCollection` / `useDoc` / `useSuperLineClient` (factory escape hatch: `createSuperLineHooks<C, Role>`) |
 | [`@super-line/control-center`](packages/control-center) | Debugging webapp (`npx`): live topology, contract, roles & per-conn ctx/state, transport/wire, `msg.*` live feed |
 | **Transports** — client↔server wire ||
-| [`@super-line/transport-websocket`](packages/transport-websocket) | Default WebSocket transport: HTTP upgrade, 401 rejection, inspector subprotocol, backpressure (`webSocketServerTransport`/`webSocketClientTransport`) |
+| [`@super-line/transport-websocket`](packages/transport-websocket) | Default WebSocket transport: HTTP upgrade, 4401/401 rejection, inspector subprotocol, backpressure (`webSocketServerTransport`/`webSocketClientTransport`) |
 | [`@super-line/transport-http`](packages/transport-http) | HTTP transport — SSE or long-poll downstream + POST upstream (`httpServerTransport`/`httpClientTransport`) |
 | [`@super-line/transport-libp2p`](packages/transport-libp2p) | libp2p / WebRTC transport over a libp2p stream, bring-your-own node (`libp2pServerTransport`/`libp2pClientTransport`) |
 | [`@super-line/transport-loopback`](packages/transport-loopback) | In-memory transport (no socket) — for tests (`createLoopbackTransport`) |

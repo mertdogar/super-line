@@ -99,7 +99,7 @@ interface SuperLineServerOptions<C, A> {
   nodeKey?: string                            // STABLE replica identity across restarts, for plugins that persist node-owned
                                               // state. REQUIRED by @super-line/plugin-auth (it keys per-node session
                                               // reconciliation on it) — a changing value leaks prior-boot sessions.
-  authenticate: (h: Handshake) => A | Promise<A>   // REQUIRED. Return { role, ctx, env? }; throw -> 401. h = { transport, headers, query, peer?, raw }
+  authenticate: (h: Handshake) => A | Promise<A>   // REQUIRED. Return { role, ctx, env? }; throw SuperLineError('UNAUTHORIZED') -> close 4401 (the client stops), any other throw -> 401 (it retries). h = { transport, headers, query, peer?, raw }
   // env (optional) seeds the connection's client-visible conn.env before the connection is ready — see "Connection env" below
   authorizeSubscribe?: (topic, ctx, conn) => boolean | void | Promise<boolean | void> // false/throw -> deny
   use?: Middleware<A>[]                        // run before request/subscribe handlers
@@ -249,7 +249,7 @@ interface SuperLineClientOptions<C, R> {
   timeoutMs?: number                            // default 30000
   validate?: 'off' | 'inbound'                  // default 'off'; 'inbound' re-validates server->client (catch drift)
   onValidationError?: (error, info: { kind: 'response'|'event'|'topic'; name }) => void
-  reconnect?: boolean                           // default true
+  reconnect?: boolean                           // default true. A 4401 close (refused credential) ends it: requests reject UNAUTHORIZED, onDisconnect(4401) fires
   reconnectBaseMs?: number                      // default 500
   reconnectMaxMs?: number                       // default 30000
   reconnectFactor?: number                      // default 2
@@ -615,7 +615,7 @@ interface AuthServerOptions<C> {
   usersReadable?: boolean               // default true (open read on `users` + `userPresence`)
   jwt?: AssertionOptions                // enables server-side minting (authKit.tokens.*) + stateless params:{ jwt } connect. See "Bearer assertions"
   rejectUnauthenticated?: boolean       // default false. true ⇒ a PRESENTED-but-invalid credential throws UNAUTHORIZED at
-                                        // connect instead of silently resolving to guest. A credential-LESS connect (and an
+                                        // connect instead of silently resolving to guest — the client gets close 4401 and stops. A credential-LESS connect (and an
                                         // explicit role:'guest') still resolves guest either way.
   sendPasswordReset?: (a: { user: AuthUser; token: string }) => void | Promise<void>
   passwordResetTtlMs?: number           // default 1 hour

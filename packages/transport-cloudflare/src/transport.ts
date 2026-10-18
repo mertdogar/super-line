@@ -1,5 +1,5 @@
 import { getLogger } from '@logtape/logtape'
-import type { AuthOutcome, ConnectionSnapshot, Handshake, RawConn, ReservedConnection, ServerTransport } from '@super-line/core'
+import { SuperLineError, type AuthOutcome, type ConnectionSnapshot, type Handshake, type RawConn, type ReservedConnection, type ServerTransport } from '@super-line/core'
 
 const log = getLogger(['super-line', 'transport-cloudflare'])
 
@@ -70,7 +70,9 @@ export function cloudflareServerTransport(ctx: DurableObjectState): CloudflareSe
       try {
         auth = await hooks.authenticate(handshake)
       } catch (err) {
-        log.warn('authenticate threw — rejecting connection with 401 {error}', { error: err })
+        log.warn('authenticate threw — refusing the connection {error}', { error: err })
+        // A thrown UNAUTHORIZED refuses the credential, so the client can stop retrying it; any other throw may be transient.
+        if (err instanceof SuperLineError && err.code === 'UNAUTHORIZED') return refuseAfterUpgrade(undefined, err)
         return new Response('Unauthorized', { status: 401 })
       }
     }

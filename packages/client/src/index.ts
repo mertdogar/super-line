@@ -701,6 +701,10 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   }
 
   function onClose(code = 1006): void {
+    // 4401: the server refused this client's credential, which is fixed at construction — a retry is refused too
+    if (code === 4401) closed = true
+    const dropped = (): SuperLineError =>
+      code === 4401 ? new SuperLineError('UNAUTHORIZED', 'The server refused the credential') : new SuperLineError('DISCONNECTED', 'Connection closed')
     stopKeepalive()
     logConn.debug('connection closed ({code})', { code })
     if (tapping) tap({ k: 'conn', phase: 'close', code })
@@ -709,7 +713,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       if (op.sent) {
         if (op.timer) clearTimeout(op.timer)
         if (tapping) tap({ k: 'req.dropped', i: id, m: op.method, why: 'disconnected' })
-        op.reject(new SuperLineError('DISCONNECTED', 'Connection closed'))
+        op.reject(dropped())
         requests.delete(id)
       }
     }
@@ -719,7 +723,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       for (const [id, op] of requests) {
         if (op.timer) clearTimeout(op.timer)
         if (tapping) tap({ k: 'req.dropped', i: id, m: op.method, why: 'disconnected' })
-        op.reject(new SuperLineError('DISCONNECTED', 'Connection closed'))
+        op.reject(dropped())
         requests.delete(id)
       }
       return

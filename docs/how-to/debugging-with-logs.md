@@ -86,7 +86,7 @@ process.on('unhandledRejection', (reason) => {
 })
 ```
 
-Note this only catches errors that reach the top with no handler. Most super-line throws are already handled — a request handler's throw becomes an error frame to the client, and a rejected `authenticate` is turned into a `401`. That `401` is otherwise silent (the reason never reaches the client), so the WebSocket transport logs a *thrown* auth error at `warning` under `['super-line', 'transport-websocket', 'auth']` — enable logging and a config bug, a nodeKey mistake, or a rejecting `authenticate` hook shows up as `authenticate threw — rejecting connection with 401` instead of a mystery drop. So a global `unhandledRejection` handler is a backstop for **your** code; seeing super-line's internals is what enabling the logs above is for.
+Note this only catches errors that reach the top with no handler. Most super-line throws are already handled — a request handler's throw becomes an error frame to the client, and a rejected `authenticate` is turned into a 4401 close (a thrown `UNAUTHORIZED`) or a `401` (anything else). A `401` carries no reason to the client, so the WebSocket transport logs a *thrown* auth error at `warning` under `['super-line', 'transport-websocket', 'auth']` — enable logging and a config bug, a nodeKey mistake, or a rejecting `authenticate` hook shows up as `authenticate threw — refusing the connection` instead of a mystery drop. So a global `unhandledRejection` handler is a backstop for **your** code; seeing super-line's internals is what enabling the logs above is for.
 
 ## Structured, not stringified
 

@@ -37,8 +37,8 @@ every resolution — guests included — and may transform the result (enrich `c
 ```ts
 hooks: {
   authenticate: {
-    // before: inspect/rewrite the raw handshake, or throw to REJECT the connection. The transport
-    // swallows a rejected authentication into a bare 401 (no server-side log, no onError), so a record
+    // before: inspect/rewrite the raw handshake, or throw to REJECT the connection. The server
+    // keeps no record of a rejected authentication (no server-side log, no onError), so a record
     // of blocked connections must be logged HERE, before the throw. NB: the WS client may re-attempt a
     // rejected handshake, so `authenticate` can run more than once per connect — keep it idempotent
     // (this is a pure check, so it is). That's why the audit line below can appear more than once.
@@ -67,10 +67,11 @@ await banned.whoami().then(
 ```
 
 ::: tip Log before you throw, and stay idempotent
-A rejected authentication becomes a bare 401 — no server log, no `onError`. Record blocked connections in the
-`before`, ahead of the throw. And because the WS client may re-attempt a rejected handshake, `authenticate` can
-run more than once per connect: keep the `before` a pure, repeatable check. `reconnect: false` surfaces the
-refusal at once instead of retrying forever.
+A rejected authentication leaves no server log and no `onError`. Record blocked connections in the
+`before`, ahead of the throw. And because the WS client re-attempts a handshake refused with anything but
+`UNAUTHORIZED`, `authenticate` can run more than once per connect: keep the `before` a pure, repeatable check.
+Throw `SuperLineError('UNAUTHORIZED')` instead and the client gets a 4401 close and stops retrying; `reconnect:
+false` surfaces any refusal at once.
 :::
 
 ## Hooks on the imperative kit

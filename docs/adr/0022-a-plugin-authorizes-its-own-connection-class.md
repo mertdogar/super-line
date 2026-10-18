@@ -76,3 +76,18 @@ fronting reverse proxy logs query strings, and the Control Center re-dials every
 
 `clustering` aside, the hook is per-node: every node mounting `inspector()` needs the credential
 configured, since the Control Center attaches to one node at a time.
+
+## Amendment — 2026-10-19: a host's refused credential closes 4401 too
+
+The 1006 argument above was never specific to reserved classes. A host `authenticate` refusal reached a
+browser the same way, so a client whose token had been revoked while it was away could not tell that from an
+outage and retried forever. The WebSocket and Cloudflare transports (and loopback) now complete the upgrade
+and close **4401** when the host's `authenticate` throws `SuperLineError('UNAUTHORIZED')`. Any other throw
+keeps the plain `401`: it may be transient (an auth store that is down), and a refusal the client treats as
+final must be one the host meant.
+
+The client treats 4401 as final. A client's credential is fixed at construction (ADR-0020), so a retry would
+be refused too: it stops reconnecting, rejects its requests `UNAUTHORIZED`, and reports the code through
+`onDisconnect`, and the app builds a new client with a fresh credential. Because the upgrade completes,
+`onConnect`/`onReconnect` fire once just before the close. The HTTP transport still answers every throw
+with a `401`.

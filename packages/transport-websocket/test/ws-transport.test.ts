@@ -2,7 +2,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
-import { INSPECTOR_SUBPROTOCOL, type AuthOutcome, type Handshake, type RawConn, type ReservedConnection } from '@super-line/core'
+import { INSPECTOR_SUBPROTOCOL, SuperLineError, type AuthOutcome, type Handshake, type RawConn, type ReservedConnection } from '@super-line/core'
 import { webSocketServerTransport, webSocketClientTransport, type WebSocketClientTransportOptions } from '../src/index.js'
 import { waitFor } from '../../core/test/wait.js'
 
@@ -86,6 +86,22 @@ describe('websocket transport', () => {
       ws.on('unexpected-response', (_req, res) => resolve('status:' + res.statusCode))
     })
     expect(['error', 'status:401']).toContain(result)
+    expect(connected).toBe(0)
+  })
+
+  it('refuses a thrown UNAUTHORIZED AFTER the upgrade with 4401, so a client can tell it from a dead host', async () => {
+    let connected = 0
+    const { url } = await listen(
+      async () => {
+        throw new SuperLineError('UNAUTHORIZED', 'revoked')
+      },
+      () => connected++,
+    )
+    const ws = new WebSocket(`${url}/?role=user`)
+    const closed = await new Promise<{ code: number; reason: string }>((resolve) =>
+      ws.on('close', (code, reason) => resolve({ code, reason: reason.toString() })),
+    )
+    expect(closed).toEqual({ code: 4401, reason: 'revoked' })
     expect(connected).toBe(0)
   })
 

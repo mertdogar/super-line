@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { AuthOutcome, Handshake, RawConn } from '@super-line/core'
+import { SuperLineError, type AuthOutcome, type Handshake, type RawConn } from '@super-line/core'
 import { createLoopbackTransport } from '../src/index.js'
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
@@ -76,6 +76,18 @@ describe('loopback transport', () => {
     expect(accepted).toHaveLength(0)
     expect(events.open).toBe(0)
     expect(events.closes).toEqual([1006])
+  })
+
+  it('closes 4401 when authenticate throws UNAUTHORIZED', async () => {
+    const loopback = createLoopbackTransport()
+    const accepted = startServer(loopback, async () => {
+      throw new SuperLineError('UNAUTHORIZED', 'revoked')
+    })
+    const { events } = dial(loopback)
+    await tick()
+    expect(accepted).toHaveLength(0)
+    expect(events.open).toBe(0)
+    expect(events.closes).toEqual([4401])
   })
 
   it('close() delivers 1000 to both ends and flips writable false', async () => {

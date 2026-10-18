@@ -33,6 +33,7 @@ export const api = defineContract({
 ```ts
 // server.ts
 import http from 'node:http'
+import { SuperLineError } from '@super-line/core'
 import { createSuperLineServer } from '@super-line/server'
 import { webSocketServerTransport } from '@super-line/transport-websocket'
 import { api } from './contract.js'
@@ -42,7 +43,7 @@ const srv = createSuperLineServer(api, {
   transports: [webSocketServerTransport({ server })],  // WS transport; HTTP/SSE + libp2p transports also available
   authenticate: (h) => {
     const name = h.query.name                          // h: Handshake = { transport, headers, query, peer?, raw }
-    if (!name) throw new Error('unauthorized')         // -> 401 at the upgrade
+    if (!name) throw new SuperLineError('UNAUTHORIZED', 'no name') // -> close 4401; the client stops retrying
     return { role: 'user' as const, ctx: { name } }    // role + ctx; ctx.name in every user handler
   },
 })
@@ -109,7 +110,7 @@ The client's `role` option is a **claim** sent as a query param; resolve the rea
 const srv = createSuperLineServer(api, {
   transports: [webSocketServerTransport({ server })],
   authenticate: async (h) => {
-    const user = await verifyJwt(h.query.token)                 // throw to reject with 401 (no socket opened)
+    const user = await verifyJwt(h.query.token)                 // a plain throw -> 401 (no socket opened), which the client retries
     if (user.role !== h.query.role) throw new SuperLineError('FORBIDDEN', 'role not granted')
     return user.role === 'admin'
       ? { role: 'admin' as const, ctx: { user } }
@@ -1007,7 +1008,7 @@ catch (e) {
 - Delivery is **at-most-once**; messages sent while a client is offline are dropped (no replay yet).
 - Make handlers **idempotent**; after a reconnect the client auto-re-subscribes topics but must **re-run room joins**.
 - In-flight requests reject `DISCONNECTED` on drop; calls during reconnect are queued and flushed.
-- A 401 looks like any drop over the WS API, so a bad-credential client retries forever unless you set `reconnect: false`.
+- Refuse a credential with `throw new SuperLineError('UNAUTHORIZED')`: the client gets close 4401, stops reconnecting, rejects its requests `UNAUTHORIZED` and fires `onDisconnect(4401)` — build a new client with a fresh credential. Any other `authenticate` throw is a 401 that looks like any drop over the WS API, so the client retries it forever unless you set `reconnect: false`.
 - Against a server whose transport runs no heartbeat (a hibernating host), set `keepalive` so the client notices a dead socket, and watch `onError` for a subscription the server stopped on a wake:
 
 ```ts
@@ -1236,7 +1237,7 @@ it('rejects a bad token and never opens a socket', async () => {
   })
   srv.implement({ user: { echo: async ({ text }) => ({ text }), boom: async () => ({ ok: true }) } })
 
-  // reconnect:false so the failure surfaces immediately (a 401 looks like any drop over the WS API)
+  // reconnect:false so the failure surfaces immediately (a plain throw is a 401, which looks like any drop over the WS API)
   const client = h.client(api, { url, role: 'user', params: { token: 'bad' }, reconnect: false })
   await expect(client.echo({ text: 'x' })).rejects.toMatchObject({ code: 'DISCONNECTED' })
   expect(connects).toBe(0)

@@ -1,4 +1,4 @@
-import type { RawConn, ServerTransport, ClientTransport, AuthOutcome } from '@super-line/core'
+import { SuperLineError, type RawConn, type ServerTransport, type ClientTransport, type AuthOutcome } from '@super-line/core'
 
 /**
  * An in-memory client↔server transport: client and server run in the same process and
@@ -49,7 +49,8 @@ export function createLoopbackTransport(): {
             }
             pair.open(h.onConnection, auth)
           })
-          .catch(() => pair.closeBoth(1006)) // rejected auth == dropped connection
+          // a refused credential closes 4401 like the WebSocket transports; any other rejection is a dropped connection
+          .catch((err) => pair.closeBoth(err instanceof SuperLineError && err.code === 'UNAUTHORIZED' ? 4401 : 1006))
         return pair.clientEnd
       },
     }

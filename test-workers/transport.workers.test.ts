@@ -42,6 +42,15 @@ describe('cloudflare transport', () => {
     expect(res.webSocket).toBeNull()
   })
 
+  it('refuses a thrown UNAUTHORIZED AFTER the upgrade with 4401, so a client can tell it from a dead host', async () => {
+    const res = await upgrade(node(), 'role=user&reject=unauthorized')
+    expect(res.status).toBe(101)
+    const ws = res.webSocket!
+    const done = closed(ws)
+    ws.accept()
+    expect(await done).toEqual({ code: 4401, reason: 'revoked' })
+  })
+
   it('accepts a reserved (subprotocol) connection without the host authenticate', async () => {
     const stub = node()
     const res = await upgrade(stub, 'pw=open%20sesame', INSPECTOR_SUBPROTOCOL)

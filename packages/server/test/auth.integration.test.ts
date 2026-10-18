@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import * as z from 'zod'
-import { defineContract } from '@super-line/core'
+import { defineContract, SuperLineError } from '@super-line/core'
 import { createHarness } from './harness.js'
 
 const contract = defineContract({
@@ -49,5 +49,22 @@ describe('auth at upgrade', () => {
     })
     await expect(client.ping({})).rejects.toMatchObject({ code: 'DISCONNECTED' })
     expect(connections).toBe(0)
+  })
+
+  it('a thrown UNAUTHORIZED closes 4401, and the client stops instead of retrying', async () => {
+    let attempts = 0
+    const { srv, url } = await h.server(contract, {
+      authenticate: () => {
+        attempts++
+        throw new SuperLineError('UNAUTHORIZED', 'revoked')
+      },
+    })
+    srv.implement({ user: { ping: async () => ({ ok: true }) } })
+    const closes: number[] = []
+    const client = h.client(contract, { url, role: 'user', reconnectBaseMs: 10, onDisconnect: (code) => closes.push(code) })
+    await expect(client.ping({})).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    await new Promise((r) => setTimeout(r, 200))
+    expect(attempts).toBe(1)
+    expect(closes).toEqual([4401])
   })
 })

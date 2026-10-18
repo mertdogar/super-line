@@ -71,7 +71,7 @@ For durable state in the same object, pair it with [`@super-line/collections-clo
 
 ## Behavior notes
 
-- **Handshake** — `transport: 'cloudflare'`, `query` from the URL, `headers` from the request, `raw` is the `Request`. A throwing `authenticate` gets a plain `401` and no socket; a refused Control Center connection is closed `4401` after the upgrade.
+- **Handshake** — `transport: 'cloudflare'`, `query` from the URL, `headers` from the request, `raw` is the `Request`. An `authenticate` that throws `SuperLineError('UNAUTHORIZED')`, and a refused Control Center connection, are closed `4401` after the upgrade, so the client can tell them from an outage; any other throw gets a plain `401` and no socket.
 - **What a wake loses** — everything in memory: `conn.data` (`onConnection` runs again for each resumed socket), memory collection backends, module state. Keep `ctx` and `env` JSON-serializable; the snapshot is stored as JSON.
 - **A subscription can end with the socket open** — a wake runs each subscription's policy again, and one it now refuses reaches the client's `onError` with `kind: 'resubscribe'`.
 - **Timers keep the node awake** — your own, `plugin-queue`'s polling (always), `plugin-inspector`'s keepalive (while a Control Center watches). A plugin's `ctx.hold()` keeps it awake on purpose.

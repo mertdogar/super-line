@@ -56,7 +56,7 @@ webSocketClientTransport({ url, WebSocket })
 
 ## Behavior notes
 
-- A rejected `authenticate` becomes a **`401` at the HTTP upgrade with no socket opened** — efficient, and a real status. (To the client this looks like a connection drop; see [Reconnection & delivery](/concepts/reconnection-delivery).)
+- An `authenticate` that throws `SuperLineError('UNAUTHORIZED')` gets the upgrade completed and closed **4401**, so the client can tell a refused credential from a dead host and stops retrying it. Any other throw becomes a **`401` at the HTTP upgrade with no socket opened**, which the client sees as a drop and retries. See [Reconnection & delivery](/concepts/reconnection-delivery#a-refused-credential-closes-4401).
 - Heartbeat is **app-level ping/pong frames** the core manages — not the WebSocket protocol ping — so it's identical across every transport.
 - `params` (and `role`) ride the URL query string and surface in `authenticate` as `h.query`.
 

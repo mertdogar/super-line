@@ -60,7 +60,7 @@ Decide: **Need a reply?** request. **Pushing to recipients *you* pick?** event (
 |---|---|
 | Define contract | `defineContract({ shared, roles })` (schemas = any Standard Schema validator; Zod in examples) |
 | Server | `const srv = createSuperLineServer(api, { transports: [webSocketServerTransport({ server })], authenticate }); srv.implement({ shared, user, agent })` (`webSocketServerTransport` from `@super-line/transport-websocket`) |
-| Authenticate | `authenticate: (h) => ({ role: 'user', ctx })` — `throw` to reject (401). Read the claimed role from the `Handshake` (`h.query.role` / `h.headers`) and verify it. |
+| Authenticate | `authenticate: (h) => ({ role: 'user', ctx })` — `throw new SuperLineError('UNAUTHORIZED')` to refuse (close 4401, the client stops retrying; any other throw is a 401 it retries). Read the claimed role from the `Handshake` (`h.query.role` / `h.headers`) and verify it. |
 | Handler | `name: async (input, ctx, conn) => output` — `ctx`/`conn` narrowed to the block's role |
 | Reply error | `throw new SuperLineError('FORBIDDEN', 'msg')` → client promise rejects with that typed code |
 | Send to one conn | `conn.emit('event', data)` (scoped to the conn's role events) |

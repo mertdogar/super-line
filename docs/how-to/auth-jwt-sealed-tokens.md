@@ -168,7 +168,9 @@ what closes the alg-confusion attack.
   for `user` would `NOT_FOUND` on every call rather than see a connect error. Either confirm with `whoami()`
   (on `shared`, returns `null` for a guest) before trusting the connection — as `authClient` does — or set
   `rejectUnauthenticated: true` on `auth(...)` so a *presented*-but-invalid credential throws `UNAUTHORIZED` at
-  connect instead (a credential-less connect, and an explicit `role: 'guest'`, still resolve guest).
+  connect instead (a credential-less connect, and an explicit `role: 'guest'`, still resolve guest). The client
+  gets a 4401 close and stops reconnecting, so a client whose token was revoked while it was away learns that
+  on its next connect: re-mint on `onDisconnect` code `4401`.
 - **Roles come from different places.** A signed assertion carries its roles in its own claims; a sealed one does
   not — connect reads them from the user row, so a grant made after minting is live on the very next connection and
   the mint site cannot escalate anyone.

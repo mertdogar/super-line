@@ -258,9 +258,9 @@ describe('plugin-auth — tokenParam + rejectUnauthenticated (Phase 1)', () => {
       admin: { adminOnly: async () => ({ ok: true }) },
     } as never)
 
-    // a PRESENTED-but-invalid token → authenticate throws → the upgrade is refused (reconnect:false surfaces it)
-    const bad = h.client(app, { url, role: 'user', params: { jwt: 'not.a.real.assertion' }, reconnect: false })
-    await expect(bad.whoami()).rejects.toThrow()
+    // a PRESENTED-but-invalid token → authenticate throws UNAUTHORIZED → closed 4401, and the client stops retrying
+    const bad = h.client(app, { url, role: 'user', params: { jwt: 'not.a.real.assertion' } })
+    await expect(bad.whoami()).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
     bad.close()
 
     // a credential-LESS connect still resolves guest
@@ -350,8 +350,7 @@ describe('plugin-auth — resolveToken + AuthState.error (Phase 2)', () => {
       authedRole: 'user',
       tokenParam: 'jwt',
       resolveToken: async () => ({ token: 'not.a.real.assertion' }),
-      // reconnect:false so the refused authed upgrade surfaces at once instead of retrying forever
-      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params, reconnect: false }),
+      connect: ({ role, params }) => h.client(app, { url, role: role as 'user', params }),
     })
     await ac.ready
     expect(ac.state.status).toBe('guest')

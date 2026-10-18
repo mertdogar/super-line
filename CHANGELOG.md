@@ -7,6 +7,16 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Features
 
+- A refused credential closes 4401, and the client stops retrying it ([35c6e25])
+
+### Documentation
+
+- **changelog:** Regenerate the root aggregate ([595cab6])
+
+## 2026-10-18
+
+### Features
+
 - **server:** Srv.batch and srv.conditionalBatch for hosts that aren't plugins ([094eb10])
 
 ### Bug Fixes

@@ -3,6 +3,17 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## 2026-10-18
+
+### Bug Fixes
+
+- **core:** Plan typed columns for a schema with a root .meta({ id }) ([457ecba])
+
+### Documentation
+
+- **concepts:** Hibernation and resumption ([87647bb])
+- **changelog:** Regenerate the root aggregate ([3136218])
+
 ## 2026-10-15
 
 ### Bug Fixes

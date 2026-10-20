@@ -58,7 +58,7 @@ import { syncedSql, type QueryOptions, type Statement } from '@super-line/collec
 export class Store extends DurableObject<Env> {
   private sync = syncedSql(this.ctx, {
     onChange: (push) => {
-      const [node, storeId] = this.ctx.id.name!.split(':')
+      const [node, storeId] = this.ctx.id.name!.split(':') as [string, string]
       return this.env.NODE.getByName(node).storeChanged(storeId, push)
     },
   })
@@ -86,7 +86,7 @@ export class Node extends createDurableNode((ctx, env, base) => {
     policies,
     collections: composeCollections({ default: cloudflareCollections(ctx.storage, owned), storeRows }),
   })
-  void server.ready.then(() => storeRows.resume(storesInUse())) // a wake restores subscriptions without reading the source
+  void server.ready.then(() => storeRows.resume()) // a wake restores subscriptions without reading the source: catch every source up
   return Object.assign(server, { storeRows })
 }) {
   storeChanged(storeId: string, push: RemotePush) {

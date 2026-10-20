@@ -15,19 +15,8 @@ import {
 export { READ_ONLY_MESSAGE, syncedSql } from './synced-sql.js'
 export { remoteRows } from './remote-rows.js'
 export type { RemoteRowsOptions, RemoteRowsStorage, RemoteRowsStore, RemoteSource } from './remote-rows.js'
-export type {
-  Outcome,
-  QueryOptions,
-  RemoteChange,
-  RemoteChanges,
-  RemotePush,
-  RemoteRow,
-  Result,
-  Statement,
-  SyncedSql,
-  SyncedSqlOptions,
-  Value,
-} from './synced-sql.js'
+export type { RemoteChange, RemoteChanges, RemotePush, RemoteRow, SyncedSql, SyncedSqlOptions } from './synced-sql.js'
+export type { Outcome, QueryOptions, Result, Statement, Value } from './contract.js'
 
 /** A Durable Object query binds at most 100 values. */
 const MAX_PARAMS = 100

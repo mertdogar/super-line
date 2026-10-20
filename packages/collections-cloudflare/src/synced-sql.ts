@@ -1,22 +1,7 @@
 import { getLogger } from '@logtape/logtape'
+import type { Outcome, QueryOptions, Result, Statement, Value } from './contract.js'
 
 const log = getLogger(['super-line', 'collections-cloudflare', 'synced-sql'])
-
-/** A cell on the wire: SQLite's own types, with a blob as base64 under `blob`. */
-export type Value = string | number | null | { blob: string }
-export type Statement = { sql: string; params?: Value[] }
-export type Result = {
-  columns: string[]
-  rows: Value[][]
-  meta: { rowsRead: number; rowsWritten: number }
-}
-/** `bytes` is set when the batch's rows passed `maxBytes`; the message then names the cap. */
-export type Outcome = { results: Result[] } | { error: string; statement: number; bytes?: number }
-/**
- * `readOnly` rolls the batch back as soon as a statement writes a row or changes the schema; `maxBytes` rolls it
- * back as soon as the serialized rows of the batch pass the cap.
- */
-export type QueryOptions = { readOnly?: boolean; maxBytes?: number }
 
 /** One row of a user table: `id` is its single-column primary key, else its rowid, as a string. */
 export type RemoteRow = { table: string; id: string; data: Record<string, Value> }
@@ -69,7 +54,8 @@ const TABLES_SQL = `SELECT l.name AS name, l.wr AS wr,
   (SELECT count(*) FROM pragma_table_info(l.name) WHERE pk > 0) AS pks,
   (SELECT name FROM pragma_table_info(l.name) WHERE pk = 1) AS pk
   FROM pragma_table_list() AS l
-  WHERE l.schema = 'main' AND l.type = 'table' AND l.name NOT GLOB 'sqlite_*' AND l.name NOT GLOB '_cf_*' AND l.name NOT GLOB '_sl_*'`
+  WHERE l.schema = 'main' AND l.type = 'table' AND l.name NOT GLOB 'sqlite_*' AND l.name NOT GLOB '_cf_*' AND l.name NOT GLOB '_sl_*'
+  AND l.name NOT GLOB '__miniflare_*'`
 
 type Trigger = { name: string; tbl: string }
 const OPS = ['i', 'u', 'd'] as const
@@ -138,6 +124,7 @@ export function syncedSql(ctx: DurableObjectState, opts: SyncedSqlOptions = {}):
   const count = (query: string, ...params: unknown[]) => sql.exec<{ n: number }>(query, ...params).one().n
   const meta = () => sql.exec<{ epoch: string; clock: number; historyStartsAt: number }>('SELECT * FROM _sl_meta').one()
   const signature = () => sql.exec<{ s: string | null }>(SIGNATURE_SQL).one().s
+  const totalChanges = () => count('SELECT total_changes() AS n')
 
   // A table's id expression, or undefined for one whose rows have no single id.
   const userTables = (): Map<string, string | undefined> => {
@@ -269,10 +256,12 @@ export function syncedSql(ctx: DurableObjectState, opts: SyncedSqlOptions = {}):
           const results = statements.map((statement, i) => {
             index = i
             if (!readOnly) return run(statement, budget)
-            // a drop writes no rows, so the schema is compared too
+            // rowsWritten counts only the last statement of a multi-statement string, and a drop writes no rows,
+            // so the connection's change count and the schema are compared too
             const schema = signature()
+            const changed = totalChanges()
             const result = run(statement, budget)
-            if (result.meta.rowsWritten > 0 || signature() !== schema) throw new Error(READ_ONLY_MESSAGE)
+            if (result.meta.rowsWritten > 0 || totalChanges() !== changed || signature() !== schema) throw new Error(READ_ONLY_MESSAGE)
             return result
           })
           return { results, push: before && commit(before) }

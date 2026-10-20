@@ -13,6 +13,8 @@ function memoryStorage(): RemoteRowsStorage {
   return {
     get: async <T>(key: string) => map.get(key) as T | undefined,
     put: async (key, value) => void map.set(key, value),
+    list: async <T>({ prefix }: { prefix: string }) =>
+      new Map([...map].filter(([key]) => key.startsWith(prefix))) as Map<string, T>,
   }
 }
 
@@ -155,6 +157,18 @@ describe('remoteRows ingest', () => {
     await woken.store.resume(['s1'])
     expect(woken.source.pulls).toEqual([1])
     expect(woken.changes.map((c) => c.id)).toEqual(['s1:dishes:a', 's1:dishes:b'])
+  })
+
+  it('resume with no ids catches up every store it keeps a clock for, and only those', async () => {
+    const storage = memoryStorage()
+    await storage.put('remote-rows:archive:s9', { epoch: 'e1', clock: 0 })
+    const { store } = setup([], storage)
+    for (const storeId of ['s1', 's2']) await store.snapshot('storeRows', { filter: and(eq('storeId', storeId), eq('table', 'dishes')) })
+
+    const pulled: string[] = []
+    const woken = remoteRows({ collection: 'storeRows', storage, stub: (id) => (pulled.push(id), fakeSource()) })
+    await woken.resume()
+    expect(pulled.sort()).toEqual(['s1', 's2'])
   })
 })
 

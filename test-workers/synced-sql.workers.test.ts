@@ -177,6 +177,28 @@ describe('syncedSql change capture', () => {
     expect(await src.changesSince(1)).toMatchObject({ clock: 1, changes: [], wipeAll: false })
   })
 
+  it('a read-only batch catches a write in any statement of a multi-statement string, and leaves no log entry', async () => {
+    const src = source()
+    await exec(src, 'CREATE TABLE t (id TEXT PRIMARY KEY)', "INSERT INTO t VALUES ('a')")
+    // the cursor's rowsWritten counts only the last statement of the string, here the SELECT
+    expect(await src.query([{ sql: "INSERT INTO t VALUES ('b'); SELECT 1" }], { readOnly: true })).toEqual({
+      error: READ_ONLY_MESSAGE,
+      statement: 0,
+    })
+    expect(await src.snapshot('t', 10)).toEqual([{ table: 't', id: 'a', data: { id: 'a' } }])
+    expect(await exec(src, "SELECT count(*) FROM _sl_changes WHERE id = 'b'")).toMatchObject([{ rows: [[0]] }])
+    await exec(src, "INSERT INTO t VALUES ('c')")
+    expect(await src.changesSince(1)).toMatchObject({ clock: 2, changes: [{ table: 't', id: 'c', op: 'put' }] })
+  })
+
+  it("never tracks miniflare's own table, which its dev wrapper rewrites on every wake", async () => {
+    const src = source()
+    await exec(src, 'CREATE TABLE __miniflare_do_name (id INTEGER PRIMARY KEY, name TEXT)', "INSERT OR REPLACE INTO __miniflare_do_name VALUES (1, 'n')")
+    await exec(src, "INSERT OR REPLACE INTO __miniflare_do_name VALUES (1, 'n')")
+    expect(await src.changesSince(0)).toMatchObject({ clock: 0, changes: [], wipeAll: false })
+    expect(await exec(src, "SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = '__miniflare_do_name'")).toMatchObject([{ rows: [] }])
+  })
+
   it('a failed statement rolls the whole batch back without moving the clock; maxBytes caps the rows', async () => {
     const src = source()
     await exec(src, 'CREATE TABLE t (id TEXT PRIMARY KEY)')

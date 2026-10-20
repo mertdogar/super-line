@@ -94,6 +94,20 @@ describe('remoteRows across a source and a node Durable Object', () => {
     expect(lifecycle).toEqual([])
   })
 
+  it('resume with no ids catches up every source the node keeps a clock for', async () => {
+    const { node, source, subscribe } = setup()
+    const [s1, s2] = [source('s1'), source('s2')]
+    await Promise.all([exec(s1, CREATE), exec(s2, CREATE)])
+    const [one, two] = [subscribe('s1'), subscribe('s2')]
+    await Promise.all([one.ready, two.ready])
+
+    await Promise.all([s1.dropPushes(1), s2.dropPushes(1)])
+    await Promise.all([exec(s1, "INSERT INTO dishes VALUES ('a', 'one')"), exec(s2, "INSERT INTO dishes VALUES ('b', 'two')")])
+    await evictDurableObject(node)
+    await node.resume()
+    await waitFor(() => names(one.rows()) === 'a=one' && names(two.rows()) === 'b=two', { label: 'both resumed' })
+  })
+
   it('a dropped table wipes: onWipe closes the socket 4409, and the resubscribe reads a fresh snapshot', async () => {
     const { node, source, subscribe, lifecycle } = setup()
     const s1 = source('s1')

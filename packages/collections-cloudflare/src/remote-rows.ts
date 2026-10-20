@@ -15,6 +15,7 @@ export interface RemoteSource {
 export interface RemoteRowsStorage {
   get<T>(key: string): Promise<T | undefined>
   put<T>(key: string, value: T): Promise<void>
+  list<T>(options: { prefix: string }): Promise<Map<string, T>>
 }
 
 export interface RemoteRowsOptions {
@@ -35,8 +36,11 @@ export interface RemoteRowsOptions {
 export interface RemoteRowsStore extends SelfCollectionStore {
   /** The forwarder's target: a source's `onChange` push. Applies it inline when it is the next clock, else pulls. */
   ingest(storeId: string, push: RemotePush): Promise<void>
-  /** Pull what these sources changed since their last clock — on wake, for the sources with surviving subscribers. */
-  resume(storeIds: string[]): Promise<void>
+  /**
+   * Pull what these sources changed since their last clock — on wake, for the sources with surviving subscribers.
+   * With no ids, every source the node keeps a clock for.
+   */
+  resume(storeIds?: string[]): Promise<void>
 }
 
 type Seen = { epoch: string; clock: number }
@@ -85,7 +89,8 @@ export function remoteRows(opts: RemoteRowsOptions): RemoteRowsStore {
   const { collection, storage, stub, onWipe, snapshotLimit = 1000 } = opts
   const listeners = new Set<(change: RowChange) => void>()
   const queues = new Map<string, Promise<unknown>>()
-  const stateKey = (storeId: string) => `remote-rows:${collection}:${storeId}`
+  const prefix = `remote-rows:${collection}:`
+  const stateKey = (storeId: string) => prefix + storeId
 
   const keyOf = (storeId: string, table: string, id: string) => `${storeId}:${table}:${id}`
   const rowOf = (storeId: string, { table, id, data }: RemoteRow) => ({ key: keyOf(storeId, table, id), storeId, table, id, data })
@@ -142,7 +147,8 @@ export function remoteRows(opts: RemoteRowsOptions): RemoteRowsStore {
     coordination: 'cluster',
     ingest: (storeId, push) => serial(storeId, () => receive(storeId, push)),
     async resume(storeIds) {
-      await Promise.all(storeIds.map(catchUp))
+      const ids = storeIds ?? [...(await storage.list({ prefix })).keys()].map((key) => key.slice(prefix.length))
+      await Promise.all(ids.map(catchUp))
     },
     async snapshot(_n, query) {
       const parts = conjuncts(query.filter)

@@ -208,7 +208,7 @@ export class RowsNode extends createDurableNode((ctx, env, base) => {
   storeChanged(storeId: string, push: RemotePush) {
     return this.server.rows.ingest(storeId, push)
   }
-  resume(storeIds: string[]) {
+  resume(storeIds?: string[]) {
     return this.server.rows.resume(storeIds)
   }
   wipes() {

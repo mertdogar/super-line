@@ -7,6 +7,26 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Features
 
+- **examples:** Cloudflare-remote-rows showcase ([c8ad03e])
+- **collections-cloudflare:** A foreign object's SQLite as a live collection ([a9579af])
+- **server:** ComposeCollections and fixed-field scoped routing ([8ace559])
+- **core:** FixedFields on the collection seam and excludesOn ([dac4412])
+
+### Bug Fixes
+
+- **transport-cloudflare:** RouteToNode accepts a typed namespace ([57e74ec])
+- **collections-cloudflare:** ReadOnly catches writes in every statement ([e391e8e])
+
+### Documentation
+
+- Remote rows resume(), snapshot limit and typed split ([b2fb591])
+- Remote rows guide, ADR-0029, skill and plan ([2f5520f])
+- **changelog:** Regenerate the root aggregate ([f4a1da9])
+
+## 2026-10-20
+
+### Features
+
 - **playground:** Collections queried and joined with TanStack DB ([a6030fc])
 - **playground:** A single-node Cloudflare variant ([1b20a6f])
 - **playground:** Every headline feature on one two-node stack ([3c6b055])

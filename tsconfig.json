@@ -13,6 +13,7 @@
     "examples/cloudflare/src/worker.ts",
     "examples/collections-chat",
     "examples/chat-supervisor",
-    "examples/react-chat-transports"
+    "examples/react-chat-transports",
+    "examples/playground"
   ]
 }

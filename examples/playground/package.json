@@ -1,0 +1,48 @@
+{
+  "name": "@super-line/example-playground",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "server": "tsx src/server.ts",
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down -v"
+  },
+  "dependencies": {
+    "@chainsafe/libp2p-noise": "^17.0.0",
+    "@chainsafe/libp2p-yamux": "^8.0.1",
+    "@libp2p/crypto": "^5.1.20",
+    "@libp2p/identify": "^4.1.8",
+    "@libp2p/websockets": "^10.1.15",
+    "@multiformats/multiaddr": "^13.0.3",
+    "@super-line/adapter-redis": "workspace:*",
+    "@super-line/client": "workspace:*",
+    "@super-line/collections-pglite": "workspace:*",
+    "@super-line/core": "workspace:*",
+    "@super-line/plugin-auth": "workspace:*",
+    "@super-line/plugin-chat": "workspace:*",
+    "@super-line/plugin-devtools": "workspace:*",
+    "@super-line/plugin-inspector": "workspace:*",
+    "@super-line/plugin-queue": "workspace:*",
+    "@super-line/react": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "@super-line/transport-http": "workspace:*",
+    "@super-line/transport-libp2p": "workspace:*",
+    "@super-line/transport-websocket": "workspace:*",
+    "libp2p": "^3.3.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^4.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  }
+}

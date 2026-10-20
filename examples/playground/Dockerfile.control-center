@@ -1,0 +1,16 @@
+# Stage 1 — build the Control Center SPA from workspace source.
+FROM node:22-slim AS build
+RUN corepack enable
+WORKDIR /app
+COPY . .
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @super-line/control-center build
+
+# Stage 2 — serve it with the package's own bin. The browser opens :8201 and connects back to the
+# cluster at ws://localhost:8200/inspect.
+FROM node:22-slim
+WORKDIR /app
+COPY --from=build /app/packages/control-center/dist ./dist
+COPY --from=build /app/packages/control-center/bin ./bin
+EXPOSE 8201
+CMD ["node", "bin/control-center.js", "--url", "ws://localhost:8200/inspect", "--port", "8201", "--no-open"]

@@ -1,0 +1,86 @@
+name: playground
+
+# Every headline feature on one stack: two nodes behind one round-robin entry point, plugin-auth +
+# plugin-chat + plugin-queue on both, cluster presence over Redis, and the Control Center watching it all.
+#
+#   postgres + electric  rows (accounts, channels, messages, queue jobs) — the `self` collection backend:
+#                        both nodes read and write ONE database, so a job enqueued on node-1 can be
+#                        claimed by node-2 and an account made on node-2 can sign in on node-1
+#   redis                the adapter: events, targeted toUser() sends, chat stream deltas, queue wake
+#                        hints and the cluster presence registry
+x-node: &node
+  build:
+    context: ../..
+    dockerfile: examples/playground/Dockerfile
+  image: super-line-playground:dev
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+    electric: { condition: service_started }
+
+x-node-env: &node-env
+  PORT: '8787'
+  PG_URL: postgres://postgres:password@postgres:5432/electric
+  ELECTRIC_URL: http://electric:3000/v1/shape
+  REDIS_URL: redis://redis:6379
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: electric
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    command: [-c, listen_addresses=*, -c, wal_level=logical]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d electric']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  electric:
+    image: electricsql/electric
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/electric?sslmode=disable
+      ELECTRIC_INSECURE: 'true'
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  # node-1 seeds the workspace (channels, demo logins, the bot, a cron schedule); node-2 only serves.
+  # The libp2p port is dialed by the browser DIRECTLY (not through Caddy), so each node publishes its own.
+  node-1:
+    <<: *node
+    environment: { <<: *node-env, NODE_NAME: node-1, P2P_PORT: '9101', SEED: 'true' }
+    ports: ['9101:9101']
+
+  node-2:
+    <<: *node
+    environment: { <<: *node-env, NODE_NAME: node-2, P2P_PORT: '9102' }
+    ports: ['9102:9102']
+
+  # Caddy: serves the SPA and routes each wire to a node — pinned by `/node-N/` prefix, else balanced.
+  web:
+    build:
+      context: ../..
+      dockerfile: examples/playground/Dockerfile.web
+    image: super-line-playground-web:dev
+    ports: ['8200:8200']
+    volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']
+    depends_on: [node-1, node-2]
+
+  # The Control Center on :8201; the browser connects it back to ws://localhost:8200/inspect (→ node-1).
+  control-center:
+    build:
+      context: ../..
+      dockerfile: examples/playground/Dockerfile.control-center
+    image: super-line-playground-cc:dev
+    ports: ['8201:8201']
+    depends_on: [web]

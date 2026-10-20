@@ -1,0 +1,48 @@
+# Single entry point on :8200. Mutually-exclusive `handle` blocks: a top-level `try_files` would rewrite
+# /ws to /index.html, so try_files stays inside the static handle only.
+#
+# The libp2p wire is NOT proxied: the browser fetches /libp2p-addr, then dials that node's published port.
+:8200 {
+	# Pinned (`?node=` in the SPA): /node-N/… goes to node-N with the prefix stripped — every wire alike.
+	handle_path /node-1/* {
+		reverse_proxy node-1:8787
+	}
+
+	handle_path /node-2/* {
+		reverse_proxy node-2:8787
+	}
+
+	# Unpinned WebSocket: each new connection goes to the next node.
+	handle /ws* {
+		reverse_proxy node-1:8787 node-2:8787 {
+			lb_policy round_robin
+		}
+	}
+
+	# Unpinned HTTP: one logical connection spans many requests (the SSE stream + every POST), and the
+	# session lives in one node's memory — so it must stick to the node that opened it.
+	handle /superline* {
+		reverse_proxy node-1:8787 node-2:8787 {
+			lb_policy cookie
+		}
+	}
+
+	# Unpinned libp2p: whichever node answers is the one the browser dials.
+	handle /libp2p-addr {
+		reverse_proxy node-1:8787 node-2:8787 {
+			lb_policy round_robin
+		}
+	}
+
+	# The Control Center attaches to ONE node; the topology still shows both through the adapter.
+	handle /inspect* {
+		reverse_proxy node-1:8787
+	}
+
+	handle {
+		root * /srv
+		encode gzip
+		try_files {path} /index.html
+		file_server
+	}
+}

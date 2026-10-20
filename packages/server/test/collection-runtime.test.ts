@@ -157,10 +157,10 @@ describe('Collection runtime · row change routing', () => {
     expect(delivered(c)).toEqual([])
   })
 
-  // A `self` backend (collections-pglite) surfaces a delete via its Electric feed WITHOUT the prior row, so the
-  // predicate cannot filter it and must broadcast to every subscriber. Reproducing that with the real thing
-  // costs Postgres + Electric + two containers; through the seam it costs a nine-line fake store.
-  it('broadcasts a prevless delete to every subscriber, even one whose policy admits nothing', async () => {
+  // A `self` backend (collections-pglite) surfaces deletes and updates via its Electric feed WITHOUT the prior
+  // row. Reproducing that with the real thing costs Postgres + Electric + two containers; through the seam it
+  // costs a nine-line fake store.
+  async function selfFeed(policy: { read: () => Expr | undefined; write: () => boolean }, filter?: Expr) {
     const listeners = new Set<(c: RowChange) => void>()
     const feed = {
       clustering: 'self' as const,
@@ -174,15 +174,15 @@ describe('Collection runtime · row change routing', () => {
         return () => listeners.delete(cb)
       },
     }
-    const r = createCollectionRuntime(
-      { store: feed, defs, policies: { messages: { read: () => eq('channelId', 'nope'), write: () => true } }, checkReferences: false },
-      host(),
-    )
+    const r = createCollectionRuntime({ store: feed, defs, policies: { messages: policy }, checkReferences: false }, host())
     const c = conn('c1')
-    await r.onSub(c, sub('messages', 1) as never)
+    await r.onSub(c, sub('messages', 1, filter) as never)
     c.sent.length = 0
+    return { c, emit: (ch: RowChange) => listeners.forEach((l) => l(ch)) }
+  }
 
-    const emit = (ch: RowChange) => listeners.forEach((l) => l(ch))
+  it('broadcasts a prevless delete to every subscriber, even one whose policy admits nothing', async () => {
+    const { c, emit } = await selfFeed({ read: () => eq('channelId', 'nope'), write: () => true })
     // prev AND next absent: unmatchable, so it must go to everyone (the client removes-if-present)
     emit({ n: 'messages', k: 'delete', id: 'gone', origin: 'x' } as RowChange)
     expect(delivered(c)).toMatchObject([{ k: 'delete', id: 'gone' }])
@@ -191,6 +191,19 @@ describe('Collection runtime · row change routing', () => {
     // whereas a delete that DOES carry prev is filterable — and this policy rejects it
     emit({ n: 'messages', k: 'delete', id: 'z', prev: msg('z', 'general'), origin: 'x' } as RowChange)
     expect(delivered(c)).toEqual([])
+  })
+
+  // Without prev, an update whose new row LEAVES the filter can't be matched on its pre-op side. Sending the row
+  // would leak it past the filter, so it goes out data-less, as a delete the client applies only if it holds the id.
+  it('sends a prevless update that no longer matches as a data-less delete', async () => {
+    const { c, emit } = await selfFeed(openPolicy, eq('channelId', 'general'))
+    emit({ n: 'messages', k: 'update', id: 'm1', next: msg('m1', 'random'), origin: 'x' } as RowChange)
+    expect(delivered(c)).toEqual([{ t: 'cchg', n: 'messages', k: 'delete', id: 'm1' }])
+
+    c.sent.length = 0
+    // one that still matches carries its row, as before
+    emit({ n: 'messages', k: 'update', id: 'm1', next: msg('m1', 'general'), origin: 'x' } as RowChange)
+    expect(delivered(c)).toMatchObject([{ k: 'update', id: 'm1', d: msg('m1', 'general') }])
   })
 })
 

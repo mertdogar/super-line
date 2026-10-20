@@ -317,13 +317,16 @@ export function createRowCollections(config: CollectionRuntimeConfig, host: Coll
       const subs = state?.subs.get(change.n)
       if (!state || !subs || subs.size === 0) continue
       const eff = andFilters(state.policy.get(change.n), orFilters([...subs.values()].map((q) => q.filter)))
-      // A `self` backend surfaces a delete via its feed WITHOUT the prior row; deliver it to every subscriber and
-      // let the client remove-if-present (it never held policy-hidden rows). Relay deletes always carry `prev`.
-      const prevlessDelete = change.k === 'delete' && change.prev === undefined
-      const inPrev = prevlessDelete || (change.prev !== undefined && matchesFilter(eff, change.prev))
+      const inPrev = change.prev !== undefined && matchesFilter(eff, change.prev)
       const inNext = change.next !== undefined && matchesFilter(eff, change.next)
-      if (!inPrev && !inNext) continue
-      conn.send({ t: 'cchg', n: change.n, k: change.k, id: change.id, d: change.next } satisfies CChangeFrame)
+      if (inPrev || inNext) {
+        conn.send({ t: 'cchg', n: change.n, k: change.k, id: change.id, d: change.next } satisfies CChangeFrame)
+      } else if (change.k !== 'insert' && change.prev === undefined) {
+        // A `self` backend surfaces deletes and updates via its feed WITHOUT the prior row, so this subscriber may
+        // hold it: a delete, or an update that left its filter. Send it data-less to every subscriber (the row
+        // would leak past the filter) and let the client remove-if-present. Relay changes always carry `prev`.
+        conn.send({ t: 'cchg', n: change.n, k: 'delete', id: change.id } satisfies CChangeFrame)
+      }
     }
   }
 

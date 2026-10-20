@@ -106,7 +106,7 @@ Also in `@super-line/collections-cloudflare`: one **read-only** collection servi
 | `storage` | `RemoteRowsStorage` | **Required.** The node's `ctx.storage` — where the last clock applied per source is kept. |
 | `stub` | `(storeId) => RemoteSource` | **Required.** The source object for a store id. |
 | `onWipe` | `(storeId) => unknown` | A source's history broke; close its readers' sockets (`4409`) so they resubscribe. Default: nothing. |
-| `snapshotLimit` | `number?` | The most rows a snapshot reads from the source table. Default `1000`. |
+| `snapshotLimit` | `number?` | The most rows a snapshot reads from the source table. Default `1000`. Live changes aren't capped, but every snapshot is, including a resubscribe's, so a subscription to a table over the limit can shrink on any reconnect. |
 
 ### Typed tables
 

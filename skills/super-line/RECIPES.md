@@ -950,7 +950,7 @@ import { syncedSql, type QueryOptions, type Statement } from '@super-line/collec
 export class Store extends DurableObject<Env> {
   private sync = syncedSql(this.ctx, {
     onChange: (push) => {                          // after every committed batch; a throw is logged and dropped (no retry)
-      const [node, storeId] = this.ctx.id.name!.split(':')
+      const [node, storeId] = this.ctx.id.name!.split(':') as [string, string]
       return this.env.NODE.getByName(node).storeChanged(storeId, push)
     },
   })
@@ -983,8 +983,8 @@ export class Node extends createDurableNode((ctx, env: Env, base) => {
     collections: composeCollections({ default: cloudflareCollections(ctx.storage, owned), storeRows }),
     policies: { storeRows: { read: (_p, ctx) => isIn('storeId', ctx.stores) } },   // write omitted (it's FORBIDDEN anyway)
   })
-  // a wake restores subscriptions WITHOUT reading the source: catch up the sources still in use
-  void server.ready.then(() => storeRows.resume([...new Set(server.local.connections.flatMap((c) => c.ctx.stores))]))
+  // a wake restores subscriptions WITHOUT reading the source: catch up every source with a saved clock
+  void server.ready.then(() => storeRows.resume())   // or resume(ids) for only the sources still in use
   return Object.assign(server, { storeRows })
 }) {
   storeChanged(storeId: string, push: RemotePush) { return this.server.storeRows.ingest(storeId, push) }   // the source's onChange target
@@ -1000,7 +1000,7 @@ const menu = dishes.rows().map((r) => dishSchema.parse(r.data))   // type the op
 
 - **Read-only.** `insert`/`update`/`delete`/`batch` → `FORBIDDEN`; write through the source's `query` (e.g. a node request handler calling `env.STORE.getByName(…).query([...])`) and the change comes back through the push.
 - **History breaks resync per source**: dropping/renaming a table, adding/dropping/renaming a column, deletes pruned past `maxTombstones` (1000), a backlog over `maxPullChanges` (5000), or `deleteAll()` on the source → `onWipe` → 4409 close → the client reconnects and resubscribes into a fresh snapshot. Creating a table is fine.
-- **Snapshots read at most `snapshotLimit` (1000) rows** of the table, then filter/sort on the node; only a filter that is exactly the two pins (no `orderBy`, no policy filter) pushes `offset + limit` down.
+- **Snapshots read at most `snapshotLimit` (1000) rows** of the table, then filter/sort on the node; only a filter that is exactly the two pins (no `orderBy`, no policy filter) pushes `offset + limit` down. Live changes aren't capped, but every resubscribe re-reads a capped snapshot, so a table over the limit can shrink on any reconnect.
 - **A delete reaches every `storeRows` subscriber on the node** as a key-only delete — a deleted row's store id, table name and row id are visible to all of them, data never. An insert/update reaches only subscribers whose filter + policy admit its `storeId` and `table`.
 - `composeCollections`: a batch across two backends → `VALIDATION`; the server refuses to start if a name other than `default` isn't a row collection on the contract.
 - **Lost pushes aren't retried**: healed by the source's next push (gap → pull), the next subscribe, or `resume`. Each push wakes the node, subscribed or not.

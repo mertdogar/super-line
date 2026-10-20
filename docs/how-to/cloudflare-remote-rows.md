@@ -59,7 +59,7 @@ export const contract = defineContract({
 })
 ```
 
-Import it from the `/contract` subpath: it pulls in only `zod` and `@super-line/core`, so a contract package shared with a browser never imports `cloudflare:workers`.
+Import it from the `/contract` subpath: it pulls in only `zod` and `@super-line/core`, so a contract package shared with a browser never imports `cloudflare:workers`. The subpath also exports the types of a source's `query` — `Statement`, `Outcome`, `Result`, `Value`, and `QueryOptions` — for a page that calls it through your Worker.
 
 Every row has the same shape:
 
@@ -86,7 +86,7 @@ import { syncedSql, type QueryOptions, type Statement } from '@super-line/collec
 export class Store extends DurableObject<Env> {
   private sync = syncedSql(this.ctx, {
     onChange: (push) => {
-      const [node, storeId] = this.ctx.id.name!.split(':')
+      const [node, storeId] = this.ctx.id.name!.split(':') as [string, string]
       return this.env.NODE.getByName(node).storeChanged(storeId, push)
     },
   })
@@ -154,8 +154,8 @@ export class Node extends createDurableNode((ctx, env: Env, base) => {
     },
   })
 
-  // a wake restores subscriptions without reading the source, so catch up the sources still in use
-  void server.ready.then(() => storeRows.resume([...new Set(server.local.connections.flatMap((conn) => conn.ctx.stores))]))
+  // a wake restores subscriptions without reading the source, so catch up every source the node has served
+  void server.ready.then(() => storeRows.resume())
 
   return Object.assign(server, { storeRows })
 }) {
@@ -170,7 +170,7 @@ The example's `authenticate` puts the stores each connection may read in `ctx.st
 
 - **The `read` policy** returns the filter a connection's subscriptions are held to. The policy is computed at subscribe, so a connection that gains a store sees it after it resubscribes — the [policy staleness](/collections/policies) rule every collection has.
 - **`onWipe`** decides which sockets to close. Closing every connection is also correct; it just disconnects clients that weren't reading that source.
-- **`resume`** pulls what the given sources changed while the node slept. A hibernation wake brings every subscription back without reading a snapshot, so `remoteRows` doesn't learn which sources they read; your code tells it once `server.ready` resolves. A source you leave out catches up at its next push or its next subscribe.
+- **`resume`** pulls what sources changed while the node slept. A hibernation wake brings every subscription back without reading a snapshot, so `remoteRows` doesn't learn which sources they read; your code calls `resume` once `server.ready` resolves. With no arguments it catches up every source the node keeps a clock for. To catch up only the sources still in use, pass their ids: `resume([...new Set(server.local.connections.flatMap((conn) => conn.ctx.stores))])`. A source you leave out catches up at its next push or its next subscribe.
 
 | Option | Default | What it does |
 | --- | --- | --- |
@@ -180,7 +180,7 @@ The example's `authenticate` puts the stores each connection may read in `ctx.st
 | `onWipe(storeId)` | does nothing | Called when a source's history broke and its subscribers may hold stale rows |
 | `snapshotLimit` | `1000` | The most rows a snapshot reads from the source table |
 
-`remoteRows` returns the backend with two methods of its own: `ingest(storeId, push)`, which your forwarding method calls with each push, and `resume(storeIds)`.
+`remoteRows` returns the backend with two methods of its own: `ingest(storeId, push)`, which your forwarding method calls with each push, and `resume(storeIds?)`.
 
 ### How the composite routes
 
@@ -206,7 +206,7 @@ await dishes.ready
 const menu = dishes.rows().map((row) => dishSchema.parse(row.data))
 ```
 
-The rest of the filter — `eq('data.available', 1)`, say — and `orderBy` run on the node, over the rows it read. The node reads at most `snapshotLimit` rows of the table, so a query over a larger table sees only part of it. When the pins are the whole filter — a `read` policy's filter counts — and there is no `orderBy`, the read stops at the query's own `offset + limit`.
+The rest of the filter — `eq('data.available', 1)`, say — and `orderBy` run on the node, over the rows it read. The node reads at most `snapshotLimit` rows of the table, so a query over a larger table sees only part of it. Live changes aren't capped, but every snapshot is, including the one a client reads when it resubscribes, so a subscription to a table over the limit can shrink on any reconnect. When the pins are the whole filter — a `read` policy's filter counts — and there is no `orderBy`, the read stops at the query's own `offset + limit`.
 
 React's `useCollection` takes the same query.
 

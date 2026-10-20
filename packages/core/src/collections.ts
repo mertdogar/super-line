@@ -72,6 +72,12 @@ interface CollectionStoreBase {
    */
   rowMeta?(n: string, ids: string[]): Awaitable<Record<string, RowTimestamps>>
   /**
+   * Fields of collection `n` whose value never changes for a key. An update without `prev` otherwise reaches every
+   * subscriber, a non-matching one as a data-less delete; the server skips a subscriber whose filter rules the new
+   * row out on these fields, since no version of the row ever matched it. Absent ⇒ none.
+   */
+  fixedFields?(n: string): readonly string[]
+  /**
    * Subscribe to every applied row change across all collections — core's single fan-out source. Returns an
    * unsubscribe fn. **Who fires it depends on the mode**: a {@link RelayCollectionStore} fires it from
    * `apply`; a {@link SelfCollectionStore} fires it from its replication feed instead. That difference is

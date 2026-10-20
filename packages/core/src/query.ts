@@ -141,6 +141,24 @@ export function evalExpr(expr: Expr, row: unknown): boolean {
 /** Whether a row passes a filter (undefined filter ⇒ always). The routing primitive. */
 export const matchesFilter = (filter: Expr | undefined, row: unknown): boolean => !filter || evalExpr(filter, row)
 
+/**
+ * Whether `filter` is false on `row` judged on `fields` alone: a leaf on any other field is unknown, never false.
+ * When `fields` never change for a row's key, a true answer holds for every version of that row.
+ */
+export function excludesOn(filter: Expr | undefined, row: unknown, fields: readonly string[]): boolean {
+  if (!filter) return false
+  switch (filter.op) {
+    case 'and':
+      return filter.args.some((e) => excludesOn(e, row, fields))
+    case 'or':
+      return filter.args.every((e) => excludesOn(e, row, fields))
+    case 'not':
+      return false
+    default:
+      return fields.includes(filter.field) && !evalExpr(filter, row)
+  }
+}
+
 /** Total order for `orderBy`: same-type scalars compare naturally; nulls/undefined/incomparable sort last. */
 const compareForSort = (a: unknown, b: unknown): number => {
   const an = a == null

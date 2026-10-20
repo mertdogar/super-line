@@ -163,6 +163,7 @@ export {
   andFilters,
   orFilters,
   matchesFilter,
+  excludesOn,
   evalExpr,
   applyQuery,
   getField,

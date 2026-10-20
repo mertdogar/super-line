@@ -3,6 +3,16 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [server-v0.23.1] — 2026-10-20
+
+### Features
+
+- A refused credential closes 4401, and the client stops retrying it ([35c6e25])
+
+### Bug Fixes
+
+- **server:** A row that leaves a filter on pglite reaches its subscribers ([8e3cb17])
+
 ## [server-v0.23.0] — 2026-10-18
 
 ### Features

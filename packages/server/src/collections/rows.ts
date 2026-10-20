@@ -1,5 +1,6 @@
 import {
   andFilters,
+  excludesOn,
   isCrdtCollection,
   matchesFilter,
   orFilters,
@@ -312,6 +313,7 @@ export function createRowCollections(config: CollectionRuntimeConfig, host: Coll
     }))
     const targets = subscribers.get(change.n)
     if (!targets || targets.size === 0) return
+    const fixed = store?.fixedFields?.(change.n) ?? []
     for (const conn of targets) {
       const state = connState.get(conn)
       const subs = state?.subs.get(change.n)
@@ -324,7 +326,9 @@ export function createRowCollections(config: CollectionRuntimeConfig, host: Coll
       } else if (change.k !== 'insert' && change.prev === undefined) {
         // A `self` backend surfaces deletes and updates via its feed WITHOUT the prior row, so this subscriber may
         // hold it: a delete, or an update that left its filter. Send it data-less to every subscriber (the row
-        // would leak past the filter) and let the client remove-if-present. Relay changes always carry `prev`.
+        // would leak past the filter) and let the client remove-if-present. Relay changes always carry `prev`. A
+        // filter that rules the row out on fields fixed for its key never matched any version of it: skip.
+        if (change.next !== undefined && excludesOn(eff, change.next, fixed)) continue
         conn.send({ t: 'cchg', n: change.n, k: 'delete', id: change.id } satisfies CChangeFrame)
       }
     }

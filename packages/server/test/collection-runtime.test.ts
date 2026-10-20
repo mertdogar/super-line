@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as z from 'zod'
-import { eq, jsonSerializer, type CollectionDef, type Expr, type RowChange } from '@super-line/core'
+import { and, eq, isIn, jsonSerializer, type CollectionDef, type Expr, type RowChange } from '@super-line/core'
 import { memoryCollections } from '@super-line/collections-memory'
 import { crdtMemoryCollections } from '@super-line/collections-crdt-memory'
 import { createCollectionRuntime, type CollectionConn, type CollectionHost } from '@super-line/server'
@@ -160,7 +160,11 @@ describe('Collection runtime · row change routing', () => {
   // A `self` backend (collections-pglite) surfaces deletes and updates via its Electric feed WITHOUT the prior
   // row. Reproducing that with the real thing costs Postgres + Electric + two containers; through the seam it
   // costs a nine-line fake store.
-  async function selfFeed(policy: { read: () => Expr | undefined; write: () => boolean }, filter?: Expr) {
+  async function selfFeed(
+    policy: { read: () => Expr | undefined; write: () => boolean },
+    filter?: Expr,
+    fixedFields: string[] = [],
+  ) {
     const listeners = new Set<(c: RowChange) => void>()
     const feed = {
       clustering: 'self' as const,
@@ -169,6 +173,7 @@ describe('Collection runtime · row change routing', () => {
       conditionalApply: () => false,
       snapshot: () => [],
       read: () => undefined,
+      fixedFields: () => fixedFields,
       onChange: (cb: (c: RowChange) => void) => {
         listeners.add(cb)
         return () => listeners.delete(cb)
@@ -204,6 +209,27 @@ describe('Collection runtime · row change routing', () => {
     // one that still matches carries its row, as before
     emit({ n: 'messages', k: 'update', id: 'm1', next: msg('m1', 'general'), origin: 'x' } as RowChange)
     expect(delivered(c)).toMatchObject([{ k: 'update', id: 'm1', d: msg('m1', 'general') }])
+  })
+
+  // A field the backend names fixed for a key (remoteRows' storeId) held the same value in every version of the row,
+  // so a filter that rules the new row out on it never matched the row: that subscriber gets nothing at all.
+  it('skips a prevless update for a subscriber whose filter rules it out on a fixed field', async () => {
+    const pinned = await selfFeed(openPolicy, eq('channelId', 'B'), ['channelId'])
+    pinned.emit({ n: 'messages', k: 'update', id: 'm1', next: msg('m1', 'A'), origin: 'x' } as RowChange)
+    expect(delivered(pinned.c)).toEqual([])
+
+    const byPolicy = await selfFeed({ read: () => isIn('channelId', ['B', 'C']), write: () => true }, undefined, ['channelId'])
+    byPolicy.emit({ n: 'messages', k: 'update', id: 'm1', next: msg('m1', 'A'), origin: 'x' } as RowChange)
+    expect(delivered(byPolicy.c)).toEqual([])
+
+    // pinned to the row's value but failing on a field that can change: it may hold the row, so the data-less delete
+    const narrowed = await selfFeed(openPolicy, and(eq('channelId', 'A'), eq('text', 'other')), ['channelId'])
+    narrowed.emit({ n: 'messages', k: 'update', id: 'm1', next: msg('m1', 'A'), origin: 'x' } as RowChange)
+    expect(delivered(narrowed.c)).toEqual([{ t: 'cchg', n: 'messages', k: 'delete', id: 'm1' }])
+
+    // a prevless delete has no row to judge, so it still reaches everyone
+    pinned.emit({ n: 'messages', k: 'delete', id: 'm1', origin: 'x' } as RowChange)
+    expect(delivered(pinned.c)).toMatchObject([{ k: 'delete', id: 'm1' }])
   })
 })
 

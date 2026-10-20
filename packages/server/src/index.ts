@@ -60,6 +60,7 @@ const logSub = getLogger(['super-line', 'server', 'sub'])
 const logCluster = getLogger(['super-line', 'server', 'cluster'])
 import { createCluster } from './cluster.js'
 import { createCollectionRuntime, CDOC, COLL_CHANNEL } from './collections/index.js'
+import { checkComposedNames } from './collections/compose.js'
 import type {
   CollectionPolicy,
   ServerCollectionHandle,
@@ -73,6 +74,8 @@ export { Conn, resolvePrincipal } from './conn.js'
 export { MemoryBus, createInMemoryAdapter } from './memory-adapter.js'
 export { createCluster } from './cluster.js'
 export { createCollectionRuntime } from './collections/index.js'
+export { composeCollections } from './collections/compose.js'
+export type { ComposedCollections } from './collections/compose.js'
 export type { Cluster, ClusterMessage } from './cluster.js'
 export type {
   CollectionConn,
@@ -706,6 +709,7 @@ export function createSuperLineServer<
 
   // ---- Collections: contract-declared defs + the host's and plugins' policies ----
   const collectionDefs = (c.collections ?? {}) as Record<string, CollectionDef>
+  checkComposedNames(opts.collections, collectionDefs)
   const collectionPolicies = { ...opts.policies } as Record<string, unknown>
   // merge plugin-contributed row policies; unknown-collection or collision with host/another plugin throws
   for (const p of plugins) {

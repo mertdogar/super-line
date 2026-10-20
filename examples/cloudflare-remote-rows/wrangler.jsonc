@@ -1,0 +1,21 @@
+// One Worker, two Durable Object classes. `Store` is a plain SQL database, one object per store id; `Node` is the
+// super-line node that serves every store's tables live. The Worker serves the page from ./dist, sends /ws to the
+// node and POST /stores/<id>/query to that store.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "super-line-cloudflare-remote-rows-example",
+  "main": "./src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  // plugin-inspector uses node:crypto
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "./dist" },
+  "durable_objects": {
+    "bindings": [
+      { "name": "NODE", "class_name": "Node" },
+      { "name": "STORE", "class_name": "Store" }
+    ]
+  },
+  // Both SQLite-backed: the store keeps its tables and change log there, the node its last clock per store
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Node", "Store"] }],
+  "observability": { "enabled": true }
+}

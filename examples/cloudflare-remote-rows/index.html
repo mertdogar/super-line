@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>super-line remote rows</title>
+    <style>
+      body { font: 14px/1.45 system-ui, sans-serif; max-width: 80rem; margin: 1.5rem auto; padding: 0 1rem; color: #1a1a1a; background: #fff; }
+      h1 { font-size: 1.3rem; margin: 0 0 0.25rem; }
+      h2 { font-size: 1rem; margin: 0 0 0.5rem; }
+      main { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1rem; }
+      @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+      section { min-width: 0; }
+      form, .buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.5rem; }
+      label { display: flex; gap: 0.35rem; align-items: center; }
+      input { width: 8rem; padding: 0.3rem; }
+      textarea { width: 100%; box-sizing: border-box; height: 11rem; font: 13px/1.4 ui-monospace, monospace; padding: 0.4rem; }
+      button { padding: 0.3rem 0.6rem; }
+      .scroll { overflow: auto; max-height: 24rem; border: 1px solid #ddd; }
+      table { border-collapse: collapse; font: 12px/1.4 ui-monospace, monospace; width: 100%; }
+      th, td { text-align: left; padding: 0.15rem 0.5rem; border-bottom: 1px solid #eee; white-space: nowrap; }
+      th { position: sticky; top: 0; background: #f6f6f6; }
+      .muted, .null { color: #777; }
+      .error { color: #b00020; }
+      #status { color: #666; }
+      #status.down { color: #b00020; }
+      #log { list-style: none; padding: 0; margin: 0; font: 12px/1.5 ui-monospace, monospace; max-height: 14rem; overflow: auto; border: 1px solid #ddd; }
+      #log li { padding: 0.1rem 0.5rem; border-bottom: 1px solid #f2f2f2; }
+      #log li.warn { color: #9a5b00; }
+    </style>
+  </head>
+  <body>
+    <h1>Remote rows</h1>
+    <p>A store is a Durable Object holding plain SQL tables. Run SQL against it on the left; the super-line node serves its rows live on the right. <span id="status">connecting…</span></p>
+    <main>
+      <section>
+        <h2>Write: SQL against a store</h2>
+        <form id="sql">
+          <label>store <input name="store" value="demo" required /></label>
+          <button>Run</button>
+        </form>
+        <textarea id="text" spellcheck="false"></textarea>
+        <div class="buttons">
+          <button data-script="create">create dishes</button>
+          <button data-script="insert">insert row</button>
+          <button data-script="update">update price</button>
+          <button data-script="delete">delete row</button>
+          <button data-script="bulk1000">bulk insert 1000</button>
+          <button data-script="bulk6000">bulk insert 6000</button>
+          <button data-script="drop">drop table</button>
+        </div>
+        <p id="outcome" class="muted">Run a statement to see its result.</p>
+        <div class="scroll" id="results"></div>
+      </section>
+      <section>
+        <h2>Read: a live subscription through the node</h2>
+        <form id="sub">
+          <label>store <input name="store" value="demo" required /></label>
+          <label>table <input name="table" value="dishes" required /></label>
+          <button>Subscribe</button>
+        </form>
+        <p id="count" class="muted">not subscribed</p>
+        <div class="scroll" id="rows"></div>
+        <h2 style="margin-top: 1rem">Events</h2>
+        <ol id="log"></ol>
+      </section>
+    </main>
+    <script type="module" src="/src/web.ts"></script>
+  </body>
+</html>

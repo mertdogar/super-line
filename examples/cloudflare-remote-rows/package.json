@@ -1,0 +1,26 @@
+{
+  "name": "@super-line/example-cloudflare-remote-rows",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build && wrangler dev",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@super-line/client": "workspace:*",
+    "@super-line/collections-cloudflare": "workspace:*",
+    "@super-line/core": "workspace:*",
+    "@super-line/plugin-inspector": "workspace:*",
+    "@super-line/server": "workspace:*",
+    "@super-line/transport-cloudflare": "workspace:*",
+    "@super-line/transport-websocket": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261013.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "wrangler": "^4.151.0"
+  }
+}

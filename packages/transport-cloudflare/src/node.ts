@@ -59,9 +59,9 @@ export function createDurableNode<Env = Cloudflare.Env, S extends { readonly rea
  * Forward a Worker request to the Durable Object that is the node. One named object per deployment by default;
  * pass `name` to pick one per request (a tenant from the host or path).
  */
-export function routeToNode(
+export function routeToNode<T extends Rpc.DurableObjectBranded | undefined = undefined>(
   request: Request,
-  namespace: DurableObjectNamespace,
+  namespace: DurableObjectNamespace<T>,
   opts: { name?: (request: Request) => string } = {},
 ): Promise<Response> {
   return namespace.getByName(opts.name?.(request) ?? 'super-line').fetch(request)

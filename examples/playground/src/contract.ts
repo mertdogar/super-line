@@ -2,7 +2,7 @@ import * as z from 'zod'
 import { defineContract, type RowOf } from '@super-line/core'
 import { authContract } from '@super-line/plugin-auth'
 import { chatContract } from '@super-line/plugin-chat'
-import { nudgeEvent, presenceRequests } from './contract-base.js'
+import { nudgeEvent, presenceRequests, trackerCollections } from './contract-base.js'
 import { queueKit } from './queue.js'
 
 const jobSchema = z.object({
@@ -21,10 +21,12 @@ const scheduleSchema = z.object({ id: z.string(), queue: z.string(), cron: z.str
 const jobId = z.object({ jobId: z.string() })
 
 // Identity (users, sessions, presence, the `guest` role) is plugin-auth's; channels/messages are
-// plugin-chat's; queue jobs/schedules/slots are plugin-queue's. The `user` block is the playground's own
+// plugin-chat's; queue jobs/schedules/slots are plugin-queue's; projects/tasks/comments are the playground's
+// own (contract-base.ts). The `user` block is the playground's own
 // surface: introspection, a cross-node nudge (contract-base.ts), and the queue operations a browser may
 // perform — queue collections are deny-all, so a browser only ever reaches them through requests like these.
 export const app = defineContract({
+  collections: trackerCollections,
   shared: {
     serverToClient: {
       ...nudgeEvent,
@@ -54,3 +56,6 @@ export const app = defineContract({
 export type User = RowOf<typeof app, 'users'>
 export type UserPresence = RowOf<typeof app, 'userPresence'>
 export type Message = RowOf<typeof app, 'messages'>
+export type Project = RowOf<typeof app, 'projects'>
+export type Task = RowOf<typeof app, 'tasks'>
+export type Comment = RowOf<typeof app, 'comments'>

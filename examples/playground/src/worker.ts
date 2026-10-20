@@ -6,7 +6,7 @@ import { inspector } from '@super-line/plugin-inspector'
 import { createSuperLineServer } from '@super-line/server'
 import { createDurableNode, routeToNode } from '@super-line/transport-cloudflare'
 import { base } from './contract-base.js'
-import { workspace } from './workspace.js'
+import { trackerPolicies, workspace } from './workspace.js'
 
 interface Env {
   NODE: DurableObjectNamespace
@@ -36,13 +36,13 @@ export class PlaygroundNode extends createDurableNode((ctx, env: Env, nodeBase) 
       },
     },
   })
-  const work = workspace({ users: authKit.users, credentials: authKit.credentials, chatKit })
   const password = env.SUPER_LINE_INSPECTOR_PASSWORD
 
   const srv = createSuperLineServer(base, {
     ...nodeBase,
     nodeName: NODE,
     collections,
+    policies: trackerPolicies,
     authenticate: authKit.authenticate,
     identify: authKit.identify,
     plugins: [authKit.plugin, chatKit.plugin, inspector(password ? { auth: { password } } : {})],
@@ -52,6 +52,7 @@ export class PlaygroundNode extends createDurableNode((ctx, env: Env, nodeBase) 
       if (userId) void seeded.then(() => work.welcome(userId)).catch((err) => console.error('welcome failed', err))
     },
   })
+  const work = workspace({ users: authKit.users, credentials: authKit.credentials, chatKit, rows: srv })
 
   srv.implement({
     user: {

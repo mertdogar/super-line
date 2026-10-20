@@ -26,6 +26,7 @@ export default defineConfig({
       '@super-line/transport-libp2p': r('../../packages/transport-libp2p/src/client.ts'),
       '@super-line/plugin-queue': r('../../packages/plugin-queue/src/index.ts'),
       '@super-line/plugin-devtools': r('../../packages/plugin-devtools/src/index.ts'),
+      '@super-line/tanstack-db': r('../../packages/tanstack-db/src/index.ts'),
       '@super-line/plugin-auth/react': r('../../packages/plugin-auth/src/react.tsx'),
       '@super-line/plugin-auth/client': r('../../packages/plugin-auth/src/client.ts'),
       '@super-line/plugin-auth': r('../../packages/plugin-auth/src/index.ts'),

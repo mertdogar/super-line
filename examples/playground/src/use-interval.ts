@@ -36,3 +36,13 @@ export function usePoll<T>(fetch: () => Promise<T>, ms: number | null, trigger?:
   }, [ms, trigger])
   return data
 }
+
+/** `value`, once it has stopped changing for `ms` — so typing re-subscribes once, not per keystroke. */
+export function useDebounced<T>(value: T, ms: number): T {
+  const [settled, setSettled] = useState(value)
+  useEffect(() => {
+    const id = setTimeout(() => setSettled(value), ms)
+    return () => clearTimeout(id)
+  }, [value, ms])
+  return settled
+}

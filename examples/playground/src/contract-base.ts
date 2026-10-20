@@ -22,12 +22,42 @@ export const presenceRequests = {
   nudge: { input: z.object({ userId: z.string(), text: z.string().min(1).max(200) }), output: z.object({ online: z.boolean() }) },
 }
 
+// A small issue tracker: three row collections, linked to each other and to plugin-auth's `users` by advisory
+// `references`. The Control Center draws them as a schema graph; the browser joins them with TanStack DB.
+export const trackerCollections = {
+  projects: {
+    schema: z.object({ id: z.string(), name: z.string(), ownerId: z.string() }),
+    key: 'id',
+    references: { ownerId: 'users' },
+  },
+  tasks: {
+    schema: z.object({
+      id: z.string(),
+      projectId: z.string(),
+      title: z.string().min(1).max(120),
+      status: z.enum(['todo', 'doing', 'done']),
+      priority: z.number().int().min(1).max(3),
+      assigneeId: z.string().nullable(),
+      createdAt: z.number(),
+    }),
+    key: 'id',
+    references: { projectId: 'projects', assigneeId: 'users' },
+  },
+  comments: {
+    schema: z.object({ id: z.string(), taskId: z.string(), authorId: z.string(), text: z.string().min(1).max(500), createdAt: z.number() }),
+    key: 'id',
+    references: { taskId: 'tasks', authorId: 'users' },
+  },
+} as const
+
 /**
- * The playground without queues: identity (plugin-auth), chat (plugin-chat) and the presence requests. The
- * Cloudflare Durable Object serves exactly this. The browser always holds the full `app` contract (contract.ts),
- * a superset, and hides the Queues panel there — a queue request reaching this node would answer NOT_FOUND.
+ * The playground without queues: identity (plugin-auth), chat (plugin-chat), the tracker collections and the
+ * presence requests. The Cloudflare Durable Object serves exactly this. The browser always holds the full `app`
+ * contract (contract.ts), a superset, and hides the Queues panel there — a queue request reaching this node
+ * would answer NOT_FOUND.
  */
 export const base = defineContract({
+  collections: trackerCollections,
   shared: { serverToClient: nudgeEvent },
   roles: { user: { clientToServer: presenceRequests } },
   plugins: [authContract(), chatContract()],

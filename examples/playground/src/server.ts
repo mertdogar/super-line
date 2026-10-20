@@ -19,7 +19,7 @@ import type { AuthContext } from '@super-line/plugin-auth'
 import type { QueueJob } from '@super-line/plugin-queue'
 import { app } from './contract.js'
 import { queueKit } from './queue.js'
-import { workspace } from './workspace.js'
+import { trackerPolicies, workspace } from './workspace.js'
 
 const PORT = Number(process.env.PORT ?? 8787) // WebSocket + HTTP share one http.Server
 const P2P_PORT = Number(process.env.P2P_PORT ?? 9101) // libp2p /ws — the browser dials this directly
@@ -47,8 +47,6 @@ const chatKit = chat({
     },
   },
 })
-const work = workspace({ users: authKit.users, credentials: authKit.credentials, chatKit })
-
 // A PeerId seeded from the node name, so it is stable across restarts.
 const keySeed = new Uint8Array(32)
 new TextEncoder().encodeInto(NODE.padEnd(8, '·'), keySeed)
@@ -76,6 +74,7 @@ const srv = createSuperLineServer(app, {
   transports: [webSocketServerTransport({ server }), httpServerTransport({ server }), libp2pServerTransport({ node: p2p })],
   adapter: createRedisAdapter(REDIS_URL),
   collections,
+  policies: trackerPolicies, // auth/chat/queue rows are policied by their plugins
   plugins: [authKit.plugin, chatKit.plugin, queueKit.plugin, inspector()],
   authenticate: authKit.authenticate,
   identify: authKit.identify,
@@ -84,6 +83,7 @@ const srv = createSuperLineServer(app, {
     if (userId) void work.welcome(userId).catch((err) => console.error(`[${NODE}] welcome failed`, err))
   },
 })
+const work = workspace({ users: authKit.users, credentials: authKit.credentials, chatKit, rows: srv })
 
 const userIdOf = (conn: { ctx: unknown }): string => (conn.ctx as AuthContext).userId!
 

@@ -6,6 +6,7 @@ import { ChatPanel } from './panels/chat'
 import { PresencePanel } from './panels/presence'
 import { QueuesPanel } from './panels/queues'
 import { AuthPanel } from './panels/auth'
+import { CollectionsPanel } from './panels/collections'
 import { dial, kind, NODES, onCloudflare, pinned, TRANSPORTS, type TransportKind } from './dial'
 
 // Docker: the compose service on :8201. Cloudflare: `pnpm cf:control-center` serves one on :8788.
@@ -89,6 +90,7 @@ function Playground(): React.JSX.Element {
         <PresencePanel />
         {!onCloudflare && <QueuesPanel />}
         <AuthPanel />
+        <CollectionsPanel />
       </main>
     </ChatProvider>
   )

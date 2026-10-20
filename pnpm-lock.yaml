@@ -802,6 +802,9 @@ importers:
       '@super-line/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@super-line/tanstack-db':
+        specifier: workspace:*
+        version: link:../../packages/tanstack-db
       '@super-line/transport-cloudflare':
         specifier: workspace:*
         version: link:../../packages/transport-cloudflare
@@ -814,6 +817,12 @@ importers:
       '@super-line/transport-websocket':
         specifier: workspace:*
         version: link:../../packages/transport-websocket
+      '@tanstack/db':
+        specifier: 0.5.33
+        version: 0.5.33(typescript@5.9.3)
+      '@tanstack/react-db':
+        specifier: 0.1.77
+        version: 0.1.77(react@19.2.8)(typescript@5.9.3)
       libp2p:
         specifier: ^3.3.4
         version: 3.3.4
@@ -5071,6 +5080,11 @@ packages:
   '@tanstack/pacer-lite@0.2.2':
     resolution: {integrity: sha512-eQ1MyLKCHyXiH7NbdmB80W77OhiMgGBUb+qDx/8WMGbwg5Lf/NlfD0TfNYAqY77i8V3AxoDoYdICrQE5ADw4Yw==}
     engines: {node: '>=18'}
+
+  '@tanstack/react-db@0.1.77':
+    resolution: {integrity: sha512-rN9UTE6LrmXrkeo5S1O6zE7altQhFIhWjF0Afbt42/GPsCUGH9sI0Ll24SpkpRsYSorGc06Z5r8LwhzcJvTmiQ==}
+    peerDependencies:
+      react: '>=16.8.0'
 
   '@testing-library/dom@10.4.1':
     resolution: {integrity: sha512-o4PXJQidqJl82ckFaXUeoAW+XysPLauYI43Abki5hABd853iMhitooc6znOnczgbTYmEP6U6/y1ZyKAIsvMKGg==}
@@ -11672,6 +11686,14 @@ snapshots:
 
   '@tanstack/pacer-lite@0.2.2': {}
 
+  '@tanstack/react-db@0.1.77(react@19.2.8)(typescript@5.9.3)':
+    dependencies:
+      '@tanstack/db': 0.5.33(typescript@5.9.3)
+      react: 19.2.8
+      use-sync-external-store: 1.6.0(react@19.2.8)
+    transitivePeerDependencies:
+      - typescript
+
   '@testing-library/dom@10.4.1':
     dependencies:
       '@babel/code-frame': 7.29.7
@@ -16062,6 +16084,10 @@ snapshots:
   use-sync-external-store@1.6.0(react@19.2.7):
     dependencies:
       react: 19.2.7
+
+  use-sync-external-store@1.6.0(react@19.2.8):
+    dependencies:
+      react: 19.2.8
 
   utf8-byte-length@1.0.5: {}
 

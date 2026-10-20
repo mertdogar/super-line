@@ -221,3 +221,22 @@ pre {
 code {
   font-size: 12px;
 }
+.panel.wide {
+  grid-column: 1 / -1;
+}
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 20px;
+}
+@media (max-width: 860px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+tr.selected td {
+  background: var(--bg);
+}
+label {
+  white-space: nowrap;
+}

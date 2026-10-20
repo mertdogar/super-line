@@ -1,8 +1,8 @@
 # playground — every headline feature on one stack
 
 Two server nodes behind one round-robin entry point, with `plugin-auth`, `plugin-chat` and `plugin-queue`
-on both, cluster presence over Redis, and the Control Center watching it all. One page, four panels,
-so you can poke each feature and see the cluster react.
+on both, cluster presence over Redis, row collections queried and joined with TanStack DB, and the Control
+Center watching it all. One page, five panels, so you can poke each feature and see the cluster react.
 
 ```
 browser :8200 ── web (Caddy) ┬─ GET  /             → the SPA
@@ -12,7 +12,7 @@ browser :8200 ── web (Caddy) ┬─ GET  /             → the SPA
                              ├─ ANY  /node-N/*     → node-N, prefix stripped (the header's node dial, ?node=)
                              └─ WS   /inspect      → node-1 (Control Center)
                                                    │            │
-                         postgres + electric ──────┤  rows: users, sessions, channels, messages, queue jobs
+                         postgres + electric ──────┤  rows: users, sessions, channels, messages, tasks, queue jobs
                          redis ────────────────────┘  adapter: events, toUser(), stream deltas, presence registry
 Control Center :8201 → ws://localhost:8200/inspect
 ```
@@ -46,12 +46,15 @@ Sessions are per tab, so open two tabs and sign in as two people. The header sho
 | Queues | Enqueue `×10` at `30% fail` | Cluster-wide concurrency 2, retries with backoff, the `node` column shows who ran each job |
 | Workers → you | Watch "Progress events" while your jobs run | The worker pushes `jobProgress` to the enqueuer with `toUser`, routed through Redis |
 | Cron | Pause / resume / trigger `report-every-minute` | `plugin-queue` schedules, claimed once across the cluster |
-| Control Center | Open :8201 | Topology of both nodes, the live wire feed, and the auth/chat/queue collections |
+| Collections + query IR | In Collections, pick a project, untick `done`, type in "title contains" | `projects`, `tasks` and `comments` reference each other and `users`. The tab syncs only the `tasks` rows matching the printed IR filter (`eq`, `in`, `gte`, `ilike`), which the server pushes down to SQL |
+| TanStack DB joins | Watch the task table and the per-project summary while another tab adds a task | `tasks ⋈ projects ⟕ users ⟕ comment counts` and `projects ⟕ tasks` with `groupBy`, all live queries in the browser over the synced rows |
+| Optimistic writes | Advance a status, add a task, delete someone else's comment | TanStack DB applies each write at once. The server's ack keeps it, and the author-only comment policy refuses the delete, which rolls back |
+| Control Center | Open :8201 | Topology of both nodes, the live wire feed, the schema graph of every collection and their rows |
 
 ## Run it on Cloudflare (single node)
 
-The same page on one Durable Object: auth, chat (including `/bot` streaming), presence and the Control Center
-over the WebSocket transport, with every row in the object's own SQLite. There are no queues or cron, because a
+The same page on one Durable Object: auth, chat (including `/bot` streaming), presence, collections and the
+Control Center over the WebSocket transport, with every row in the object's own SQLite. There are no queues or cron, because a
 polling queue keeps a Durable Object awake forever. There are also no extra nodes or wires: objects share
 nothing, and Workers have no HTTP (SSE) or libp2p transport. The page hides the Queues panel and both dials.
 
@@ -77,7 +80,7 @@ Deploy with `pnpm exec wrangler login`, then `pnpm run cf:deploy`. Guard the Con
 
 What changes on Cloudflare:
 
-- The Durable Object serves `base` (`src/contract-base.ts`: auth, chat, presence), and the browser keeps the full
+- The Durable Object serves `base` (`src/contract-base.ts`: auth, chat, the tracker collections, presence), and the browser keeps the full
   `app` contract. A queue request reaching the object would answer `NOT_FOUND`.
 - `/bot` streams straight from the `sendMessage.after` hook instead of through a queue.
 - The client sets `keepalive`: the object runs no heartbeat, so the client pings and Cloudflare answers without waking it.
@@ -88,10 +91,11 @@ What changes on Cloudflare:
 
 - `src/contract.ts`: the merged contract (`authContract()` + `chatContract()` + `queueKit.contract`) plus the playground's own requests and events.
 - `src/queue.ts`: the queues, declared without workers so the browser can import the contract.
-- `src/contract-base.ts`: the queue-free contract the Durable Object serves; `contract.ts` adds the queues to it.
+- `src/contract-base.ts`: the queue-free contract the Durable Object serves, including the tracker collections and their `references`; `contract.ts` adds the queues to it.
 - `src/server.ts`: one Node node: three transports, plugins, workers (`setWorker`), introspection requests.
 - `src/worker.ts` + `wrangler.jsonc`: the Durable Object node and its Worker.
-- `src/workspace.ts`: seeding, welcome and the `/bot` stream, shared by both hosts.
+- `src/workspace.ts`: seeding, welcome, the `/bot` stream and the tracker's row policies, shared by both hosts.
+- `src/panels/collections.tsx`: the TanStack DB collections (`superLineCollectionOptions`), the IR filter and the live queries.
 - `src/dial.ts`: the tab's node + wire, read from `?node=` / `?transport=`.
 - `src/panels/*`: one React panel per feature.
 

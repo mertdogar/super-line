@@ -15,6 +15,7 @@
       "@super-line/plugin-inspector": ["../../packages/plugin-inspector/src/index.ts"],
       "@super-line/plugin-devtools": ["../../packages/plugin-devtools/src/index.ts"],
       "@super-line/plugin-queue": ["../../packages/plugin-queue/src/index.ts"],
+      "@super-line/tanstack-db": ["../../packages/tanstack-db/src/index.ts"],
       "@super-line/plugin-auth": ["../../packages/plugin-auth/src/index.ts"],
       "@super-line/plugin-auth/server": ["../../packages/plugin-auth/src/server.ts"],
       "@super-line/plugin-auth/client": ["../../packages/plugin-auth/src/client.ts"],

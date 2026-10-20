@@ -3,6 +3,22 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## 2026-10-20
+
+### Features
+
+- **playground:** Collections queried and joined with TanStack DB ([a6030fc])
+- **playground:** A single-node Cloudflare variant ([1b20a6f])
+- **playground:** Every headline feature on one two-node stack ([3c6b055])
+
+### Bug Fixes
+
+- **server:** A row that leaves a filter on pglite reaches its subscribers ([8e3cb17])
+
+### Documentation
+
+- **changelog:** Regenerate the root aggregate ([8e33ebb])
+
 ## 2026-10-18
 
 ### Features

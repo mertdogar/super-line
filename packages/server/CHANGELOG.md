@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [server-v0.24.0] — 2026-10-20
+
+### Features
+
+- **server:** ComposeCollections and fixed-field scoped routing ([8ace559])
+
 ## [server-v0.23.1] — 2026-10-20
 
 ### Features

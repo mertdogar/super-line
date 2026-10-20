@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [core-v0.23.0] — 2026-10-20
+
+### Features
+
+- **core:** FixedFields on the collection seam and excludesOn ([dac4412])
+
 ## [core-v0.22.0] — 2026-10-18
 
 ### Bug Fixes

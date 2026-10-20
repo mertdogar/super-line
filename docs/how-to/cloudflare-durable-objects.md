@@ -369,4 +369,5 @@ To watch a wake, log a line from your factory: it prints once on first use and a
 - [`examples/cloudflare`](https://github.com/mertdogar/super-line/tree/main/examples/cloudflare) — auth, chat, and the inspector in one Durable Object, ready to deploy.
 - [Choose a transport](/how-to/choose-a-transport) — every wire super-line speaks.
 - [Backends & clustering](/collections/backends) — how the Cloudflare backends compare with the others.
+- [Serve another Durable Object's tables](/how-to/cloudflare-remote-rows) — rows that live in other objects' SQLite, served live by this node.
 - [Reconnection & delivery](/concepts/reconnection-delivery) — what a reconnect restores, and the `keepalive` option.

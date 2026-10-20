@@ -138,6 +138,7 @@ export default defineConfig({
           items: [
             { text: 'Choose a collection backend', link: '/how-to/choose-a-collection-backend' },
             { text: 'Run pg_durable beside super-line', link: '/how-to/pg-durable-beside-super-line' },
+            { text: 'Serve another Durable Object’s tables', link: '/how-to/cloudflare-remote-rows' },
           ],
         },
         {

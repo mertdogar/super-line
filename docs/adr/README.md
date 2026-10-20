@@ -39,6 +39,7 @@ Repo-internal: `docs/.vitepress/config.ts` excludes `adr/**` from the docs site,
 | 0026 | The React binding is registered once, and plugins feed it | In force; **supersedes 0020 §4** (the React surface moves from plugin-auth to `@super-line/react`; 0020 §1–§3 stand) |
 | 0027 | A connection is reconstructible from its snapshot | Accepted 2026-10-14 (cloudflare-workers effort); the connection snapshot seam + the `end` frame |
 | 0028 | Liveness belongs to the transport, not a server timer | Accepted 2026-10-14 (cloudflare-workers effort); `liveness: 'socket'` + client `keepalive` |
+| 0029 | A foreign Durable Object's SQLite is a read-only live collection | Accepted 2026-10-21 (remote-rows effort); `syncedSql` trigger capture + `remoteRows` `self` backend + `composeCollections` (a mixed composite is `relay`, its `self` collections read-only) |
 
 ## 2. The standing position, by subsystem
 

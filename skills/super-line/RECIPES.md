@@ -928,6 +928,84 @@ const srv2 = createSuperLineServer(api, {
 
 Runnable: `examples/ai-canvas-pglite` (CRDT self-tier).
 
+## Remote rows — serve another Durable Object's tables live (Cloudflare)
+
+When a Durable Object that is NOT the node (a "source") holds SQLite tables its users create at runtime with arbitrary SQL, serve them to the node's subscribers as ONE read-only row collection. The source captures changes with triggers and pushes each committed batch to the node; the node applies the next clock inline, pulls `changesSince` on a gap, and reads snapshots straight from the source. wrangler: both classes under `new_sqlite_classes`, both bound (`NODE`, `STORE`).
+
+```ts
+// contract.ts — the /contract subpath imports only zod + core (safe in a browser bundle)
+import { remoteRowsCollection } from '@super-line/collections-cloudflare/contract'
+export const api = defineContract({
+  collections: { notes: { schema: z.object({ id: z.string(), text: z.string() }), key: 'id' } },
+  roles: { user: { clientToServer: {} } },
+  plugins: [remoteRowsCollection('storeRows')],   // rows { key: `${storeId}:${table}:${id}`, storeId, table, id, data } — data opaque
+})
+```
+
+```ts
+// store.ts — the SOURCE, named `<node>:<store>` via getByName
+import { DurableObject } from 'cloudflare:workers'
+import { syncedSql, type QueryOptions, type Statement } from '@super-line/collections-cloudflare'
+
+export class Store extends DurableObject<Env> {
+  private sync = syncedSql(this.ctx, {
+    onChange: (push) => {                          // after every committed batch; a throw is logged and dropped (no retry)
+      const [node, storeId] = this.ctx.id.name!.split(':')
+      return this.env.NODE.getByName(node).storeChanged(storeId, push)
+    },
+  })
+  query(statements: Statement[], opts?: QueryOptions) { return this.sync.query(statements, opts) }   // EVERY write goes through here
+  snapshot(table: string, limit: number) { return this.sync.snapshot(table, limit) }                 // ↓ the node calls these three
+  get(table: string, id: string) { return this.sync.get(table, id) }
+  changesSince(clock: number) { return this.sync.changesSince(clock) }
+}
+```
+
+```ts
+// worker.ts — the NODE
+import { composeCollections, createSuperLineServer } from '@super-line/server'
+import { createDurableNode } from '@super-line/transport-cloudflare'
+import { cloudflareCollections, remoteRows, type RemotePush } from '@super-line/collections-cloudflare'
+
+const { storeRows: _, ...owned } = api.collections   // the default backend gets ONLY its own collections
+
+export class Node extends createDurableNode((ctx, env: Env, base) => {
+  const storeRows = remoteRows({
+    collection: 'storeRows',
+    storage: ctx.storage,                                    // last clock applied, per source
+    stub: (storeId) => env.STORE.getByName(`${ctx.id.name}:${storeId}`),
+    onWipe: (storeId) => {                                   // the source's history broke → its readers resync
+      for (const conn of server.local.connections) if (conn.ctx.stores.includes(storeId)) conn.raw.close(4409, 'resync')
+    },
+  })
+  const server = createSuperLineServer(api, {
+    ...base, authenticate,
+    collections: composeCollections({ default: cloudflareCollections(ctx.storage, owned), storeRows }),
+    policies: { storeRows: { read: (_p, ctx) => isIn('storeId', ctx.stores) } },   // write omitted (it's FORBIDDEN anyway)
+  })
+  // a wake restores subscriptions WITHOUT reading the source: catch up the sources still in use
+  void server.ready.then(() => storeRows.resume([...new Set(server.local.connections.flatMap((c) => c.ctx.stores))]))
+  return Object.assign(server, { storeRows })
+}) {
+  storeChanged(storeId: string, push: RemotePush) { return this.server.storeRows.ingest(storeId, push) }   // the source's onChange target
+}
+```
+
+```ts
+// client — an ordinary row collection; the filter MUST pin storeId AND table with eq() (else VALIDATION)
+const dishes = client.collection('storeRows').subscribe({ filter: and(eq('storeId', 'downtown'), eq('table', 'dishes')), limit: 100 })
+await dishes.ready
+const menu = dishes.rows().map((r) => dishSchema.parse(r.data))   // type the opaque data yourself
+```
+
+- **Read-only.** `insert`/`update`/`delete`/`batch` → `FORBIDDEN`; write through the source's `query` (e.g. a node request handler calling `env.STORE.getByName(…).query([...])`) and the change comes back through the push.
+- **History breaks resync per source**: dropping/renaming a table, adding/dropping/renaming a column, deletes pruned past `maxTombstones` (1000), a backlog over `maxPullChanges` (5000), or `deleteAll()` on the source → `onWipe` → 4409 close → the client reconnects and resubscribes into a fresh snapshot. Creating a table is fine.
+- **Snapshots read at most `snapshotLimit` (1000) rows** of the table, then filter/sort on the node; only a filter that is exactly the two pins (no `orderBy`, no policy filter) pushes `offset + limit` down.
+- **A delete reaches every `storeRows` subscriber on the node** as a key-only delete — a deleted row's store id, table name and row id are visible to all of them, data never. An insert/update reaches only subscribers whose filter + policy admit its `storeId` and `table`.
+- `composeCollections`: a batch across two backends → `VALIDATION`; the server refuses to start if a name other than `default` isn't a row collection on the contract.
+- **Lost pushes aren't retried**: healed by the source's next push (gap → pull), the next subscribe, or `resume`. Each push wakes the node, subscribed or not.
+- Store ids and table names colon-free · row id = single-column PK else `rowid` (a `WITHOUT ROWID` composite-key table is skipped with a warning) · the source runs `recursive_triggers = ON`, owns `_sl_*`, and `meta.rowsWritten` counts the change log's writes.
+
 ## Synced state with a CRDT (Yjs / Automerge) — roll your own
 
 For most apps, prefer a built-in **CRDT document collection** (above) — a validated, mergeable, persisted document with a client `DocHandle` and a server co-writer, batteries-included. Roll your own only when you need to **own the wire** (custom rooms, your own message shapes, no collection abstraction). super-line is an ideal transport for a hand-rolled CRDT: keep a doc per room and relay **opaque** update bytes (base64-wrapped, so they ride the default JSON serializer). The **server holds the canonical doc** — so it persists state and can be a **co-writer** — and the doc's update observer is the single fan-out point. An `origin` tag marks who wrote each update so clients can break the echo.

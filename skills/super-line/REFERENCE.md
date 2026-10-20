@@ -324,11 +324,27 @@ CLOSE_NOT_RESUMABLE  // 4409: a socket whose connection could not be resumed on 
 // @super-line/collections-cloudflare — row collections in the node object's own SQLite (relay; single node)
 cloudflareCollections(ctx.storage, contract.collections): RelayCollectionStore   // build it in createDurableNode's build
 
+// Remote rows — the runtime-created tables of OTHER Durable Objects (sources) as ONE read-only row collection on the node.
+// In the SOURCE object (its own SQLite):
+syncedSql(ctx, { onChange?(push: RemotePush), maxInlineChanges? = 500, maxTombstones? = 1000, maxPullChanges? = 5000 }): SyncedSql
+  .query(statements: { sql, params? }[], { readOnly?, maxBytes? }): { results } | { error, statement, bytes? }   // the ONE write funnel: one tx, moves the clock, pushes after commit
+  .snapshot(table, limit) · .get(table, id) · .changesSince(clock): { epoch, clock, changes, wipeAll }           // expose all three as RPC methods — the node calls them
+// In the NODE (clustering 'self', read-only — every write → FORBIDDEN):
+remoteRows({ collection, storage: ctx.storage, stub: (storeId) => sourceStub, onWipe?(storeId), snapshotLimit? = 1000 }): RemoteRowsStore
+  .ingest(storeId, push)   // call it from the node RPC method the source's onChange targets
+  .resume(storeIds)        // after `server.ready` on a wake: pull what these sources changed while the node slept
+// @super-line/collections-cloudflare/contract — imports only zod + core, never cloudflare:workers
+remoteRowsCollection(name): ContractPlugin   // defineContract({ plugins: [remoteRowsCollection('storeRows')] }); rows { key: `${storeId}:${table}:${id}`, storeId, table, id, data: Record<string, string | number | null | { blob: base64 }> }
+// @super-line/server — one backend over several, routed by collection name
+composeCollections({ default: CollectionStore, [collection]: CollectionStore }): CollectionStore
+
 // @super-line/collections-crdt-cloudflare — CRDT docs in the same object's SQLite (relay; snapshot-per-doc)
 crdtCloudflareCollections(ctx.storage, contract.collections, { debounceMs? }): CrdtCollectionStore   // sync; peer: collections-crdt-memory
 ```
 
 On Cloudflare the object hibernates between events while sockets stay open; on wake the server resumes every connection (subscriptions, open docs, rooms, env) and the client sees nothing. The server runs no heartbeat there (pings are answered by the platform without waking it), so give browser clients `keepalive`. In-memory state does not survive a wake: `conn.data`, and anything in a memory collection backend — use `cloudflareCollections` for rows. The `createDurableNode` factory is the object's constructor and `onConnection` runs again for every resumed socket, so seed shared rows inside `ctx.blockConcurrencyWhile` (it completes before any event) and make connection side effects idempotent (join only if not already a member). Keep `ctx`/`env` JSON-serializable — the connection snapshot is JSON, so a `Date` comes back as a string. plugin-auth's sessions survive a wake (only a session whose socket didn't come back is ended), but no heartbeat refreshes `lastSeenAt` while a session is open — read `connectedAt !== null` as online there, and give the chat client `presenceTimeoutMs: Infinity` (a vanished client stays online until the platform reports its socket closed, timing undocumented). It lays tables out exactly as `sqliteCollections` does, opens them on first use, and within Durable Object SQLite's limits: at most 98 schema fields per collection, 2 MB per row. A collection whose schema changed non-additively (a field changed type or was removed, a required field added) fails its own operations with an `INTERNAL` error naming it, without touching the rest of the object; rename the collection or migrate its table yourself. For CRDT docs use `crdtCloudflareCollections`: a doc loads on first use after a wake, edits are written through per doc after `debounceMs` (250 ms; a pending write keeps the object awake that long, and only a forced reset such as a deploy loses that window), and a doc whose encoded state outgrows 2 MB is refused with an `INTERNAL` error naming it — split big content across docs. A plugin running timers keeps the object awake: plugin-queue's polls always, plugin-inspector only while a Control Center watches the live feed. Every request the object receives wakes it, so route only the WebSocket path to it.
+
+Remote rows: a source pushes every committed batch to the node, which applies the next clock inline and otherwise pulls `changesSince`; a lost push is never retried and heals at the source's next push, the next subscribe, or `resume`. A subscribe must pin `storeId` AND `table` with `eq()` (else `VALIDATION`); the rest of the filter and `orderBy` run on the node over at most `snapshotLimit` rows read from the source table. `data` is untyped on the contract — parse it on the client. Row id = the single-column primary key, else `rowid`; a `WITHOUT ROWID` table with a composite key is skipped. Store ids and table names must be colon-free (row ids may hold colons). Dropping/renaming a table, adding/dropping/renaming a column, deletes pruned past `maxTombstones`, a backlog over `maxPullChanges`, or `deleteAll()` on the source breaks its history: `onWipe(storeId)` runs, and you close that source's readers with `conn.raw.close(4409, 'resync')` so they reconnect into a fresh snapshot — no resync frame exists. A delete reaches every subscriber of the collection on the node as a data-less delete carrying the key, so deleted rows' store ids, table names and row ids are visible to all of them (data never is); an insert/update reaches only subscribers whose filter + policy admit its `storeId` and `table`. A backend can declare such never-changing fields with the optional `CollectionStore.fixedFields?(n)` (`remoteRows` names `storeId`, `table`). The source runs with `recursive_triggers` on, owns every `_sl_`-prefixed object, and its `meta.rowsWritten` includes the change log's writes. A write made with `ctx.storage.sql.exec` instead of `query` isn't pushed when it commits. Pass `cloudflareCollections` only the collections it owns (`const { storeRows, ...owned } = contract.collections`), or it lays out an unused table. `composeCollections`: a batch spanning two backends throws `VALIDATION`; a composite is `self` only when every backend is, and any mix is `relay` with its `self` collections read-only (`FORBIDDEN`); a backend named twice is one backend; the server refuses to start when a name other than `default` isn't a row collection on the contract.
 
 Writing a transport for a host that hibernates (sockets outlive the server instance, e.g. a Durable Object) uses three optional `ServerTransport` members and one start hook:
 
@@ -498,6 +514,8 @@ createSuperLineServer(api, {
   // falls back to key + one _sl_data JSON column (correct, just no SQL column typing or pushdown).
   // Same per-field fallback for anything JSON Schema can't express, e.g. a .transform(). A root
   // .meta({ id }) plans like the object without one.
+  // composeCollections({ default: backend, storeRows: otherBackend }) from @super-line/server serves the named
+  // collections from another backend (atomic per backend: a batch spanning two throws VALIDATION).
   checkReferences: true,                        // opt-in advisory FK existence check (no cascades)
   policies: {                                   // DENY-BY-DEFAULT: omit read/write ⇒ that op is server-only
     messages: {
@@ -525,6 +543,15 @@ await client.collection('messages').insert(row) // also update(row) / delete(id)
 // QUERY IR (from @super-line/core) — one evaluator shared by routing/snapshots/client re-filter:
 and/or/not · eq/neq/lt/lte/gt/gte(field, value) · isIn(field, values) · like/ilike(field, pattern)   // field = dot path
 type CollectionQuery = { filter?: Expr; orderBy?: { field, dir: 'asc'|'desc' }[]; limit?; offset? }
+matchesFilter(filter, row): boolean · applyQuery(rows, query): rows   // the evaluator — for a backend that filters/sorts/windows in JS
+excludesOn(filter, row, fields): boolean   // true only if `filter` is false on `row` judged on `fields` alone (a leaf on any other field is unknown; `and` excludes if any conjunct does, `or` if every branch does, `not` never)
+
+// BACKEND SEAM (writing your own CollectionStore) — optional:
+fixedFields?(n): readonly string[]   // fields of collection n whose value never changes for a key (remoteRows: ['storeId', 'table']).
+// A `self` backend's prev-less update otherwise reaches EVERY subscriber, a non-matching one as a data-less delete; with
+// fixedFields the server skips a subscriber whose filter (policy included) excludesOn those fields. A prev-less DELETE
+// carries no row, so it still reaches every subscriber. Never name a field that can change: a subscriber on
+// `status = 'open'` holding the row must still get the delete when an update closes it.
 
 // TANSTACK DB adapter — the query engine (joins, live queries):
 import { createCollection, createLiveQueryCollection, eq as teq } from '@tanstack/db'
@@ -534,7 +561,7 @@ const users = createCollection(superLineCollectionOptions(client, api, 'users'))
 createLiveQueryCollection((q) => q.from({ m: messages }).join({ u: users }, ({ m, u }) => teq(u.id, m.authorId), 'inner').select(({ m, u }) => ({ id: m.id, text: m.text, author: u.name })))
 ```
 
-Backends (all drop-in, one line to swap): `@super-line/collections-memory` (in-memory · relay) · `collections-sqlite` (SQLite · relay, IR→SQL snapshot pushdown) · `collections-cloudflare` (Durable Object SQLite · relay, same pushdown) · `collections-pglite` (central Postgres + Electric→PGlite · **self**, no adapter). Inspector: `listCollections` / `queryCollection` + a Control Center **Collections** view (schema graph + row browser). Guide: `/collections/`; example: `examples/collections`.
+Backends (all drop-in, one line to swap): `@super-line/collections-memory` (in-memory · relay) · `collections-sqlite` (SQLite · relay, IR→SQL snapshot pushdown) · `collections-cloudflare` (Durable Object SQLite · relay, same pushdown; plus `remoteRows`, other Durable Objects' tables as one read-only `self` collection — see the Cloudflare section) · `collections-pglite` (central Postgres + Electric→PGlite · **self**, no adapter). Inspector: `listCollections` / `queryCollection` + a Control Center **Collections** view (schema graph + row browser). Guide: `/collections/`; example: `examples/collections`.
 
 ### CRDT document collections
 

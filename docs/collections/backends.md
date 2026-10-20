@@ -96,6 +96,18 @@ Synchronous, positional, and only usable inside a SQLite-backed Durable Object �
 
 It opens lazily, on the first operation, so building it in the object's constructor never throws. A collection that can't open — its schema changed non-additively, or it plans more than 98 typed columns — fails only its own operations with an `INTERNAL` error naming it and the fix; additive drift is altered in as with SQLite. Every row must fit the platform's 2 MB, and a snapshot filter needing more than 98 bound values scans and filters in JS. See [change a schema on a deployed object](/how-to/cloudflare-durable-objects#change-a-schema-on-a-deployed-object).
 
+### `remoteRows(options)`
+
+Also in `@super-line/collections-cloudflare`: one **read-only** collection serving the tables of *other* Durable Objects — sources whose tables are created at runtime by arbitrary SQL — to the node's subscribers. Each source wraps its SQLite in `syncedSql(ctx)`, which captures every row change with triggers and pushes each committed batch to the node; the contract declares the collection with `remoteRowsCollection(name)` from the `/contract` subpath, as rows `{ key, storeId, table, id, data }` with each row's columns opaque under `data`. It declares `clustering: 'self'`, because its changes arrive from the sources rather than from super-line's fan-out, and it serves alongside the node's own backend through `composeCollections({ default, [name]: rows })` from `@super-line/server`. A subscription must pin `storeId` and `table` with `eq()`, writes fail with `FORBIDDEN`, and a source whose history breaks (a dropped or altered table, a reset) sends its subscribers back for a fresh snapshot. Its changes carry no prior row, so it declares `storeId` and `table` as **fixed fields** (`fixedFields`) — fields whose value never changes for a key: an insert or update then reaches only the subscribers whose filter and policy admit that store and table, while a delete reaches every subscriber of the collection as a key-only delete. See [serve another Durable Object's tables](/how-to/cloudflare-remote-rows).
+
+| Option | Type | Notes |
+| --- | --- | --- |
+| `collection` | `string` | **Required.** The name given to `remoteRowsCollection`. |
+| `storage` | `RemoteRowsStorage` | **Required.** The node's `ctx.storage` — where the last clock applied per source is kept. |
+| `stub` | `(storeId) => RemoteSource` | **Required.** The source object for a store id. |
+| `onWipe` | `(storeId) => unknown` | A source's history broke; close its readers' sockets (`4409`) so they resubscribe. Default: nothing. |
+| `snapshotLimit` | `number?` | The most rows a snapshot reads from the source table. Default `1000`. |
+
 ### Typed tables
 
 The SQL backends store each LWW collection in its **own typed table** (`col_<name>`): scalar schema fields become real columns, everything else a per-field JSON column, derived from the contract — so every SQL factory takes the contract's `collections` map. `collections-cloudflare` runs the same table layout and query compiler as `collections-sqlite`. `collections-sqlite` compiles the [query IR](/collections/row-collections#the-query-ir) against those columns (an exactly-compilable query runs entirely in SQL); `collections-pglite` is the self-clustering tier (central Postgres + one Electric shape per table streaming into each node's replica).

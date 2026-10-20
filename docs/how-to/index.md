@@ -41,6 +41,7 @@ Where typed collection state lives, and how it reaches other nodes.
 
 - [Choose a collection backend](/how-to/choose-a-collection-backend) — match a row and CRDT backend to your durability and clustering needs.
 - [Run pg_durable beside super-line](/how-to/pg-durable-beside-super-line) — share the `self` tier's Postgres with Microsoft's durable-execution extension and watch its workflows through Electric.
+- [Serve another Durable Object's tables](/how-to/cloudflare-remote-rows) — stream the runtime-created SQLite tables of objects beside your Cloudflare node as one live, read-only collection.
 
 ## Queues & workers
 

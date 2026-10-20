@@ -12,7 +12,9 @@
       { "name": "RAW", "class_name": "RawNode" },
       { "name": "APP", "class_name": "AppNode" },
       { "name": "STORE", "class_name": "StoreNode" },
-      { "name": "AUTH", "class_name": "AuthNode" }
+      { "name": "AUTH", "class_name": "AuthNode" },
+      { "name": "SQL_SOURCE", "class_name": "SqlSourceNode" },
+      { "name": "ROWS", "class_name": "RowsNode" }
     ]
   },
   "migrations": [
@@ -20,6 +22,8 @@
     { "tag": "v2", "new_sqlite_classes": ["RawNode"] },
     { "tag": "v3", "new_sqlite_classes": ["AppNode"] },
     { "tag": "v4", "new_sqlite_classes": ["StoreNode"] },
-    { "tag": "v5", "new_sqlite_classes": ["AuthNode"] }
+    { "tag": "v5", "new_sqlite_classes": ["AuthNode"] },
+    { "tag": "v6", "new_sqlite_classes": ["SqlSourceNode"] },
+    { "tag": "v7", "new_sqlite_classes": ["RowsNode"] }
   ]
 }

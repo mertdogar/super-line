@@ -1707,6 +1707,13 @@ importers:
         version: link:../core
 
   packages/collections-cloudflare:
+    dependencies:
+      '@logtape/logtape':
+        specifier: ^2.2.4
+        version: 2.2.4
+      zod:
+        specifier: ^4.2.0
+        version: 4.6.5
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^5.20261013.1

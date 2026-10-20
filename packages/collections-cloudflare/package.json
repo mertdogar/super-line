@@ -26,6 +26,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./contract": {
+      "types": "./dist/contract.d.ts",
+      "default": "./dist/contract.js"
     }
   },
   "files": [
@@ -39,6 +43,10 @@
   "scripts": {
     "build": "tsup",
     "prepublishOnly": "tsup && node ../../scripts/check-changelog.mjs && node ../../scripts/check-manifest.mjs"
+  },
+  "dependencies": {
+    "@logtape/logtape": "^2.2.4",
+    "zod": "^4.2.0"
   },
   "peerDependencies": {
     "@super-line/core": ">=0.17.0 <1.0.0"

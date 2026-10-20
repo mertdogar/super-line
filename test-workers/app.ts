@@ -1,6 +1,7 @@
 import { defineContract } from '@super-line/core'
 import type { ClientTransport, RawConn } from '@super-line/core'
 import { authContract } from '@super-line/plugin-auth'
+import { remoteRowsCollection } from '@super-line/collections-cloudflare/contract'
 import * as z from 'zod'
 
 // The app the hibernation tests run: one topic, and requests to publish on it, to flip a lock the
@@ -30,6 +31,13 @@ export const appContract = defineContract({
 export const authApp = defineContract({
   roles: { user: { clientToServer: { ping: { input: z.void(), output: z.null() } } } },
   plugins: [authContract()],
+})
+
+/** A node serving its sources' tables as `storeRows`, beside a row collection of its own. */
+export const rowsContract = defineContract({
+  collections: { notes: { schema: z.object({ id: z.string(), text: z.string() }), key: 'id' } },
+  roles: { user: { clientToServer: { ping: { input: z.void(), output: z.null() } } } },
+  plugins: [remoteRowsCollection('storeRows')],
 })
 
 const enc = new TextEncoder()

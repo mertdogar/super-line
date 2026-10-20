@@ -1,11 +1,12 @@
 import { DurableObject } from 'cloudflare:workers'
 import { INSPECTOR_SUBPROTOCOL, SuperLineError, type AuthOutcome, type Handshake } from '@super-line/core'
 import { cloudflareServerTransport, createDurableNode } from '@super-line/transport-cloudflare'
-import { createSuperLineServer } from '@super-line/server'
-import { cloudflareCollections } from '@super-line/collections-cloudflare'
+import { composeCollections, createSuperLineServer } from '@super-line/server'
+import { cloudflareCollections, remoteRows, syncedSql } from '@super-line/collections-cloudflare'
+import type { QueryOptions, RemotePush, Statement } from '@super-line/collections-cloudflare'
 import { crdtCloudflareCollections } from '@super-line/collections-crdt-cloudflare'
 import { auth } from '@super-line/plugin-auth/server'
-import { appContract, authApp } from './app.js'
+import { appContract, authApp, rowsContract } from './app.js'
 
 // Smoke Durable Object for the workers lane. Counts its own constructions in SQLite so a test can
 // prove the constructor reran after eviction while the hibernated socket stayed open.
@@ -137,6 +138,83 @@ export class AuthNode extends createDurableNode((ctx, _env, base) => {
 
 // A bare object: the collection-backend tests drive its storage through `runInDurableObject`.
 export class StoreNode extends DurableObject<Cloudflare.Env> {}
+
+// A raw SQL source: syncedSql over the object's own SQLite, with low caps so a test reaches them. Records its pushes,
+// and when named `<node>:<store>` forwards them to that RowsNode, less the ones a test drops.
+export class SqlSourceNode extends DurableObject<Cloudflare.Env> {
+  readonly pushes: RemotePush[] = []
+  private dropping = 0
+  readonly sync = syncedSql(this.ctx, {
+    maxTombstones: 4,
+    maxInlineChanges: 3,
+    maxPullChanges: 5,
+    onChange: (push) => {
+      this.pushes.push(push)
+      const [node, store] = this.ctx.id.name?.split(':') ?? []
+      if (!node || !store) return
+      if (this.dropping > 0) return void this.dropping--
+      return this.env.ROWS.getByName(node).storeChanged(store, push)
+    },
+  })
+
+  query(statements: Statement[], opts?: QueryOptions) {
+    return this.sync.query(statements, opts)
+  }
+  snapshot(table: string, limit: number) {
+    return this.sync.snapshot(table, limit)
+  }
+  get(table: string, id: string) {
+    return this.sync.get(table, id)
+  }
+  changesSince(clock: number) {
+    return this.sync.changesSince(clock)
+  }
+  takePushes() {
+    return this.pushes.splice(0)
+  }
+  dropPushes(n: number) {
+    this.dropping = n
+  }
+  destroy() {
+    return this.ctx.storage.deleteAll()
+  }
+}
+
+// A node fronting SqlSourceNodes named `<this node>:<store>`: their rows are its `storeRows`, beside its own `notes`.
+// A wipe closes every connection 4409 and is recorded.
+export class RowsNode extends createDurableNode((ctx, env, base) => {
+  const wipes: string[] = []
+  const rows = remoteRows({
+    collection: 'storeRows',
+    storage: ctx.storage,
+    stub: (storeId) => env.SQL_SOURCE.getByName(`${ctx.id.name}:${storeId}`),
+    onWipe: (storeId) => {
+      wipes.push(storeId)
+      for (const conn of srv.local.connections) conn.raw.close(4409, 'resync')
+    },
+  })
+  const { storeRows: _, ...owned } = rowsContract.collections
+  const srv = createSuperLineServer(rowsContract, {
+    ...base,
+    collections: composeCollections({ default: cloudflareCollections(ctx.storage, owned), storeRows: rows }),
+    policies: {
+      notes: { read: () => undefined, write: () => true },
+      storeRows: { read: () => undefined, write: () => true },
+    },
+    authenticate: () => ({ role: 'user' as const, ctx: {} }),
+  }).implement({ user: { ping: async () => null } })
+  return Object.assign(srv, { rows, wipes })
+}) {
+  storeChanged(storeId: string, push: RemotePush) {
+    return this.server.rows.ingest(storeId, push)
+  }
+  resume(storeIds: string[]) {
+    return this.server.rows.resume(storeIds)
+  }
+  wipes() {
+    return this.server.wipes
+  }
+}
 
 export default {
   fetch: (request: Request, env: Cloudflare.Env) =>

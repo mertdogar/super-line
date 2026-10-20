@@ -12,6 +12,23 @@ import {
   type Table,
 } from '../../collections-sqlite/src/sql.js'
 
+export { READ_ONLY_MESSAGE, syncedSql } from './synced-sql.js'
+export { remoteRows } from './remote-rows.js'
+export type { RemoteRowsOptions, RemoteRowsStorage, RemoteRowsStore, RemoteSource } from './remote-rows.js'
+export type {
+  Outcome,
+  QueryOptions,
+  RemoteChange,
+  RemoteChanges,
+  RemotePush,
+  RemoteRow,
+  Result,
+  Statement,
+  SyncedSql,
+  SyncedSqlOptions,
+  Value,
+} from './synced-sql.js'
+
 /** A Durable Object query binds at most 100 values. */
 const MAX_PARAMS = 100
 /** A Durable Object table holds at most 100 columns; two are the row timestamps. */

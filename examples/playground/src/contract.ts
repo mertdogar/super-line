@@ -2,17 +2,9 @@ import * as z from 'zod'
 import { defineContract, type RowOf } from '@super-line/core'
 import { authContract } from '@super-line/plugin-auth'
 import { chatContract } from '@super-line/plugin-chat'
+import { nudgeEvent, presenceRequests } from './contract-base.js'
 import { queueKit } from './queue.js'
 
-const nodeSchema = z.object({ nodeId: z.string(), nodeName: z.string(), connections: z.number(), alive: z.boolean() })
-const connSchema = z.object({
-  id: z.string(),
-  nodeId: z.string(),
-  role: z.string(),
-  userId: z.string().optional(),
-  transport: z.string().optional(),
-  connectedAt: z.number(),
-})
 const jobSchema = z.object({
   id: z.string(),
   queue: z.string(),
@@ -30,23 +22,19 @@ const jobId = z.object({ jobId: z.string() })
 
 // Identity (users, sessions, presence, the `guest` role) is plugin-auth's; channels/messages are
 // plugin-chat's; queue jobs/schedules/slots are plugin-queue's. The `user` block is the playground's own
-// surface: introspection, a cross-node nudge, and the queue operations a browser may perform — queue
-// collections are deny-all, so a browser only ever reaches them through requests like these.
+// surface: introspection, a cross-node nudge (contract-base.ts), and the queue operations a browser may
+// perform — queue collections are deny-all, so a browser only ever reaches them through requests like these.
 export const app = defineContract({
   shared: {
     serverToClient: {
-      // Both ride `srv.toUser(id).emit`, which takes SHARED events — it reaches every device of a user,
-      // on whichever node holds them.
-      nudge: { payload: z.object({ from: z.string(), fromNode: z.string(), text: z.string() }) },
+      ...nudgeEvent,
       jobProgress: { payload: z.object({ jobId: z.string(), label: z.string(), node: z.string(), text: z.string() }) },
     },
   },
   roles: {
     user: {
       clientToServer: {
-        whereAmI: { input: z.void(), output: z.object({ node: z.string(), nodeId: z.string(), connId: z.string() }) },
-        cluster: { input: z.void(), output: z.object({ nodes: z.array(nodeSchema), connections: z.array(connSchema) }) },
-        nudge: { input: z.object({ userId: z.string(), text: z.string().min(1).max(200) }), output: z.object({ online: z.boolean() }) },
+        ...presenceRequests,
         enqueueReport: {
           input: z.object({ label: z.string().min(1).max(80), failRate: z.number().min(0).max(1), count: z.number().int().min(1).max(20) }),
           output: z.object({ jobIds: z.array(z.string()) }),

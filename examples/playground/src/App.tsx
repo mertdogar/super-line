@@ -6,9 +6,10 @@ import { ChatPanel } from './panels/chat'
 import { PresencePanel } from './panels/presence'
 import { QueuesPanel } from './panels/queues'
 import { AuthPanel } from './panels/auth'
-import { dial, kind, NODES, pinned, TRANSPORTS, type TransportKind } from './dial'
+import { dial, kind, NODES, onCloudflare, pinned, TRANSPORTS, type TransportKind } from './dial'
 
-const CONTROL_CENTER = `${location.protocol}//${location.hostname}:8201`
+// Docker: the compose service on :8201. Cloudflare: `pnpm cf:control-center` serves one on :8788.
+const CONTROL_CENTER = `${location.protocol}//${location.hostname}:${onCloudflare ? 8788 : 8201}`
 
 export function App(): React.JSX.Element {
   const { state } = useAuth()
@@ -76,22 +77,7 @@ function Playground(): React.JSX.Element {
         <span>
           connected to <b className="node">{where?.node ?? '…'}</b> <span className="muted">conn {where?.connId.slice(0, 8)}</span>
         </span>
-        <span className="row">
-          node:
-          {[null, ...NODES].map((n) => (
-            <button key={n ?? 'any'} className={n === pinned ? 'small active' : 'small'} onClick={() => dial({ node: n })}>
-              {n ?? 'any'}
-            </button>
-          ))}
-        </span>
-        <span className="row">
-          wire:
-          {(Object.keys(TRANSPORTS) as TransportKind[]).map((k) => (
-            <button key={k} className={k === kind ? 'small active' : 'small'} onClick={() => dial({ transport: k })}>
-              {TRANSPORTS[k]}
-            </button>
-          ))}
-        </span>
+        {!onCloudflare && <Dials />}
         <span className="spacer" />
         <a href={CONTROL_CENTER} target="_blank" rel="noreferrer">
           Control Center ↗
@@ -101,9 +87,32 @@ function Playground(): React.JSX.Element {
       <main>
         <ChatPanel />
         <PresencePanel />
-        <QueuesPanel />
+        {!onCloudflare && <QueuesPanel />}
         <AuthPanel />
       </main>
     </ChatProvider>
+  )
+}
+
+function Dials(): React.JSX.Element {
+  return (
+    <>
+      <span className="row">
+        node:
+        {[null, ...NODES].map((n) => (
+          <button key={n ?? 'any'} className={n === pinned ? 'small active' : 'small'} onClick={() => dial({ node: n })}>
+            {n ?? 'any'}
+          </button>
+        ))}
+      </span>
+      <span className="row">
+        wire:
+        {(Object.keys(TRANSPORTS) as TransportKind[]).map((k) => (
+          <button key={k} className={k === kind ? 'small active' : 'small'} onClick={() => dial({ transport: k })}>
+            {TRANSPORTS[k]}
+          </button>
+        ))}
+      </span>
+    </>
   )
 }

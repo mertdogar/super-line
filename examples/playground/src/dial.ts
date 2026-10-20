@@ -16,7 +16,10 @@ export const NODES = ['node-1', 'node-2'] as const
 export const TRANSPORTS = { websocket: 'WebSocket', http: 'HTTP (SSE)', libp2p: 'libp2p' } as const
 export type TransportKind = keyof typeof TRANSPORTS
 
-const params = new URLSearchParams(location.search)
+/** `vite build --mode cloudflare`: one Durable Object node, WebSocket only — so there is nothing to dial. */
+export const onCloudflare = import.meta.env.MODE === 'cloudflare'
+
+const params = new URLSearchParams(onCloudflare ? '' : location.search)
 export const pinned = NODES.find((n) => n === params.get('node')) ?? null
 export const kind: TransportKind = (Object.keys(TRANSPORTS) as TransportKind[]).find((k) => k === params.get('transport')) ?? 'websocket'
 

@@ -28,5 +28,7 @@
       "@super-line/transport-libp2p": ["../../packages/transport-libp2p/src/index.ts"]
     }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts"],
+  // Workers' global types collide with the DOM's — the worker has its own tsconfig.worker.json
+  "exclude": ["src/worker.ts"]
 }

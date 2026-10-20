@@ -1,0 +1,17 @@
+// The Cloudflare variant: one Worker, one Durable Object that IS the single super-line node. The Worker serves the
+// SPA from ./dist-cloudflare (`vite build --mode cloudflare`) and forwards only /ws to the object.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "super-line-playground",
+  "main": "./src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  // plugin-auth and plugin-inspector use node:crypto
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "./dist-cloudflare" },
+  "durable_objects": {
+    "bindings": [{ "name": "NODE", "class_name": "PlaygroundNode" }]
+  },
+  // SQLite-backed (the only kind on the Workers Free plan): users, sessions, channels and messages live here
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PlaygroundNode"] }],
+  "observability": { "enabled": true }
+}

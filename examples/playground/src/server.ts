@@ -6,7 +6,6 @@ import { noise } from '@chainsafe/libp2p-noise'
 import { yamux } from '@chainsafe/libp2p-yamux'
 import { identify } from '@libp2p/identify'
 import { generateKeyPairFromSeed } from '@libp2p/crypto/keys'
-import { eq } from '@super-line/core'
 import { createSuperLineServer } from '@super-line/server'
 import { createRedisAdapter } from '@super-line/adapter-redis'
 import { pgliteCollections } from '@super-line/collections-pglite'
@@ -20,6 +19,7 @@ import type { AuthContext } from '@super-line/plugin-auth'
 import type { QueueJob } from '@super-line/plugin-queue'
 import { app } from './contract.js'
 import { queueKit } from './queue.js'
+import { workspace } from './workspace.js'
 
 const PORT = Number(process.env.PORT ?? 8787) // WebSocket + HTTP share one http.Server
 const P2P_PORT = Number(process.env.P2P_PORT ?? 9101) // libp2p /ws — the browser dials this directly
@@ -27,7 +27,6 @@ const NODE = process.env.NODE_NAME ?? 'node-1'
 const PG_URL = process.env.PG_URL ?? 'postgres://postgres:password@localhost:5432/electric'
 const ELECTRIC_URL = process.env.ELECTRIC_URL ?? 'http://localhost:3000/v1/shape'
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379'
-const BOT_NAME = 'Echo Bot'
 
 // ONE CollectionStore for auth, chat and queue rows, shared by every node through Postgres. That shared
 // database is what makes a queue slot cluster-wide and lets an account made on one node sign in on the other.
@@ -48,6 +47,7 @@ const chatKit = chat({
     },
   },
 })
+const work = workspace({ users: authKit.users, credentials: authKit.credentials, chatKit })
 
 // A PeerId seeded from the node name, so it is stable across restarts.
 const keySeed = new Uint8Array(32)
@@ -81,7 +81,7 @@ const srv = createSuperLineServer(app, {
   identify: authKit.identify,
   onConnection: (_conn, ctx) => {
     const { userId } = ctx as AuthContext
-    if (userId) void welcome(userId).catch((err) => console.error(`[${NODE}] welcome failed`, err))
+    if (userId) void work.welcome(userId).catch((err) => console.error(`[${NODE}] welcome failed`, err))
   },
 })
 
@@ -164,41 +164,10 @@ queueKit.queue('report').setWorker(async ({ label, failRate, userId }, { jobId, 
   return { processedBy: NODE }
 })
 
-let botId: string | undefined
-async function bot(): Promise<string> {
-  botId ??= (await authKit.users.find({ filter: eq('displayName', BOT_NAME) }))[0]?.id
-  botId ??= (await authKit.users.create({ displayName: BOT_NAME })).id
-  return botId
-}
-
-queueKit.queue('botReply').setWorker(async ({ channelId, prompt }, { signal }) => {
-  const authorId = await bot()
-  // every author must be a member — the server included
-  if (!(await chatKit.members.get(channelId, authorId))) await chatKit.members.add(channelId, authorId)
-  const writer = await chatKit.messages.stream({ channelId, authorId })
-  try {
-    await writer.push({ type: 'part_start', key: 'reply', partType: 'text' })
-    const words = `${NODE} claimed this job and is streaming it word by word. You said: “${prompt || '…nothing'}”.`.split(' ')
-    for (const word of words) {
-      await delay(120, undefined, { signal })
-      await writer.push({ type: 'delta', key: 'reply', text: `${word} ` })
-    }
-    await writer.push({ type: 'part_end', key: 'reply' })
-    await writer.finalize()
-  } catch (err) {
-    await writer.abort(String(err)).catch(() => {})
-    throw err
-  }
-  return { messageId: writer.messageId, processedBy: NODE }
-})
-
-/** Drop first-timers into every public channel so nobody lands on an empty workspace. */
-async function welcome(userId: string): Promise<void> {
-  if ((await chatKit.members.channelsOf(userId)).length > 0) return
-  for (const channel of await chatKit.channels.find()) {
-    await chatKit.members.add(channel.id, userId).catch(() => {})
-  }
-}
+queueKit.queue('botReply').setWorker(async ({ channelId, prompt }, { signal }) => ({
+  messageId: await work.streamBotReply(channelId, prompt, NODE, signal),
+  processedBy: NODE,
+}))
 
 async function ignoreConflict(op: () => Promise<unknown>): Promise<void> {
   await op().catch((err: { code?: string }) => {
@@ -206,20 +175,9 @@ async function ignoreConflict(op: () => Promise<unknown>): Promise<void> {
   })
 }
 
-/** node-1 only: two channels, three demo logins, the bot, and a cron schedule. Idempotent across restarts. */
+/** node-1 only: the shared workspace plus a cron schedule. Idempotent across restarts. */
 async function seed(): Promise<void> {
-  const channels = new Set((await chatKit.channels.find()).map((c) => c.name))
-  for (const name of ['general', 'random']) if (!channels.has(name)) await chatKit.channels.create({ name })
-
-  const known = new Set((await authKit.users.find()).map((u) => u.displayName))
-  for (const name of ['Ada', 'Grace', 'Linus']) {
-    if (known.has(name)) continue
-    const user = await authKit.users.create({ displayName: name })
-    await authKit.credentials.create(user.id, { email: `${name.toLowerCase()}@example.com`, password: 'superline' })
-    await welcome(user.id)
-  }
-  await bot()
-
+  await work.seed()
   await ignoreConflict(() =>
     queueKit.schedules.create({
       id: 'report-every-minute',

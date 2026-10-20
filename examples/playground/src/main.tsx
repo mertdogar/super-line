@@ -6,7 +6,7 @@ import { SuperLineAuthProvider } from '@super-line/plugin-auth/react'
 import type { AuthClientOptions, TokenStorage } from '@super-line/plugin-auth/react'
 import { app } from './contract'
 import { App } from './App'
-import { transport } from './dial'
+import { onCloudflare, transport } from './dial'
 import './styles.css'
 
 // sessionStorage, not the default localStorage: one identity PER TAB, so Ada and Grace can sit side by side
@@ -24,6 +24,8 @@ const authOptions = {
       transport,
       role: role as 'user',
       params,
+      // A Durable Object runs no server heartbeat (a timer would keep it awake), so the client pings instead.
+      keepalive: onCloudflare ? 30_000 : undefined,
       plugins: [devtoolsPlugin()],
     }),
 } satisfies AuthClientOptions<typeof app, 'user'>

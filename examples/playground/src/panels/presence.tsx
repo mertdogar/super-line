@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useClient, useCollection, useEvent, useRequest } from '@super-line/react'
 import { USER_PRESENCE_LIVE_MS } from '@super-line/plugin-auth'
 import { useInterval, usePoll } from '../use-interval'
+import { onCloudflare } from '../dial'
 
 interface Nudge {
   from: string
@@ -15,16 +16,23 @@ export function PresencePanel(): React.JSX.Element {
   // plugin-auth derives these rows from real connection sessions — live, and cluster-wide through Postgres.
   const { rows: presence } = useCollection('userPresence')
   const [now, setNow] = useState(Date.now())
+  // A hibernating Durable Object hears no heartbeat, so `lastSeenAt` never refreshes there: an open session is the signal.
   const online = useMemo(
     () =>
-      new Set(presence.filter((p) => p.connectedAt !== null && (p.lastSeenAt ?? 0) > now - USER_PRESENCE_LIVE_MS).map((p) => p.userId)),
+      new Set(
+        presence
+          .filter((p) => p.connectedAt !== null && (onCloudflare || (p.lastSeenAt ?? 0) > now - USER_PRESENCE_LIVE_MS))
+          .map((p) => p.userId),
+      ),
     [presence, now],
   )
   const names = useMemo(() => new Map(users.map((u) => [u.id, u.displayName])), [users])
 
   // srv.cluster.* reads the adapter's presence registry (Redis): every connection on every node.
   const client = useClient()
-  const cluster = usePoll(() => client.cluster(), 2000)
+  // On Cloudflare every request wakes the Durable Object, so a timer would keep it awake for as long as a tab is
+  // open. There, refetch only when the live presence rows change — someone connected or left.
+  const cluster = usePoll(() => client.cluster(), onCloudflare ? null : 2000, presence)
   useInterval(() => setNow(Date.now()), 2000) // re-evaluate presence liveness
 
   const { call: nudge } = useRequest('nudge')

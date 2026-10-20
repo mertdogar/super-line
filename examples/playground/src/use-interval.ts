@@ -11,11 +11,12 @@ export function useInterval(fn: () => void, ms: number): void {
 }
 
 /**
- * Polls `fetch` every `ms`, keeping the last result on screen until the next one lands. Cluster topology and
- * queue jobs have no client-readable live feed, so these poll — and not through `useRequest().refetch`, which
- * clears `data` while each call is in flight and would blank the panel on every tick.
+ * Fetches on mount, whenever `trigger` changes, and every `ms` (`null`: never on a timer), keeping the last
+ * result on screen until the next one lands. Cluster topology and queue jobs have no client-readable live feed,
+ * so these poll — and not through `useRequest().refetch`, which clears `data` while each call is in flight and
+ * would blank the panel on every tick.
  */
-export function usePoll<T>(fetch: () => Promise<T>, ms: number): T | undefined {
+export function usePoll<T>(fetch: () => Promise<T>, ms: number | null, trigger?: unknown): T | undefined {
   const [data, setData] = useState<T>()
   const ref = useRef(fetch)
   ref.current = fetch
@@ -27,11 +28,11 @@ export function usePoll<T>(fetch: () => Promise<T>, ms: number): T | undefined {
         () => {},
       )
     tick()
-    const id = setInterval(tick, ms)
+    const id = ms === null ? undefined : setInterval(tick, ms)
     return () => {
       live = false
       clearInterval(id)
     }
-  }, [ms])
+  }, [ms, trigger])
   return data
 }

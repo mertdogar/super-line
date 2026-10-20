@@ -1,1 +1,3 @@
 dist
+dist-cloudflare
+.wrangler

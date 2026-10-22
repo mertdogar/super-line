@@ -1,4 +1,4 @@
-import { SuperLineError, applyQuery, isCrdtCollection, matchesFilter } from '@super-line/core'
+import { SuperLineError, applyQuery, countValues, isCrdtCollection, matchesFilter } from '@super-line/core'
 import type {
   CollectionDef,
   CollectionQuery,
@@ -10,6 +10,7 @@ import type {
 } from '@super-line/core'
 import {
   META_SQL,
+  countBySql,
   countSql,
   defineTable,
   driftOf,
@@ -159,6 +160,12 @@ export function cloudflareCollections(storage: DurableObjectStorage, collections
       if (!t) return 0
       const q = countSql(t, filter, MAX_PARAMS)
       return q ? (rows(q.sql, ...q.params)[0]!.n as number) : snapshot(n, { filter }).length
+    },
+    countBy(n, field, filter) {
+      const t = table(n)
+      if (!t) return []
+      const q = countBySql(t, field, filter, MAX_PARAMS)
+      return q ? rows(q.sql, ...q.params).map(q.decode) : countValues(snapshot(n, { filter }), field)
     },
     read(n, id) {
       const t = table(n)

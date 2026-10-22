@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as z from 'zod'
-import { and, applyQuery, countValues, eq, gt, gte, has, ilike, like, lt, neq, not, or, orderValueCounts } from '../src/index.js'
+import { and, applyQuery, countValues, eq, gt, gte, has, ilike, isIn, like, lt, neq, not, or, orderValueCounts } from '../src/index.js'
 import type { CollectionDef, CollectionQuery, CollectionStore, RowChange, ValueCount } from '../src/index.js'
 
 /**
@@ -108,6 +108,10 @@ const QUERIES: CollectionQuery[] = [
   { filter: eq('connectedAt', null) },
   { filter: neq('connectedAt', null), orderBy: [{ field: 'name', dir: 'asc' }] },
   { filter: or(has('labels', 'vip'), like('name', 'a%')) },
+  { filter: eq('labels.0', 'lobby') },
+  { filter: isIn('labels.1', ['vip']) },
+  { filter: gte('tags.0', 1) },
+  { filter: not(eq('labels.0', 'lobby')) },
   {
     filter: and(eq('channelId', 'c1'), ilike('name', '%a%'), not(has('labels', 'vip'))),
     orderBy: [{ field: 'createdAt', dir: 'desc' }],

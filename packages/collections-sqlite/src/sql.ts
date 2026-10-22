@@ -65,16 +65,26 @@ export function defineTable(n: string, def: LwwCollectionDef): Table {
   }
 }
 
-/** Where a filter/order field lives: a typed column, inside a JSON column, or nowhere on a validated row. */
-type FieldRef = { at: 'scalar'; col: ColumnSpec } | { at: 'json'; col: string; path: string } | { at: 'absent' }
+/**
+ * Where a filter/order field lives: a typed column, inside a JSON column, nowhere on a validated row, or at a
+ * JSON path SQL can't name (`opaque`: the evaluator alone decides it).
+ */
+type FieldRef = { at: 'scalar'; col: ColumnSpec } | { at: 'json'; col: string; path: string } | { at: 'absent' } | { at: 'opaque' }
+
+/**
+ * The SQLite JSON path for dot-path segments, if it reads what the evaluator's property access reads. SQLite takes
+ * `$.0` as the key "0", never an array's index 0, and ends a label at `[`, so only identifier segments qualify.
+ */
+const jsonRef = (col: string, segments: string): FieldRef =>
+  segments.split('.').every((segment) => IDENT.test(segment)) ? { at: 'json', col, path: '$.' + segments } : { at: 'opaque' }
 
 function resolveField(t: Table, field: string): FieldRef {
-  if (t.plan.degenerate) return { at: 'json', col: DEGENERATE_DATA_COLUMN, path: '$.' + field }
+  if (t.plan.degenerate) return jsonRef(DEGENERATE_DATA_COLUMN, field)
   const dot = field.indexOf('.')
   const head = dot === -1 ? field : field.slice(0, dot)
   const col = t.byName.get(head)
   if (!col) return { at: 'absent' } // rows are schema-validated: an undeclared field is never present
-  if (col.kind === 'json') return { at: 'json', col: col.name, path: dot === -1 ? '$' : '$.' + field.slice(dot + 1) }
+  if (col.kind === 'json') return dot === -1 ? { at: 'json', col: col.name, path: '$' } : jsonRef(col.name, field.slice(dot + 1))
   return dot === -1 ? { at: 'scalar', col } : { at: 'absent' } // a dot-path into a scalar reads undefined
 }
 
@@ -170,6 +180,7 @@ function compileExpr(t: Table, expr: Expr): Compiled | null {
         if (!kindMatches(ref.col.kind, expr.value)) return FALSE // strict equality: no coercion
         return { sql: `"${ref.col.name}" IS ?`, params: [norm(expr.value)], exact: true }
       }
+      if (ref.at === 'opaque') return null
       const je = `json_extract("${ref.col}", ?)`
       return expr.value === null
         ? { sql: `${je} IS NULL`, params: [ref.path], exact: false } // JSON can't split missing from null
@@ -199,7 +210,7 @@ function compileExpr(t: Table, expr: Expr): Compiled | null {
         }
         return FALSE // type mismatch / booleans: the evaluator says incomparable ⇒ false
       }
-      if (typeof expr.value !== 'number') return null
+      if (ref.at === 'opaque' || typeof expr.value !== 'number') return null
       return { sql: `COALESCE(json_extract("${ref.col}", ?) ${op} ?, 0)`, params: [ref.path, expr.value], exact: false }
     }
     case 'in': {
@@ -217,7 +228,7 @@ function compileExpr(t: Table, expr: Expr): Compiled | null {
         if (expr.values.includes(null) && ref.col.nullable) parts.push(`"${ref.col.name}" IS NULL`)
         return parts.length === 0 ? FALSE : { sql: parts.join(' OR '), params, exact: true }
       }
-      if (expr.values.some((v) => v === null)) return null // SQL IN (NULL) never matches — let JS decide
+      if (ref.at === 'opaque' || expr.values.some((v) => v === null)) return null // SQL IN (NULL) never matches — let JS decide
       return {
         sql: `COALESCE(json_extract("${ref.col}", ?) IN (${expr.values.map(() => '?').join(',')}), 0)`,
         params: [ref.path, ...expr.values.map(norm)],
@@ -235,8 +246,9 @@ function compileExpr(t: Table, expr: Expr): Compiled | null {
       return { sql, params: [p.pattern], exact: p.exact }
     }
     case 'has': {
-      if (expr.field.includes('.')) return null // '$.a.0' reads key "0", never index 0
+      if (expr.field.includes('.')) return null // top-level arrays only
       const ref = resolveField(t, expr.field)
+      if (ref.at === 'opaque') return null
       if (ref.at !== 'json') return FALSE // absent, or a scalar column: never an array
       const el = elementSql(expr.value)
       return {
@@ -310,6 +322,7 @@ export function countBySql(
   const where = filter ? compileExpr(t, filter) : TRUE
   if (field.includes('.') || !where?.exact || where.params.length + 2 > maxParams) return null
   const ref = resolveField(t, field)
+  if (ref.at === 'opaque') return null
   if (ref.at === 'absent') return { sql: `SELECT 0 AS n WHERE 0`, params: [], decode: () => ({ value: null, count: 0 }) }
   if (ref.at === 'scalar') {
     const c = ref.col

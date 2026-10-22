@@ -5,6 +5,16 @@ run `pnpm changelog` rather than editing by hand.
 
 ## 2026-10-22
 
+### Bug Fixes
+
+- **client:** A subscription with offset keeps its page ([0825531])
+
+### Documentation
+
+- **changelog:** Regenerate the root aggregate ([9bc1d80])
+
+## 2026-10-22
+
 ### Features
 
 - **server:** Srv.collection(n).countBy(field, filter?, { order?, limit? }) ([3b58892])

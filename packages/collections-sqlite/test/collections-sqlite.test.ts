@@ -7,7 +7,7 @@ import { sqliteCollections } from '@super-line/collections-sqlite'
 import { eq, gte, isIn, like, ilike, and, neq } from '@super-line/core'
 import type { CollectionDef, CollectionStore } from '@super-line/core'
 
-import { runRowConformance } from '../../core/test/collection-store-conformance.js'
+import { QUERY_COLLECTIONS, runRowConformance } from '../../core/test/collection-store-conformance.js'
 
 const defs: Record<string, CollectionDef> = {
   messages: { schema: z.object({ id: z.string(), channelId: z.string(), text: z.string(), likes: z.number() }), key: 'id' },
@@ -17,6 +17,7 @@ const defs: Record<string, CollectionDef> = {
   m: { schema: z.object({ id: z.string(), tag: z.string().nullable().optional() }), key: 'id' },
   ranked: { schema: z.object({ id: z.string(), rank: z.number().optional() }), key: 'id' },
   flags: { schema: z.object({ id: z.string(), on: z.boolean() }), key: 'id' },
+  ...QUERY_COLLECTIONS,
 }
 const make = (file = ':memory:') => sqliteCollections({ file, collections: defs })
 

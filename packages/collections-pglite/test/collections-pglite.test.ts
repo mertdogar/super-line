@@ -6,7 +6,7 @@ import * as z from 'zod'
 import type { CollectionDef, CollectionStore, RowChange } from '@super-line/core'
 import { pgliteCollections } from '@super-line/collections-pglite'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { runRowConformance } from '../../core/test/collection-store-conformance.js'
+import { QUERY_COLLECTIONS, runRowConformance } from '../../core/test/collection-store-conformance.js'
 import { waitForWith } from '../../core/test/wait.js'
 
 const waitFor = waitForWith(4000)
@@ -32,6 +32,7 @@ const defs: Record<string, CollectionDef> = {
   // camelCase primary key — Electric folds the raw key identifier in its live.changes diff JOINs, so this
   // table's feed must alias the key to a folded-safe name or the backend crashes on boot (regression below).
   presence: { schema: z.object({ userId: z.string(), online: z.boolean() }), key: 'userId' },
+  ...QUERY_COLLECTIONS,
 }
 
 const pgUrl = `postgres://postgres:postgres@127.0.0.1:${PORT}/postgres`

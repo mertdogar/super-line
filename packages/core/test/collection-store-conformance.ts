@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { eq, gte } from '../src/index.js'
-import type { CollectionStore, RowChange } from '../src/index.js'
+import * as z from 'zod'
+import { and, applyQuery, eq, gt, gte, has, ilike, like, lt, neq, not, or } from '../src/index.js'
+import type { CollectionDef, CollectionQuery, CollectionStore, RowChange } from '../src/index.js'
 
 /**
  * The shared specification of the {@link CollectionStore} seam, as tests rather than prose.
@@ -31,6 +32,92 @@ export interface RowConformanceOptions {
 }
 
 const msg = (id: string, channelId = 'general', n = 1): Record<string, unknown> => ({ id, channelId, text: `m${n}`, likes: n })
+
+/** Collections the query clauses use. A backend that takes the contract's collections must declare these too. */
+export const QUERY_COLLECTIONS: Record<string, CollectionDef> = {
+  screens: {
+    schema: z.object({
+      id: z.string(),
+      name: z.string(),
+      channelId: z.string(),
+      createdAt: z.string(),
+      connectedAt: z.string().nullable(),
+      labels: z.array(z.string()),
+      tags: z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])),
+    }),
+    key: 'id',
+  },
+}
+
+// Names where SQL and a naive evaluator part ways: case, accents, a newline, U+FF5A against an astral character,
+// GLOB's own wildcards, the Kelvin sign (which folds to `k` only under Unicode case folding).
+const SCREENS = (
+  [
+    ['alpha', ['lobby'], ['1', 1]],
+    ['Alpha Beta', ['lobby', 'vip'], [true]],
+    ['line one\nalpha', [], [null]],
+    ['café', ['vip'], [1.5]],
+    ['CAFÉ', [], [false]],
+    ['ｚoo', ['lobby'], []],
+    ['😀 party', [], ['vip']],
+    ['\u212a', [], []],
+    ['a_b', [], []],
+    ['a*b', [], []],
+    ['a?b', [], []],
+    ['a[b]', [], []],
+    ['a%b', [], []],
+    ['aXb', [], []],
+    ['', [], []],
+  ] as const
+).map(([name, labels, tags], i) => ({
+  id: `s${String(i).padStart(2, '0')}`,
+  name,
+  channelId: i % 2 ? 'c1' : 'c2',
+  createdAt: `2026-01-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`,
+  connectedAt: i % 3 ? null : `2026-02-01T00:00:00.000Z`,
+  labels: [...labels],
+  tags: [...tags],
+}))
+
+const QUERIES: CollectionQuery[] = [
+  { orderBy: [{ field: 'name', dir: 'asc' }] },
+  { orderBy: [{ field: 'name', dir: 'desc' }], offset: 2, limit: 4 },
+  { filter: gt('name', 'ｚ') },
+  { filter: lt('name', '😀') },
+  { filter: and(gte('createdAt', '2026-01-03'), lt('createdAt', '2026-01-09')), orderBy: [{ field: 'createdAt', dir: 'desc' }], limit: 3 },
+  { filter: like('name', '%alpha%') },
+  { filter: like('name', 'line one%') },
+  { filter: like('name', 'a*b') },
+  { filter: like('name', 'a?b') },
+  { filter: like('name', 'a[b]') },
+  { filter: like('name', 'a_b') },
+  { filter: like('name', '__ party') },
+  { filter: ilike('name', '%ALPHA%'), orderBy: [{ field: 'name', dir: 'asc' }], limit: 2 },
+  { filter: ilike('name', 'café') },
+  { filter: ilike('name', 'k') },
+  { filter: not(ilike('name', '%a%')) },
+  { filter: has('labels', 'vip') },
+  { filter: not(has('labels', 'lobby')) },
+  { filter: has('tags', 1) },
+  { filter: has('tags', '1') },
+  { filter: has('tags', true) },
+  { filter: has('tags', null) },
+  { filter: has('name', 'alpha') },
+  { filter: eq('connectedAt', null) },
+  { filter: neq('connectedAt', null), orderBy: [{ field: 'name', dir: 'asc' }] },
+  { filter: or(has('labels', 'vip'), like('name', 'a%')) },
+  {
+    filter: and(eq('channelId', 'c1'), ilike('name', '%a%'), not(has('labels', 'vip'))),
+    orderBy: [{ field: 'createdAt', dir: 'desc' }],
+    offset: 1,
+    limit: 2,
+  },
+]
+
+const ids = (rows: unknown[], q: CollectionQuery): string[] => {
+  const out = (rows as { id: string }[]).map((r) => r.id)
+  return q.orderBy?.length ? out : out.sort()
+}
 
 export function runRowConformance(name: string, opts: RowConformanceOptions): void {
   const { make, clustering } = opts
@@ -197,6 +284,31 @@ export function runRowConformance(name: string, opts: RowConformanceOptions): vo
         limit: 2,
       })) as Array<{ id: string }>
       expect(rows.map((r) => r.id)).toEqual(['d', 'a'])
+    })
+
+    it('answers every query exactly as the evaluator does', async () => {
+      const s = await fresh()
+      await s.apply(
+        SCREENS.map((row) => ({ op: 'insert' as const, n: 'screens', id: row.id, row })),
+        'o1',
+      )
+      for (const q of QUERIES) {
+        expect(ids(await s.snapshot('screens', q), q), JSON.stringify(q)).toEqual(ids(applyQuery(SCREENS, q), q))
+      }
+    })
+
+    it('counts what a snapshot of the same filter would hold, when it counts', async () => {
+      const s = await fresh()
+      if (!s.count) return
+      await s.apply(
+        SCREENS.map((row) => ({ op: 'insert' as const, n: 'screens', id: row.id, row })),
+        'o1',
+      )
+      expect(await s.count('screens', undefined)).toBe(SCREENS.length)
+      expect(await s.count('nope', undefined)).toBe(0)
+      for (const { filter } of QUERIES) {
+        expect(await s.count('screens', filter), JSON.stringify(filter)).toBe(applyQuery(SCREENS, { filter }).length)
+      }
     })
 
     it('keeps snapshot and read row-pure — timestamps never leak into the client-facing row', async () => {

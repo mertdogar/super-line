@@ -5,7 +5,7 @@ import { cloudflareCollections } from '@super-line/collections-cloudflare'
 import { createSuperLineClient } from '@super-line/client'
 import { SuperLineError, and, eq, gte, ilike, isIn, like, neq } from '@super-line/core'
 import type { CollectionDef, CollectionStore } from '@super-line/core'
-import { runRowConformance } from '../packages/core/test/collection-store-conformance.js'
+import { QUERY_COLLECTIONS, runRowConformance } from '../packages/core/test/collection-store-conformance.js'
 import { waitFor } from '../packages/core/test/wait.js'
 import { appContract, stubTransport } from './app.js'
 
@@ -19,6 +19,7 @@ const defs: Record<string, CollectionDef> = {
   m: { schema: z.object({ id: z.string(), tag: z.string().nullable().optional() }), key: 'id' },
   ranked: { schema: z.object({ id: z.string(), rank: z.number().optional() }), key: 'id' },
   flags: { schema: z.object({ id: z.string(), on: z.boolean() }), key: 'id' },
+  ...QUERY_COLLECTIONS,
 }
 
 const freshObject = () => env.STORE.get(env.STORE.idFromName(`store-${crypto.randomUUID()}`))

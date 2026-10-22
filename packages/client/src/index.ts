@@ -1104,7 +1104,8 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
 
   // ---- Collections --------------------------------------------------------
   const recomputeView = (sub: LiveSub): void => {
-    sub.view = applyQuery([...sub.map.values()], sub.query) // filter (redundant, already matched) + sort + window
+    // filter (redundant, already matched) + sort + limit; the snapshot already skipped `offset`, so skipping again empties page 2
+    sub.view = applyQuery([...sub.map.values()], { ...sub.query, offset: undefined })
   }
   const notifySub = (sub: LiveSub, ev: RowSetEvent): void => {
     for (const cb of sub.listeners) cb(ev)

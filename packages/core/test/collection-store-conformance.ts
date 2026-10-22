@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as z from 'zod'
-import { and, applyQuery, eq, gt, gte, has, ilike, like, lt, neq, not, or } from '../src/index.js'
-import type { CollectionDef, CollectionQuery, CollectionStore, RowChange } from '../src/index.js'
+import { and, applyQuery, countValues, eq, gt, gte, has, ilike, like, lt, neq, not, or, orderValueCounts } from '../src/index.js'
+import type { CollectionDef, CollectionQuery, CollectionStore, RowChange, ValueCount } from '../src/index.js'
 
 /**
  * The shared specification of the {@link CollectionStore} seam, as tests rather than prose.
@@ -42,6 +42,7 @@ export const QUERY_COLLECTIONS: Record<string, CollectionDef> = {
       channelId: z.string(),
       createdAt: z.string(),
       connectedAt: z.string().nullable(),
+      platform: z.string().optional(),
       labels: z.array(z.string()),
       tags: z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])),
     }),
@@ -53,7 +54,7 @@ export const QUERY_COLLECTIONS: Record<string, CollectionDef> = {
 // GLOB's own wildcards, the Kelvin sign (which folds to `k` only under Unicode case folding).
 const SCREENS = (
   [
-    ['alpha', ['lobby'], ['1', 1]],
+    ['alpha', ['lobby', 'lobby'], ['1', 1]],
     ['Alpha Beta', ['lobby', 'vip'], [true]],
     ['line one\nalpha', [], [null]],
     ['café', ['vip'], [1.5]],
@@ -75,6 +76,7 @@ const SCREENS = (
   channelId: i % 2 ? 'c1' : 'c2',
   createdAt: `2026-01-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`,
   connectedAt: i % 3 ? null : `2026-02-01T00:00:00.000Z`,
+  ...(i % 4 ? { platform: i % 4 === 1 ? 'tizen' : 'webos' } : {}),
   labels: [...labels],
   tags: [...tags],
 }))
@@ -309,6 +311,23 @@ export function runRowConformance(name: string, opts: RowConformanceOptions): vo
       for (const { filter } of QUERIES) {
         expect(await s.count('screens', filter), JSON.stringify(filter)).toBe(applyQuery(SCREENS, { filter }).length)
       }
+    })
+
+    it('groups what a snapshot of the same filter would hold, when it groups', async () => {
+      const s = await fresh()
+      if (!s.countBy) return
+      await s.apply(
+        SCREENS.map((row) => ({ op: 'insert' as const, n: 'screens', id: row.id, row })),
+        'o1',
+      )
+      const byValue = (groups: ValueCount[]) => orderValueCounts(groups, { order: 'value' })
+      expect(await s.countBy('nope', 'channelId', undefined)).toEqual([])
+      for (const field of ['channelId', 'connectedAt', 'platform', 'labels', 'tags', 'name', 'nope'])
+        for (const { filter } of [{ filter: undefined }, ...QUERIES]) {
+          expect(byValue(await s.countBy('screens', field, filter)), `${field} ${JSON.stringify(filter)}`).toEqual(
+            byValue(countValues(applyQuery(SCREENS, { filter }), field)),
+          )
+        }
     })
 
     it('keeps snapshot and read row-pure — timestamps never leak into the client-facing row', async () => {

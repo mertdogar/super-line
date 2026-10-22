@@ -12,7 +12,7 @@
  * a filter on update is delivered too (the client removes it). See the wire `cchg` frame.
  */
 
-import type { CollectionQuery, Expr } from './query.js'
+import type { CollectionQuery, Expr, ValueCount } from './query.js'
 
 type Awaitable<T> = T | Promise<T>
 
@@ -65,6 +65,8 @@ interface CollectionStoreBase {
   snapshot(n: string, query: CollectionQuery): Awaitable<unknown[]>
   /** Rows of `n` matching `filter` (all rows when undefined), without materializing them. Absent ⇒ the server counts a snapshot. */
   count?(n: string, filter: Expr | undefined): Awaitable<number>
+  /** Every group of `field` over `filter`, unordered, as core's `countValues` forms them. Absent ⇒ the server groups a snapshot. */
+  countBy?(n: string, field: string, filter: Expr | undefined): Awaitable<ValueCount[]>
   /** Read one row by primary key — for write-policy `prev` and advisory FK checks. Undefined if absent. */
   read(n: string, id: string): Awaitable<unknown | undefined>
   /**

@@ -186,6 +186,49 @@ export function excludesOn(filter: Expr | undefined, row: unknown, fields: reado
   }
 }
 
+/** How many rows hold one value of a field — a row of a grouped count. */
+export interface ValueCount {
+  value: Scalar
+  count: number
+}
+
+/** `'count'` (default): most rows first, ties by value. `'value'`: by value, null last. `limit` keeps the first N. */
+export interface CountByOptions {
+  order?: 'count' | 'value'
+  limit?: number
+}
+
+const isScalar = (v: unknown): v is Scalar => v === null || ['string', 'number', 'boolean'].includes(typeof v)
+
+/**
+ * Count rows per value of `field`: a scalar is its own group, null included; an array counts the row once under
+ * each distinct scalar element (what {@link has} matches); a missing field, object or empty array joins no group.
+ * Unordered — see {@link orderValueCounts}.
+ */
+export function countValues(rows: readonly unknown[], field: string): ValueCount[] {
+  const groups = new Map<Scalar, number>()
+  for (const row of rows) {
+    const v = getField(row, field)
+    for (const x of Array.isArray(v) ? new Set(v) : [v]) if (isScalar(x)) groups.set(x, (groups.get(x) ?? 0) + 1)
+  }
+  return [...groups].map(([value, count]) => ({ value, count }))
+}
+
+const valueRank = (v: Scalar): number => (v === null ? 3 : typeof v === 'boolean' ? 0 : typeof v === 'number' ? 1 : 2)
+
+/** Booleans, then numbers, then strings (by code point), then null. */
+const compareValue = (a: Scalar, b: Scalar): number => {
+  const r = valueRank(a) - valueRank(b)
+  if (r !== 0 || a === null) return r
+  return typeof a === 'boolean' ? Number(a) - Number(b) : (compareScalar(a, b) ?? 0)
+}
+
+/** Order and trim grouped counts (see {@link CountByOptions}). */
+export function orderValueCounts(groups: readonly ValueCount[], opts: CountByOptions = {}): ValueCount[] {
+  const out = groups.slice().sort((x, y) => (opts.order === 'value' ? 0 : y.count - x.count) || compareValue(x.value, y.value))
+  return opts.limit === undefined ? out : out.slice(0, opts.limit)
+}
+
 /** Total order for `orderBy`: same-type scalars compare naturally; nulls/undefined/incomparable sort last. */
 const compareForSort = (a: unknown, b: unknown): number => {
   const an = a == null

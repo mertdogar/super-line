@@ -168,8 +168,10 @@ export {
   evalExpr,
   applyQuery,
   getField,
+  countValues,
+  orderValueCounts,
 } from './query.js'
-export type { Scalar, Expr, OrderBy, CollectionQuery } from './query.js'
+export type { Scalar, Expr, OrderBy, CollectionQuery, ValueCount, CountByOptions } from './query.js'
 
 export type {
   RawConn,

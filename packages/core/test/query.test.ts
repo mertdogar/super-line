@@ -18,6 +18,8 @@ import {
   matchesFilter,
   applyQuery,
   getField,
+  countValues,
+  orderValueCounts,
 } from '@super-line/core'
 import type { Expr, CollectionQuery } from '@super-line/core'
 
@@ -115,6 +117,43 @@ describe('evalExpr — composition', () => {
   it('nested composition', () => {
     const expr = and(eq('authorId', 'u1'), or(eq('channelId', 'general'), gt('likes', 100)))
     expect(evalExpr(expr, row)).toBe(true)
+  })
+})
+
+describe('countValues / orderValueCounts', () => {
+  const rows = [
+    { ch: 'a', labels: ['x', 'y', 'x'], v: 1 },
+    { ch: 'b', labels: ['x'], v: '1' },
+    { ch: null, labels: [], v: true },
+    { labels: [{ nested: 1 }, null], v: { o: 1 } },
+  ]
+  it('groups scalars by value (null included, missing excluded) and arrays per distinct element', () => {
+    expect(orderValueCounts(countValues(rows, 'ch'), { order: 'value' })).toEqual([
+      { value: 'a', count: 1 },
+      { value: 'b', count: 1 },
+      { value: null, count: 1 },
+    ])
+    expect(orderValueCounts(countValues(rows, 'labels'))).toEqual([
+      { value: 'x', count: 2 },
+      { value: 'y', count: 1 },
+      { value: null, count: 1 },
+    ])
+    expect(orderValueCounts(countValues(rows, 'v'), { order: 'value' })).toEqual([
+      { value: true, count: 1 },
+      { value: 1, count: 1 },
+      { value: '1', count: 1 },
+    ])
+  })
+  it('orders by count (ties by value) and keeps the first `limit`', () => {
+    const groups = [
+      { value: 'b', count: 2 },
+      { value: null, count: 5 },
+      { value: 'a', count: 2 },
+    ]
+    expect(orderValueCounts(groups, { limit: 2 })).toEqual([
+      { value: null, count: 5 },
+      { value: 'a', count: 2 },
+    ])
   })
 })
 

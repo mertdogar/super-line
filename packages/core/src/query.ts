@@ -9,6 +9,8 @@
  * compile the same IR to SQL as a snapshot optimization — never for correctness.
  *
  * Values are JSON scalars. A missing field reads as `undefined` and matches nothing (missing ≠ null).
+ * Strings order by Unicode code point — the order of SQL's binary text collation — not by UTF-16 code unit,
+ * so a SQL backend can push text ranges and text ORDER BY without changing the answer.
  */
 
 /** A comparable leaf value carried in the IR. */
@@ -16,7 +18,7 @@ export type Scalar = string | number | boolean | null
 
 /**
  * A boolean predicate over a row. `field` is a dot path into the row (`'author.name'`). Combine with
- * {@link and}/{@link or}/{@link not}; build leaves with {@link eq}/{@link isIn}/{@link like}/etc.
+ * {@link and}/{@link or}/{@link not}; build leaves with {@link eq}/{@link isIn}/{@link like}/{@link has}/etc.
  */
 export type Expr =
   | { op: 'and' | 'or'; args: Expr[] }
@@ -24,6 +26,7 @@ export type Expr =
   | { op: 'eq' | 'neq' | 'lt' | 'lte' | 'gt' | 'gte'; field: string; value: Scalar }
   | { op: 'in'; field: string; values: Scalar[] }
   | { op: 'like' | 'ilike'; field: string; pattern: string }
+  | { op: 'has'; field: string; value: Scalar }
 
 /** A sort key: a dot-path field and a direction. */
 export interface OrderBy {
@@ -57,6 +60,8 @@ export const gte = (field: string, value: Scalar): Expr => ({ op: 'gte', field, 
 export const isIn = (field: string, values: Scalar[]): Expr => ({ op: 'in', field, values })
 export const like = (field: string, pattern: string): Expr => ({ op: 'like', field, pattern })
 export const ilike = (field: string, pattern: string): Expr => ({ op: 'ilike', field, pattern })
+/** The array at `field` holds an element strictly equal to `value`. Never matches a non-array. */
+export const has = (field: string, value: Scalar): Expr => ({ op: 'has', field, value })
 
 /** AND a set of optional filters (policy filter ∧ client filter), dropping the undefined ones. Empty ⇒ undefined. */
 export const andFilters = (...filters: (Expr | undefined)[]): Expr | undefined => {
@@ -89,10 +94,28 @@ export function getField(row: unknown, path: string): unknown {
 /** Scalar equality — strict, so a missing field (`undefined`) never equals an explicit `null`. */
 const scalarEq = (a: unknown, b: Scalar): boolean => a === b
 
+/** Code point order. `<` compares UTF-16 code units, which puts astral characters before U+E000–U+FFFF. */
+const compareText = (a: string, b: string): number => {
+  const n = Math.min(a.length, b.length)
+  for (let i = 0; i < n; i++) {
+    let x = a.charCodeAt(i)
+    let y = b.charCodeAt(i)
+    if (x === y) continue
+    if (x >= 0xd800 && y >= 0xd800) {
+      // a surrogate encodes a code point above every BMP unit: lift D800–DFFF over E000–FFFF
+      x += x < 0xe000 ? 0x2000 : -0x800
+      y += y < 0xe000 ? 0x2000 : -0x800
+    }
+    return x < y ? -1 : 1
+  }
+  return a.length < b.length ? -1 : a.length > b.length ? 1 : 0
+}
+
 /** Order two values of the same comparable type; `undefined` ⇒ incomparable (used by range ops, which then fail). */
 const compareScalar = (a: unknown, b: Scalar): number | undefined => {
   if (typeof a !== typeof b) return undefined
-  if (typeof a === 'number' || typeof a === 'string') return a < (b as typeof a) ? -1 : a > (b as typeof a) ? 1 : 0
+  if (typeof a === 'string') return compareText(a, b as string)
+  if (typeof a === 'number') return a < (b as number) ? -1 : a > (b as number) ? 1 : 0
   return undefined
 }
 
@@ -104,7 +127,7 @@ const likeRegex = (pattern: string, ci: boolean): RegExp => {
     else if (ch === '_') out += '.'
     else out += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   }
-  return new RegExp(`^${out}$`, ci ? 'i' : '')
+  return new RegExp(`^${out}$`, ci ? 'is' : 's') // `s`: `%` spans newlines, as in SQL
 }
 
 /** Evaluate a predicate against a row. The single source of truth for routing, snapshots, and client re-filtering. */
@@ -134,6 +157,10 @@ export function evalExpr(expr: Expr, row: unknown): boolean {
     case 'ilike': {
       const v = getField(row, expr.field)
       return typeof v === 'string' && likeRegex(expr.pattern, expr.op === 'ilike').test(v)
+    }
+    case 'has': {
+      const v = getField(row, expr.field)
+      return Array.isArray(v) && v.some((x) => scalarEq(x, expr.value))
     }
   }
 }

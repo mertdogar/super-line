@@ -160,6 +160,7 @@ export {
   isIn,
   like,
   ilike,
+  has,
   andFilters,
   orFilters,
   matchesFilter,

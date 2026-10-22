@@ -12,6 +12,7 @@ import {
   isIn,
   like,
   ilike,
+  has,
   andFilters,
   evalExpr,
   matchesFilter,
@@ -72,6 +73,27 @@ describe('evalExpr — leaves', () => {
     expect(evalExpr(like('text', 'Hell_ World'), row)).toBe(true)
     expect(evalExpr(like('id', 'm1'), row)).toBe(true)
     expect(evalExpr(like('likes', '3'), row)).toBe(false) // non-string field
+  })
+  it('like % spans newlines, as in SQL', () => {
+    expect(evalExpr(like('text', 'Hello%'), { text: 'Hello\nWorld' })).toBe(true)
+    expect(evalExpr(ilike('text', '%world'), { text: 'Hello\r\nWorld' })).toBe(true)
+  })
+  it('has: an array element strictly equal to the value', () => {
+    const r = { labels: ['vip', 'lobby'], mixed: [1, '2', true, null], name: 'vip' }
+    expect(evalExpr(has('labels', 'vip'), r)).toBe(true)
+    expect(evalExpr(has('labels', 'VIP'), r)).toBe(false)
+    expect(evalExpr(has('mixed', 1), r)).toBe(true)
+    expect(evalExpr(has('mixed', 2), r)).toBe(false) // no coercion: '2' is not 2
+    expect(evalExpr(has('mixed', true), r)).toBe(true)
+    expect(evalExpr(has('mixed', null), r)).toBe(true)
+    expect(evalExpr(has('name', 'vip'), r)).toBe(false) // a string is not an array
+    expect(evalExpr(has('nope', 'vip'), r)).toBe(false)
+  })
+  it('orders strings by code point, so an astral character sorts after U+FF5A', () => {
+    expect(evalExpr(gt('name', 'ｚ'), { name: '😀' })).toBe(true)
+    expect(evalExpr(lt('name', '😀'), { name: '\uffff' })).toBe(true)
+    expect(evalExpr(lt('name', 'b'), { name: 'a😀' })).toBe(true)
+    expect(evalExpr(lt('name', 'ab'), { name: 'a' })).toBe(true)
   })
   it('like escapes regex metacharacters in the pattern', () => {
     expect(evalExpr(like('text', 'Hello.World'), row)).toBe(false) // '.' is literal, not any-char
@@ -137,6 +159,10 @@ describe('applyQuery', () => {
     const copy = rows.slice()
     applyQuery(rows, { orderBy: [{ field: 'n', dir: 'asc' }] })
     expect(rows).toEqual(copy)
+  })
+  it('sorts text by code point', () => {
+    const named = [{ id: 'emoji', name: '😀' }, { id: 'wide', name: 'ｚ' }, { id: 'ascii', name: 'z' }]
+    expect(applyQuery(named, { orderBy: [{ field: 'name', dir: 'asc' }] }).map((r) => r.id)).toEqual(['ascii', 'wide', 'emoji'])
   })
   it('sorts null/undefined fields last', () => {
     const withNulls = [{ id: 'x', n: 2 }, { id: 'y' }, { id: 'z', n: 1 }]

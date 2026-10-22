@@ -3,6 +3,30 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## 2026-10-22
+
+### Features
+
+- **server:** Srv.collection(n).countBy(field, filter?, { order?, limit? }) ([3b58892])
+- **collections-cloudflare:** CountBy runs as one GROUP BY in the object's SQLite ([ec7b2b9])
+- **collections-sqlite:** CountBy runs as one GROUP BY ([4942b28])
+- **core:** CountValues, orderValueCounts and an optional countBy on the store seam ([245c7a4])
+- **server:** Srv.collection(n).count(filter?) ([d2d8c1a])
+- **collections-cloudflare:** Count, and text order, like and has run in the object's SQLite ([73dd870])
+- **collections-sqlite:** Text order, text ranges, like, ilike and has run in SQL; count ([e96cbc7])
+- **core:** An optional count on the collection store seam ([aa47c2f])
+- **core:** Has() matches an array element, and strings order by code point ([8a454e2])
+- **collections-cloudflare:** A remote rows snapshot may span every table of a store ([f26cc95])
+
+### Testing
+
+- **core:** Every backend answers the query IR exactly as the evaluator does ([d213029])
+
+### Documentation
+
+- Has(), count and countBy, and what runs in SQL ([285c439])
+- **changelog:** Regenerate the root aggregate ([e82cece])
+
 ## 2026-10-20
 
 ### Features

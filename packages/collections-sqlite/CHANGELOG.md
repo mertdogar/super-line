@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [collections-sqlite-v0.5.1] — 2026-10-22
+
+### Bug Fixes
+
+- **collections-sqlite:** A dot path through an array no longer drops matching rows ([344e41b])
+
 ## [collections-sqlite-v0.5.0] — 2026-10-22
 
 ### Features

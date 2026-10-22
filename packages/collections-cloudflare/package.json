@@ -1,6 +1,6 @@
 {
   "name": "@super-line/collections-cloudflare",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Durable Object SQLite CollectionStore backend for super-line — typed row collections stored in the object that is the node, with IR→SQL snapshot pushdown.",
   "license": "MIT",

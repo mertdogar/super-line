@@ -184,6 +184,21 @@ describe('collections — an update that changes nothing', () => {
   }
 })
 
+describe('collections — server count()', () => {
+  it.each([
+    ['a backend that counts (sqlite)', () => sqliteCollections({ file: ':memory:', collections: chat.collections })],
+    ['a backend that does not (memory: the server counts a snapshot)', () => memoryCollections()],
+  ])('counts the rows a filter matches on %s', async (_, collections) => {
+    const { srv } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, { authenticate, identify, collections: collections() })
+    await srv.collection('messages').insert(msg('m1', 'general', 'u9', 1))
+    await srv.collection('messages').insert(msg('m2', 'random', 'u9', 2))
+    await srv.collection('messages').insert(msg('m3', 'general', 'u9', 3))
+    expect(await srv.collection('messages').count()).toBe(3)
+    expect(await srv.collection('messages').count(eq('channelId', 'general'))).toBe(2)
+    expect(await srv.collection('users').count()).toBe(0)
+  })
+})
+
 describe('collections — one-shot query()', () => {
   it('returns the ordered, limited snapshot as a detached copy — no live subscription stays behind', async () => {
     const { srv, url } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, {

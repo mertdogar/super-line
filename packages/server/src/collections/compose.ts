@@ -8,6 +8,7 @@ import {
   type RowCondition,
   type SelfCollectionStore,
 } from '@super-line/core'
+import { countRows } from './rows.js'
 
 /** The backends {@link composeCollections} routes between: a named collection goes to its own, the rest to `default`. */
 export type ComposedCollections = { default: CollectionStore } & Record<string, CollectionStore>
@@ -22,7 +23,7 @@ const namesOf = (conditions: RowCondition[], ops: ResolvedRowOp[]): string[] => 
 
 /**
  * Serve some collections from another backend: one {@link CollectionStore} over several, routed by collection
- * name. `snapshot`/`read`/`rowMeta`/`fixedFields` go to the collection's backend (else `default`), `onChange` fans
+ * name. `snapshot`/`count`/`read`/`rowMeta`/`fixedFields` go to the collection's backend (else `default`), `onChange` fans
  * in from every backend, `close` closes them all. Atomicity is per backend, so a batch must stay inside one: a
  * batch spanning two throws `VALIDATION` before anything is applied.
  *
@@ -65,8 +66,9 @@ export function composeCollections(backends: ComposedCollections): CollectionSto
     return owner
   }
 
-  const reads: Pick<CollectionStore, 'snapshot' | 'read' | 'rowMeta' | 'fixedFields' | 'onChange' | 'close'> = {
+  const reads: Pick<CollectionStore, 'snapshot' | 'count' | 'read' | 'rowMeta' | 'fixedFields' | 'onChange' | 'close'> = {
     snapshot: (n, query) => route(n).snapshot(n, query),
+    count: (n, filter) => countRows(route(n), n, filter),
     read: (n, id) => route(n).read(n, id),
     rowMeta: (n, ids) => route(n).rowMeta?.(n, ids) ?? {},
     fixedFields: (n) => route(n).fixedFields?.(n) ?? [],

@@ -136,6 +136,8 @@ export interface ServerCollectionHandle<Row = unknown> {
   read(id: string): Promise<Row | undefined>
   /** Materialize a snapshot (filter/sort/limit); omit the query for the whole collection. Server-side, policy-free. */
   snapshot(query?: CollectionQuery): Promise<Row[]>
+  /** Count the rows matching `filter` (omit it for the whole collection). Server-side, policy-free, like `snapshot`. */
+  count(filter?: Expr): Promise<number>
   /** Inspector-only: per-row created/updated timestamps keyed by id. Absent unless the backend tracks them. */
   rowMeta?(ids: string[]): Promise<Record<string, RowTimestamps>>
 }

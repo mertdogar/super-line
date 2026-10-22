@@ -9,6 +9,7 @@ import {
   type CBatchFrame,
   type CChangeFrame,
   type CollectionQuery,
+  type CollectionStore,
   type CSubFrame,
   type CUnsubFrame,
   type Expr,
@@ -27,6 +28,11 @@ import type {
   WriteOp,
 } from './types.js'
 import { REPLAY_BASE } from '../snapshot.js'
+
+/** The store's own count, else the length of a snapshot. */
+export async function countRows(store: CollectionStore, n: string, filter: Expr | undefined): Promise<number> {
+  return store.count ? store.count(n, filter) : (await store.snapshot(n, { filter })).length
+}
 
 /** Fixed cluster channel carrying relayed row batches (compared by `===`, not a prefix). */
 export const COLL_CHANNEL = 'cbatch'
@@ -379,6 +385,9 @@ export function createRowCollections(config: CollectionRuntimeConfig, host: Coll
       },
       snapshot(query) {
         return Promise.resolve(store.snapshot(name, query ?? {}))
+      },
+      count(filter) {
+        return countRows(store, name, filter)
       },
       ...(store.rowMeta ? { rowMeta: (ids: string[]) => Promise.resolve(store.rowMeta!(name, ids)) } : {}),
     }

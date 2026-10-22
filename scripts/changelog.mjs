@@ -18,6 +18,10 @@ const CONFIG = resolve(ROOT, 'cliff.toml')
 
 const [only, asVersion] = process.argv.slice(2)
 
+// Files a package ships from outside its own directory: a commit touching one belongs in that package's
+// changelog too, or a release carrying only such a fix would list nothing.
+const BUNDLED = { 'collections-cloudflare': ['packages/collections-sqlite/src/sql.ts'] }
+
 export function packageDirs() {
   return readdirSync(resolve(ROOT, 'packages')).filter((d) =>
     existsSync(resolve(ROOT, 'packages', d, 'package.json')),
@@ -28,6 +32,7 @@ export function packageDirs() {
 export function generate(dir, { version, capture = false } = {}) {
   const cwd = resolve(ROOT, 'packages', dir)
   const args = [`--config ${CONFIG}`, `--tag-pattern "^${dir}-v[0-9]"`]
+  for (const path of BUNDLED[dir] ? [`packages/${dir}/**`, ...BUNDLED[dir]] : []) args.push(`--include-path "${path}"`)
   // --tag names the version that unreleased commits belong to, so a changelog can be written
   // before the tag exists (the release commit and its tag land together, afterwards).
   if (version) args.push(`--tag ${dir}-v${version}`)

@@ -3,6 +3,7 @@ import type {
   CollectionDef,
   CollectionQuery,
   CollectionStore,
+  CountByOptions,
   CrdtCollectionStore,
   CrdtServerReplica,
   DocListOpts,
@@ -11,6 +12,7 @@ import type {
   RowTimestamps,
   RowCondition,
   TapEvent,
+  ValueCount,
 } from '@super-line/core'
 import type { Cluster } from '../cluster.js'
 
@@ -138,6 +140,12 @@ export interface ServerCollectionHandle<Row = unknown> {
   snapshot(query?: CollectionQuery): Promise<Row[]>
   /** Count the rows matching `filter` (omit it for the whole collection). Server-side, policy-free, like `snapshot`. */
   count(filter?: Expr): Promise<number>
+  /**
+   * Count rows per value of `field` over `filter` — a facet's counts. A scalar groups by value, null included; an
+   * array counts each row once per distinct element, as `has` matches it. Most rows first unless `order: 'value'`.
+   * Server-side, policy-free, like `snapshot`.
+   */
+  countBy(field: string, filter?: Expr, opts?: CountByOptions): Promise<ValueCount[]>
   /** Inspector-only: per-row created/updated timestamps keyed by id. Absent unless the backend tracks them. */
   rowMeta?(ids: string[]): Promise<Record<string, RowTimestamps>>
 }

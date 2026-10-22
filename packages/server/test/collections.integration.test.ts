@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import * as z from 'zod'
-import { defineContract, eq } from '@super-line/core'
+import { defineContract, eq, neq } from '@super-line/core'
 import { memoryCollections } from '@super-line/collections-memory'
 import { sqliteCollections } from '@super-line/collections-sqlite'
 import { createHarness, waitFor } from './harness.js'
@@ -196,6 +196,22 @@ describe('collections — server count()', () => {
     expect(await srv.collection('messages').count()).toBe(3)
     expect(await srv.collection('messages').count(eq('channelId', 'general'))).toBe(2)
     expect(await srv.collection('users').count()).toBe(0)
+  })
+
+  it.each([
+    ['a backend that groups (sqlite)', () => sqliteCollections({ file: ':memory:', collections: chat.collections })],
+    ['a backend that does not (memory: the server groups a snapshot)', () => memoryCollections()],
+  ])('counts rows per value on %s, ordered and limited', async (_, collections) => {
+    const { srv } = await h.server<typeof chat, { role: 'user'; ctx: Ctx }>(chat, { authenticate, identify, collections: collections() })
+    for (const [id, ch] of [['m1', 'general'], ['m2', 'random'], ['m3', 'general'], ['m4', 'ops']] as const)
+      await srv.collection('messages').insert(msg(id, ch, 'u9', 1))
+    const messages = srv.collection('messages')
+    expect(await messages.countBy('channelId')).toEqual([
+      { value: 'general', count: 2 },
+      { value: 'ops', count: 1 },
+      { value: 'random', count: 1 },
+    ])
+    expect(await messages.countBy('channelId', neq('channelId', 'general'), { order: 'value', limit: 1 })).toEqual([{ value: 'ops', count: 1 }])
   })
 })
 

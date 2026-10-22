@@ -1,8 +1,10 @@
 import {
   andFilters,
+  countValues,
   excludesOn,
   isCrdtCollection,
   matchesFilter,
+  orderValueCounts,
   orFilters,
   SuperLineError,
   validate,
@@ -16,6 +18,7 @@ import {
   type ResolvedRowOp,
   type RowCondition,
   type RowChange,
+  type ValueCount,
 } from '@super-line/core'
 import type {
   CollectionConn,
@@ -32,6 +35,11 @@ import { REPLAY_BASE } from '../snapshot.js'
 /** The store's own count, else the length of a snapshot. */
 export async function countRows(store: CollectionStore, n: string, filter: Expr | undefined): Promise<number> {
   return store.count ? store.count(n, filter) : (await store.snapshot(n, { filter })).length
+}
+
+/** The store's own grouping, else `countValues` over a snapshot. */
+export async function countRowsBy(store: CollectionStore, n: string, field: string, filter: Expr | undefined): Promise<ValueCount[]> {
+  return store.countBy ? store.countBy(n, field, filter) : countValues(await store.snapshot(n, { filter }), field)
 }
 
 /** Fixed cluster channel carrying relayed row batches (compared by `===`, not a prefix). */
@@ -388,6 +396,9 @@ export function createRowCollections(config: CollectionRuntimeConfig, host: Coll
       },
       count(filter) {
         return countRows(store, name, filter)
+      },
+      async countBy(field, filter, opts) {
+        return orderValueCounts(await countRowsBy(store, name, field, filter), opts)
       },
       ...(store.rowMeta ? { rowMeta: (ids: string[]) => Promise.resolve(store.rowMeta!(name, ids)) } : {}),
     }

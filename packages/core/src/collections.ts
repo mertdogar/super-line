@@ -63,6 +63,8 @@ export function withRowMeta(row: unknown, meta: RowTimestamps | undefined): unkn
 interface CollectionStoreBase {
   /** Materialize a collection's snapshot for the initial subscribe: filter → sort → offset/limit (core injects the policy filter). */
   snapshot(n: string, query: CollectionQuery): Awaitable<unknown[]>
+  /** Rows of `n` matching `filter` (all rows when undefined), without materializing them. Absent ⇒ the server counts a snapshot. */
+  count?(n: string, filter: Expr | undefined): Awaitable<number>
   /** Read one row by primary key — for write-policy `prev` and advisory FK checks. Undefined if absent. */
   read(n: string, id: string): Awaitable<unknown | undefined>
   /**

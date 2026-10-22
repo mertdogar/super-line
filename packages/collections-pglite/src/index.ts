@@ -101,8 +101,8 @@ const parseFingerprint = (fp: string): { head: string; key: string; cols: Map<st
 /**
  * Superset-safe WHERE narrowing for central snapshots ($n-parameterized). Never authoritative — the JS
  * evaluator re-applies the exact query — so anything doubtful returns `null` (scan the collection).
- * Scalar columns only; json/dot-path fields, `not`, `like`/`ilike` and text ranges (byte order ≠
- * UTF-16 code-unit order) all fall through to JS.
+ * Scalar columns only; json/dot-path fields, `not`, `like`/`ilike`, `has` and text ranges (Postgres
+ * orders text by the database collation, not by code point) all fall through to JS.
  */
 function compileWhere(t: Table, expr: Expr, params: unknown[]): string | null {
   const scalar = (field: string): ColumnSpec | undefined => {

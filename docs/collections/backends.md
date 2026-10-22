@@ -110,7 +110,7 @@ Also in `@super-line/collections-cloudflare`: one **read-only** collection servi
 
 ### Typed tables
 
-The SQL backends store each LWW collection in its **own typed table** (`col_<name>`): scalar schema fields become real columns, everything else a per-field JSON column, derived from the contract — so every SQL factory takes the contract's `collections` map. `collections-cloudflare` runs the same table layout and query compiler as `collections-sqlite`. `collections-sqlite` compiles the [query IR](/collections/row-collections#the-query-ir) against those columns (an exactly-compilable query runs entirely in SQL); `collections-pglite` is the self-clustering tier (central Postgres + one Electric shape per table streaming into each node's replica).
+The SQL backends store each LWW collection in its **own typed table** (`col_<name>`): scalar schema fields become real columns, everything else a per-field JSON column, derived from the contract — so every SQL factory takes the contract's `collections` map. `collections-cloudflare` runs the same table layout and query compiler as `collections-sqlite`. `collections-sqlite` compiles the [query IR](/collections/row-collections#the-query-ir) against those columns (an exactly-compilable query runs entirely in SQL, and so do `count`'s `COUNT(*)` and `countBy`'s `GROUP BY`); `collections-pglite` is the self-clustering tier (central Postgres + one Electric shape per table streaming into each node's replica).
 
 ::: tip Which validators get typed columns
 super-line reads a schema's shape through [Standard JSON Schema](https://standardschema.dev/json-schema), the companion spec to Standard Schema — so it never assumes a particular library and every implementer plans identically. That covers **Zod 4.2+**, **Zod Mini 4.2+**, **ArkType 2.1.28+**, **VineJS 4.3+**, **Sury 11+**, **stnl 2.1+**, and **Valibot 1.2+** (wrap the schema in `toStandardJsonSchema()` from `@valibot/to-json-schema`).
@@ -118,14 +118,14 @@ super-line reads a schema's shape through [Standard JSON Schema](https://standar
 A schema whose shape can't be read as one object still works — its collection falls back to the key column plus one `_sl_data` JSON column. That happens when the validator's library hasn't implemented the companion spec, or when the root isn't an object (a union, such as `z.discriminatedUnion`). Everything is still validated, stored and queried correctly; you only lose SQL-level column typing and pushdown. The same fallback applies per-field to anything JSON Schema can't express, such as a `.transform()`. A root `.meta({ id })` doesn't count: it plans the same columns as the object without one.
 :::
 
-::: warning What disqualifies a query
-Not every query compiles to SQL — a few operators can't be translated without diverging from the JS evaluator's semantics, so `collections-sqlite` falls back to a full table scan (JS-filtered, and JS-sorted if `orderBy` is affected too):
+::: warning What keeps a query out of SQL
+An exactly-compilable query runs entirely in SQL: the filter, the `orderBy` on number and text columns, and `limit`/`offset`. That covers comparisons on scalar columns (text ranges such as ISO dates included), `in`, `like` (as `GLOB`), `ilike` with an ASCII pattern (as `LIKE`) and `has` on a top-level array field (through `json_each`). A few things SQLite would answer differently from the JS evaluator, so `collections-sqlite` uses SQL only to narrow the scan, then filters, sorts and windows the rest in JS:
 
-- **`like` / `ilike`** — SQLite's `LIKE` case rules don't match the evaluator's regex semantics.
-- **`neq` on a JSON-backed column** — a non-scalar schema field (record/union/nested/optional+nullable), where SQL's `1`/`0` vs `true`/`false` collide under `IS NOT`.
-- **Any text range comparison** (`lt`/`lte`/`gt`/`gte` against a string) **or text `orderBy`** — SQLite orders text by UTF-8 bytes, the JS evaluator by UTF-16 code units, and the two disagree on astral-plane characters.
+- **`like` with `_`, or `ilike` with a non-ASCII character** — `_` is one UTF-16 code unit to the evaluator but one character to SQLite, and SQLite's `LIKE` folds ASCII case only.
+- **A filter on a JSON-backed field** — a non-scalar schema field (record/union/nested/array/optional+nullable) or a dot path, except `has` on a top-level array. `neq` there isn't used even to narrow: SQL's `1`/`0` and `true`/`false` collide under `IS NOT`.
+- **`orderBy` on a boolean or JSON-backed field.**
 
-None of this affects correctness — the JS evaluator stays authoritative either way — but it's a silent perf cliff: a filter or sort that touches one of these falls back to scanning and sorting the whole table in JS instead of letting SQLite do it.
+None of this affects correctness — the JS evaluator stays authoritative either way — but it's a perf cliff: the snapshot reads every row the narrowed `WHERE` admits (the whole table, if nothing narrows it) and sorts them in JS, and `count`/`countBy` count that snapshot instead of running `COUNT(*)`/`GROUP BY`. `countBy` on a dot-path field always counts a snapshot.
 :::
 
 `collections-pglite` works differently: it compiles a **superset-safe `WHERE`** to narrow what it reads from Postgres, then always re-applies the full query in JS. The SQL is an optimization that never has to be exact, so there is no equivalent cliff — but also no full pushdown of sorting or limits.

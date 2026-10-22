@@ -465,6 +465,23 @@ await client.collection('messages').insert({ id: nano(), channelId: 'general', a
 ```
 
 ```ts
+// a paged list + its total. The page is a subscription; the total is a host request
+const screensFilter = (channelId: string, term: string) => and(eq('channelId', channelId), has('labels', 'lobby'), ilike('name', `%${term}%`))
+const page = client.collection('screens').subscribe({ filter: screensFilter(channelId, term), orderBy: [{ field: 'name', dir: 'asc' }, { field: 'id', dir: 'asc' }], offset: 50, limit: 50 }) // end on a unique field: tied rows can't hop pages
+// server: `screenCount` rebuilds the filter from its typed input and scopes it — count skips policy
+screenCount: async ({ channelId, term }, ctx) => srv.collection('screens').count(and(screensFilter(channelId, term), eq('orgId', ctx.orgId)))
+// facet rail: per-value counts with the OTHER facets' filters applied; an array field counts per element (click → has(field, value))
+screenFacets: async ({ channelId, label }, ctx) => {
+  const scope = eq('orgId', ctx.orgId)
+  const screens = srv.collection('screens')
+  return {
+    labels: await screens.countBy('labels', channelId ? and(scope, eq('channelId', channelId)) : scope, { limit: 20 }),
+    channels: await screens.countBy('channelId', label ? and(scope, has('labels', label)) : scope), // [{ value: null, count }] = "No channel"
+  }
+},
+```
+
+```ts
 // joins + live queries — TanStack DB is the query engine
 import { createCollection, createLiveQueryCollection, eq as teq } from '@tanstack/db'
 import { superLineCollectionOptions } from '@super-line/tanstack-db'

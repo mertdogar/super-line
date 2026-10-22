@@ -137,7 +137,7 @@ interface SuperLineServer<C, A> {
   // targeted cross-node send (no registry lookup on the delivery path)
   toConn(id: string): ConnTarget<C>                                  // one connection, any node
   toUser(userId: string): UserTarget<C>                              // all of a user's connections, any node
-  collection(name: string): ServerCollectionHandle                   // server-authoritative: co-write rows (insert/update/delete/read/snapshot) or create+open CRDT docs; typed by the contract. See Collections.
+  collection(name: string): ServerCollectionHandle                   // server-authoritative: co-write rows (insert/update/delete/read/snapshot/count/countBy) or create+open CRDT docs; typed by the contract. See Collections.
   batch(ops: ServerCollectionOp[]): Promise<void>                    // ONE atomic, schema-validated, policy-free batch across row collections (all or none)
   conditionalBatch(conditions: ServerRowCondition[], ops: ServerCollectionOp[]): Promise<boolean>  // same, only while every condition's row still matches its filter; false = nothing applied
   close(): Promise<void>                                              // idempotent; closes conns + cleans registry + adapter + ws
@@ -526,6 +526,9 @@ createSuperLineServer(api, {
   },
 })
 srv.collection('messages').insert/update/delete/read/snapshot   // server co-write: policy-free, schema-validated
+await srv.collection('messages').count(eq('channelId', 'general')) // → number, without reading rows (SQL: one COUNT(*) when the filter compiles exactly); policy-free — AND in the caller's visibility yourself; omit the filter for the whole collection
+await srv.collection('screens').countBy('labels', filter?, { order?: 'count'|'value', limit? }) // → [{ value, count }] facet counts, most rows first; null is a group, missing joins none;
+//   an array field counts each row once per distinct element (= what has() matches); top-level fields run as one GROUP BY on SQL backends; policy-free like count
 await srv.batch([                                               // several co-writes, across row collections, as ONE atomic batch
   { op: 'delete', collection: 'messages', id: 'm1' },
   { op: 'insert', collection: 'messages', row: { /* … */ } },
@@ -542,12 +545,17 @@ await client.collection('messages').insert(row) // also update(row) / delete(id)
 // React: const { rows, insert, update, delete: del } = useCollection('messages', { filter: eq('channelId', id) })
 
 // QUERY IR (from @super-line/core) — one evaluator shared by routing/snapshots/client re-filter:
-and/or/not · eq/neq/lt/lte/gt/gte(field, value) · isIn(field, values) · like/ilike(field, pattern)   // field = dot path
+and/or/not · eq/neq/lt/lte/gt/gte(field, value) · isIn(field, values) · like/ilike(field, pattern) · has(field, value)   // field = dot path
+// has = the array at `field` holds an element === value (never matches a non-array). Strings compare by code point (= SQL binary collation); like's % spans newlines.
+// SQL backends run a query entirely in SQL (WHERE + ORDER BY + LIMIT/OFFSET) when it compiles exactly: scalar comparisons incl. text ranges/ISO dates, in, like, ASCII ilike, has on a top-level array,
+// orderBy on number/text columns. like with `_`, ilike with non-ASCII, JSON-field filters, boolean orderBy → SQL narrows, JS sorts + windows. End orderBy on a unique field for stable pages.
 type CollectionQuery = { filter?: Expr; orderBy?: { field, dir: 'asc'|'desc' }[]; limit?; offset? }
 matchesFilter(filter, row): boolean · applyQuery(rows, query): rows   // the evaluator — for a backend that filters/sorts/windows in JS
 excludesOn(filter, row, fields): boolean   // true only if `filter` is false on `row` judged on `fields` alone (a leaf on any other field is unknown; `and` excludes if any conjunct does, `or` if every branch does, `not` never)
 
 // BACKEND SEAM (writing your own CollectionStore) — optional:
+count?(n, filter): number   // rows matching filter (undefined = all); absent ⇒ the server counts snapshot(n, { filter })
+countBy?(n, field, filter): ValueCount[]   // every group, unordered, exactly as core's countValues(rows, field) forms them; absent ⇒ countValues over a snapshot. The server orders + limits (orderValueCounts)
 fixedFields?(n): readonly string[]   // fields of collection n whose value never changes for a key (remoteRows: ['storeId', 'table']).
 // A `self` backend's prev-less update otherwise reaches EVERY subscriber, a non-matching one as a data-less delete; with
 // fixedFields the server skips a subscriber whose filter (policy included) excludesOn those fields. A prev-less DELETE

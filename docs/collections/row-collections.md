@@ -113,7 +113,7 @@ The subscription's frames process concurrently, so `sub.ready` is the barrier be
 
 ## The query IR
 
-The subscription carries a small **query IR** — `filter` (`and`/`or`/`not`, `eq`/`neq`/comparisons/`in`/`like`/`ilike`), `orderBy`, and `limit`/`offset` — built with the helpers exported from `@super-line/core`:
+The subscription carries a small **query IR** — `filter` (`and`/`or`/`not`, `eq`/`neq`/comparisons/`in`/`like`/`ilike`/`has`), `orderBy`, and `limit`/`offset` — built with the helpers exported from `@super-line/core`:
 
 ```ts
 import { and, eq, gt, like } from '@super-line/core'
@@ -123,7 +123,34 @@ messages.subscribe({
 })
 ```
 
+`has(field, value)` matches a row whose array field holds an element strictly equal to `value` (`has('labels', 'vip')`); it never matches a field that isn't an array. Strings compare by Unicode code point, which is the order of SQL's binary collation, and `like`'s `%` spans newlines, as in SQL.
+
 The server **pushes down** what it can and re-checks the exact predicate; the client re-filters too, so an over-approximate result is always safe. `orderBy`/`limit` shape the **initial snapshot**; the live phase then streams every matching change and the consumer owns its window. The full operator set is in the [query IR reference](/reference/) and the same helpers power [TanStack DB queries](/collections/tanstack-db).
+
+### Page a list and show its total
+
+`offset`/`limit` page the snapshot. The total the page belongs to comes from the server: `srv.collection(n).count(filter?)` counts matching rows without reading them. A SQL backend answers it with one `COUNT(*)` when the filter compiles exactly. Like the other `srv.collection` calls it skips policy, so AND in what the caller may read yourself. End `orderBy` on a unique field, so rows that tie on the sort value can't move between pages:
+
+```ts
+const filter = and(eq('channelId', channelId), has('labels', 'lobby'), ilike('name', `%${term}%`))
+const page = client.collection('screens').subscribe({
+  filter,
+  orderBy: [{ field: 'name', dir: 'asc' }, { field: 'id', dir: 'asc' }],
+  offset: 50,
+  limit: 50,
+})
+
+// server: a request handler rebuilds the filter from its input and scopes it to the caller
+const total = await srv.collection('screens').count(and(filter, eq('orgId', ctx.orgId)))
+```
+
+For a filter rail, `srv.collection(n).countBy(field, filter?, { order?, limit? })` returns how many rows hold each value of a field: `[{ value, count }]`, most rows first (`order: 'value'` sorts by value instead), with `limit` keeping the top N. Null is its own group; a missing field joins none. An array field counts each row once under every distinct element, the rows `has(field, value)` would match, so clicking a facet value filters to exactly the count it showed. A SQL backend answers with one `GROUP BY` when the filter compiles exactly:
+
+```ts
+const scope = eq('orgId', ctx.orgId)
+const byLabel = await srv.collection('screens').countBy('labels', scope, { limit: 10 }) // [{ value: 'lobby', count: 412 }, …]
+const byVersion = await srv.collection('screens').countBy('appVersion', and(scope, eq('channelId', channelId)))
+```
 
 ::: tip The primitive is non-optimistic
 `client.collection(name)` is the raw sync layer: a write appears in `rows()` when the server confirms it. Optimism — instant local application, rollback on error — is [TanStack DB's](/collections/tanstack-db) job, layered on top.

@@ -19,7 +19,7 @@ const srv = createSuperLineServer(api, {
 })
 ```
 
-Every LWW collection gets its own typed table (`col_<name>`), derived from the contract's Zod schema — so the factory REQUIRES the contract's (post-plugin-merge) `collections` map, not just a file path. Queries compile to SQL where exact; a few operators (`like`/`ilike`, text ranges/order, `neq` on a JSON-backed field) fall back to a full scan, JS-filtered — see the guide for the list.
+Every LWW collection gets its own typed table (`col_<name>`), derived from the contract's Zod schema — so the factory REQUIRES the contract's (post-plugin-merge) `collections` map, not just a file path. Queries compile to SQL where exact (filter, ORDER BY, LIMIT/OFFSET, `count`'s `COUNT(*)` and `countBy`'s `GROUP BY`); the rest — `like` with `_`, `ilike` with a non-ASCII character, most filters on JSON-backed fields, `orderBy` on a boolean — narrow the scan in SQL and finish in JS. See the guide for the list.
 
 - 📖 Docs: <https://super-line.dogar.biz/>
 - 📚 Guide: [backends & clustering](https://super-line.dogar.biz/collections/backends)

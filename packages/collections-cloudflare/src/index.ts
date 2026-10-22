@@ -1,7 +1,16 @@
 import { SuperLineError, applyQuery, isCrdtCollection, matchesFilter } from '@super-line/core'
-import type { CollectionDef, LwwCollectionDef, RelayCollectionStore, ResolvedRowOp, RowChange, RowTimestamps } from '@super-line/core'
+import type {
+  CollectionDef,
+  CollectionQuery,
+  LwwCollectionDef,
+  RelayCollectionStore,
+  ResolvedRowOp,
+  RowChange,
+  RowTimestamps,
+} from '@super-line/core'
 import {
   META_SQL,
+  countSql,
   defineTable,
   driftOf,
   fromRow,
@@ -84,6 +93,14 @@ export function cloudflareCollections(storage: DurableObjectStorage, collections
     return r ? fromRow(t, r) : undefined
   }
 
+  const snapshot = (n: string, query: CollectionQuery): unknown[] => {
+    const t = table(n)
+    if (!t) return [] // undeclared collection: nothing to serve
+    const q = snapshotSql(t, query, MAX_PARAMS)
+    const found = rows(q.sql, ...q.params).map((r) => fromRow(t, r))
+    return q.exact ? found : applyQuery(found, query) // non-exact: the evaluator is authoritative
+  }
+
   const listeners = new Set<(change: RowChange) => void>()
   const emit = (changes: RowChange[]) => {
     for (const c of changes) for (const cb of listeners) cb(c) // fan out only after the commit
@@ -136,12 +153,12 @@ export function cloudflareCollections(storage: DurableObjectStorage, collections
       emit(changes)
       return true
     },
-    snapshot(n, query) {
+    snapshot,
+    count(n, filter) {
       const t = table(n)
-      if (!t) return [] // undeclared collection: nothing to serve
-      const q = snapshotSql(t, query, MAX_PARAMS)
-      const found = rows(q.sql, ...q.params).map((r) => fromRow(t, r))
-      return q.exact ? found : applyQuery(found, query) // non-exact: the evaluator is authoritative
+      if (!t) return 0
+      const q = countSql(t, filter, MAX_PARAMS)
+      return q ? (rows(q.sql, ...q.params)[0]!.n as number) : snapshot(n, { filter }).length
     },
     read(n, id) {
       const t = table(n)

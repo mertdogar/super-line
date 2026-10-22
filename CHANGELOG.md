@@ -7,6 +7,20 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Bug Fixes
 
+- **collections-sqlite:** A dot path through an array no longer drops matching rows ([344e41b])
+
+### Chores
+
+- **changelog:** Collections-cloudflare's changelog includes the SQL layer it bundles ([3ce361e])
+
+### Documentation
+
+- **changelog:** Regenerate the root aggregate ([3c056de])
+
+## 2026-10-22
+
+### Bug Fixes
+
 - **client:** A subscription with offset keeps its page ([0825531])
 
 ### Documentation

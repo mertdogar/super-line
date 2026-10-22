@@ -23,7 +23,7 @@ function fakeSource(rows: RemoteRow[] = []) {
   const source = {
     head: { epoch: 'e1', clock: 0, changes: [], wipeAll: false } as RemoteChanges,
     pulls: [] as number[],
-    snapshot: vi.fn((table: string, limit: number) => rows.filter((r) => r.table === table).slice(0, limit)),
+    snapshot: vi.fn((table: string | undefined, limit: number) => rows.filter((r) => table === undefined || r.table === table).slice(0, limit)),
     get: (table: string, id: string) => rows.find((r) => r.table === table && r.id === id),
     changesSince(clock: number): RemoteChanges {
       source.pulls.push(clock)
@@ -175,10 +175,16 @@ describe('remoteRows ingest', () => {
 describe('remoteRows reads', () => {
   const rows = [dish('a', 'soup'), dish('b', 'bread'), dish('c', 'cake'), { table: 'drinks', id: 'w', data: { id: 'w' } }]
 
-  it('refuses a snapshot that does not pin storeId and table by equality', async () => {
+  it('refuses a snapshot that does not pin storeId by equality', async () => {
     const { store } = setup(rows)
-    for (const filter of [undefined, eq('storeId', 's1'), and(isIn('storeId', ['s1']), eq('table', 'dishes'))])
+    for (const filter of [undefined, eq('table', 'dishes'), and(isIn('storeId', ['s1']), eq('table', 'dishes'))])
       await expect(store.snapshot('storeRows', { filter })).rejects.toMatchObject({ code: 'VALIDATION' })
+  })
+
+  it('a snapshot pinned to the store alone spans every table', async () => {
+    const { store } = setup(rows)
+    const all = await store.snapshot('storeRows', { filter: eq('storeId', 's1') })
+    expect(all.map((r) => (r as { key: string }).key).sort()).toEqual(['s1:dishes:a', 's1:dishes:b', 's1:dishes:c', 's1:drinks:w'])
   })
 
   it('pulls first, reads the pinned table and runs the rest of the query on it', async () => {

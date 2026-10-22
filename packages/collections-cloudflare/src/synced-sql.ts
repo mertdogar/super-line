@@ -29,7 +29,8 @@ export interface SyncedSqlOptions {
 
 export interface SyncedSql {
   query(statements: Statement[], opts?: QueryOptions): Outcome
-  snapshot(table: string, limit: number): RemoteRow[]
+  /** Rows of one table, or of every table when `table` is undefined, up to `limit` in all. */
+  snapshot(table: string | undefined, limit: number): RemoteRow[]
   get(table: string, id: string): RemoteRow | undefined
   changesSince(clock: number): RemoteChanges
 }
@@ -276,9 +277,13 @@ export function syncedSql(ctx: DurableObjectState, opts: SyncedSqlOptions = {}):
     },
     snapshot(table, limit) {
       ensure()
-      const key = userTables().get(table)
-      if (key === undefined) return []
-      return read(table, `SELECT ${key}, * FROM ${ident(table)} LIMIT ?`, limit)
+      const tables = userTables()
+      const out: RemoteRow[] = []
+      for (const [name, key] of table === undefined ? tables : [[table, tables.get(table)] as const]) {
+        if (key === undefined || out.length >= limit) continue
+        out.push(...read(name, `SELECT ${key}, * FROM ${ident(name)} LIMIT ?`, limit - out.length))
+      }
+      return out
     },
     get(table, id) {
       ensure()

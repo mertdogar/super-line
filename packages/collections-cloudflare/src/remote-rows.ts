@@ -6,7 +6,7 @@ type Awaitable<T> = T | Promise<T>
 
 /** A source as the node reaches it: `syncedSql`'s reads, over RPC. A Durable Object stub satisfies it. */
 export interface RemoteSource {
-  snapshot(table: string, limit: number): Awaitable<RemoteRow[]>
+  snapshot(table: string | undefined, limit: number): Awaitable<RemoteRow[]>
   get(table: string, id: string): Awaitable<RemoteRow | undefined>
   changesSince(clock: number): Awaitable<RemoteChanges>
 }
@@ -75,8 +75,8 @@ const splitKey = (key: string): [string, string, string] | undefined => {
  * `changesSince` when a push skips a clock, carries no changes or comes from a new epoch. A store's feed starts at
  * its first subscribe, and every subscribe pulls first.
  *
- * A snapshot must pin `storeId` and `table` by equality (`VALIDATION` otherwise); the rest of the query runs on the
- * rows read. Changes carry no prior row, so the server sends a data-less delete to a subscriber the new row doesn't
+ * A snapshot must pin `storeId` by equality (`VALIDATION` otherwise) and may pin `table`; without it the read spans
+ * every table of the store. The rest of the query runs on the rows read. Changes carry no prior row, so the server sends a data-less delete to a subscriber the new row doesn't
  * match — unless its filter rules out the row's `storeId` or `table`, which never change for a key. Writes throw
  * `FORBIDDEN`: they go through the source's own path.
  *
@@ -154,8 +154,8 @@ export function remoteRows(opts: RemoteRowsOptions): RemoteRowsStore {
       const parts = conjuncts(query.filter)
       const storeId = pinOf(parts, 'storeId')
       const table = pinOf(parts, 'table')
-      if (typeof storeId !== 'string' || typeof table !== 'string')
-        throw new SuperLineError('VALIDATION', `A ${collection} subscription must pin storeId and table with eq()`)
+      if (typeof storeId !== 'string' || (table !== undefined && typeof table !== 'string'))
+        throw new SuperLineError('VALIDATION', `A ${collection} subscription must pin storeId with eq()`)
       await catchUp(storeId)
       // only a query the pins alone decide can stop reading at its own window
       const exact = !query.orderBy?.length && parts.every(isPin) && query.limit !== undefined

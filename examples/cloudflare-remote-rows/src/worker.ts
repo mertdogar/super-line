@@ -29,7 +29,7 @@ export class Store extends DurableObject<Env> {
   query(statements: Statement[]) {
     return this.sync.query(statements)
   }
-  snapshot(table: string, limit: number) {
+  snapshot(table: string | undefined, limit: number) {
     return this.sync.snapshot(table, limit)
   }
   get(table: string, id: string) {

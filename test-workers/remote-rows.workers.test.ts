@@ -62,6 +62,19 @@ describe('remoteRows across a source and a node Durable Object', () => {
     expect(other.rows()).toEqual([])
   })
 
+  it('a subscription pinned to the store alone spans every table, live', async () => {
+    const { client, source } = setup()
+    const s1 = source('s1')
+    await exec(s1, CREATE, 'CREATE TABLE drinks (id TEXT PRIMARY KEY, name TEXT)', "INSERT INTO dishes VALUES ('a', 'stew')")
+    const sub = client.collection('storeRows').subscribe({ filter: eq('storeId', 's1') })
+    await sub.ready
+    expect(sub.rows().map((r) => r.key)).toEqual(['s1:dishes:a'])
+
+    await exec(s1, "INSERT INTO drinks VALUES ('w', 'water')")
+    await waitFor(() => sub.rows().length === 2, { label: 'second table live' })
+    expect(sub.rows().map((r) => r.key).sort()).toEqual(['s1:dishes:a', 's1:drinks:w'])
+  })
+
   it('pulls on a clock-only push and on a gap left by a lost push', async () => {
     const { source, subscribe } = setup()
     const s1 = source('s1')
@@ -138,10 +151,10 @@ describe('remoteRows across a source and a node Durable Object', () => {
     expect(await node.wipes()).toEqual(['s1'])
   })
 
-  it('refuses a subscribe that does not pin storeId and table, and every write', async () => {
+  it('refuses a subscribe that does not pin storeId, and every write', async () => {
     const { client } = setup()
     const rows = client.collection('storeRows')
-    await expect(rows.subscribe({ filter: eq('storeId', 's1') }).ready).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(rows.subscribe({ filter: eq('table', 'dishes') }).ready).rejects.toMatchObject({ code: 'VALIDATION' })
     await expect(rows.subscribe().ready).rejects.toMatchObject({ code: 'VALIDATION' })
     const row = { key: 's1:dishes:a', storeId: 's1', table: 'dishes', id: 'a', data: { id: 'a' } }
     await expect(rows.insert(row)).rejects.toMatchObject({ code: 'FORBIDDEN' })

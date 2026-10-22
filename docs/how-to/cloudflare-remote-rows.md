@@ -94,7 +94,7 @@ export class Store extends DurableObject<Env> {
   query(statements: Statement[], opts?: QueryOptions) {
     return this.sync.query(statements, opts)
   }
-  snapshot(table: string, limit: number) {
+  snapshot(table: string | undefined, limit: number) {
     return this.sync.snapshot(table, limit)
   }
   get(table: string, id: string) {
@@ -193,7 +193,7 @@ The example's `authenticate` puts the stores each connection may read in `ctx.st
 
 ## Subscribe from a client
 
-Nothing on the client is specific to this backend: `storeRows` is an ordinary row collection. Its filter must pin `storeId` and `table` with `eq()`, so the node knows which source table to read — a subscribe without both fails with `VALIDATION`.
+Nothing on the client is specific to this backend: `storeRows` is an ordinary row collection. Its filter must pin `storeId` with `eq()`, so the node knows which source to read — a subscribe without it fails with `VALIDATION`. Pin `table` too to read one table; without it the snapshot spans every table of the store, up to the limit, and live changes from all of them arrive.
 
 ```ts
 import { and, eq } from '@super-line/core'

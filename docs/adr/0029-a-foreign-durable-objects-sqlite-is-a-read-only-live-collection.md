@@ -42,7 +42,7 @@ capture in the source and served by a `self` backend composed beside the node's 
 - **`remoteRows(opts)`** on the node: a `SelfCollectionStore` whose feed is the source's pushes. `ingest`
   applies the next clock of the same epoch inline and pulls `changesSince(lastSeen)` for anything else; steps
   run one at a time per source, and `lastSeen` lives in the node's own storage. Snapshots read the source
-  directly and must pin `storeId` and `table` by equality. Wake catch-up is the host's call (`resume`),
+  directly and must pin `storeId` by equality (`table` optionally: a store-wide read spans every table). Wake catch-up is the host's call (`resume`),
   because a replayed subscription never reaches the backend. A wipe is the host's call too (`onWipe`),
   answered by closing the affected sockets 4409 so clients reconnect into a fresh snapshot.
 - **`remoteRowsCollection(name)`** on the contract: one generic collection, rows

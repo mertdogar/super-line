@@ -201,7 +201,7 @@ of tldraw's per-session machinery is needed; its storage-portability wrapper
 18. A **`SelfCollectionStore`** (`clustering: 'self'`): the owner is external and the feed fires
     `onChange`, exactly like `collections-pglite` with Electric. `ingest(storeId, push)` is what the host's
     forwarder calls; `snapshot(n, query)` **refuses** a query that
-    doesn't pin `storeId` and `table` by equality (`VALIDATION`), pushes `limit` (default 1000) into
+    doesn't pin `storeId` by equality (`VALIDATION`; `table` optional since 0.3.0 — super-omma reads whole stores), pushes `limit` (default 1000) into
     the source, and lets `applyQuery` in the node do the rest of the filter.
 19. **Composition**: super-line takes one `CollectionStore` per server, and the node already has
     `cloudflareCollections`. Add `composeCollections({ default, <name>: store })` to

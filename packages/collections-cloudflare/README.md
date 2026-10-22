@@ -63,7 +63,7 @@ export class Store extends DurableObject<Env> {
     },
   })
   query(statements: Statement[], opts?: QueryOptions) { return this.sync.query(statements, opts) }
-  snapshot(table: string, limit: number) { return this.sync.snapshot(table, limit) }
+  snapshot(table: string | undefined, limit: number) { return this.sync.snapshot(table, limit) }
   get(table: string, id: string) { return this.sync.get(table, id) }
   changesSince(clock: number) { return this.sync.changesSince(clock) }
 }
@@ -95,7 +95,7 @@ export class Node extends createDurableNode((ctx, env, base) => {
 }
 ```
 
-A subscription must pin both `storeId` and `table` with `eq()`, and writes fail with `FORBIDDEN` — they go through the source's `query`. Dropping, renaming or altering a table, pruned deletes, a backlog over `maxPullChanges` or a reset source breaks that source's history: `onWipe` runs, and its subscribers resync. Store ids and table names must be colon-free. The source owns every `_sl_`-prefixed object in its SQLite.
+A subscription must pin `storeId` with `eq()` (and may pin `table`; without it the snapshot spans every table of the store), and writes fail with `FORBIDDEN` — they go through the source's `query`. Dropping, renaming or altering a table, pruned deletes, a backlog over `maxPullChanges` or a reset source breaks that source's history: `onWipe` runs, and its subscribers resync. Store ids and table names must be colon-free. The source owns every `_sl_`-prefixed object in its SQLite.
 
 - 📖 Guide: [Host a node on Cloudflare Durable Objects](https://super-line.dogar.biz/how-to/cloudflare-durable-objects)
 - 📖 Guide: [Serve another Durable Object's tables](https://super-line.dogar.biz/how-to/cloudflare-remote-rows)

@@ -160,7 +160,7 @@ export class SqlSourceNode extends DurableObject<Cloudflare.Env> {
   query(statements: Statement[], opts?: QueryOptions) {
     return this.sync.query(statements, opts)
   }
-  snapshot(table: string, limit: number) {
+  snapshot(table: string | undefined, limit: number) {
     return this.sync.snapshot(table, limit)
   }
   get(table: string, id: string) {

@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [client-v0.18.1] — 2026-10-22
+
+### Bug Fixes
+
+- **client:** A subscription with offset keeps its page ([0825531])
+
 ## [client-v0.18.0] — 2026-10-18
 
 ### Features

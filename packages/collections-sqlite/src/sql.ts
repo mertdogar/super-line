@@ -1,5 +1,5 @@
 import { DEGENERATE_DATA_COLUMN, planColumns } from '@super-line/core'
-import type { CollectionQuery, ColumnPlan, ColumnSpec, Expr, LwwCollectionDef, OrderBy } from '@super-line/core'
+import type { CollectionQuery, ColumnPlan, ColumnSpec, Expr, LwwCollectionDef, OrderBy, Scalar } from '@super-line/core'
 
 // The SQL text of a typed-table row backend, shared by every SQLite engine: better-sqlite3 here, a Durable
 // Object's `ctx.storage.sql` in collections-cloudflare (which bundles this file). Pure — it builds statements
@@ -89,16 +89,51 @@ interface Compiled {
   exact: boolean
 }
 
+/** Two-valued: a NOT NULL column already compares to 0/1, and left bare an index can serve it. */
+const twoValued = (col: ColumnSpec, sql: string): string => (col.nullable || col.optional ? `COALESCE(${sql}, 0)` : sql)
+
 const TRUE: Compiled = { sql: '1=1', params: [], exact: true }
 const FALSE: Compiled = { sql: '1=0', params: [], exact: true }
+
+/** The array element test for `has`: json_each's `type` keeps 1 apart from true and '1'. */
+const elementSql = (value: Scalar): { sql: string; params: unknown[] } =>
+  value === null
+    ? { sql: `e.type = 'null'`, params: [] }
+    : typeof value === 'boolean'
+      ? { sql: `e.type = '${value}'`, params: [] }
+      : typeof value === 'number'
+        ? { sql: `e.type IN ('integer', 'real') AND e.value = ?`, params: [value] }
+        : { sql: `e.type = 'text' AND e.value = ?`, params: [value] }
+
+/**
+ * A `like` pattern as GLOB (case-sensitive, like the evaluator) and an `ilike` one as LIKE (ASCII-only case
+ * folding). `%` and every literal translate exactly — `[*]`/`[?]`/`[[]` escape GLOB's own wildcards. Two things
+ * only widen, leaving the evaluator to refine: `_` (one UTF-16 code unit in the evaluator, one code point in
+ * SQLite) and, for `ilike`, a non-ASCII BMP character, whose case variants SQLite LIKE doesn't fold.
+ */
+function likeSql(pattern: string, ci: boolean): { pattern: string; exact: boolean } {
+  let out = ''
+  let exact = true
+  for (const ch of pattern) {
+    if (ch === '%') out += ci ? '%' : '*'
+    else if (ch === '_') {
+      out += ci ? '%' : '*'
+      exact = false
+    } else if (ci && ch.length === 1 && ch.charCodeAt(0) > 0x7f) {
+      out += '_'
+      exact = false
+    } else if (!ci && (ch === '*' || ch === '?' || ch === '[')) out += `[${ch}]`
+    else out += ch
+  }
+  return { pattern: out, exact }
+}
 
 /**
  * Compile a filter against a typed table. Exact fragments use two-valued forms only (`IS`/`IS NOT`,
  * `COALESCE(cmp, 0)`) so `not`/`and`/`or` compose without SQL's three-valued NULL logic diverging
- * from the evaluator. Text range comparisons and text ORDER BY are never pushed: SQLite compares
- * UTF-8 bytes, JS compares UTF-16 code units, and those orders disagree on astral-plane characters —
- * a superset guarantee can't be made, so JS does them. Returns `null` where not even a superset
- * narrowing is safe (`like`/`ilike`, json `neq`, …).
+ * from the evaluator. Text compares exactly: SQLite's BINARY collation orders UTF-8 bytes, which is
+ * code point order, the evaluator's. Returns `null` where not even a superset narrowing is safe
+ * (json `neq`, `like` on a json field, `has` on a dot path, …).
  */
 function compileExpr(t: Table, expr: Expr): Compiled | null {
   switch (expr.op) {
@@ -159,10 +194,9 @@ function compileExpr(t: Table, expr: Expr): Compiled | null {
       const ref = resolveField(t, expr.field)
       if (ref.at === 'absent') return FALSE
       if (ref.at === 'scalar') {
-        if (ref.col.kind === 'real' && typeof expr.value === 'number') {
-          return { sql: `COALESCE("${ref.col.name}" ${op} ?, 0)`, params: [expr.value], exact: true }
+        if ((ref.col.kind === 'real' && typeof expr.value === 'number') || (ref.col.kind === 'text' && typeof expr.value === 'string')) {
+          return { sql: twoValued(ref.col, `"${ref.col.name}" ${op} ?`), params: [expr.value], exact: true }
         }
-        if (ref.col.kind === 'text' && typeof expr.value === 'string') return null // byte vs code-unit order
         return FALSE // type mismatch / booleans: the evaluator says incomparable ⇒ false
       }
       if (typeof expr.value !== 'number') return null
@@ -177,7 +211,7 @@ function compileExpr(t: Table, expr: Expr): Compiled | null {
         const parts: string[] = []
         const params: unknown[] = []
         if (usable.length > 0) {
-          parts.push(`COALESCE("${ref.col.name}" IN (${usable.map(() => '?').join(',')}), 0)`)
+          parts.push(twoValued(ref.col, `"${ref.col.name}" IN (${usable.map(() => '?').join(',')})`))
           params.push(...usable.map(norm))
         }
         if (expr.values.includes(null) && ref.col.nullable) parts.push(`"${ref.col.name}" IS NULL`)
@@ -190,21 +224,40 @@ function compileExpr(t: Table, expr: Expr): Compiled | null {
         exact: false,
       }
     }
-    default:
-      return null // like / ilike: SQLite LIKE case rules diverge from the evaluator's regex — JS only
+    case 'like':
+    case 'ilike': {
+      const ref = resolveField(t, expr.field)
+      if (ref.at === 'absent') return FALSE
+      if (ref.at !== 'scalar') return null
+      if (ref.col.kind !== 'text') return FALSE // the evaluator matches strings only
+      const p = likeSql(expr.pattern, expr.op === 'ilike')
+      const sql = twoValued(ref.col, `"${ref.col.name}" ${expr.op === 'ilike' ? 'LIKE' : 'GLOB'} ?`)
+      return { sql, params: [p.pattern], exact: p.exact }
+    }
+    case 'has': {
+      if (expr.field.includes('.')) return null // '$.a.0' reads key "0", never index 0
+      const ref = resolveField(t, expr.field)
+      if (ref.at !== 'json') return FALSE // absent, or a scalar column: never an array
+      const el = elementSql(expr.value)
+      return {
+        sql: `json_type("${ref.col}", ?) IS 'array' AND EXISTS (SELECT 1 FROM json_each("${t.name}"."${ref.col}", ?) AS e WHERE ${el.sql})`,
+        params: [ref.path, ref.path, ...el.params],
+        exact: true,
+      }
+    }
   }
 }
 
 /**
- * Compile ORDER BY, or `null` to sort in JS. Exact only for real-typed columns: the evaluator sorts
+ * Compile ORDER BY, or `null` to sort in JS. Exact for real and text columns: the evaluator sorts
  * nulls/missing last on asc and (via comparator negation) first on desc, ties booleans and mixed
- * types, and orders text by UTF-16 code units — of those, only numbers translate faithfully.
+ * types, and orders text by code point — of those, only booleans don't translate.
  */
 function compileOrder(t: Table, orderBy: readonly OrderBy[]): string | null {
   const parts: string[] = []
   for (const { field, dir } of orderBy) {
     const ref = resolveField(t, field)
-    if (ref.at !== 'scalar' || ref.col.kind !== 'real') return null
+    if (ref.at !== 'scalar' || ref.col.kind === 'integer-bool') return null
     parts.push(dir === 'desc' ? `"${ref.col.name}" DESC NULLS FIRST` : `"${ref.col.name}" ASC NULLS LAST`)
   }
   return parts.join(', ')
@@ -232,6 +285,14 @@ export function snapshotSql(t: Table, query: CollectionQuery, maxParams = Infini
     params.push(query.limit ?? -1, query.offset ?? 0)
   }
   return { sql, params, exact: true }
+}
+
+/** `SELECT COUNT(*) AS n` for `filter`, or `null` when SQL can't answer it exactly (count the snapshot instead). */
+export function countSql(t: Table, filter: Expr | undefined, maxParams = Infinity): { sql: string; params: unknown[] } | null {
+  if (!filter) return { sql: `SELECT COUNT(*) AS n FROM "${t.name}"`, params: [] }
+  const where = compileExpr(t, filter)
+  if (!where?.exact || where.params.length > maxParams) return null
+  return { sql: `SELECT COUNT(*) AS n FROM "${t.name}" WHERE ${where.sql}`, params: where.params }
 }
 
 /** Timestamps of `count` rows by key, bound as `IN (?, …)`. */

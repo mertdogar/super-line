@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { SuperLineError, applyQuery, isCrdtCollection, matchesFilter } from '@super-line/core'
-import type { RelayCollectionStore, ResolvedRowOp, RowChange, RowTimestamps, CollectionDef } from '@super-line/core'
-import { META_SQL, defineTable, driftOf, fromRow, rowMetaSql, rowParams, snapshotSql, updateParams, type Table } from './sql.js'
+import type { CollectionDef, CollectionQuery, RelayCollectionStore, ResolvedRowOp, RowChange, RowTimestamps } from '@super-line/core'
+import { META_SQL, countSql, defineTable, driftOf, fromRow, rowMetaSql, rowParams, snapshotSql, updateParams, type Table } from './sql.js'
 
 /** Options for {@link sqliteCollections}. */
 export interface SqliteCollectionsOptions {
@@ -37,7 +37,8 @@ function reconcile(db: Database.Database, n: string, t: Table): void {
  * JSON column (see core's `planColumns`), plus `_sl_created_at`/`_sl_updated_at`. One better-sqlite3
  * transaction spans all tables, so a cross-collection batch stays atomic. Snapshots compile the query
  * IR against real columns — an exactly-compilable query runs entirely in SQL (WHERE + ORDER BY +
- * LIMIT/OFFSET); anything else narrows the scan and re-applies the evaluator in JS (authoritative).
+ * LIMIT/OFFSET); anything else narrows the scan and re-applies the evaluator in JS (authoritative). `count`
+ * runs `COUNT(*)` when the filter compiles exactly.
  * `clustering: 'relay'` — core relays batches across nodes and re-ingests them through `apply`.
  */
 export function sqliteCollections(opts: SqliteCollectionsOptions): RelayCollectionStore {
@@ -65,6 +66,14 @@ export function sqliteCollections(opts: SqliteCollectionsOptions): RelayCollecti
   const readRow = (t: Prepared, id: string): unknown => {
     const r = t.stmt.get.get(id) as Record<string, unknown> | undefined
     return r ? fromRow(t, r) : undefined
+  }
+
+  const snapshot = (n: string, query: CollectionQuery): unknown[] => {
+    const t = table(n)
+    if (!t) return [] // undeclared collection: nothing to serve
+    const q = snapshotSql(t, query)
+    const rows = (db.prepare(q.sql).all(...q.params) as Record<string, unknown>[]).map((r) => fromRow(t, r))
+    return q.exact ? rows : applyQuery(rows, query) // non-exact: the evaluator is authoritative
   }
 
   const listeners = new Set<(change: RowChange) => void>()
@@ -118,12 +127,12 @@ export function sqliteCollections(opts: SqliteCollectionsOptions): RelayCollecti
       for (const c of changes) for (const cb of listeners) cb(c)
       return true
     },
-    snapshot(n, query) {
+    snapshot,
+    count(n, filter) {
       const t = table(n)
-      if (!t) return [] // undeclared collection: nothing to serve
-      const q = snapshotSql(t, query)
-      const rows = (db.prepare(q.sql).all(...q.params) as Record<string, unknown>[]).map((r) => fromRow(t, r))
-      return q.exact ? rows : applyQuery(rows, query) // non-exact: the evaluator is authoritative
+      if (!t) return 0
+      const q = countSql(t, filter)
+      return q ? (db.prepare(q.sql).get(...q.params) as { n: number }).n : snapshot(n, { filter }).length
     },
     read(n, id) {
       const t = table(n)

@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import Database from 'better-sqlite3'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as z from 'zod'
 import { sqliteCollections } from '@super-line/collections-sqlite'
-import { eq, gte, isIn, like, ilike, and, neq } from '@super-line/core'
-import type { CollectionDef, CollectionStore } from '@super-line/core'
+import { eq, gte, has, isIn, like, ilike, and, neq, not, lt } from '@super-line/core'
+import type { CollectionDef, CollectionQuery, CollectionStore } from '@super-line/core'
+import { countSql, defineTable, snapshotSql } from '../src/sql.js'
 
 import { QUERY_COLLECTIONS, runRowConformance } from '../../core/test/collection-store-conformance.js'
 
@@ -135,6 +137,47 @@ describe('sqliteCollections — snapshot (IR→SQL over typed columns + JS refin
     expect((store.snapshot('m', { filter: eq('tag', null) }) as { id: string }[]).map((r) => r.id)).toEqual(['hasNull'])
     expect((store.snapshot('m', { filter: neq('tag', 'x') }) as { id: string }[]).map((r) => r.id).sort()).toEqual(['hasNull', 'missing'])
     store.close?.()
+  })
+})
+
+describe('snapshotSql — what runs entirely in SQL', () => {
+  const t = defineTable('screens', QUERY_COLLECTIONS.screens as Parameters<typeof defineTable>[1])
+  const exact = (q: CollectionQuery) => snapshotSql(t, q).exact
+
+  it('pushes text ORDER BY, text ranges, like, ASCII ilike and has, with LIMIT/OFFSET', () => {
+    const page = { orderBy: [{ field: 'name', dir: 'asc' as const }], offset: 20, limit: 10 }
+    expect(exact(page)).toBe(true)
+    expect(exact({ ...page, filter: and(gte('createdAt', '2026-01-01'), lt('createdAt', '2026-02-01')) })).toBe(true)
+    expect(exact({ ...page, filter: like('name', 'a*b%') })).toBe(true)
+    expect(exact({ ...page, filter: ilike('name', '%lobby screen%') })).toBe(true)
+    expect(exact({ ...page, filter: and(eq('channelId', 'c1'), not(has('labels', 'vip')), neq('connectedAt', null)) })).toBe(true)
+    expect(snapshotSql(t, page).sql).toMatch(/ORDER BY "name" ASC NULLS LAST LIMIT \? OFFSET \?$/)
+  })
+
+  it('only narrows what SQLite would answer differently: `_`, non-ASCII ilike, a has through a dot path', () => {
+    expect(exact({ filter: like('name', 'a_b') })).toBe(false)
+    expect(exact({ filter: ilike('name', 'café') })).toBe(false)
+    expect(exact({ filter: has('labels.0', 'vip') })).toBe(false)
+    expect(exact({ filter: like('name', 'café') })).toBe(true) // case-sensitive: GLOB compares it exactly
+  })
+
+  it('leaves comparisons on NOT NULL columns bare, so an index serves a range', () => {
+    const db = new Database(':memory:')
+    const indexed = defineTable('screens', { ...QUERY_COLLECTIONS.screens, indexes: [['createdAt']] } as Parameters<typeof defineTable>[1])
+    db.exec(indexed.create)
+    for (const index of indexed.indexes) db.exec(index)
+    const q = snapshotSql(indexed, { filter: and(gte('createdAt', '2026-01-01'), lt('createdAt', '2026-02-01')) })
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${q.sql}`).all(...q.params) as { detail: string }[]
+    expect(plan.map((r) => r.detail).join('\n')).toMatch(/USING INDEX col_screens_idx_0/)
+    expect(snapshotSql(t, { filter: lt('connectedAt', '2026') }).sql).toMatch(/COALESCE\("connectedAt" < \?, 0\)/) // nullable: kept two-valued
+    db.close()
+  })
+
+  it('counts in SQL exactly when the filter compiles exactly', () => {
+    expect(countSql(t, undefined)?.sql).toBe('SELECT COUNT(*) AS n FROM "col_screens"')
+    expect(countSql(t, and(eq('channelId', 'c1'), ilike('name', '%a%')))).not.toBeNull()
+    expect(countSql(t, like('name', 'a_b'))).toBeNull()
+    expect(countSql(t, has('labels', 'x'), 2)).toBeNull() // over the engine's bind limit
   })
 })
 

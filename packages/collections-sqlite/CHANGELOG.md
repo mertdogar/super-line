@@ -3,6 +3,21 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [collections-sqlite-v0.5.0] — 2026-10-22
+
+### Features
+
+- **collections-sqlite:** CountBy runs as one GROUP BY ([4942b28])
+- **collections-sqlite:** Text order, text ranges, like, ilike and has run in SQL; count ([e96cbc7])
+
+### Testing
+
+- **core:** Every backend answers the query IR exactly as the evaluator does ([d213029])
+
+### Documentation
+
+- Has(), count and countBy, and what runs in SQL ([285c439])
+
 ## [collections-sqlite-v0.4.1] — 2026-10-15
 
 ### Refactor

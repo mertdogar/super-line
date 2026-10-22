@@ -3,6 +3,18 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [core-v0.24.0] — 2026-10-22
+
+### Features
+
+- **core:** CountValues, orderValueCounts and an optional countBy on the store seam ([245c7a4])
+- **core:** An optional count on the collection store seam ([aa47c2f])
+- **core:** Has() matches an array element, and strings order by code point ([8a454e2])
+
+### Testing
+
+- **core:** Every backend answers the query IR exactly as the evaluator does ([d213029])
+
 ## [core-v0.23.0] — 2026-10-20
 
 ### Features

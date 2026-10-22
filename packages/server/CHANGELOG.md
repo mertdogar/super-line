@@ -3,6 +3,13 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [server-v0.25.0] — 2026-10-22
+
+### Features
+
+- **server:** Srv.collection(n).countBy(field, filter?, { order?, limit? }) ([3b58892])
+- **server:** Srv.collection(n).count(filter?) ([d2d8c1a])
+
 ## [server-v0.24.0] — 2026-10-20
 
 ### Features

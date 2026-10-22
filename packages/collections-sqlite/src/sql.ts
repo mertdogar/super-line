@@ -1,5 +1,5 @@
 import { DEGENERATE_DATA_COLUMN, planColumns } from '@super-line/core'
-import type { CollectionQuery, ColumnPlan, ColumnSpec, Expr, LwwCollectionDef, OrderBy, Scalar } from '@super-line/core'
+import type { CollectionQuery, ColumnPlan, ColumnSpec, Expr, LwwCollectionDef, OrderBy, Scalar, ValueCount } from '@super-line/core'
 
 // The SQL text of a typed-table row backend, shared by every SQLite engine: better-sqlite3 here, a Durable
 // Object's `ctx.storage.sql` in collections-cloudflare (which bundles this file). Pure — it builds statements
@@ -293,6 +293,42 @@ export function countSql(t: Table, filter: Expr | undefined, maxParams = Infinit
   const where = compileExpr(t, filter)
   if (!where?.exact || where.params.length > maxParams) return null
   return { sql: `SELECT COUNT(*) AS n FROM "${t.name}" WHERE ${where.sql}`, params: where.params }
+}
+
+/**
+ * A `GROUP BY` of top-level `field` over `filter`, grouping exactly as core's `countValues`, or `null` when SQL
+ * can't answer it exactly. A JSON field goes through `json_each`, which yields an array's elements or a scalar
+ * itself; the filter runs in an inner select so json_each's own columns (`id`, `key`, `value`, …) can't shadow
+ * the table's.
+ */
+export function countBySql(
+  t: Table,
+  field: string,
+  filter: Expr | undefined,
+  maxParams = Infinity,
+): { sql: string; params: unknown[]; decode: (r: Record<string, unknown>) => ValueCount } | null {
+  const where = filter ? compileExpr(t, filter) : TRUE
+  if (field.includes('.') || !where?.exact || where.params.length + 2 > maxParams) return null
+  const ref = resolveField(t, field)
+  if (ref.at === 'absent') return { sql: `SELECT 0 AS n WHERE 0`, params: [], decode: () => ({ value: null, count: 0 }) }
+  if (ref.at === 'scalar') {
+    const c = ref.col
+    const missing = c.optional ? ` AND "${c.name}" IS NOT NULL` : '' // optional-only: NULL is a missing field
+    return {
+      sql: `SELECT "${c.name}" AS v, COUNT(*) AS n FROM "${t.name}" WHERE (${where.sql})${missing} GROUP BY "${c.name}"`,
+      params: where.params,
+      decode: (r) => ({ value: c.kind === 'integer-bool' && r.v !== null ? r.v === 1 : (r.v as Scalar), count: r.n as number }),
+    }
+  }
+  const kind = `CASE WHEN e.type IN ('integer', 'real') THEN 'number' ELSE e.type END`
+  return {
+    sql:
+      `SELECT k, v, COUNT(*) AS n FROM (SELECT DISTINCT f.rid, ${kind} AS k, e.value AS v` +
+      ` FROM (SELECT "${t.plan.key}" AS rid, "${ref.col}" AS c FROM "${t.name}" WHERE ${where.sql}) AS f, json_each(f.c, ?) AS e` +
+      ` WHERE json_type(f.c, ?) IS NOT 'object' AND e.type NOT IN ('object', 'array')) GROUP BY k, v`,
+    params: [...where.params, ref.path, ref.path],
+    decode: (r) => ({ value: r.k === 'true' ? true : r.k === 'false' ? false : (r.v as Scalar), count: r.n as number }),
+  }
 }
 
 /** Timestamps of `count` rows by key, bound as `IN (?, …)`. */

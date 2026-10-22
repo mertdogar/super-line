@@ -7,7 +7,7 @@ import * as z from 'zod'
 import { sqliteCollections } from '@super-line/collections-sqlite'
 import { eq, gte, has, isIn, like, ilike, and, neq, not, lt } from '@super-line/core'
 import type { CollectionDef, CollectionQuery, CollectionStore } from '@super-line/core'
-import { countSql, defineTable, snapshotSql } from '../src/sql.js'
+import { countBySql, countSql, defineTable, snapshotSql } from '../src/sql.js'
 
 import { QUERY_COLLECTIONS, runRowConformance } from '../../core/test/collection-store-conformance.js'
 
@@ -178,6 +178,13 @@ describe('snapshotSql — what runs entirely in SQL', () => {
     expect(countSql(t, and(eq('channelId', 'c1'), ilike('name', '%a%')))).not.toBeNull()
     expect(countSql(t, like('name', 'a_b'))).toBeNull()
     expect(countSql(t, has('labels', 'x'), 2)).toBeNull() // over the engine's bind limit
+  })
+
+  it('groups in SQL exactly when the filter compiles exactly, top-level fields only', () => {
+    expect(countBySql(t, 'channelId', ilike('name', '%a%'))?.sql).toMatch(/GROUP BY "channelId"$/)
+    expect(countBySql(t, 'labels', undefined)?.sql).toMatch(/json_each/)
+    expect(countBySql(t, 'labels', like('name', 'a_b'))).toBeNull()
+    expect(countBySql(t, 'labels.0', undefined)).toBeNull()
   })
 })
 

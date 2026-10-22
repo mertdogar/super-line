@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
-import { SuperLineError, applyQuery, isCrdtCollection, matchesFilter } from '@super-line/core'
+import { SuperLineError, applyQuery, countValues, isCrdtCollection, matchesFilter } from '@super-line/core'
 import type { CollectionDef, CollectionQuery, RelayCollectionStore, ResolvedRowOp, RowChange, RowTimestamps } from '@super-line/core'
-import { META_SQL, countSql, defineTable, driftOf, fromRow, rowMetaSql, rowParams, snapshotSql, updateParams, type Table } from './sql.js'
+import { META_SQL, countBySql, countSql, defineTable, driftOf, fromRow, rowMetaSql, rowParams, snapshotSql, updateParams, type Table } from './sql.js'
 
 /** Options for {@link sqliteCollections}. */
 export interface SqliteCollectionsOptions {
@@ -38,7 +38,7 @@ function reconcile(db: Database.Database, n: string, t: Table): void {
  * transaction spans all tables, so a cross-collection batch stays atomic. Snapshots compile the query
  * IR against real columns — an exactly-compilable query runs entirely in SQL (WHERE + ORDER BY +
  * LIMIT/OFFSET); anything else narrows the scan and re-applies the evaluator in JS (authoritative). `count`
- * runs `COUNT(*)` when the filter compiles exactly.
+ * runs `COUNT(*)` and `countBy` a `GROUP BY` when the filter compiles exactly.
  * `clustering: 'relay'` — core relays batches across nodes and re-ingests them through `apply`.
  */
 export function sqliteCollections(opts: SqliteCollectionsOptions): RelayCollectionStore {
@@ -133,6 +133,13 @@ export function sqliteCollections(opts: SqliteCollectionsOptions): RelayCollecti
       if (!t) return 0
       const q = countSql(t, filter)
       return q ? (db.prepare(q.sql).get(...q.params) as { n: number }).n : snapshot(n, { filter }).length
+    },
+    countBy(n, field, filter) {
+      const t = table(n)
+      if (!t) return []
+      const q = countBySql(t, field, filter)
+      if (!q) return countValues(snapshot(n, { filter }), field)
+      return (db.prepare(q.sql).all(...q.params) as Record<string, unknown>[]).map(q.decode)
     },
     read(n, id) {
       const t = table(n)

@@ -7,6 +7,16 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Bug Fixes
 
+- **collections-sqlite:** A new nullable JSON field backfills old rows with null ([9210f96])
+
+### Documentation
+
+- **changelog:** Regenerate the root aggregate ([ddf9c5a])
+
+## 2026-10-23
+
+### Bug Fixes
+
 - **control-center:** A live collection view with offset keeps its page ([783efca])
 
 ### Documentation

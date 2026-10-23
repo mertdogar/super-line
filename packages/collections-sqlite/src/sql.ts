@@ -415,7 +415,9 @@ export function driftOf(t: Table, stored: string): { refuse: string } | { alter:
   for (const col of t.plan.columns) {
     if (old.cols.has(col.name)) continue
     if (!col.optional && !col.nullable) return { refuse: `added required field '${col.name}' (existing rows can't be backfilled)` }
-    alter.push(`ALTER TABLE "${t.name}" ADD COLUMN "${col.name}" ${sqlType(col.kind)}`)
+    // A JSON column's SQL NULL means absent, which a nullable-only field refuses: old rows get JSON null
+    const backfill = col.kind === 'json' && !col.optional ? ` DEFAULT 'null'` : ''
+    alter.push(`ALTER TABLE "${t.name}" ADD COLUMN "${col.name}" ${sqlType(col.kind)}${backfill}`)
   }
   return { alter }
 }

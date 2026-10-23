@@ -218,6 +218,27 @@ describe('sqliteCollections — schema drift (col_meta fingerprint)', () => {
     s2.close?.()
   })
 
+  it('backfills a new nullable field with null, so old rows still validate', () => {
+    const file = tmpFile()
+    const s1 = sqliteCollections({ file, collections: notes(z.object({ id: z.string() })) })
+    s1.apply([{ op: 'insert', n: 'notes', id: 'a', row: { id: 'a' } }], 'o')
+    s1.close?.()
+
+    const next = z.object({
+      id: z.string(),
+      rotation: z.enum(['left', 'right']).nullable(),
+      meta: z.object({ a: z.number() }).nullable(),
+      note: z.string().nullable(),
+    })
+    const s2 = sqliteCollections({ file, collections: notes(next) })
+    const old = s2.read('notes', 'a')
+    expect(old).toEqual({ id: 'a', rotation: null, meta: null, note: null })
+    expect(next.safeParse(old).success).toBe(true)
+    s2.apply([{ op: 'insert', n: 'notes', id: 'b', row: { id: 'b', rotation: 'left', meta: { a: 1 }, note: null } }], 'o')
+    expect(s2.read('notes', 'b')).toEqual({ id: 'b', rotation: 'left', meta: { a: 1 }, note: null })
+    s2.close?.()
+  })
+
   it('refuses to boot when a field changes type or a required field is added', () => {
     const file = tmpFile()
     const s1 = sqliteCollections({ file, collections: notes(z.object({ id: z.string(), n: z.number() })) })

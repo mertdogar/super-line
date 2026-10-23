@@ -198,9 +198,10 @@ export function createInspector(opts: InspectorOptions): InspectorClient {
       void ready.catch(() => {}) // the caller may not await it; don't trip unhandled-rejection
 
       // Recompute the ordered/limited view, then evict rows that fell outside it so `map` stays bounded by
-      // `limit` — the honest cost is that a delete inside the window can't backfill from beyond it.
+      // `limit` — the honest cost is that a delete inside the window can't backfill from beyond it. The snapshot
+      // already skipped `offset`, so skipping again would empty every later page (and evict it).
       const recompute = (): Set<string> => {
-        view = applyQuery([...map.values()], query)
+        view = applyQuery([...map.values()], { ...query, offset: undefined })
         const next = new Set(view.map((r) => String((r as Record<string, unknown>)[key])))
         if (query.limit !== undefined && map.size > query.limit) {
           for (const id of map.keys()) if (!next.has(id)) map.delete(id)

@@ -170,6 +170,19 @@ describe('inspector client', () => {
     expect(things()).toEqual([{ id: 'b', n: 20 }])
   })
 
+  it('subscribeCollection: keeps a later page — the snapshot applies offset, the view does not again', async () => {
+    const { srv, url } = await startThingsServer()
+    for (const n of [1, 2, 3, 4, 5]) await srv.collection('things').insert({ id: `t${n}`, n })
+
+    const insp = createInspector({ url, reconnect: false })
+    cleanups.push(() => insp.close())
+    await whenOpen(insp)
+
+    const sub = insp.subscribeCollection('things', { orderBy: [{ field: 'n', dir: 'asc' }], offset: 2, limit: 2 })
+    await sub.ready
+    expect(sub.rows().map((r) => (r as { id: string }).id)).toEqual(['t3', 't4'])
+  })
+
   // A change committed after the server reads the snapshot but before the client applies it arrives as an
   // event *first*. Applying the snapshot must fold that change in, not overwrite it — otherwise a job that
   // settles during page load stays stale in the table until it happens to change again.

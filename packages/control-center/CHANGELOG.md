@@ -3,6 +3,17 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [control-center-v0.14.2] — 2026-10-23
+
+### Bug Fixes
+
+- **control-center:** A live collection view with offset keeps its page ([783efca])
+- **test:** Bind test servers to 127.0.0.1, the address their clients dial ([6727757])
+
+### Testing
+
+- One polling wait with backoff, and teardown that cannot hang ([e86664a])
+
 ## [control-center-v0.14.1] — 2026-07-29
 
 ### Bug Fixes

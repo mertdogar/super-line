@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [collections-sqlite-v0.5.2] — 2026-10-23
+
+### Bug Fixes
+
+- **collections-sqlite:** A new nullable JSON field backfills old rows with null ([9210f96])
+
 ## [collections-sqlite-v0.5.1] — 2026-10-22
 
 ### Bug Fixes

@@ -3,6 +3,16 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## 2026-10-23
+
+### Bug Fixes
+
+- **control-center:** A live collection view with offset keeps its page ([783efca])
+
+### Documentation
+
+- **changelog:** Regenerate the root aggregate ([1d1ba2c])
+
 ## 2026-10-22
 
 ### Bug Fixes

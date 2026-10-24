@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [control-center-v0.14.3] — 2026-10-24
+
+### Bug Fixes
+
+- **control-center:** The built app loads from any path prefix ([8d9fd34])
+
 ## [control-center-v0.14.2] — 2026-10-23
 
 ### Bug Fixes

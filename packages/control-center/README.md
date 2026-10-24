@@ -25,7 +25,7 @@ The inspector ships as [`@super-line/plugin-inspector`](https://www.npmjs.com/pa
 npx @super-line/control-center --url ws://localhost:3000
 ```
 
-It serves the app locally and opens your browser. Switch endpoints from the connection bar, or pass `--port` to change the local port.
+It serves the app locally and opens your browser. Switch endpoints from the connection bar, or pass `--port` to change the local port. To host it yourself, serve the package's `dist/` under any path (its asset URLs are relative) and open `<path>/?url=wss://…`, keeping the trailing slash.
 
 ## What you get
 

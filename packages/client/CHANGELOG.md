@@ -3,6 +3,12 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## [client-v0.18.2] — 2026-10-24
+
+### Bug Fixes
+
+- **client:** Row-set events follow the limit window ([25ccb61])
+
 ## [client-v0.18.1] — 2026-10-22
 
 ### Bug Fixes

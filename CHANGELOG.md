@@ -7,6 +7,16 @@ run `pnpm changelog` rather than editing by hand.
 
 ### Bug Fixes
 
+- **client:** Row-set events follow the limit window ([25ccb61])
+
+### Documentation
+
+- **changelog:** Regenerate the root aggregate ([cdbd9b3])
+
+## 2026-10-24
+
+### Bug Fixes
+
 - **control-center:** The built app loads from any path prefix ([8d9fd34])
 
 ### Documentation

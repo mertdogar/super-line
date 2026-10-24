@@ -51,6 +51,8 @@ npx @super-line/control-center --url ws://localhost:3000
 
 This serves the app on a local port and opens your browser. Change the endpoint from the Settings page at any time, or pass `--port` to pick the local port.
 
+To host it yourself instead, serve the package's `dist/` as static files under any path, such as `/control-center/` (its asset URLs are relative), and open it with `?url=` naming the node: `/control-center/?url=wss://example.com/ws`. Keep the trailing slash, or the relative asset URLs resolve against the parent path.
+
 ## Locking the inspector
 
 Set a password and the Control Center must present it to connect:

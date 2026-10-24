@@ -3,6 +3,17 @@
 Generated from conventional commits by [git-cliff](https://git-cliff.org) —
 run `pnpm changelog` rather than editing by hand.
 
+## 2026-10-24
+
+### Bug Fixes
+
+- **control-center:** The built app loads from any path prefix ([8d9fd34])
+
+### Documentation
+
+- Serve the Control Center's dist/ under a path prefix ([d415ba9])
+- **changelog:** Regenerate the root aggregate ([61b5bbf])
+
 ## 2026-10-23
 
 ### Bug Fixes

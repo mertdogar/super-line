@@ -165,8 +165,9 @@ export interface RowSetEvent<Row = unknown> {
 
 /**
  * A live view of the rows matching one subscription — the raw, **non-optimistic** sync primitive beneath the
- * TanStack DB adapter. The initial snapshot arrives via `ready`; thereafter every matching change streams as a
- * {@link RowSetEvent}. Rows leaving the filter (an update that no longer matches) arrive as `delete` events.
+ * TanStack DB adapter. The initial snapshot arrives via `ready`; thereafter every change to {@link LiveRowSet.rows}
+ * streams as a {@link RowSetEvent}. Rows leaving the filter (an update that no longer matches) or pushed out of a
+ * `limit` window arrive as `delete` events; changes beyond the window emit nothing.
  * Auto-resubscribes and re-diffs on reconnect. Optimism belongs to the layer above (TanStack), not here.
  */
 export interface LiveRowSet<Row = unknown> {
@@ -1103,12 +1104,24 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
   }
 
   // ---- Collections --------------------------------------------------------
-  const recomputeView = (sub: LiveSub): void => {
-    // filter (redundant, already matched) + sort + limit; the snapshot already skipped `offset`, so skipping again empties page 2
-    sub.view = applyQuery([...sub.map.values()], { ...sub.query, offset: undefined })
-  }
-  const notifySub = (sub: LiveSub, ev: RowSetEvent): void => {
-    for (const cb of sub.listeners) cb(ev)
+  // Recompute the view and notify ITS delta, so events describe rows(): churn beyond a `limit` window stays silent
+  // and a row pushed out of the window leaves as a `delete`. Filter (redundant, already matched) + sort + limit;
+  // the snapshot already skipped `offset`, so skipping again empties page 2.
+  function updateView(sub: LiveSub): void {
+    const idOf = (row: unknown): string => (row as Record<string, unknown>)[sub.key] as string
+    const left = new Map(sub.view.map((row) => [idOf(row), row]))
+    const view = applyQuery([...sub.map.values()], { ...sub.query, offset: undefined })
+    const events: RowSetEvent[] = []
+    for (const row of view) {
+      const id = idOf(row)
+      if (!left.has(id)) events.push({ type: 'insert', id, row })
+      else if (left.get(id) !== row) events.push({ type: 'update', id, row })
+      left.delete(id)
+    }
+    for (const id of left.keys()) events.push({ type: 'delete', id })
+    if (events.length === 0) return // the view didn't change: keep rows() reference-stable
+    sub.view = view
+    for (const ev of events) for (const cb of sub.listeners) cb(ev)
   }
 
   // Seed from a snapshot: first snapshot populates + resolves ready; a reconnect re-snapshot diffs against the
@@ -1126,27 +1139,18 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
       // against snapshot rows, deletes remove rows the stale snapshot still carried
       const raced = sub.pending
       sub.pending = []
-      const racedIds = new Set<string>()
-      for (const f of raced) {
-        racedIds.add(f.id)
-        applyCollectionChange(sub, f) // notifies per change
-      }
-      recomputeView(sub)
-      // Notify the seed itself: a listener attached BEFORE the snapshot (useSyncExternalStore, any
-      // reactive wrapper) must learn the rows exist — silence here left UIs frozen at [] until some
-      // unrelated live change happened to arrive. Fired BEFORE `ready` resolves, so consumers that
-      // seed from rows() at ready-time (the TanStack adapter) still see exactly-once delivery.
-      for (const [id, row] of sub.map) if (!racedIds.has(id)) notifySub(sub, { type: 'insert', id, row })
+      for (const f of raced) applyCollectionChange(sub, f)
+      // Notify the seed itself (the view is still empty, so this inserts every row): a listener attached BEFORE
+      // the snapshot (useSyncExternalStore, any reactive wrapper) must learn the rows exist — silence here left UIs
+      // frozen at [] until some unrelated live change happened to arrive. Fired BEFORE `ready` resolves, so
+      // consumers that seed from rows() at ready-time (the TanStack adapter) still see exactly-once delivery.
+      updateView(sub)
       sub.ready.resolve()
       return
     }
-    const events: RowSetEvent[] = []
-    for (const id of sub.map.keys()) if (!next.has(id)) events.push({ type: 'delete', id })
     // ponytail: reconnect emits `update` for still-present rows without an equality check; add one if it causes re-render churn.
-    for (const [id, row] of next) events.push({ type: sub.map.has(id) ? 'update' : 'insert', id, row })
     sub.map = next
-    recomputeView(sub)
-    for (const ev of events) notifySub(sub, ev)
+    updateView(sub)
   }
 
   // Apply one `cchg`, re-filtering against THIS subscription: a row matching the filter is upserted; one that no
@@ -1158,8 +1162,7 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     }
     if (frame.k === 'delete' || frame.d === undefined) {
       if (sub.map.delete(id)) {
-        recomputeView(sub)
-        notifySub(sub, { type: 'delete', id })
+        updateView(sub)
         routed('delete')
       } else routed('skip')
       return
@@ -1168,13 +1171,11 @@ export function createSuperLineClient<C extends Contract, R extends RoleOf<C>>(
     if (matchesFilter(sub.query.filter, row)) {
       const was = sub.map.has(id)
       sub.map.set(id, row)
-      recomputeView(sub)
-      notifySub(sub, { type: was ? 'update' : 'insert', id, row })
+      updateView(sub)
       routed(was ? 'update' : 'insert')
     } else if (sub.map.delete(id)) {
       // still exists — it just no longer matches THIS subscription's query
-      recomputeView(sub)
-      notifySub(sub, { type: 'delete', id })
+      updateView(sub)
       routed('left-filter')
     } else routed('skip')
   }

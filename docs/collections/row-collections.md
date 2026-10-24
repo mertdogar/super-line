@@ -125,7 +125,7 @@ messages.subscribe({
 
 `has(field, value)` matches a row whose array field holds an element strictly equal to `value` (`has('labels', 'vip')`); it never matches a field that isn't an array. Strings compare by Unicode code point, which is the order of SQL's binary collation, and `like`'s `%` spans newlines, as in SQL.
 
-The server **pushes down** what it can and re-checks the exact predicate; the client re-filters too, so an over-approximate result is always safe. `orderBy`/`limit` shape the **initial snapshot**; the live phase then streams every matching change and the consumer owns its window. The full operator set is in the [query IR reference](/reference/) and the same helpers power [TanStack DB queries](/collections/tanstack-db).
+The server **pushes down** what it can and re-checks the exact predicate; the client re-filters too, so an over-approximate result is always safe. `orderBy`/`limit` shape the **initial snapshot**. In the live phase the server streams every matching change, and the client keeps the window: `rows()` and its change events stay inside it, and a row pushed out of the window arrives as a `delete`. A delete inside the window backfills only from rows the client has already received, so the window can shrink until you resubscribe. The full operator set is in the [query IR reference](/reference/) and the same helpers power [TanStack DB queries](/collections/tanstack-db).
 
 ### Page a list and show its total
 

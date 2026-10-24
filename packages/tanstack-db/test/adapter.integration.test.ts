@@ -103,4 +103,24 @@ describe('@super-line/tanstack-db adapter', () => {
     expect(await srv.collection('messages').read('m9')).toMatchObject({ text: 'optimistic' }) // durable on the server
     await waitFor(() => messages.get('m9') !== undefined) // and confirmed back through sync
   })
+
+  it('keeps a limited collection to its window as newer rows arrive', async () => {
+    const { srv, client } = await harness()
+    const msg = (n: number) => ({ id: `m${n}`, channelId: 'general', authorId: 'u1', text: `t${n}`, createdAt: n })
+    for (const n of [1, 2, 3]) await srv.collection('messages').insert(msg(n))
+
+    const latest = createCollection(
+      superLineCollectionOptions(client, contract, 'messages', {
+        query: { orderBy: [{ field: 'createdAt', dir: 'desc' }], limit: 2 },
+      }),
+    )
+    await latest.preload()
+    const ids = () => latest.toArray.map((m) => m.id).sort()
+    expect(ids()).toEqual(['m2', 'm3'])
+
+    await srv.collection('messages').insert(msg(0)) // older than the window: never synced
+    await srv.collection('messages').insert(msg(4)) // newest: pushes m2 out
+    await waitFor(() => latest.has('m4'))
+    expect(ids()).toEqual(['m3', 'm4'])
+  })
 })

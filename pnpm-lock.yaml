@@ -2150,6 +2150,25 @@ importers:
         specifier: workspace:^
         version: link:../server
 
+  packages/plugin-peer:
+    dependencies:
+      zod:
+        specifier: ^4.2.0
+        version: 4.6.5
+    devDependencies:
+      '@super-line/client':
+        specifier: workspace:^
+        version: link:../client
+      '@super-line/core':
+        specifier: workspace:^
+        version: link:../core
+      '@super-line/server':
+        specifier: workspace:^
+        version: link:../server
+      '@super-line/transport-loopback':
+        specifier: workspace:*
+        version: link:../transport-loopback
+
   packages/plugin-queue:
     dependencies:
       cron-parser:

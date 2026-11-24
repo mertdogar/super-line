@@ -136,6 +136,11 @@ const toBase64url = (bytes: Uint8Array): string => {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
+/** A fresh 128-bit base64url secret: an `ownerSecret` or a join `ticket`. */
+export function peerSecret(): string {
+  return toBase64url(globalThis.crypto.getRandomValues(new Uint8Array(16)))
+}
+
 /** base64url(SHA-256(value)): `roomKey` from `ownerSecret`, `keyHash` from `roomKey`. */
 export async function peerHash(value: string): Promise<string> {
   const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))

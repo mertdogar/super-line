@@ -30,6 +30,7 @@ disagree, **the code is right**. For what the system does today, read the
 | [`PLAN-chat-resources.md`](PLAN-chat-resources.md) | Channel-linked CRDT documents — the link registry, membership-gated access | Shipped |
 | [`PLAN-chat-mastra.md`](PLAN-chat-mastra.md) | The Mastra bridge, per-channel turn serialization, bot provisioning | Shipped |
 | [`PLAN-cloudflare.md`](PLAN-cloudflare.md) | One Durable Object is one node: hibernation-aware transport, connection snapshot seam, DO SQLite backends | Locked 2026-10-14 ([ADR-0027](../adr/0027-a-connection-is-reconstructible-from-its-snapshot.md), [ADR-0028](../adr/0028-liveness-belongs-to-the-transport.md)); building |
+| [`PLAN-plugin-peer.md`](PLAN-plugin-peer.md) | Direct client-to-client rooms over WebRTC data channels; a stateless server that brokers admission and signaling | Built 2026-11-25, unreleased ([ADR-0030](../adr/0030-clients-exchange-data-directly-and-the-server-only-brokers.md)) |
 | [`PLAN-logtape.md`](PLAN-logtape.md) | Internal diagnostics through LogTape, configured by the app | Shipped ([ADR-0018](../adr/0018-logging-is-app-configured-not-per-instance.md)) |
 | [`PLAN-live-feed.md`](PLAN-live-feed.md) | The Control Center live feed — filters, magnitude bars, export | Shipped |
 | [`PLAN-traffic-lab.md`](PLAN-traffic-lab.md) | A multi-container traffic lab measuring cluster and client fan-out; the two fixes it proves | Shipped |

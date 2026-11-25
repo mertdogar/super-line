@@ -1,8 +1,10 @@
 # ADR snapshot — the consolidated position
 
-Where the 23 ADRs *net out* as of **2026-07-28**. The individual files are the reasoning
-and the rejected alternatives; this is the standing answer plus the supersession graph, so
-nobody re-derives a path that was already walked and closed.
+Where the ADRs *net out*. The ledger lists all 30 as of **2026-11-25**; the standing
+position in §2–§4 was compiled on **2026-07-28** and has since gained only the ADR-0030
+paragraph. The individual files are the reasoning and the rejected alternatives; this is the
+standing answer plus the supersession graph, so nobody re-derives a path that was already
+walked and closed.
 
 Repo-internal: `docs/.vitepress/config.ts` excludes `adr/**` from the docs site, and
 `skills/super-line/` must never cite an ADR — state the behavior there instead.
@@ -40,6 +42,7 @@ Repo-internal: `docs/.vitepress/config.ts` excludes `adr/**` from the docs site,
 | 0027 | A connection is reconstructible from its snapshot | Accepted 2026-10-14 (cloudflare-workers effort); the connection snapshot seam + the `end` frame |
 | 0028 | Liveness belongs to the transport, not a server timer | Accepted 2026-10-14 (cloudflare-workers effort); `liveness: 'socket'` + client `keepalive` |
 | 0029 | A foreign Durable Object's SQLite is a read-only live collection | Accepted 2026-10-21 (remote-rows effort); `syncedSql` trigger capture + `remoteRows` `self` backend + `composeCollections` (a mixed composite is `relay`, its `self` collections read-only) |
+| 0030 | Clients may exchange data directly; the server brokers admission and signaling and stays out of the data path | Accepted 2026-11-25 (plugin-peer effort); authority from the room secret, receiver-side validation, full mesh, no relay. **Qualifies** the server-authoritative tenets for peer-channel payloads only |
 
 ## 2. The standing position, by subsystem
 
@@ -149,6 +152,14 @@ and super-line builds many instances per process, so a per-instance `logLevel` i
 configured. Orthogonal to the inspector: LogTape sees internal diagnostics, taps see wire
 traffic, no bridge. `0018`
 
+**Peer channels are the one payload path the server does not carry.** `@super-line/plugin-peer`
+lets clients exchange data over WebRTC data channels; the server authorizes creation and join
+requests (deny-by-default), stamps identity on everything it relays, and holds no state —
+owner authority is a client-held secret, not server-room membership, because hosts let
+clients join rooms by name. The receiving client validates every peer message against the
+channel schema; the server never sees, validates or revokes them, kick is enforced by honest
+clients, and the inspector and DevTools see only signaling. `0030`
+
 ## 3. Reversals — closed paths, do not re-walk
 
 | Was decided | Now | Why it flipped |
@@ -187,6 +198,9 @@ auto-seeding `env` from claims (0015) · a reverse plugin index in core (0016) �
   disposable-email check on the client signup path currently has no home; the workaround is the
   hooked `authKit.credentials.create`. Single additive hook if it's ever wanted. `0017`
 - **Intersecting token roles with row roles** — the safe form of scoped tokens, additive. `0015`
+- **plugin-peer: a relay fallback, a star topology, a React half, and a `peer` client-tap kind** —
+  each additive; revive the relay only if smart-TV runtimes come into scope, the star when a
+  room outgrows the full mesh, the tap kind with a core change to the client tap. `0030`
 - **A server-triggered resubscribe hook** for the RLS staleness caveat (principal-side state
   captured at subscribe time goes stale; row-side predicates re-evaluate naturally). `0006`
 

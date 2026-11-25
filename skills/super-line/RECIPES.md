@@ -296,6 +296,8 @@ srv.implement({
 })
 ```
 
+Latency-critical data between clients that the server shouldn't carry at all (controller input, cursor streams between devices) is a different tool: direct WebRTC links with `@super-line/plugin-peer` — see **Phone as a game controller** below. The server then authorizes who may link but never sees or validates the messages.
+
 ## Cluster event bus (cluster coordination)
 
 A bus channel is just a **shared topic**. One `server.publish` fans out to three kinds of subscriber at once: same-node `server.subscribe` listeners (local echo, in-process, no Redis/WS hop), other nodes' `server.subscribe` listeners (over the adapter, inbound-validated), and subscribed clients. `server.subscribe` fires for a publish from **any** node including this one — self-exclude with `if (from === srv.nodeId) return`.
@@ -781,6 +783,101 @@ const { snapshot } = await bot.writeResource(channelId, 'canvas', canvas.docId, 
 - For the LLM, `chatAgentTools(botRawClient, { resourceShapes: { canvas: '{ … }' } })` adds `list/read/create/detach/write_resource`; pass shapes so it writes without reading first.
 - Presence: `useResourcePresence(row)` (React) announces open/heartbeat/close; reap with `chatKit.resources.sweepPresence({ olderThanMs })`.
 - Runnable: `examples/chat-supervisor` (human + agent co-edit a canvas, full UI) · `examples/chat-resources` (headless mechanics). Guide: `/how-to/chat-resources`; Tutorial 6.
+
+## Phone as a game controller (`@super-line/plugin-peer`)
+
+The screen (a desktop browser on the TV) creates a room and shows its key as a QR code; each phone joins with the key. After admission, input travels phone → screen over a WebRTC data channel — the server only authorized the room and relayed the handshake.
+
+```ts
+// contract.ts — channels are symmetric: both ends send and receive the same schema
+import * as z from 'zod'
+import { defineContract } from '@super-line/core'
+import { peerContract } from '@super-line/plugin-peer'
+
+const axis = z.number().min(-1).max(1)
+export const controls = peerContract({
+  channels: {
+    stick: { schema: z.object({ x: axis, y: axis }), reliable: false, maxBytes: 256 }, // lossy: resend every frame
+    events: { schema: z.object({ type: z.literal('press'), button: z.enum(['a', 'b']) }), maxBytes: 1024 },
+  },
+})
+export const contract = defineContract({ roles: { screen: {}, controller: {} }, plugins: [controls] })
+```
+
+```ts
+// server.ts — both hooks REQUIRED (deny-by-default). authorize's `info` is what the screen sees per member.
+import { createSuperLineServer } from '@super-line/server'
+import { peer } from '@super-line/plugin-peer/server'
+import { inspector } from '@super-line/plugin-inspector'
+import { webSocketServerTransport } from '@super-line/transport-websocket'
+
+createSuperLineServer(contract, {
+  transports: [webSocketServerTransport({ server, path: '/ws' })],
+  authenticate: (h) => ({
+    role: h.query.role === 'screen' ? 'screen' : 'controller',
+    ctx: { name: (h.query.name ?? '').slice(0, 24) || 'Player' },
+  }),
+  plugins: [
+    inspector({ redact: ['ownerSecret', 'roomKey', 'ticket', 'sdp', 'candidate'] }), // only if you run the Control Center
+    peer<{ name: string }>({
+      authorizeCreate: ({ creator }) => creator.role === 'screen',
+      authorize: ({ ctx }) => ({ info: { name: ctx.name } }),
+    }).plugin,
+  ],
+})
+```
+
+```ts
+// screen.ts — open it at https:// or http://localhost (createRoom needs crypto.subtle)
+const peers = peerClient(screenClient, controls, { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
+const room = await peers.createRoom({ accept: (j) => j.role === 'controller', maxMembers: 9 }) // 8 phones + screen
+showQrCode(`${location.origin}/c#${room.key}`)
+
+const sticks = new Map<string, { x: number; y: number; at: number }>()
+room.onMember(({ type, member }) => { if (type === 'left') sticks.delete(member.id) })
+room.channel('stick').on((s, from) => sticks.set(from.id, { ...s, at: performance.now() }))
+room.channel('events').on((e, from) => fire(from.id, e.button))
+// in the game loop: treat lossy input older than ~200 ms as neutral, or a vanished phone keeps steering
+const stickOf = (id: string) => {
+  const s = sticks.get(id)
+  return s && performance.now() - s.at < 200 ? s : { x: 0, y: 0 }
+}
+```
+
+```ts
+// controller.ts (phone) — join works on plain-HTTP LAN pages too
+const client = createSuperLineClient(contract, {
+  transport: webSocketClientTransport({ url: wsUrl }),
+  role: 'controller',
+  params: { role: 'controller', name },
+  reconnectMaxMs: 3000, // come back fast after a Wi-Fi blip
+  keepalive: 5000,
+})
+const peers = peerClient(client, controls, { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
+const room = await peers.join(location.hash.slice(1)) // FORBIDDEN | TIMEOUT | VALIDATION on failure
+
+const screen = () => room.members.find((m) => m.role === 'screen')
+const toScreen = (send: (id: string) => void) => {
+  const s = screen()
+  if (s?.link === 'open') send(s.id) // to(id).send throws DISCONNECTED when the link isn't open
+}
+const frame = () => {
+  if (room.state === 'closed') return
+  toScreen((id) => room.channel('stick').to(id).send(currentStick()))
+  requestAnimationFrame(frame)
+}
+requestAnimationFrame(frame)
+buttonA.onpointerdown = () => toScreen((id) => room.channel('events').to(id).send({ type: 'press', button: 'a' }))
+
+// lifecycle: hold a wake lock while linked (secure context only); show "Join again" when it can't recover
+room.onMember(() => { if (screen()?.link === 'open') void navigator.wakeLock?.request('screen').catch(() => {}) })
+room.onClose((reason) => showJoinAgain(reason)) // 'ended' | 'kicked' | 'refused' | 'lost' | …
+```
+
+- **The data never reaches the server.** The screen's `on` handlers get messages the PHONE's client sent, validated by the SCREEN against the channel schema — not by the server. Keep scores, purchases and anything authoritative on requests.
+- **Re-join is automatic** after a reconnect or when the phone's page becomes visible again (`room.state === 'rejoining'`, then `'active'`); a link that failed before it ever opened needs the "Join again" button (`room.leave()` then `peers.join(key)`, or reload).
+- **Same Wi-Fi usually just works with STUN.** Guest/venue Wi-Fi with client isolation, or a phone on cellular, needs TURN in `iceServers`. There is no fallback through the server: such a pair shows `link: 'failed'`.
+- Runnable: `examples/peer-controller`.
 
 ## Author a plugin · compose a library
 

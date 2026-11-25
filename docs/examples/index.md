@@ -12,6 +12,19 @@ cd examples/queue-cluster && docker compose up --build
 
 Open the dashboard at `http://localhost:8080` and Control Center at `http://localhost:8081`. See the [queue-cluster README](https://github.com/mertdogar/super-line/tree/main/examples/queue-cluster) and [run queues across a cluster](/how-to/queue-clusters).
 
+## peer-controller — phones as game controllers over direct links
+
+Phones drive coloured dots on a desktop "TV" page through [`@super-line/plugin-peer`](/how-to/plugin-peer). The server admits each phone and relays the WebRTC handshake; after that, stick input (a lossy channel, every animation frame) and button presses (a reliable channel) travel directly from phone to screen. Scan the QR code on the screen with a phone on the same Wi-Fi, or open the join link in a second window. Stop the server while a controller is linked and the dot keeps moving; when the server returns, the screen re-claims its room and the controller re-joins on its own.
+
+```bash
+pnpm --filter @super-line/example-peer-controller build
+pnpm --filter @super-line/example-peer-controller start   # http://localhost:3000
+```
+
+Open the screen at `localhost`: creating a room needs a secure context. The [peer-controller README](https://github.com/mertdogar/super-line/tree/main/examples/peer-controller) covers phones, HTTPS, and TURN.
+
+Demonstrates: [direct client-to-client rooms](/how-to/plugin-peer).
+
 ## chat — roles in one room
 
 A human (`user`) and an AI participant (`agent`) join the **same room** with different surfaces. Shows a `shared` `join` + `message` event, role-specific verbs (`say` vs `announce`), and `conn.role`.

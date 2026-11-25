@@ -18,6 +18,7 @@ This is the reassurance line, **not** the headline. It tells an engineer the exa
   1. One contract object both sides import — types can't drift or get misordered.
   2. Every inbound message is validated at runtime, always.
   3. The server owns rooms and authorizes topics; clients can't self-join anything.
+  - **The one scoped exception (added 2026-11-25):** `@super-line/plugin-peer` peer channels. The server still authorizes and brokers who may link (deny-by-default, identity stamped on every relayed signal), but payloads travel client to client and are validated by the *receiving client* against the contract schema; the server never sees them. Never claim opinion 2 or 3 covers peer-channel payloads; frame plugin-peer as "the server decides who may talk, then gets out of the way."
 - **Not doctrine:** "every client→server is req/res" is a **roadmap gap** (Status → "not yet"), never marketed as a principle.
 
 ## Hero (final copy — shipped)
@@ -37,7 +38,7 @@ Hero code sample = **assembly-collapse**: one small contract that declares a **r
 
 1. **Hero** — C2 headline + assembly-collapse snippet.
 2. **The assembly tax, shown** — the stack you hand-glue today vs. one contract.
-3. **Proof — the contract is the law** *(opinions 1+2)*: rename a payload → an untyped client ships it and crashes at runtime; with super-line the client won't compile, and the server validates every inbound message so even an untyped peer can't sneak past.
+3. **Proof — the contract is the law** *(opinions 1+2)*: rename a payload → an untyped client ships it and crashes at runtime; with super-line the client won't compile, and the server validates every inbound message so even an untyped peer can't sneak past. (Peer-channel payloads from `plugin-peer` are the explicit exception: the receiving client validates them, not the server. Don't use this proof for them.)
 4. **Proof — it works on one node, then you add a second** *(the bus)*: node-A/node-B miss → pass an adapter, the *same* `publish` now hits in-process subscribers (local echo, no network hop) **and** every other node across the backbone; `meta.from` tells you the origin. Real: `examples/bus-cluster`.
 5. **Control Center** *(observability)*: the `inspector()` plugin + `npx @super-line/control-center` — live topology, connections + `ctx`, the running contract, a live event feed, cluster-wide. On the home it's a stylized topology mock (cyan dashed bus spine + node cards + `Adapter · bus` pill); swap for a clean screenshot later.
 6. **Character — server-authoritative** *(opinion 3 + roles)*: server owns rooms, authorizes topics, roles fixed at the upgrade (cross-role → `NOT_FOUND`).
@@ -67,6 +68,8 @@ Two subsystems landed after this brief and now share the spotlight. Fold each in
 
 - **Pluggable client↔server transports.** WebSocket is the *default*, never the identity — do not write "WebSocket library." The server takes `transports: [...]`, the client a `transport:`; `authenticate` receives a normalized `Handshake`. WS ships as `@super-line/transport-websocket`; HTTP-SSE/long-poll, libp2p (bring-your-own node), and an in-memory loopback (for tests) ship alongside. Same contract, swap the wire. Real: `examples/transports`, `examples/react-chat-transports`.
 - **Stores — persisted + synced state (the fourth pattern).** Beyond requests · events · subscriptions, super-line now persists server-authoritative state addressed by `name.id`: opened as a reactive `ResourceHandle` client-side (`set`/`update`/`delete` + a `deleted` signal) and a `ServerReplica` server-side (`srv.store(ns).open(id)`). Two consistency models (LWW · CRDT) × two clustering modes — **`relay`** (node-local replicas; changes fan out over the Adapter) vs **`self`** (a central backend + per-node replica; no Adapter). Five backends ship: in-memory (`store-memory` / `store-sync`), durable (`store-sqlite`), and self-clustering (`store-pglite`, `store-sync-pglite` over Postgres + Electric). Deletes fan out cluster-wide (`srv.store(ns).delete(id)` → the `deleted` signal). The durable-`relay` CRDT store (`store-sync-libsql`) has folded into a CRDT document collection (ADR-0007). Real: `examples/store`, `examples/advanced-chat-app`, `examples/ai-canvas-pglite`.
+
+- **Direct client-to-client rooms (added 2026-11-25).** `@super-line/plugin-peer`: the server admits and relays WebRTC signaling, then typed messages travel between clients over data channels. Lead with the pain (a phone-as-controller round trip through the server), keep the trust model in the same breath (server-brokered, receiver-validated, server never sees payloads), and never call it a transport — it rides on whichever transport the clients already use. Real: `examples/peer-controller`.
 
 This makes the on-the-wire pattern list **four** — requests · events · subscriptions · **synced state** — but the spotlight stays on the assembly-tax spine and the cluster bus; stores and transports are proof sections, not the headline.
 

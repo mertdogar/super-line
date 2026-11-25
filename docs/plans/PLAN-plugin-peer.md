@@ -1,6 +1,6 @@
 # PLAN: `@super-line/plugin-peer` — direct client-to-client rooms
 
-Status: in progress. Decision record: ADR-0030 (written with the docs ticket).
+Status: built 2026-11-25 (tickets 1–6), unreleased. Decision record: ADR-0030. Guide: `docs/how-to/plugin-peer.md`.
 
 ## Goal
 
@@ -35,8 +35,9 @@ connect directly reports link state `failed`, and the host supplies STUN/TURN th
 | `/client` | `peerClient(client, contract, opts)` |
 
 No React half in v1. `zod ^4.2.0` is a regular dependency for the plugin's own wire surface. User
-channel schemas are **Standard Schema** (reuse core's types and its synchronous validation helper; async
-validators are rejected, as in plugin-chat's `hostSchema`).
+channel schemas are **Standard Schema** (reuse core's types and its synchronous validation helper,
+`validateSync`). An async validator is not refused up front: `validateSync` throws `INTERNAL` for every
+inbound message on that channel, which goes to `onError`.
 
 ## Public surface
 
@@ -74,7 +75,7 @@ room.channel('input').to(memberId).send(msg)
 room.channel('input').on((msg, from) => ...)   // returns an unsubscribe
 room.kick(memberId)                       // creator only
 room.leave()
-room.onClose((reason) => ...)             // 'left' | 'kicked' | 'closed' | 'refused' | 'lost'
+room.onClose((reason) => ...)             // 'left' | 'kicked' | 'closed' | 'refused' | 'lost' | 'ended'
 p.close()
 ```
 
@@ -204,7 +205,8 @@ inbound validation is off by default).
 
 - Encode with the `serializer` option (default core's `jsonSerializer`).
 - `send()` broadcasts only to links whose channel is `open`; it never throws because one link is not
-  ready. On a `reliable: false` channel, skip a link whose `bufferedAmount` is above a small threshold.
+  ready. On a `reliable: false` channel, skip a link whose `bufferedAmount` is above `lossyBufferedAmount`
+  (default 16384); `to(id).send()` skips it the same way rather than throwing.
   `to(id).send()` throws when that link is not open. An encoded message larger than the link's
   `sctp.maxMessageSize` (fallback 65536) throws a typed `SuperLineError`.
 - Receive: check the raw size against a per-channel `maxBytes` (default 65536) → decode → validate

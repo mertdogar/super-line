@@ -177,6 +177,7 @@ export default defineConfig({
             { text: 'Use the React hooks', link: '/how-to/react' },
             { text: 'Migrate to the one React binding', link: '/how-to/react-one-binding-migration' },
             { text: 'Configure serialization', link: '/how-to/serialization' },
+            { text: 'Link clients directly (plugin)', link: '/how-to/plugin-peer' },
           ],
         },
         {
@@ -257,6 +258,7 @@ export default defineConfig({
             { text: 'Chat · run an AI bot', link: '/how-to/chat-bots' },
             { text: 'Chat · channel resources', link: '/how-to/chat-resources' },
             { text: 'Chat · drive from scripts', link: '/how-to/chat-headless' },
+            { text: 'Peer rooms (WebRTC)', link: '/how-to/plugin-peer' },
             { text: 'Control Center inspector', link: '/how-to/control-center' },
             { text: 'Client DevTools panel', link: '/how-to/devtools-panel' },
             { text: 'Super Harness', link: '/plugins/super-harness' },

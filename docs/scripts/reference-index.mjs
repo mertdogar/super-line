@@ -64,6 +64,7 @@ ${api('adapter-rabbitmq', 'RabbitMQ backbone')}
 ${api('plugin-queue', '`queue()` — durable jobs, retries, leases, cluster-wide cron')}
 ${guide('plugin-auth', '/how-to/plugin-auth', 'first-party authentication — sessions, roles, API keys, JWT')}
 ${guide('plugin-chat', '/how-to/plugin-chat', 'chat/messaging — channels, streaming messages, resources')}
+${guide('plugin-peer', '/how-to/plugin-peer', 'direct client↔client rooms over WebRTC data channels, brokered by the server')}
 ${guide('plugin-inspector', '/how-to/control-center', 'inspector channel behind the Control Center')}
 
 ## Tooling

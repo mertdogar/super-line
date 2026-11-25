@@ -10,9 +10,9 @@ guide. To propose a listing, open a pull request against the
 
 ## Available plugins
 
-Choose a plugin by the capability you need. The first two entries are
-first-party packages published from the super-line monorepo; Super Harness is
-an ecosystem plugin maintained in its own repository.
+Choose a plugin by the capability you need. Entries marked first-party are
+published from the super-line monorepo; Super Harness is an ecosystem plugin
+maintained in its own repository.
 
 ### Authentication
 
@@ -65,6 +65,22 @@ Guides: [wire it in](/how-to/plugin-chat) ·
 [tutorial: co-edit a canvas](/tutorials/collaborative-canvas-with-agent).
 
 Flagship examples: [`chat-supervisor`](https://github.com/mertdogar/super-line/tree/main/examples/chat-supervisor) (a human + agent co-editing a canvas) · [`chat-resources`](https://github.com/mertdogar/super-line/tree/main/examples/chat-resources) (the resource mechanics headless) · [`collections-chat`](https://github.com/mertdogar/super-line/tree/main/examples/collections-chat) (a Slack-like app).
+
+### Peer rooms
+
+**First-party · Client-to-client data channels**
+
+[`@super-line/plugin-peer`](/how-to/plugin-peer) lets clients exchange data
+directly over WebRTC data channels. The server authorizes who may create a room
+and who may ask to join, and relays the WebRTC handshake; after that, messages
+travel from client to client, and each receiving client validates them against
+the channel's schema. Use it when the server hop costs too much, such as phones
+acting as game controllers for a desktop screen. The server never sees peer
+messages, so read its trust model before you rely on it.
+
+Guide: [wire it in](/how-to/plugin-peer).
+
+Flagship example: [`peer-controller`](https://github.com/mertdogar/super-line/tree/main/examples/peer-controller), phones driving dots on a desktop screen over direct links.
 
 ### Control Center inspector
 

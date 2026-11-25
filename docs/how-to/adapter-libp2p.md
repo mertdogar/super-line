@@ -7,7 +7,7 @@ pnpm add @super-line/core @super-line/adapter-libp2p
 ```
 
 ::: tip Adapter, not transport
-This is the *server↔server* fan-out adapter. For *client↔server* libp2p/WebRTC connections, see the [libp2p transport](/how-to/transport-libp2p) — they're independent, and you can use either, both, or neither.
+This is the *server↔server* fan-out adapter. For *client↔server* libp2p/WebRTC connections, see the [libp2p transport](/how-to/transport-libp2p) — they're independent, and you can use either, both, or neither. For data sent directly between clients, see [Link clients directly](/how-to/plugin-peer).
 :::
 
 ## Setup

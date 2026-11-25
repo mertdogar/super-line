@@ -54,7 +54,7 @@ Subscribing to a topic that isn't on the connection's role surface is rejected w
 
 ## Let a client fan something out
 
-Clients can't publish — that's by design. To let a client fan something out, send a **request**; the handler validates/authorizes, then publishes:
+Clients can't publish — that's by design. To let a client fan something out, send a **request**; the handler validates/authorizes, then publishes (for latency-critical data between clients that the server shouldn't carry, see [Link clients directly](/how-to/plugin-peer)):
 
 ```ts
 srv.implement({

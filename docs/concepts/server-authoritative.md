@@ -50,6 +50,14 @@ authenticate: (h) => {
 
 The full recipe — writing `authenticate`, verifying the claim, per-role `ctx` — is in [Roles & auth](/how-to/roles-auth). First-party email/password/session auth built on this boundary is [plugin-auth](/how-to/plugin-auth).
 
+## The one exception: peer channels
+
+[`@super-line/plugin-peer`](/how-to/plugin-peer) is an explicit, opt-in exception for payloads. It lets clients exchange messages directly over WebRTC data channels, so latency-critical input, such as a phone acting as a game controller, doesn't make a round trip through the server.
+
+The server stays in charge of who may talk: it authorizes who may create a room and who may ask to join one (deny-by-default), and it stamps each member's verified identity on everything it relays. It is out of the data path, though. It never sees, validates, or revokes the messages members send each other. The receiving client validates each message against the channel's contract schema, so Tenet 2 holds at the receiver rather than at the server. Room membership lives in the clients, and the creator and the other members, not the server, enforce a kick.
+
+Everything else on this page is unchanged. Use peer channels only for data whose sender you're willing to trust as much as the receiver's schema allows, and read the plugin's [trust model](/how-to/plugin-peer#trust-model) before you do.
+
 ## Authorize at the server, always
 
 Put the three tenets together and one rule falls out: **every authorization decision lives on the server.** The contract fixes the vocabulary, validation guards the values, and role-scoped dispatch guards the verbs. A client's types are a developer-experience mirror of that authority — never a substitute for it.

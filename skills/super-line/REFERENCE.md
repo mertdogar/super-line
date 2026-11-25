@@ -945,6 +945,99 @@ useResourcePresence(row: { kind, collection, docId }): ResourcePresence[]       
 
 Rules: **public** channels are self-service join/leave; **private** are add-by-owner and answer `NOT_FOUND` to a non-member's `joinChannel` (anti-probing). Creator is the first `owner`; owners manage membership + rename/delete. **Last-owner protection**: leave/remove/demote throws `CONFLICT` if it would leave members with zero owners. Messages **hard-delete**; edit stamps `editedAt`. **A streamed message always settles before it vanishes** — deleting one that is still `streaming` settles it first, so a viewer never sees a turn blink out mid-flight and a producer writing behind the settle gets `CONFLICT` instead of resurrecting the row. Membership is required for EVERY send (server included) — add an agent to a channel before it posts. **AI agents = regular users**: provision via `authKit.users.create` (no password) + `authKit.apiKeys.create`, add to a channel, connect with `params: { apiKey }` and the same `chatClient`. Known v1 caveat: per-channel serialization is in-process, so under relay clustering requests on other nodes can still interleave (no cross-node CAS).
 
+## @super-line/plugin-peer
+
+**Direct client-to-client rooms.** Members exchange typed messages over WebRTC data channels; the server authorizes who may create and who may ask to join, relays the WebRTC handshake, and is then out of the data path. Subpaths: `.` (contract) · `/server` · `/client`. No React half (use the vanilla client from components). Reach for it only when the server hop costs too much (phones as game controllers for a desktop screen); for everything else use requests/events/topics, which the server validates.
+
+```ts
+// . (contract half)
+peerContract<const Ch extends Record<string, PeerChannelDef>>(opts: { channels: Ch }): ContractPlugin & { channels: Ch }
+interface PeerChannelDef<S extends Schema = Schema> {
+  schema: S          // any Standard Schema; channels are SYMMETRIC (both ends send and receive it)
+  reliable?: boolean // default true (reliable + ordered); false = unordered, maxRetransmits 0
+  maxBytes?: number  // inbound size cap, checked BEFORE decoding (default 65536)
+}
+// put the fragment in defineContract({ plugins: [fragment] }) AND pass the same object to peerClient
+// adds to `shared` of every role: requests peerCreateRoom/peerCloseRoom/peerJoin/peerAdmit/peerRemove/peerSignal,
+// events peer.joinRequest/peer.admitted/peer.joined/peer.left/peer.signal — internal; never call them yourself
+// also exports: PeerInfo, PeerSelf, PeerMember, PeerChannels, PeerMessageIn/Out<Ch, N>, peerSecret(), peerHash()
+
+// /server — factory is `peer`
+peer<Ctx = unknown>(opts: {
+  authorizeCreate: (a: { creator: ConnDescriptor; ctx: Ctx }) => Awaitable<boolean>             // REQUIRED, deny-by-default
+  authorize: (a: { joiner: ConnDescriptor; roomKey: string; ctx: Ctx }) => Awaitable<boolean | { info?: PeerInfo }> // REQUIRED, deny-by-default
+  maxRoomsPerConn?: number                                                                      // rooms one conn may OWN at once (default 8)
+}): { plugin: SuperLinePlugin }
+// PeerInfo = flat record, ≤16 keys (≤64 chars), values string(≤256) | number | boolean | null — else the join fails VALIDATION
+// stateless: no plugin state; one server room per peer room, named `peer-owner:<hash>`
+
+// /client
+peerClient<C, R, Ch>(client: SuperLineClient<C, R>, fragment: { channels: Ch }, opts?: PeerClientOptions<Ch>): PeerClient<Ch>
+interface PeerClientOptions<Ch> {
+  iceServers?: RTCIceServer[] | (() => Awaitable<RTCIceServer[]>) // fn is called per peer connection (short-lived TURN creds)
+  iceTransportPolicy?: RTCIceTransportPolicy                       // 'relay' forces TURN, hides IPs from peers
+  serializer?: Serializer          // default core jsonSerializer; EVERY member must use the same
+  rtc?: new (config?: RTCConfiguration) => RTCPeerConnection       // default globalThis.RTCPeerConnection; Node: node-datachannel/polyfill
+  onError?: (error: unknown, info: { room?; channel?; member? }) => void // default: LogTape warn on ['super-line','plugin-peer','client'] (channel + member id, never the room key)
+  joinTimeoutMs?: number           // 30000 — join waits this long for admission
+  connectTimeoutMs?: number        // 15000 — a link not open by then → 'failed'
+  pingIdleMs?: number              // 1000  — control ping after this long without sending on a link
+  livenessTimeoutMs?: number       // 3000  — member dropped after this long of silence on an open link
+  lossyBufferedAmount?: number     // 16384 — a reliable:false channel SKIPS a link whose bufferedAmount exceeds this
+  rejoinAttempts?: number          // 8     — then the joined room closes 'lost' (≈30 s with defaults)
+  rejoinBaseMs?: number            // 500   — first re-join retry delay, doubling…
+  rejoinMaxMs?: number             // 5000  — …up to this
+  document?: PeerDocument | null   // default globalThis.document (visibilitychange + pagehide); null turns both off
+}
+interface PeerClient<Ch> {
+  createRoom(o: { accept: (j: { id: string; role: string; info?: PeerInfo }) => Awaitable<boolean>; maxMembers?: number }): Promise<PeerRoom<Ch>>
+  //   accept: deny-by-default (falsy or throw = reject). maxMembers counts the creator, 2..33, default 33
+  join(key: string): Promise<PeerRoom<Ch>>   // resolves on admission; same key again → same room
+  close(): void                              // leave every room ('closed'), close links; does NOT close the SuperLineClient
+}
+interface PeerRoom<Ch> {
+  readonly key: string                         // 43-char base64url; share via QR/link — anyone holding it may ASK to join
+  readonly self: { id: string; role: string }  // creator's id CHANGES after its reconnect
+  readonly members: Array<{ id: string; role?: string; info?: PeerInfo; link: 'connecting' | 'open' | 'failed' }> // everyone but you
+  readonly state: 'active' | 'rejoining' | 'closed'
+  onState(cb: (s) => void): () => void
+  onMember(cb: (e: { type: 'joined' | 'left' | 'link'; member }) => void): () => void
+  channel<N extends keyof Ch>(name: N): {
+    send(msg: In): void                                  // every member whose link is open; never throws for a not-ready link
+    to(memberId: string): { send(msg: In): void }        // NOT_FOUND no such member · DISCONNECTED link not open
+    on(h: (msg: Out, from: PeerRoomMember) => void): () => void // msg = schema's PARSED OUTPUT, from = link's member
+  }
+  kick(memberId: string): Promise<void>        // creator only (else FORBIDDEN); forgets the member's ticket
+  leave(): void                                // closes with 'left'; a creator's leave → joiners close 'ended'
+  onClose(cb: (reason: PeerCloseReason) => void): () => void
+}
+type PeerCloseReason = 'left' | 'closed' | 'kicked' | 'ended' | 'refused' | 'lost'
+```
+
+**Close reasons.** `left` you called `room.leave()` · `closed` you called `peers.close()` · `kicked` the creator kicked you · `ended` the creator left or closed its peer client (joiners only) · `refused` a re-join was denied (by `authorize` or the creator) · `lost` re-join ran out of attempts.
+
+**Error codes** (all `SuperLineError`):
+
+| Code | Where |
+|---|---|
+| `FORBIDDEN` | `createRoom`: `authorizeCreate` denied or `maxRoomsPerConn` reached · `join`: `authorize` denied, `accept` false/threw, or room full · `kick` by a non-creator · `onError`: a peer whose hello doesn't match its link |
+| `TIMEOUT` | `join`: nobody admitted within `joinTimeoutMs` (no such room — the server can't tell — creator offline, or >8 requests queued) |
+| `BAD_REQUEST` | `peerClient` with no `RTCPeerConnection` and no `rtc` · `createRoom` without `crypto.subtle` (non-secure context) or bad `maxMembers` · `join` on a room you created · a send larger than the link's max message size (65536 until the browser reports the live SCTP limit) · `onError`: an inbound message over `maxBytes` |
+| `NOT_FOUND` | `room.channel(name)` undeclared · `to(id)` unknown member |
+| `DISCONNECTED` | `to(id).send` on a link that isn't open · `createRoom`/`join` after `peers.close()` (pending joins reject with it too) |
+| `VALIDATION` | `join` with a malformed key · `onError`: an inbound message failing the channel schema · `authorize` returning bad `info` |
+| `INTERNAL` | `onError`: every inbound message when the channel schema validates ASYNCHRONOUSLY (unsupported) |
+
+**Links.** One `RTCPeerConnection` per member pair — a room is a FULL MESH (`n(n−1)/2` links; 33 members = 528). A link is `open` once both ends verified each other and every channel is open; never-opened → `failed` after `connectTimeoutMs` (stays listed; the creator removes it instead). `left` fires on goodbye (`leave()`, `pagehide`, `close()`), kick, an open link closing, or `livenessTimeoutMs` silence. `member.role` may be `undefined` until that member's first relayed signal. No relay through the server: a pair with no direct path and no TURN stays `failed`.
+
+**Reconnect.** Links don't use the server, so they survive a server outage. The CREATOR re-claims its rooms on reconnect (same key, links kept, `self.id` changes; admissions wait for the re-claim). A JOINER re-joins with its ticket when its client reconnects, when an open link to the creator closes, or when the page becomes visible while that link isn't open → `state: 'rejoining'`, backoff 500 ms ×2 to 5 s, 8 attempts → `lost`; `refused` on denial. A new connection id rebuilds every link (`left` then `joined` for each member); the room object is the same. A returning ticket is admitted WITHOUT `accept` and replaces the old member. A link to the creator that failed BEFORE ever opening does not auto re-join (the next `visible` does) — offer "Join again": `room.leave()` then `peers.join(key)` (same ticket → re-admitted without `accept`). A plugin-auth session replacement builds a new `SuperLineClient` → `close()` the old peerClient and build a new one.
+
+**Secure contexts.** `createRoom` needs `crypto.subtle` → HTTPS or `localhost`; `join` (only `crypto.getRandomValues`) and `RTCPeerConnection` work on plain-HTTP LAN pages. Screen Wake Lock (yours, for phones) needs a secure context too.
+
+**Trust model.** The server: authorizes creation/join (deny-by-default), stamps each sender's verified `{ connId, role }` on join requests and relayed signals, and proves ownership by the client-held room secret (joining the `peer-owner:` server room grants NOTHING). The server does NOT: see, validate, store or revoke peer messages (the RECEIVER validates against the channel schema — keep schemas tight and `maxBytes` small); enforce membership or kicks (honest clients do; an open link survives server-side revocation of either end); hide members (they learn each other's connection ids — the session id under plugin-auth — and IP addresses; `iceTransportPolicy: 'relay'` hides IPs). A ticket alone grants a seat.
+
+**Operations.** Redact the plugin's secrets in the inspector: `inspector({ redact: ['ownerSecret', 'roomKey', 'ticket', 'sdp', 'candidate'] })`. Rate-limit `peerJoin` / `peerSignal` / `peerAdmit` with `use` middleware (it runs before validation). Every member must reach the same node or cluster (on Cloudflare: the same Durable Object name — put the route in the join link). The Control Center and DevTools panel see only the signaling requests/events, never channel messages. Tested: node-datachannel (automated) and desktop Chrome (by hand); NOT tested: real phones, TURN, Firefox, Safari. Smart-TV web runtimes are unsupported.
+
 ## Contract plugins (compile-time contract merge)
 
 `defineContract({ plugins: [...] })` merges each plugin's fragment INTO the contract by plain intersection, so `RowOf` / `client.collection` / per-role `Requests` all infer from the single materialized contract with zero type-threading. Existing no-plugin callers are untouched (the overload is identity).

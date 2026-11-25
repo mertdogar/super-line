@@ -125,10 +125,12 @@ The type system holds both ends honest: forgetting the plugin (while its surface
 
 The merge **keeps the fragments that formed it**: `contract.plugins` survives on the merged contract, so every collection and message stays attributable to the plugin that contributed it. The inspector reports that provenance alongside the **runtime** plugin list on `getContract`, which is what lets the [Control Center](/how-to/control-center) badge plugin-owned contract entries and flag a fragment whose server half was never registered.
 
-::: tip Three full contract-fragment plugins ship today
+::: tip Four full contract-fragment plugins ship today
 [`@super-line/plugin-auth`](/how-to/plugin-auth) merges identity (users/sessions collections + `signIn`/`signUp`/… requests) and [`@super-line/plugin-chat`](/how-to/plugin-chat) merges a whole chat model (six collections — channels/memberships/messages/messageParts/resources/resourcePresence — plus 20 mutation requests). plugin-chat is the reference for the **requests-first plugin idiom**: its collections are client-**read-only** (RLS `read`, `write` denied), and every mutation flows through a server-authoritative handler wrapped in a before/after **domain hook** a host can't bypass — the cost being that a client cannot write those collections directly, even for a change the server would have allowed.
 
 [`@super-line/plugin-queue`](/how-to/plugin-queue) is the third shape: **server-only**. It merges three collections (`queueJobs`, `queueSchedules`, `queueSlots`) whose policies are deny-**all** — no client reads them, let alone writes — and contributes no client surface at all. Its whole API is the trusted server kit `queue()` hands back (`enqueue`, `get`, `list`, `cancel`, `retry`, `schedules`), so a browser UI reaches jobs only through host-owned requests that return job ids and sanitized summaries. A plugin's contract fragment is how it gets a validated, cluster-visible place to keep state — it does not have to hand any of that to a client.
+
+[`@super-line/plugin-peer`](/how-to/plugin-peer) is a fourth, **broker-only** shape: no collections and no server state at all. Its fragment merges a handful of signaling requests and events into `shared`, its server half authorizes admission and relays WebRTC signaling, and its client half (`peerClient`, a function over a `SuperLineClient`, like `chatClient`) carries the data directly between clients, where the server never sees it.
 :::
 
 ## The client half

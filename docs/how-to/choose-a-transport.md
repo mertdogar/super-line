@@ -8,11 +8,11 @@ Pick the wire your client and server talk over, then change it in one line. The 
 |---|---|---|
 | The default — lowest latency, full-duplex, broadest support | **WebSocket** | [`@super-line/transport-websocket`](/how-to/transport-websocket) |
 | To survive restrictive networks / proxies that block or buffer WebSocket | **HTTP** (SSE or long-poll) | [`@super-line/transport-http`](/how-to/transport-http) |
-| Peer-to-peer / **WebRTC** / WebTransport, browser↔server with no signaling code | **libp2p** | [`@super-line/transport-libp2p`](/how-to/transport-libp2p) |
+| **WebRTC** / WebTransport between browser and server, with no signaling code | **libp2p** | [`@super-line/transport-libp2p`](/how-to/transport-libp2p) |
 | To host the server on **Cloudflare** — one Durable Object is one node, and it hibernates between events | **Cloudflare** (server side; clients use WebSocket) | [`@super-line/transport-cloudflare`](/how-to/cloudflare-durable-objects) |
 | Fast, deterministic tests with a real server + client in one process | **Loopback** | [`@super-line/transport-loopback`](/how-to/transport-loopback) |
 
-Start with WebSocket. Reach for HTTP as a fallback wire, libp2p when you want WebRTC/p2p, and loopback in your test suite. The Cloudflare transport is a server-side choice: it replaces the Node `http.Server` with a Durable Object, and clients keep dialing it over WebSocket.
+Start with WebSocket. Reach for HTTP as a fallback wire, libp2p when you want WebRTC/p2p to the server, and loopback in your test suite. A transport always connects a client to a server; for data sent directly between clients, see [Link clients directly](/how-to/plugin-peer). The Cloudflare transport is a server-side choice: it replaces the Node `http.Server` with a Durable Object, and clients keep dialing it over WebSocket.
 
 ## Swap the client transport
 

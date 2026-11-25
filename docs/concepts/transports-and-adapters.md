@@ -24,8 +24,10 @@ Four wires, each for a different constraint:
 |---|---|
 | **WebSocket** | the default — lowest latency, full-duplex, broadest support |
 | **HTTP** (SSE / long-poll) | you must survive restrictive networks or proxies that block or buffer WebSocket |
-| **libp2p / WebRTC** | you want peer-to-peer, browser↔server with no signaling code |
+| **libp2p / WebRTC** | you want WebRTC or WebTransport between browser and server, with no signaling code |
 | **Loopback** | fast, deterministic tests with a real server + client in one process |
+
+Every transport connects a client to a server. Data sent directly from client to client doesn't use a transport: [`@super-line/plugin-peer`](/how-to/plugin-peer) brokers a WebRTC link between clients over whichever transport they already use, and the data then bypasses the server.
 
 A fifth server transport changes where the server runs rather than which wire the client speaks: **Cloudflare** hosts a node inside a Durable Object, and clients reach it over plain WebSocket. See [Host a node on Cloudflare Durable Objects](/how-to/cloudflare-durable-objects).
 

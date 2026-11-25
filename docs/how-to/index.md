@@ -18,7 +18,7 @@ The pluggable client↔server wire. Pick one, then wire it on both ends.
 - [Choose a transport](/how-to/choose-a-transport) — decide between WebSocket, HTTP, libp2p, Cloudflare, and loopback.
 - [WebSocket transport](/how-to/transport-websocket) — the default duplex transport for server and client.
 - [HTTP transport](/how-to/transport-http) — SSE plus long-poll where a socket won't do.
-- [libp2p transport](/how-to/transport-libp2p) — bring your own libp2p node for peer-to-peer reach.
+- [libp2p transport](/how-to/transport-libp2p) — bring your own libp2p node to reach the server over WebRTC or WebTransport. (For client-to-client data, see [Link clients directly](/how-to/plugin-peer).)
 - [Cloudflare Durable Objects](/how-to/cloudflare-durable-objects) — host a node in a Durable Object whose sockets hibernate and resume transparently.
 - [Loopback transport](/how-to/transport-loopback) — in-memory client↔server for fast tests.
 
@@ -74,6 +74,7 @@ Consume the contract from the browser or Node.
 
 - [React](/how-to/react) — bind requests, events, topics, and collections with `createSuperLineHooks`.
 - [Serialization](/how-to/serialization) — control how payloads cross the wire.
+- [Link clients directly (plugin)](/how-to/plugin-peer) — rooms whose members exchange data over WebRTC data channels, with the server brokering admission and signaling.
 
 ## Scaling
 

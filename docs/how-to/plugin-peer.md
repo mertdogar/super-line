@@ -226,8 +226,8 @@ room.onClose((reason) => showClosed(reason))
 | `left` | You called `room.leave()`. |
 | `closed` | You called `peers.close()`. |
 | `kicked` | The creator kicked you. |
-| `ended` | The creator left the room or closed its peer client. Joiners only. |
-| `refused` | A re-join was denied, by `authorize` or by the creator. |
+| `ended` | The creator left the room, closed its peer client, or lost the room on a refused re-claim. Joiners only. |
+| `refused` | A joiner's re-join was denied, by `authorize` or by the creator, or `authorizeCreate` denied the creator's re-claim. |
 | `lost` | A re-join ran out of attempts. |
 
 ## Kick and leave
@@ -322,7 +322,9 @@ connection is down. Rooms recover on their own once it comes back.
 
 **The creator** re-claims each room it owns when its client reconnects. The room keeps the same key,
 links stay open, and `room.self.id` changes to the new connection id. Admissions wait until the
-re-claim has gone through.
+re-claim has gone through. If `authorizeCreate` denies the re-claim, the room closes with `refused` and
+ends for its members, who close with `ended`. A re-claim that fails for any other reason, such as a
+timeout, leaves the room open and runs again on the next reconnect.
 
 **A joiner** re-joins the room, with the same ticket, when any of these happens:
 

@@ -290,6 +290,11 @@ creator's own connect timeout removes a member from the list it sends in admissi
   350 KB. Chrome (same host, the example's STUN server) sends a 650 B offer and about 375 B per
   candidate, about 1.6 KB per sender. Frames past the budget are dropped like frames past the count
   caps.
+- **A refused re-claim closes the room.** When `authorizeCreate` denies a creator's re-claim (`FORBIDDEN`),
+  the room closes with `'refused'` and sends `end`, so members close with `'ended'` instead of re-joining
+  a key nobody owns; other re-claim failures keep the room open for the next reconnect. The close still
+  sends `peerCloseRoom`: it is a no-op there (both `FORBIDDEN` checks run before the connection joins the
+  owner room) that cannot itself be refused, and skipping it would add a parameter to the shared close.
 
 ### What real WebRTC changed (ticket 4, node-datachannel 0.32.3 / libdatachannel)
 

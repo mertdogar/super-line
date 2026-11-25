@@ -54,7 +54,7 @@ function setup(opts: { libdatachannel?: boolean } = {}) {
     onConnection: (conn) => void conns.set(conn.id, conn),
     plugins: [
       peer<{ name: string }>({
-        authorizeCreate: () => true,
+        authorizeCreate: ({ ctx }) => !denied.has(ctx.name),
         authorize: ({ ctx }) => !denied.has(ctx.name) && { info: { name: ctx.name } },
       }).plugin,
     ],
@@ -90,7 +90,7 @@ function setup(opts: { libdatachannel?: boolean } = {}) {
     cleanups.push(() => p.close())
     return { client, p, errors }
   }
-  return { srv, net, connect, raw, drop, denied, order }
+  return { srv, net, connect, raw, drop, conns, denied, order }
 }
 
 const ownerRoom = async (room: Room) => `peer-owner:${await peerHash(room.key)}`
@@ -954,6 +954,63 @@ describe('reconnect and re-join', () => {
     drop(ra.self.id)
     await waitFor(() => reasons.length === 1)
     expect(reasons).toEqual(['refused'])
+  })
+
+  it('closes with refused when the server denies the creator its re-claim, and members close with ended', async () => {
+    const { srv, connect, drop, denied } = setup()
+    const tv = connect('tv')
+    const watchA = gate('peer.admitted', () => false)
+    const a = connect('a', {}, watchA.wrap)
+    const host = await tv.p.createRoom({ accept: () => true })
+    const ra = await a.p.join(host.key)
+    await waitFor(() => open(host, [ra.self.id]) && open(ra, [host.self.id]))
+    const transitions = [states(host), states(ra)]
+    const reasons = [closes(host), closes(ra)]
+    const joins = watchA.joins
+    denied.add('tv')
+    drop(host.self.id)
+    await waitFor(() => reasons.every((r) => r.length === 1), { label: 'both rooms closed' })
+    expect(reasons).toEqual([['refused'], ['ended']])
+    expect(transitions).toEqual([['closed'], ['closed']])
+    expect([host.state, ra.state]).toEqual(['closed', 'closed'])
+    await tick(50)
+    expect(watchA.joins).toBe(joins)
+    expect(srv.room(await ownerRoom(host)).size).toBe(0)
+    expect([...tv.errors, ...a.errors]).toEqual([])
+  })
+
+  it('keeps the room open when a re-claim fails transiently, and re-claims on the next reconnect', async () => {
+    const { srv, connect, drop, conns } = setup()
+    let failNext = false
+    const flaky = (client: Client): Client =>
+      new Proxy(client, {
+        get(target, prop) {
+          if (prop !== 'peerCreateRoom') return Reflect.get(target, prop)
+          return (input: { ownerSecret: string }) => {
+            if (!failNext) return target.peerCreateRoom(input)
+            failNext = false
+            return Promise.reject(new SuperLineError('TIMEOUT', 'Request timed out'))
+          }
+        },
+      })
+    const tv = connect('tv', {}, flaky)
+    const host = await tv.p.createRoom({ accept: () => true })
+    const ra = await connect('a').p.join(host.key)
+    await waitFor(() => open(host, [ra.self.id]) && open(ra, [host.self.id]))
+    const reasons = [closes(host), closes(ra)]
+    const before = host.self.id
+    failNext = true
+    drop(before)
+    await waitFor(() => tv.errors.length === 1, { label: 'the re-claim failed' })
+    expect((tv.errors[0]!.error as SuperLineError).code).toBe('TIMEOUT')
+    expect([host.state, ra.state]).toEqual(['active', 'active'])
+    expect(srv.room(await ownerRoom(host)).size).toBe(0)
+
+    drop([...conns.values()].find((c) => c.role === 'tv' && c.id !== before)!.id)
+    await waitFor(() => host.self.id !== before, { label: 'the next reconnect re-claimed the room' })
+    expect(srv.room(await ownerRoom(host)).connections.map((c) => c.id)).toEqual([host.self.id])
+    expect(open(host, [ra.self.id]) && open(ra, [before])).toBe(true)
+    expect(reasons).toEqual([[], []])
   })
 
   it('re-joins when the page becomes visible and the link to the creator is not open', async () => {

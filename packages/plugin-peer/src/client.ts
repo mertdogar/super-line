@@ -956,7 +956,9 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
         else room.self = self
       },
       (err) => {
-        if (!room.closed && !disconnected(err)) report(err, { room: room.api })
+        if (room.closed) return
+        if (err instanceof SuperLineError && err.code === 'FORBIDDEN') closeRoom(room, 'refused')
+        else if (!disconnected(err)) report(err, { room: room.api })
       },
     )
   }

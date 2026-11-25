@@ -285,9 +285,8 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
   const onError =
     opts.onError ??
     ((error: unknown, info: PeerErrorInfo<Ch>) =>
-      log.warn('peer error in room {room} channel {channel} member {member}: {error}', {
+      log.warn('peer error on channel {channel} member {member}: {error}', {
         error,
-        room: info.room?.key,
         channel: info.channel,
         member: info.member?.id,
       }))

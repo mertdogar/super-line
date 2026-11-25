@@ -124,6 +124,36 @@ describe('peerCreateRoom', () => {
   })
 })
 
+describe('peerCloseRoom', () => {
+  it('takes the caller out of the owner room, so join requests stop reaching it and the room count frees up', async () => {
+    const n = node({ ...allowAll, maxRoomsPerConn: 1 })
+    const owner = await room(n)
+    const ownerRoom = `peer-owner:${await peerHash(owner.roomKey)}`
+    await expect(owner.client.peerCreateRoom({ ownerSecret: secret() })).rejects.toMatchObject({ code: 'FORBIDDEN' })
+
+    await expect(owner.client.peerCloseRoom({ ownerSecret: owner.ownerSecret })).resolves.toEqual({})
+    expect(n.srv.room(ownerRoom).size).toBe(0)
+    await n.connect('phone').client.peerJoin({ roomKey: owner.roomKey, ticket: secret() })
+    await tick(30)
+    expect(owner.got.joinRequest).toEqual([])
+    await expect(owner.client.peerCreateRoom({ ownerSecret: secret() })).resolves.toBeDefined()
+  })
+
+  it('removes only the calling connection, and a secret for another room changes nothing', async () => {
+    const n = node(allowAll)
+    const owner = await room(n)
+    const other = n.connect('tv')
+    await other.client.peerCreateRoom({ ownerSecret: owner.ownerSecret })
+    const ownerRoom = n.srv.room(`peer-owner:${await peerHash(owner.roomKey)}`)
+    expect(ownerRoom.size).toBe(2)
+
+    await owner.client.peerCloseRoom({ ownerSecret: secret() })
+    expect(ownerRoom.size).toBe(2)
+    await other.client.peerCloseRoom({ ownerSecret: owner.ownerSecret })
+    expect(ownerRoom.connections.map((c) => c.id)).toEqual([owner.self.connId])
+  })
+})
+
 describe('peerJoin', () => {
   it('delivers the join request to the owner with the server-stamped joiner and the host info', async () => {
     const authorized: unknown[] = []
@@ -314,6 +344,7 @@ describe('schema bounds', () => {
     const bad: Array<() => Promise<unknown>> = [
       () => client.peerCreateRoom({ ownerSecret: 'short' }),
       () => client.peerCreateRoom({ ownerSecret: `${secret().slice(0, 21)}+` }),
+      () => client.peerCloseRoom({ ownerSecret: 'short' }),
       () => client.peerJoin({ roomKey: roomKey.slice(1), ticket: secret() }),
       () => client.peerJoin({ roomKey, ticket: `${secret()}A` }),
       () => client.peerSignal({ roomKey, to, kind: 'offer', sdp: 'x'.repeat(65_537) }),

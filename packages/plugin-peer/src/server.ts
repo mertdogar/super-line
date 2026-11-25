@@ -49,6 +49,10 @@ export function peer<Ctx = unknown>(opts: PeerServerOptions<Ctx>): { plugin: Sup
           if (!conn.raw.writable) sl.room(ownerRoom).remove(conn)
           return { roomKey, self: selfOf(conn) }
         },
+        peerCloseRoom: async ({ ownerSecret }, _ctx, conn) => {
+          sl.room(OWNER_ROOM + (await peerHash(await peerHash(ownerSecret)))).remove(conn)
+          return {}
+        },
         peerJoin: async ({ roomKey, ticket }, ctx, conn) => {
           const verdict = opts.authorize
             ? await opts.authorize({ joiner: sl.describe(conn), roomKey, ctx: ctx as Ctx })

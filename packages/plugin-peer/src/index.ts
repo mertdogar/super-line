@@ -48,6 +48,10 @@ export const peerSurface = defineSurface({
       input: z.strictObject({ ownerSecret: secret }),
       output: z.strictObject({ roomKey: hash, self: selfSchema }),
     },
+    peerCloseRoom: {
+      input: z.strictObject({ ownerSecret: secret }),
+      output: empty,
+    },
     peerJoin: {
       input: z.strictObject({ roomKey: hash, ticket: secret }),
       output: z.strictObject({ self: selfSchema }),

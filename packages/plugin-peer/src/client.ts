@@ -51,7 +51,22 @@ export interface PeerMemberEvent {
   member: PeerRoomMember
 }
 
-export type PeerCloseReason = 'left' | 'kicked' | 'closed'
+/** `refused`: a re-join was denied. `lost`: a re-join ran out of attempts. */
+export type PeerCloseReason = 'left' | 'kicked' | 'closed' | 'refused' | 'lost'
+
+/** `rejoining` while a joined room re-joins after a reconnect or after losing its link to the creator. */
+export type PeerRoomState = 'active' | 'rejoining' | 'closed'
+
+export interface PeerEventTarget {
+  addEventListener(type: string, listener: () => void): void
+  removeEventListener(type: string, listener: () => void): void
+}
+
+/** The slice of `document` the peer client listens on: `visibilitychange` here, `pagehide` on `defaultView`. */
+export interface PeerDocument extends PeerEventTarget {
+  readonly visibilityState: string
+  readonly defaultView?: PeerEventTarget | null
+}
 
 /** What the creator's `accept` sees: the server-verified id and role, plus the host's `authorize` info. */
 export interface PeerJoiner {
@@ -73,6 +88,8 @@ export interface PeerRoom<Ch extends PeerChannels = PeerChannels> {
   readonly key: string
   readonly self: { id: string; role: string }
   readonly members: PeerRoomMember[]
+  readonly state: PeerRoomState
+  onState(cb: (state: PeerRoomState) => void): () => void
   onMember(cb: (event: PeerMemberEvent) => void): () => void
   channel<N extends PeerChannelName<Ch>>(name: N): PeerChannel<PeerMessageIn<Ch, N>, PeerMessageOut<Ch, N>>
   /** Creator only: remove a member everywhere and forget its ticket. */
@@ -114,6 +131,14 @@ export interface PeerClientOptions<Ch extends PeerChannels = PeerChannels> {
   livenessTimeoutMs?: number
   /** A `reliable: false` channel skips a link whose `bufferedAmount` is above this (default 16384). */
   lossyBufferedAmount?: number
+  /** Re-join attempts before a joined room closes with `'lost'` (default 8). */
+  rejoinAttempts?: number
+  /** Delay before the first re-join retry, doubling up to `rejoinMaxMs` (default 500). */
+  rejoinBaseMs?: number
+  /** Longest delay between re-join retries (default 5000). */
+  rejoinMaxMs?: number
+  /** Where `visibilitychange` and `pagehide` are heard. Default `globalThis.document`; `null` turns both off. */
+  document?: PeerDocument | null
 }
 
 export interface PeerClient<Ch extends PeerChannels = PeerChannels> {
@@ -126,6 +151,7 @@ export interface PeerClient<Ch extends PeerChannels = PeerChannels> {
 
 interface Dyn {
   peerCreateRoom(i: { ownerSecret: string }): Promise<{ roomKey: string; self: PeerSelf }>
+  peerCloseRoom(i: { ownerSecret: string }): Promise<unknown>
   peerJoin(i: { roomKey: string; ticket: string }): Promise<{ self: PeerSelf }>
   peerAdmit(i: {
     ownerSecret: string
@@ -136,6 +162,8 @@ interface Dyn {
   peerRemove(i: { ownerSecret: string; member: string; members: string[] }): Promise<unknown>
   peerSignal(i: unknown): Promise<unknown>
   on(event: string, handler: (data: unknown) => void): () => void
+  onReconnect(cb: () => void): () => void
+  readonly connected: boolean
 }
 
 interface Link {
@@ -164,13 +192,25 @@ interface Owner {
   tickets: Map<string, string>
   queue: PeerJoinRequest[]
   busy: boolean
+  claim: Promise<unknown>
+}
+
+interface Rejoin {
+  attempts: number
+  timer: Timer | undefined
+  self: PeerSelf | undefined
+  admitted: PeerAdmitted | undefined
 }
 
 interface Room<Ch extends PeerChannels> {
   key: string
   self: PeerSelf
   owner?: Owner
+  ticket?: string
+  creator?: string
+  rejoin?: Rejoin
   members: Map<string, Member>
+  stateListeners: Set<(state: PeerRoomState) => void>
   memberListeners: Set<(event: PeerMemberEvent) => void>
   closeListeners: Set<(reason: PeerCloseReason) => void>
   channelListeners: Map<string, Set<(message: never, from: PeerRoomMember) => void>>
@@ -232,6 +272,11 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
   const pingIdleMs = opts.pingIdleMs ?? 1_000
   const livenessTimeoutMs = opts.livenessTimeoutMs ?? 3_000
   const lossyBufferedAmount = opts.lossyBufferedAmount ?? 16_384
+  const rejoinAttempts = opts.rejoinAttempts ?? 8
+  const rejoinBaseMs = opts.rejoinBaseMs ?? 500
+  const rejoinMaxMs = opts.rejoinMaxMs ?? 5_000
+  const doc = opts.document === undefined ? (globalThis.document as PeerDocument | undefined) : opts.document
+  const page = doc ? (doc.defaultView ?? doc) : undefined
   const onError =
     opts.onError ??
     ((error: unknown, info: PeerErrorInfo<Ch>) =>
@@ -308,16 +353,40 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
     room.members.delete(id)
     member.link.close(false)
     emitMember(room, { type: 'left', member: snapshot(member) })
+    if (id === room.creator) startRejoin(room)
   }
+
+  const stateOf = (room: Room<Ch>): PeerRoomState => (room.closed ? 'closed' : room.rejoin ? 'rejoining' : 'active')
+
+  function emitState(room: Room<Ch>) {
+    const state = stateOf(room)
+    for (const cb of room.stateListeners) {
+      try {
+        cb(state)
+      } catch (err) {
+        report(err, { room: room.api })
+      }
+    }
+  }
+
+  const giveUp = (ownerSecret: string) => void dyn.peerCloseRoom({ ownerSecret }).catch(() => {})
+
+  const disconnected = (err: unknown) => err instanceof SuperLineError && err.code === 'DISCONNECTED'
 
   function closeRoom(room: Room<Ch>, reason: PeerCloseReason) {
     if (room.closed) return
     room.closed = true
     rooms.delete(room.key)
-    if (room.owner) owned.delete(room.owner.keyHash)
+    if (room.owner) {
+      owned.delete(room.owner.keyHash)
+      giveUp(room.owner.secret)
+    }
+    clearTimeout(room.rejoin?.timer)
+    room.rejoin = undefined
     held.delete(room.key)
     for (const member of room.members.values()) member.link.close(true)
     room.members.clear()
+    emitState(room)
     for (const cb of room.closeListeners) {
       try {
         cb(reason)
@@ -329,7 +398,8 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
 
   function createLink(room: Room<Ch>, member: Member): Link {
     const peerId = member.id
-    const polite = room.self.connId > peerId
+    const selfId = room.self.connId
+    const polite = selfId > peerId
     const dcs: RTCDataChannel[] = []
     const early: Array<[number, string | ArrayBuffer]> = []
     const candidates: PeerIceCandidate[] = []
@@ -449,7 +519,7 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
       } catch {}
       if (!helloOk) {
         const hello = helloSchema.safeParse(msg)
-        if (!hello.success || hello.data.from !== peerId || hello.data.to !== room.self.connId || hello.data.roomKey !== room.key) {
+        if (!hello.success || hello.data.from !== peerId || hello.data.to !== selfId || hello.data.roomKey !== room.key) {
           return fail(new SuperLineError('FORBIDDEN', 'Peer hello does not match the link'))
         }
         helloOk = true
@@ -463,7 +533,7 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
     function setup(dc: RTCDataChannel, index: number) {
       dc.binaryType = 'arraybuffer'
       dc.onopen = () => {
-        if (index === 0) sendControl({ t: 'hello', from: room.self.connId, to: peerId, roomKey: room.key })
+        if (index === 0) sendControl({ t: 'hello', from: selfId, to: peerId, roomKey: room.key })
         maybeOpen()
       }
       dc.onmessage = (ev: MessageEvent<string | ArrayBuffer>) => {
@@ -576,6 +646,7 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
       key,
       self,
       members: new Map(),
+      stateListeners: new Set(),
       memberListeners: new Set(),
       closeListeners: new Set(),
       channelListeners: new Map(),
@@ -635,6 +706,13 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
       get members() {
         return [...room.members.values()].map(snapshot)
       },
+      get state() {
+        return stateOf(room)
+      },
+      onState(cb) {
+        room.stateListeners.add(cb)
+        return () => void room.stateListeners.delete(cb)
+      },
       onMember(cb) {
         room.memberListeners.add(cb)
         return () => void room.memberListeners.delete(cb)
@@ -664,7 +742,12 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
     const previous = o.tickets.get(request.ticket)
     let accept = false
     if (previous !== undefined) {
-      removeMember(room, previous)
+      if (previous !== id) {
+        removeMember(room, previous)
+        dyn
+          .peerRemove({ ownerSecret: o.secret, member: previous, members: [...room.members.keys()] })
+          .catch((err) => report(err, { room: room.api }))
+      }
       accept = true
     } else {
       try {
@@ -673,6 +756,7 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
         report(err, { room: room.api })
       }
     }
+    await o.claim
     if (room.closed || room.members.has(id)) return
     if (room.members.size + 2 > o.maxMembers) accept = false
     const members = accept
@@ -718,7 +802,7 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
 
   function onSignal(s: PeerSignal) {
     const room = rooms.get(s.roomKey)
-    const member = room?.members.get(s.from.connId)
+    const member = room && !room.rejoin ? room.members.get(s.from.connId) : undefined
     if (member) {
       member.role ??= s.from.role
       member.link.signal(s)
@@ -727,15 +811,69 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
 
   function onJoined(j: PeerJoined) {
     const room = rooms.get(j.roomKey)
-    if (room) addMember(room, { id: j.member.connId, ...(j.member.info !== undefined ? { info: j.member.info } : {}) })
-    else if (pending.has(j.roomKey)) hold(j.roomKey, null, j)
+    const entry = { id: j.member.connId, ...(j.member.info !== undefined ? { info: j.member.info } : {}) }
+    if (room && !room.rejoin) addMember(room, entry)
+    else if (room || pending.has(j.roomKey)) hold(j.roomKey, null, j)
   }
 
   function onLeft(l: PeerLeft) {
     const room = rooms.get(l.roomKey)
     if (!room) return
-    if (l.member === room.self.connId) closeRoom(room, 'kicked')
+    if (l.member === room.self.connId || l.member === room.rejoin?.self?.connId) closeRoom(room, 'kicked')
     else removeMember(room, l.member)
+  }
+
+  function populate(room: Room<Ch>, a: PeerAdmitted) {
+    room.creator = a.by.connId
+    addMember(room, { id: a.by.connId, role: a.by.role })
+    for (const m of a.members) addMember(room, { id: m.connId, ...(m.info !== undefined ? { info: m.info } : {}) })
+    for (const id of room.members.keys()) for (const frame of take(room.key, id)) onSignal(frame as PeerSignal)
+    for (const frame of take(room.key, null)) onJoined(frame as PeerJoined)
+  }
+
+  function startRejoin(room: Room<Ch>) {
+    if (room.closed || room.owner || room.rejoin) return
+    room.rejoin = { attempts: 0, timer: undefined, self: undefined, admitted: undefined }
+    emitState(room)
+    attemptRejoin(room)
+  }
+
+  function attemptRejoin(room: Room<Ch>) {
+    const r = room.rejoin
+    if (!r) return
+    clearTimeout(r.timer)
+    if (closed || !dyn.connected) return
+    if (r.attempts >= rejoinAttempts) return closeRoom(room, 'lost')
+    r.timer = setTimeout(() => attemptRejoin(room), Math.min(rejoinBaseMs * 2 ** r.attempts, rejoinMaxMs))
+    r.attempts++
+    dyn.peerJoin({ roomKey: room.key, ticket: room.ticket! }).then(
+      ({ self }) => {
+        if (room.rejoin !== r) return
+        r.self = self
+        finishRejoin(room)
+      },
+      (err) => {
+        if (room.rejoin !== r) return
+        if (err instanceof SuperLineError && err.code === 'FORBIDDEN') closeRoom(room, 'refused')
+        else if (!disconnected(err)) report(err, { room: room.api })
+      },
+    )
+  }
+
+  function finishRejoin(room: Room<Ch>) {
+    const r = room.rejoin
+    if (!r?.self || !r.admitted) return
+    const { self, admitted } = r
+    const changed = self.connId !== room.self.connId
+    const fresh = new Set([admitted.by.connId, ...admitted.members.map((m) => m.connId)])
+    for (const [id, m] of room.members) {
+      if (changed || id === admitted.by.connId || !fresh.has(id) || m.link.state !== 'open') removeMember(room, id)
+    }
+    clearTimeout(r.timer)
+    room.rejoin = undefined
+    room.self = self
+    populate(room, admitted)
+    emitState(room)
   }
 
   function settle(p: Pending<Ch>, error?: unknown) {
@@ -753,19 +891,37 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
     const { self, admitted } = p
     if (!self || !admitted || !settle(p)) return
     const room = makeRoom(p.key, self)
+    room.ticket = tickets.get(p.key)!
     rooms.set(p.key, room)
-    addMember(room, { id: admitted.by.connId, role: admitted.by.role })
-    for (const m of admitted.members) addMember(room, { id: m.connId, ...(m.info !== undefined ? { info: m.info } : {}) })
-    for (const frame of take(p.key, null)) onJoined(frame as PeerJoined)
+    populate(room, admitted)
     p.resolve(room.api)
   }
 
   function onAdmitted(a: PeerAdmitted) {
     const p = pending.get(a.roomKey)
+    const room = p ? undefined : rooms.get(a.roomKey)
+    const r = room?.rejoin
+    if (room && r) {
+      if (!a.accept) return closeRoom(room, 'refused')
+      r.admitted = a
+      return finishRejoin(room)
+    }
     if (!p) return
     if (!a.accept) return void settle(p, new SuperLineError('FORBIDDEN', 'The room creator rejected the join'))
     p.admitted = a
     maybeAdmitted(p)
+  }
+
+  function reclaim(room: Room<Ch>, o: Owner) {
+    return dyn.peerCreateRoom({ ownerSecret: o.secret }).then(
+      ({ self }) => {
+        if (room.closed) giveUp(o.secret)
+        else room.self = self
+      },
+      (err) => {
+        if (!room.closed && !disconnected(err)) report(err, { room: room.api })
+      },
+    )
   }
 
   const listen = <S extends z.ZodType>(event: string, schema: S, handler: (data: z.infer<S>) => void) =>
@@ -782,10 +938,31 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
     listen('peer.signal', stc['peer.signal'].payload, onSignal),
   ]
 
+  const offReconnect = dyn.onReconnect(() => {
+    for (const room of rooms.values()) {
+      const o = room.owner
+      if (o) o.claim = reclaim(room, o)
+      else if (room.rejoin) {
+        room.rejoin.self = room.rejoin.admitted = undefined
+        attemptRejoin(room)
+      } else startRejoin(room)
+    }
+  })
+
+  const onVisibility = () => {
+    if (doc?.visibilityState !== 'visible') return
+    for (const room of rooms.values()) {
+      if (room.owner) continue
+      if (room.rejoin) attemptRejoin(room)
+      else if (room.members.get(room.creator!)?.link.state !== 'open') startRejoin(room)
+    }
+  }
+
   const onPageHide = () => {
     for (const room of rooms.values()) for (const member of room.members.values()) member.link.bye()
   }
-  globalThis.addEventListener?.('pagehide', onPageHide)
+  doc?.addEventListener('visibilitychange', onVisibility)
+  page?.addEventListener('pagehide', onPageHide)
 
   const closedError = () => new SuperLineError('DISCONNECTED', 'Peer client closed')
 
@@ -798,8 +975,20 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
       const secret = peerSecret()
       const keyHash = await peerHash(await peerHash(secret))
       const { roomKey, self } = await dyn.peerCreateRoom({ ownerSecret: secret })
-      if (closed) throw closedError()
-      const room = makeRoom(roomKey, self, { secret, keyHash, accept, maxMembers, tickets: new Map(), queue: [], busy: false })
+      if (closed) {
+        giveUp(secret)
+        throw closedError()
+      }
+      const room = makeRoom(roomKey, self, {
+        secret,
+        keyHash,
+        accept,
+        maxMembers,
+        tickets: new Map(),
+        queue: [],
+        busy: false,
+        claim: Promise.resolve(),
+      })
       rooms.set(roomKey, room)
       owned.set(keyHash, room)
       return room.api
@@ -835,7 +1024,9 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
       if (closed) return
       closed = true
       for (const off of offs) off()
-      globalThis.removeEventListener?.('pagehide', onPageHide)
+      offReconnect()
+      doc?.removeEventListener('visibilitychange', onVisibility)
+      page?.removeEventListener('pagehide', onPageHide)
       for (const p of pending.values()) settle(p, closedError())
       for (const room of rooms.values()) closeRoom(room, 'closed')
     },

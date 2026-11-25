@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, expectTypeOf, it } from 'vitest'
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import * as z from 'zod'
 import { defineContract, SuperLineError } from '@super-line/core'
-import { createSuperLineServer } from '@super-line/server'
+import { createSuperLineServer, type Conn } from '@super-line/server'
 import { createSuperLineClient } from '@super-line/client'
 import { createLoopbackTransport } from '@super-line/transport-loopback'
-import { peerContract, peerHash, peerSecret, type PeerSignal } from '../src/index.js'
+import { peerContract, peerHash, peerSecret, type PeerLeft, type PeerSignal } from '../src/index.js'
 import { peer } from '../src/server.js'
 import {
   peerClient,
@@ -13,6 +13,7 @@ import {
   type PeerJoiner,
   type PeerMemberEvent,
   type PeerRoom,
+  type PeerRoomState,
 } from '../src/client.js'
 import { tick, waitFor } from '../../core/test/wait.js'
 import { createFakeNetwork } from './fake-rtc.js'
@@ -37,18 +38,32 @@ afterEach(async () => {
 
 function setup() {
   const loopback = createLoopbackTransport()
+  const conns = new Map<string, Conn>()
+  const denied = new Set<string>()
   const srv = createSuperLineServer(contract, {
     transports: [loopback.server],
     authenticate: (h) => ({ role: (h.query.role ?? 'phone') as Role, ctx: { name: h.query.name ?? 'anon' } }),
+    onConnection: (conn) => void conns.set(conn.id, conn),
     plugins: [
-      peer<{ name: string }>({ authorizeCreate: () => true, authorize: ({ ctx }) => ({ info: { name: ctx.name } }) }).plugin,
+      peer<{ name: string }>({
+        authorizeCreate: () => true,
+        authorize: ({ ctx }) => !denied.has(ctx.name) && { info: { name: ctx.name } },
+      }).plugin,
     ],
   })
   cleanups.push(() => srv.close())
   const net = createFakeNetwork()
+  /** Drop a client's server connection; it reconnects under a new connection id. */
+  const drop = (connId: string) => conns.get(connId)!.terminate()
   const raw = (name: string): Client => {
     const role: Role = name === 'tv' ? 'tv' : 'phone'
-    const client = createSuperLineClient(contract, { transport: loopback.client(), role, params: { role, name } })
+    const client = createSuperLineClient(contract, {
+      transport: loopback.client(),
+      role,
+      params: { role, name },
+      reconnectBaseMs: 10,
+      reconnectMaxMs: 20,
+    })
     cleanups.push(() => client.close())
     return client
   }
@@ -63,7 +78,40 @@ function setup() {
     cleanups.push(() => p.close())
     return { client, p, errors }
   }
-  return { net, connect, raw }
+  return { srv, net, connect, raw, drop, denied }
+}
+
+const ownerRoom = async (room: Room) => `peer-owner:${await peerHash(room.key)}`
+
+const foreign = (errors: Array<{ error: unknown }>) =>
+  errors.filter((e) => (e.error as Error).message === 'foreign candidate').length
+
+function states(room: Room) {
+  const got: PeerRoomState[] = []
+  room.onState((s) => got.push(s))
+  return got
+}
+
+function closes(room: Room) {
+  const got: string[] = []
+  room.onClose((r) => got.push(r))
+  return got
+}
+
+function fakeDocument() {
+  const listeners = new Map<string, Set<() => void>>()
+  return {
+    visibilityState: 'hidden',
+    addEventListener(type: string, cb: () => void) {
+      listeners.set(type, (listeners.get(type) ?? new Set()).add(cb))
+    },
+    removeEventListener(type: string, cb: () => void) {
+      listeners.get(type)?.delete(cb)
+    },
+    dispatch(type: string) {
+      for (const cb of listeners.get(type) ?? []) cb()
+    },
+  }
 }
 
 const open = (room: Room, ids: string[]) =>
@@ -81,14 +129,21 @@ function received<N extends 'input' | 'events' | 'blob'>(room: Room, name: N) {
   return got
 }
 
-/** Hold matching events until released, and record every event the peer client receives. */
+/** Hold matching events until released, record every event the peer client receives, and count its joins. */
 function gate(event: string, match: (data: unknown) => boolean = () => true) {
   let released = false
+  let joins = 0
   const queued: Array<() => void> = []
   const seen: Array<{ event: string; data: unknown }> = []
   const wrap = (client: Client): Client =>
     new Proxy(client, {
       get(target, prop) {
+        if (prop === 'peerJoin') {
+          return (input: { roomKey: string; ticket: string }) => {
+            joins++
+            return target.peerJoin(input)
+          }
+        }
         if (prop !== 'on') return Reflect.get(target, prop)
         return (ev: string, handler: (data: unknown) => void) =>
           (target.on as (e: string, h: (d: unknown) => void) => () => void)(ev, (data) => {
@@ -106,6 +161,9 @@ function gate(event: string, match: (data: unknown) => boolean = () => true) {
     signalsFrom,
     get queued() {
       return queued.length
+    },
+    get joins() {
+      return joins
     },
     release() {
       released = true
@@ -420,12 +478,15 @@ describe('links', () => {
 
   it('removes a member that goes silent after its link opened', async () => {
     const { net, connect } = setup()
-    const { host, ra, rb } = await mesh(connect, { pingIdleMs: 20, livenessTimeoutMs: 200 })
+    const { host, ra, rb } = await mesh(connect, { pingIdleMs: 20, livenessTimeoutMs: 200, rejoinAttempts: 0 })
     await tick(400)
     expect(open(host, [ra.self.id, rb.self.id]) && open(ra, [host.self.id, rb.self.id])).toBe(true)
+    const reasons = closes(rb)
 
     net.filter = (owner, _channelId, data) => (owner === 'b' ? undefined : data)
     await waitFor(() => open(host, [ra.self.id]) && open(ra, [host.self.id]), { label: 'b dropped as gone' })
+    await waitFor(() => reasons.length === 1, { label: 'b loses the creator and gives up re-joining' })
+    expect(reasons).toEqual(['lost'])
   })
 })
 
@@ -481,6 +542,45 @@ describe('leaving', () => {
     expect(asked).toBe(2)
   })
 
+  it('leave() before a link opens leaves the joiner clean, and the others see it go connecting then failed', async () => {
+    const { net, connect } = setup()
+    const opts = { connectTimeoutMs: 200 }
+    const tv = connect('tv', opts)
+    const b = connect('b', opts)
+    const host = await tv.p.createRoom({ accept: () => true })
+    const rb = await b.p.join(host.key)
+    await waitFor(() => open(host, [rb.self.id]) && open(rb, [host.self.id]))
+    net.block('tv', 'phone')
+    net.block('b', 'phone')
+    const phone = connect('phone', opts)
+    const guest = await phone.p.join(host.key)
+    await waitFor(() => rb.members.some((m) => m.id === guest.self.id))
+    const seen = events(rb)
+    expect(guest.members.map((m) => m.link)).toEqual(['connecting', 'connecting'])
+
+    guest.leave()
+    expect(guest.members).toEqual([])
+    expect(guest.state).toBe('closed')
+    expect(net.connections('phone').every((pc) => pc.closed)).toBe(true)
+    await waitFor(() => host.members.length === 1 && rb.members.find((m) => m.id === guest.self.id)?.link === 'failed')
+    expect(seen).toEqual([{ type: 'link', member: expect.objectContaining({ id: guest.self.id, link: 'failed' }) }])
+    await tick(250)
+    expect(phone.errors).toEqual([])
+  })
+
+  it('the creator gives up its owner room on leave() and close()', async () => {
+    const { srv, connect } = setup()
+    const tv = connect('tv')
+    const first = await tv.p.createRoom({ accept: () => true })
+    const second = await tv.p.createRoom({ accept: () => true })
+    expect(srv.room(await ownerRoom(first)).size).toBe(1)
+    first.leave()
+    await waitFor(async () => srv.room(await ownerRoom(first)).size === 0)
+    expect(srv.room(await ownerRoom(second)).size).toBe(1)
+    tv.p.close()
+    await waitFor(async () => srv.room(await ownerRoom(second)).size === 0)
+  })
+
   it('close() closes every link and room and rejects pending joins', async () => {
     const { net, connect } = setup()
     const { a, host, ra, rb } = await mesh(connect)
@@ -493,5 +593,265 @@ describe('leaving', () => {
     await expect(a.p.join(host.key)).rejects.toMatchObject({ code: 'DISCONNECTED' })
     expect(net.connections('a').every((pc) => pc.closed)).toBe(true)
     await waitFor(() => open(host, [rb.self.id]) && open(rb, [host.self.id]))
+  })
+})
+
+describe('admission and buffering limits', () => {
+  it('queues at most 8 join requests behind the one being decided and drops the rest', async () => {
+    const { connect } = setup()
+    const watch = gate('peer.joinRequest', () => false)
+    const tv = connect('tv', {}, watch.wrap)
+    let release!: () => void
+    const decided = new Promise<void>((resolve) => (release = resolve))
+    const host = await tv.p.createRoom({
+      accept: async () => {
+        await decided
+        return true
+      },
+    })
+    const joining = Promise.allSettled(
+      Array.from({ length: 11 }, (_, i) => connect(`j${i}`, { joinTimeoutMs: 400 }).p.join(host.key)),
+    )
+    await waitFor(() => watch.seen.length === 11, { label: 'every join request reached the creator' })
+    release()
+    const settled = await joining
+    expect(settled.filter((r) => r.status === 'fulfilled')).toHaveLength(9)
+    expect(settled.flatMap((r) => (r.status === 'rejected' ? [r.reason.code] : []))).toEqual(['TIMEOUT', 'TIMEOUT'])
+  })
+
+  async function earlySignals(fillKey = false) {
+    const { connect, raw } = setup()
+    const tv = connect('tv')
+    const held = gate('peer.admitted')
+    const phone = connect('phone', {}, held.wrap)
+    const outsiders = fillKey ? [raw('o1'), raw('o2')] : []
+    const signals = () => held.seen.filter((s) => s.event === 'peer.signal').length
+    let joinerId = ''
+    const host: Room = await tv.p.createRoom({
+      accept: async (joiner) => {
+        joinerId = joiner.id
+        for (const outsider of outsiders) {
+          for (let i = 0; i < 32; i++) {
+            await outsider.peerSignal({ roomKey: host.key, to: joiner.id, kind: 'candidate', candidate: { candidate: `x${i}` } })
+          }
+        }
+        await waitFor(() => signals() === outsiders.length * 32)
+        return true
+      },
+    })
+    const joining = phone.p.join(host.key)
+    await waitFor(() => held.queued === 1 && held.signalsFrom(host.self.id) >= 3, { label: 'offer and candidates held' })
+    const real = held.signalsFrom(host.self.id)
+    const bogus = async (n: number) => {
+      for (let i = 0; i < n; i++) {
+        await tv.client.peerSignal({ roomKey: host.key, to: joinerId, kind: 'candidate', candidate: { candidate: `bogus${i}` } })
+      }
+      await waitFor(() => held.signalsFrom(host.self.id) === real + n)
+    }
+    return { phone, held, real, joining, bogus }
+  }
+
+  it('holds at most 32 early signals per sender and replays them once the sender is a member', async () => {
+    const { phone, held, real, joining, bogus } = await earlySignals()
+    await bogus(40)
+    held.release()
+    await joining
+    await waitFor(() => foreign(phone.errors) === 32 - real)
+    await tick(30)
+    expect(foreign(phone.errors)).toBe(32 - real)
+  })
+
+  it('holds at most 64 early frames per key', async () => {
+    const { phone, held, joining, bogus } = await earlySignals(true)
+    await bogus(5)
+    held.release()
+    await joining
+    await tick(50)
+    expect(foreign(phone.errors)).toBe(0)
+  })
+
+  it('drops held frames older than the join timeout', async () => {
+    const { phone, held, joining, bogus } = await earlySignals()
+    await bogus(5)
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.now() + 30_001)
+    try {
+      held.release()
+    } finally {
+      vi.useRealTimers()
+    }
+    await joining
+    await tick(50)
+    expect(foreign(phone.errors)).toBe(0)
+  })
+})
+
+describe('reconnect and re-join', () => {
+  it('the creator keeps its links across a reconnect and still admits a newcomer who links to everyone', async () => {
+    const { srv, connect, drop } = setup()
+    const { tv, a, b, host, ra, rb } = await mesh(connect)
+    const before = host.self.id
+    const seen = events(host)
+    drop(before)
+    await waitFor(() => host.self.id !== before, { label: 'the creator re-claimed its room under a new id' })
+    expect(srv.room(await ownerRoom(host)).connections.map((c) => c.id)).toEqual([host.self.id])
+    expect(open(host, [ra.self.id, rb.self.id]) && open(ra, [before, rb.self.id]) && open(rb, [before, ra.self.id])).toBe(
+      true,
+    )
+
+    const rc = await connect('c').p.join(host.key)
+    await waitFor(
+      () =>
+        open(host, [ra.self.id, rb.self.id, rc.self.id]) &&
+        open(rc, [host.self.id, ra.self.id, rb.self.id]) &&
+        open(ra, [before, rb.self.id, rc.self.id]) &&
+        open(rb, [before, ra.self.id, rc.self.id]),
+      { label: 'the newcomer linked to everyone' },
+    )
+    expect(seen.map((e) => e.type)).toEqual(['joined', 'link'])
+    expect([ra.state, rb.state]).toEqual(['active', 'active'])
+    expect([...tv.errors, ...a.errors, ...b.errors]).toEqual([])
+  })
+
+  it('a joiner re-joins under its new id without asking the creator again, and the others drop the old id', async () => {
+    const { connect, drop } = setup()
+    const tv = connect('tv')
+    const a = connect('a')
+    const watchB = gate('peer.left', () => false)
+    const b = connect('b', {}, watchB.wrap)
+    let asked = 0
+    const host = await tv.p.createRoom({ accept: () => ++asked > 0 })
+    const ra = await a.p.join(host.key)
+    const rb = await b.p.join(host.key)
+    await waitFor(() => open(host, [ra.self.id, rb.self.id]) && open(ra, [host.self.id, rb.self.id]))
+    const old = ra.self.id
+    const transitions = states(ra)
+    const seen = events(host)
+
+    drop(old)
+    await waitFor(
+      () =>
+        ra.self.id !== old &&
+        open(ra, [host.self.id, rb.self.id]) &&
+        open(host, [ra.self.id, rb.self.id]) &&
+        open(rb, [host.self.id, ra.self.id]),
+      { label: 'mesh rebuilt under the new id' },
+    )
+    expect(asked).toBe(2)
+    expect(transitions).toEqual(['rejoining', 'active'])
+    expect(seen[0]).toEqual({ type: 'left', member: expect.objectContaining({ id: old, link: 'open' }) })
+    expect(watchB.seen.some((s) => s.event === 'peer.left' && (s.data as PeerLeft).member === old)).toBe(true)
+
+    const atHost = received(host, 'events')
+    const atB = received(rb, 'events')
+    ra.channel('events').send({ type: 'back' })
+    await waitFor(() => atHost.length === 1 && atB.length === 1)
+    expect(atHost).toEqual([[{ type: 'back', n: 0 }, ra.self.id]])
+    expect(atB).toEqual([[{ type: 'back', n: 0 }, ra.self.id]])
+    expect(a.errors).toEqual([])
+  })
+
+  async function withheldRejoin() {
+    const { connect, drop } = setup()
+    const tv = connect('tv')
+    let armed = false
+    const held = gate('peer.admitted', () => armed)
+    const a = connect('a', { rejoinBaseMs: 20, rejoinMaxMs: 20 }, held.wrap)
+    const host = await tv.p.createRoom({ accept: () => true })
+    const ra = await a.p.join(host.key)
+    await waitFor(() => open(host, [ra.self.id]) && open(ra, [host.self.id]))
+    const old = ra.self.id
+    armed = true
+    drop(old)
+    await waitFor(() => held.queued > 0 && host.members.some((m) => m.id !== old), { label: 're-admitted, admission withheld' })
+    const fresh = host.members.find((m) => m.id !== old)!.id
+    const joins = held.joins
+    await waitFor(() => held.joins > joins, { label: 'still retrying' })
+    return { host, ra, held, fresh }
+  }
+
+  it('stops re-joining when kicked', async () => {
+    const { host, ra, held, fresh } = await withheldRejoin()
+    const reasons = closes(ra)
+    await host.kick(fresh)
+    await waitFor(() => reasons.length === 1)
+    expect(reasons).toEqual(['kicked'])
+    expect(ra.state).toBe('closed')
+    const joins = held.joins
+    await tick(80)
+    expect(held.joins).toBe(joins)
+  })
+
+  it('stops re-joining on leave()', async () => {
+    const { ra, held } = await withheldRejoin()
+    expect(ra.state).toBe('rejoining')
+    const reasons = closes(ra)
+    ra.leave()
+    expect(reasons).toEqual(['left'])
+    const joins = held.joins
+    await tick(80)
+    expect(held.joins).toBe(joins)
+  })
+
+  it('gives up and closes with lost when the creator is gone', async () => {
+    const { srv, connect } = setup()
+    const { tv, host, ra, rb } = await mesh(connect, { rejoinAttempts: 3, rejoinBaseMs: 10, rejoinMaxMs: 20 })
+    const transitions = states(ra)
+    const reasons = [closes(ra), closes(rb)]
+    const left = events(ra)
+    tv.p.close()
+    await waitFor(() => reasons.every((r) => r.length === 1), { label: 'both joiners gave up' })
+    expect(reasons).toEqual([['lost'], ['lost']])
+    expect(transitions).toEqual(['rejoining', 'closed'])
+    expect(left[0]).toEqual({ type: 'left', member: expect.objectContaining({ id: host.self.id }) })
+    expect(srv.room(await ownerRoom(host)).size).toBe(0)
+  })
+
+  it('closes with refused when the server denies the re-join', async () => {
+    const { connect, drop, denied } = setup()
+    const { ra } = await mesh(connect)
+    const reasons = closes(ra)
+    denied.add('a')
+    drop(ra.self.id)
+    await waitFor(() => reasons.length === 1)
+    expect(reasons).toEqual(['refused'])
+  })
+
+  it('re-joins when the page becomes visible and the link to the creator is not open', async () => {
+    const { net, connect } = setup()
+    const document = fakeDocument()
+    net.block('tv', 'phone')
+    const tv = connect('tv', { connectTimeoutMs: 200 })
+    let asked = 0
+    const host = await tv.p.createRoom({ accept: () => ++asked > 0 })
+    const watch = gate('peer.admitted', () => false)
+    const phone = connect('phone', { connectTimeoutMs: 200, document }, watch.wrap)
+    const guest = await phone.p.join(host.key)
+    await waitFor(() => guest.members[0]?.link === 'failed' && host.members.length === 0)
+    net.unblock('tv', 'phone')
+
+    const joins = watch.joins
+    document.dispatch('visibilitychange')
+    await tick(30)
+    expect([watch.joins, guest.state]).toEqual([joins, 'active'])
+
+    document.visibilityState = 'visible'
+    document.dispatch('visibilitychange')
+    await waitFor(() => open(guest, [host.self.id]) && open(host, [guest.self.id]), { label: 're-joined on visible' })
+    expect(asked).toBe(1)
+    expect(guest.state).toBe('active')
+
+    const after = watch.joins
+    document.dispatch('visibilitychange')
+    await tick(30)
+    expect(watch.joins).toBe(after)
+
+    const byes: string[] = []
+    net.filter = (owner, channelId, data) => {
+      if (channelId === 0 && typeof data === 'string' && data.includes('"bye"')) byes.push(owner)
+      return data
+    }
+    document.dispatch('pagehide')
+    expect(byes).toEqual(['phone'])
   })
 })

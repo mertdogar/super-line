@@ -16,6 +16,7 @@ export interface FakeNetwork {
   connections(owner?: string): FakePeerConnection[]
   /** Never connect any pair between these two owners. */
   block(a: string, b: string): void
+  unblock(a: string, b: string): void
   /** Inspect or rewrite every data-channel send; return `undefined` to drop it. */
   filter?: (owner: string, channelId: number, data: Data) => Data | undefined
 }
@@ -206,6 +207,9 @@ export function createFakeNetwork(): FakeNetwork {
     blocked: (a: string, b: string) => blocks.has(pair(a, b)),
     block(a: string, b: string) {
       blocks.add(pair(a, b))
+    },
+    unblock(a: string, b: string) {
+      blocks.delete(pair(a, b))
     },
     connections: (owner?: string) => net.all.filter((pc) => owner === undefined || pc.owner === owner),
     rtc(owner: string) {

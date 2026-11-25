@@ -58,7 +58,7 @@ const peerKit = peer({
 createSuperLineServer({ plugins: [peerKit.plugin], ... })
 
 // client
-const p = peerClient(client, peerFragment, { iceServers, serializer?, rtc?, onError? })
+const p = peerClient(client, peerFragment, { iceServers, serializer?, rtc?, onError?, document?, ... })
 
 const room = await p.createRoom({ accept: (joiner) => true, maxMembers: 8 })
 room.key                                  // long random string → QR code / link
@@ -66,13 +66,15 @@ const room = await p.join(key)            // resolves on admission
 
 room.self                                 // { id, role }
 room.members                              // [{ id, role?, info?, link: 'connecting' | 'open' | 'failed' }]
+room.state                                // 'active' | 'rejoining' | 'closed'
+room.onState((state) => ...)
 room.onMember((event) => ...)             // joined | left | link-state change
 room.channel('input').send(msg)           // every member whose link is open
 room.channel('input').to(memberId).send(msg)
 room.channel('input').on((msg, from) => ...)   // returns an unsubscribe
 room.kick(memberId)                       // creator only
 room.leave()
-room.onClose((reason) => ...)
+room.onClose((reason) => ...)             // 'left' | 'kicked' | 'closed' | 'refused' | 'lost'
 p.close()
 ```
 
@@ -91,6 +93,7 @@ Requests are camelCase, events dot-prefixed, following plugin-chat. Every schema
 | Request | Input | Output |
 | --- | --- | --- |
 | `peerCreateRoom` | `{ ownerSecret }` | `{ roomKey, self: { connId, role } }` |
+| `peerCloseRoom` | `{ ownerSecret }` | `{}` |
 | `peerJoin` | `{ roomKey, ticket }` | `{ self: { connId, role } }` |
 | `peerAdmit` | `{ ownerSecret, joiner: { connId, info? }, accept, members: [{ connId, info? }] }` | `{}` |
 | `peerRemove` | `{ ownerSecret, member, members: connId[] }` | `{}` |
@@ -124,6 +127,9 @@ import `node:crypto`).
   `ctx.describe(conn).rooms` entries with the `peer-owner:` prefix (no new state). `await
   ctx.room(ownerRoom).add(conn)`; if the socket closed meanwhile (`!conn.raw.writable`), remove it again.
   Return `{ roomKey, self }`. Sending the same secret again re-claims the same key (idempotent).
+- **`peerCloseRoom`**: recompute the owner room from the secret and remove the calling connection from
+  it. Stateless: it frees the `maxRoomsPerConn` slot, and join requests stop reaching that connection.
+  The creator's `leave()` and `p.close()` send it.
 - **`peerJoin`**: run `authorize({ joiner: ctx.describe(conn), roomKey, ctx })`. `false` ⇒ `FORBIDDEN`.
   `true` or `{ info }` ⇒ `ctx.room(ownerRoom).broadcast('peer.joinRequest', { keyHash, ticket, joiner: {
   connId, role, info } })`. Return `{ self }`. The server does not know whether anyone owns the room.
@@ -165,9 +171,10 @@ inbound validation is off by default).
   key this client created rejects.
 - Creator, on `peer.joinRequest` whose `keyHash` matches one of its rooms: ignore its own id and ids
   already members; if the `ticket` was accepted before, auto-accept and **replace** the old member that
-  held that ticket (close its link); otherwise run `accept(joiner)`. Reject when the room is at
-  `maxMembers`. Admissions are serialized (one at a time); queue at most 8 pending requests per room and
-  drop the overflow. Send `peerAdmit` with the current member list, add the joiner to the list, and
+  held that ticket (close its link, and send `peerRemove` for the old id to the remaining members so
+  they drop it at once instead of waiting for their liveness timeout); otherwise run `accept(joiner)`.
+  Reject when the room is at `maxMembers`. Admissions are serialized (one at a time); queue at most 8
+  pending requests per room and drop the overflow. Send `peerAdmit` with the current member list, add the joiner to the list, and
   start the link to it.
 
 ### Links
@@ -210,12 +217,26 @@ creator's own connect timeout removes a member from the list it sends in admissi
 ### Reconnect and automatic re-join
 
 - Creator, on `client.onReconnect`: keep its links and member list; re-send `peerCreateRoom` with the
-  saved `ownerSecret` for each room it owns (same key). `self.id` updates; `polite` stays fixed per link.
+  saved `ownerSecret` for each room it owns (same key). `self.id` updates when that answers; an
+  admission waits for it, so `peer.admitted.by` and the new link agree on the creator's id. Each link
+  keeps the id and `polite` it was created with, so existing members keep the creator's old id.
 - Joiner: re-send `peerJoin(roomKey, ticket)` from `client.onReconnect`, on `visibilitychange` →
-  `visible` when its link to the creator is not open, and when that link closes. Retry with backoff;
-  stop on an explicit reject, a kick (`peer.left` naming itself), or `leave()`. On a successful re-join
-  the client has a new connection id: drop links to members under the old identity and rebuild from the
-  fresh `peer.admitted.members`.
+  `visible` when its link to the creator is not open, and when that link closes (the creator is removed
+  from the member list: `bye`, liveness loss, or a channel closing after open). A link to the creator
+  that fails before it ever opened does not start a re-join; the next `visible` does.
+- Retry: one `peerJoin` per attempt, the next after `rejoinBaseMs` (500) doubling up to `rejoinMaxMs`
+  (5000); an attempt is only spent while the client is connected (a reconnect re-drives it, a `visible`
+  retries at once). After `rejoinAttempts` (8) the room closes with `'lost'`. It stops with `'refused'`
+  on `FORBIDDEN` from `peerJoin` or `peer.admitted { accept: false }`, `'kicked'` on `peer.left` naming
+  the current or the re-joining id, `'left'` on `leave()`, `'closed'` on `p.close()`.
+- While re-joining, `room.state` is `'rejoining'` and inbound `peer.signal` / `peer.joined` for the room
+  are held in the same bounded buffer, then replayed once the re-join settles.
+- On `peer.admitted`: when the connection id changed, every member is removed (`'left'` events) and the
+  room is rebuilt from `by` + `members` (`'joined'` events). When it did not, the creator's entry, any
+  member not in the fresh list and any member whose link is not open are rebuilt; open links stay. The
+  room object stays the same; `onClose` fires only when re-join gives up or is refused.
+- The creator only re-admits a returning id it no longer lists, so a re-join under the same id waits for
+  the creator's own liveness or connect timeout to drop the old entry.
 - A plugin-auth session replacement builds a new `SuperLineClient`; the app builds a new `peerClient`.
   Documented, not automated.
 
@@ -229,6 +250,29 @@ creator's own connect timeout removes a member from the list it sends in admissi
 - Hosts should rate-limit `peerJoin` / `peerSignal` / `peerAdmit` with middleware.
 - Both peers must reach the same node or cluster (on Cloudflare, the same Durable Object name).
 - Phones: hold a Screen Wake Lock while linked; recommend `reconnectMaxMs ≈ 3000` and keepalive on.
+- A member that calls `leave()` before its links are open cannot send `bye`. Its own state is clean
+  (links closed, timers cleared, room gone), but the others see that member go `connecting` → `failed`
+  at their connect timeout; the creator drops it from its list at the same point.
+- When the creator leaves or closes, joiners see its link close and re-join until they give up
+  (`'lost'`, about 30 s with the defaults). There is no "room ended" message.
+
+## Decisions made during implementation
+
+- A data channel that closes, or a peer connection that reaches `failed`/`closed`, after the link was
+  open counts as an immediate departure (same as `bye`), not as a link-state change.
+- User messages that arrive before the hello is verified are held (up to 64 per link) and delivered
+  once it is, or dropped if the link closes first.
+- `maxMembers` counts the creator: range 2..33, default 33, so the wire cap of 32 listed members holds.
+- Error codes: `FORBIDDEN` (create or join denied, room cap, creator rejected the join, non-creator
+  `kick`, hello mismatch reported to `onError`), `TIMEOUT` (nobody admitted the join), `BAD_REQUEST`
+  (no `RTCPeerConnection`, bad `maxMembers`, joining your own room, a message over the link or channel
+  limit), `NOT_FOUND` (unknown channel or member), `DISCONNECTED` (`to(id)` on a link that is not open,
+  peer client closed), `VALIDATION` (an inbound message fails its channel schema; wire input bounds).
+- `members[].role` is filled from the first server-stamped `peer.signal` from that member, so it may be
+  `undefined` until then (the creator knows each joiner's role from its join request, and a joiner
+  knows the creator's from `peer.admitted.by`).
+- A returning ticket replaces the old member even while its link still looks open. A ticket therefore
+  grants a seat on its own; hosts must redact `ticket` in the inspector along with the other secrets.
 
 ## Tickets
 

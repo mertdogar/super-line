@@ -36,7 +36,7 @@ afterEach(async () => {
   for (const fn of cleanups.splice(0).reverse()) await fn()
 })
 
-function setup() {
+function setup(opts: { libdatachannel?: boolean } = {}) {
   const loopback = createLoopbackTransport()
   const conns = new Map<string, Conn>()
   const denied = new Set<string>()
@@ -52,7 +52,11 @@ function setup() {
     ],
   })
   cleanups.push(() => srv.close())
-  const net = createFakeNetwork()
+  const net = createFakeNetwork(opts)
+  cleanups.push(async () => {
+    await waitFor(() => net.connections().every((pc) => pc.closed), { label: 'every peer connection closed' })
+    expect(net.leaked).toBe(0)
+  })
   /** Drop a client's server connection; it reconnects under a new connection id. */
   const drop = (connId: string) => conns.get(connId)!.terminate()
   const raw = (name: string): Client => {
@@ -295,6 +299,16 @@ describe('mesh', () => {
     const { net, connect } = setup()
     await mesh(connect)
     for (const owner of ['tv', 'a', 'b']) expect(net.connections(owner)).toHaveLength(2)
+  })
+
+  it('links a mesh through an implementation that offers on its own and answers inside setRemoteDescription', async () => {
+    const { connect } = setup({ libdatachannel: true })
+    const { tv, a, b, host, ra, rb } = await mesh(connect)
+    const got = received(rb, 'events')
+    host.channel('events').send({ type: 'hi' })
+    ra.channel('events').send({ type: 'hey' })
+    await waitFor(() => got.length === 2)
+    expect([...tv.errors, ...a.errors, ...b.errors]).toEqual([])
   })
 
   it('links two joiners admitted back to back', async () => {
@@ -561,7 +575,7 @@ describe('leaving', () => {
     guest.leave()
     expect(guest.members).toEqual([])
     expect(guest.state).toBe('closed')
-    expect(net.connections('phone').every((pc) => pc.closed)).toBe(true)
+    await waitFor(() => net.connections('phone').every((pc) => pc.closed))
     await waitFor(() => host.members.length === 1 && rb.members.find((m) => m.id === guest.self.id)?.link === 'failed')
     expect(seen).toEqual([{ type: 'link', member: expect.objectContaining({ id: guest.self.id, link: 'failed' }) }])
     await tick(250)
@@ -591,7 +605,7 @@ describe('leaving', () => {
     expect(reasons).toEqual(['closed'])
     await expect(pendingJoin).rejects.toMatchObject({ code: 'DISCONNECTED' })
     await expect(a.p.join(host.key)).rejects.toMatchObject({ code: 'DISCONNECTED' })
-    expect(net.connections('a').every((pc) => pc.closed)).toBe(true)
+    await waitFor(() => net.connections('a').every((pc) => pc.closed))
     await waitFor(() => open(host, [rb.self.id]) && open(rb, [host.self.id]))
   })
 })
@@ -619,23 +633,25 @@ describe('admission and buffering limits', () => {
     expect(settled.flatMap((r) => (r.status === 'rejected' ? [r.reason.code] : []))).toEqual(['TIMEOUT', 'TIMEOUT'])
   })
 
-  async function earlySignals(fillKey = false) {
+  async function earlySignals(fillers = 0) {
     const { connect, raw } = setup()
     const tv = connect('tv')
     const held = gate('peer.admitted')
     const phone = connect('phone', {}, held.wrap)
-    const outsiders = fillKey ? [raw('o1'), raw('o2')] : []
+    const outsiders = Array.from({ length: fillers }, (_, i) => raw(`o${i}`))
     const signals = () => held.seen.filter((s) => s.event === 'peer.signal').length
     let joinerId = ''
     const host: Room = await tv.p.createRoom({
       accept: async (joiner) => {
         joinerId = joiner.id
-        for (const outsider of outsiders) {
-          for (let i = 0; i < 32; i++) {
-            await outsider.peerSignal({ roomKey: host.key, to: joiner.id, kind: 'candidate', candidate: { candidate: `x${i}` } })
-          }
-        }
-        await waitFor(() => signals() === outsiders.length * 32)
+        await Promise.all(
+          outsiders.map(async (outsider) => {
+            for (let i = 0; i < 32; i++) {
+              await outsider.peerSignal({ roomKey: host.key, to: joiner.id, kind: 'candidate', candidate: { candidate: `x${i}` } })
+            }
+          }),
+        )
+        await waitFor(() => signals() === outsiders.length * 32, { timeout: 10_000, label: 'every filler frame held' })
         return true
       },
     })
@@ -661,8 +677,17 @@ describe('admission and buffering limits', () => {
     expect(foreign(phone.errors)).toBe(32 - real)
   })
 
-  it('holds at most 64 early frames per key', async () => {
-    const { phone, held, joining, bogus } = await earlySignals(true)
+  it('holds the early frames of a full room: 31 other members and the creator each at their own cap', async () => {
+    const { phone, held, joining, bogus } = await earlySignals(31)
+    await bogus(5)
+    held.release()
+    const guest = await joining
+    await waitFor(() => foreign(phone.errors) === 5)
+    await waitFor(() => guest.members[0]?.link === 'open', { label: "the creator's held offer formed the link" })
+  })
+
+  it('holds at most 33 senders worth of early frames per key', async () => {
+    const { phone, held, joining, bogus } = await earlySignals(33)
     await bogus(5)
     held.release()
     await joining
@@ -794,17 +819,86 @@ describe('reconnect and re-join', () => {
   })
 
   it('gives up and closes with lost when the creator is gone', async () => {
-    const { srv, connect } = setup()
+    const { srv, net, connect } = setup()
     const { tv, host, ra, rb } = await mesh(connect, { rejoinAttempts: 3, rejoinBaseMs: 10, rejoinMaxMs: 20 })
     const transitions = states(ra)
     const reasons = [closes(ra), closes(rb)]
     const left = events(ra)
-    tv.p.close()
+    tv.client.close()
+    for (const pc of net.connections('tv')) pc.close()
     await waitFor(() => reasons.every((r) => r.length === 1), { label: 'both joiners gave up' })
     expect(reasons).toEqual([['lost'], ['lost']])
     expect(transitions).toEqual(['rejoining', 'closed'])
     expect(left[0]).toEqual({ type: 'left', member: expect.objectContaining({ id: host.self.id }) })
     expect(srv.room(await ownerRoom(host)).size).toBe(0)
+  })
+
+  for (const how of ['leave', 'close'] as const) {
+    it(`members close with ended, without re-joining, when the creator calls ${how}()`, async () => {
+      const { connect } = setup()
+      const tv = connect('tv')
+      const watchA = gate('peer.admitted', () => false)
+      const watchB = gate('peer.admitted', () => false)
+      const a = connect('a', {}, watchA.wrap)
+      const b = connect('b', {}, watchB.wrap)
+      const host = await tv.p.createRoom({ accept: () => true })
+      const ra = await a.p.join(host.key)
+      const rb = await b.p.join(host.key)
+      await waitFor(() => open(ra, [host.self.id, rb.self.id]) && open(rb, [host.self.id, ra.self.id]))
+      const transitions = [states(ra), states(rb)]
+      const reasons = [closes(ra), closes(rb)]
+      const joins = [watchA.joins, watchB.joins]
+      if (how === 'leave') host.leave()
+      else tv.p.close()
+      await waitFor(() => reasons.every((r) => r.length === 1))
+      expect(reasons).toEqual([['ended'], ['ended']])
+      expect(transitions).toEqual([['closed'], ['closed']])
+      await tick(50)
+      expect([watchA.joins, watchB.joins]).toEqual(joins)
+      expect([...a.errors, ...b.errors]).toEqual([])
+    })
+  }
+
+  it('an end from a member that is not the creator is ignored', async () => {
+    const { net, connect } = setup()
+    net.filter = (owner, channelId, data) =>
+      owner === 'b' && channelId === 0 && typeof data === 'string' && data.includes('"bye"') ? '{"t":"end"}' : data
+    const { host, ra, rb } = await mesh(connect)
+    const reasons = closes(ra)
+    rb.leave()
+    await waitFor(() => open(ra, [host.self.id]))
+    await tick(30)
+    expect(reasons).toEqual([])
+    expect(ra.state).toBe('active')
+  })
+
+  it('an admission whose creator dropped after its re-claim waits for the next re-claim', async () => {
+    const { connect, drop } = setup()
+    let tvClient!: Client
+    const tv = connect('tv')
+    tvClient = tv.client
+    let armed = false
+    const host = await tv.p.createRoom({
+      accept: async () => {
+        if (armed) {
+          drop(host.self.id)
+          await waitFor(() => !tvClient.connected, { label: 'the creator saw the drop' })
+        }
+        return true
+      },
+    })
+    const ra = await connect('a').p.join(host.key)
+    await waitFor(() => open(host, [ra.self.id]) && open(ra, [host.self.id]))
+    armed = true
+    const before = host.self.id
+    const rb = await connect('b').p.join(host.key)
+    expect(rb.self.id).not.toBe(before)
+    await waitFor(() => open(host, [ra.self.id, rb.self.id]) && open(rb, [host.self.id, ra.self.id]), {
+      label: 'the newcomer linked to the creator under its new id',
+    })
+    expect(host.self.id).not.toBe(before)
+    expect(rb.members.find((m) => m.id === host.self.id)).toBeDefined()
+    expect(tv.errors).toEqual([])
   })
 
   it('closes with refused when the server denies the re-join', async () => {

@@ -27,10 +27,11 @@ const log = getLogger(['super-line', 'plugin-peer', 'client'])
 const MAX_ROOM_MEMBERS = 33
 const ADMISSION_QUEUE = 8
 const HELD_PER_SENDER = 32
-const HELD_PER_KEY = 64
+const HELD_PER_KEY = MAX_ROOM_MEMBERS * HELD_PER_SENDER
 const EARLY_MESSAGES = 64
 const PENDING_CANDIDATES = 64
 const FALLBACK_MAX_MESSAGE = 65_536
+const CLOSE_GRACE_MS = 1_000
 
 const stc = peerSurface.serverToClient
 const helloSchema = z.strictObject({ t: z.literal('hello'), from: z.string(), to: z.string(), roomKey: z.string() })
@@ -51,8 +52,8 @@ export interface PeerMemberEvent {
   member: PeerRoomMember
 }
 
-/** `refused`: a re-join was denied. `lost`: a re-join ran out of attempts. */
-export type PeerCloseReason = 'left' | 'kicked' | 'closed' | 'refused' | 'lost'
+/** `refused`: a re-join was denied. `lost`: a re-join ran out of attempts. `ended`: the creator left or closed. */
+export type PeerCloseReason = 'left' | 'kicked' | 'closed' | 'refused' | 'lost' | 'ended'
 
 /** `rejoining` while a joined room re-joins after a reconnect or after losing its link to the creator. */
 export type PeerRoomState = 'active' | 'rejoining' | 'closed'
@@ -174,8 +175,10 @@ interface Link {
   maxMessageSize(): number
   send(index: number, data: string | Uint8Array): void
   bye(): void
-  close(bye: boolean): void
+  close(farewell?: Farewell): void
 }
+
+type Farewell = 'bye' | 'end'
 
 interface Member {
   id: string
@@ -296,6 +299,8 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
   const tickets = new Map<string, string>()
   const held = new Map<string, Held[]>()
   let closed = false
+  let announce!: () => void
+  let reconnected = new Promise<void>((resolve) => (announce = resolve))
 
   const report = (error: unknown, info: PeerErrorInfo<Ch>) => {
     try {
@@ -351,7 +356,7 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
     const member = room.members.get(id)
     if (!member) return
     room.members.delete(id)
-    member.link.close(false)
+    member.link.close()
     emitMember(room, { type: 'left', member: snapshot(member) })
     if (id === room.creator) startRejoin(room)
   }
@@ -384,7 +389,7 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
     clearTimeout(room.rejoin?.timer)
     room.rejoin = undefined
     held.delete(room.key)
-    for (const member of room.members.values()) member.link.close(true)
+    for (const member of room.members.values()) member.link.close(room.owner ? 'end' : 'bye')
     room.members.clear()
     emitState(room)
     for (const cb of room.closeListeners) {
@@ -410,6 +415,7 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
     let makingOffer = false
     let ignoreOffer = false
     let settingAnswer = false
+    let described = false
     let lastHeard = 0
     let lastSent = 0
     let liveness: ReturnType<typeof setInterval> | undefined
@@ -438,26 +444,48 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
 
     const sendControl = (msg: object) => {
       const dc = dcs[0]
-      if (dc?.readyState !== 'open') return
+      if (dc?.readyState !== 'open') return false
       try {
         dc.send(JSON.stringify(msg))
         lastSent = Date.now()
-      } catch {}
+        return true
+      } catch {
+        return false
+      }
     }
 
-    function release() {
+    function release(farewell?: Farewell) {
       released = true
       clearInterval(liveness)
-      for (const dc of dcs) {
-        dc.onopen = dc.onmessage = dc.onclose = null
+      const said = farewell !== undefined && sendControl({ t: farewell })
+      for (const dc of dcs) dc.onopen = dc.onmessage = dc.onclose = null
+      if (pc) pc.onnegotiationneeded = pc.onicecandidate = pc.onconnectionstatechange = null
+      let left = dcs.length
+      const finish = () => {
+        clearTimeout(grace)
+        pc?.close()
+      }
+      const grace = setTimeout(finish, CLOSE_GRACE_MS)
+      const closed = () => {
+        if (--left === 0) finish()
+      }
+      const shut = (dc: RTCDataChannel, then = closed) => {
+        if (dc.readyState === 'closed') return then()
+        dc.onclose = () => {
+          dc.onclose = null
+          then()
+        }
         try {
           dc.close()
         } catch {}
       }
-      if (pc) {
-        pc.onnegotiationneeded = pc.onicecandidate = pc.onconnectionstatechange = null
-        pc.close()
-      }
+      if (!dcs.length) finish()
+      else if (said) {
+        shut(dcs[0]!, () => {
+          for (const dc of dcs.slice(1)) shut(dc)
+          closed()
+        })
+      } else for (const dc of dcs) shut(dc)
     }
 
     function fail(error?: unknown) {
@@ -527,7 +555,9 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
         for (const [index, d] of early.splice(0)) deliver(index, d)
         return
       }
-      if ((msg as { t?: unknown } | undefined)?.t === 'bye') removeMember(room, peerId)
+      const t = (msg as { t?: unknown } | undefined)?.t
+      if (t === 'bye') removeMember(room, peerId)
+      else if (t === 'end' && peerId === room.creator) closeRoom(room, 'ended')
     }
 
     function setup(dc: RTCDataChannel, index: number) {
@@ -586,12 +616,13 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
         const init: RTCDataChannelInit = { negotiated: true, id: i + 1, ...(lossy ? { ordered: false, maxRetransmits: 0 } : {}) }
         setup(peer.createDataChannel(name, init), i + 1)
       })
+      if (peer.signalingState === 'have-local-offer') sendDescription()
     }
 
     async function handle(s: PeerSignal) {
       if (released || !pc) return
       if (s.kind === 'candidate') {
-        if (pc.remoteDescription) await addCandidate(s.candidate)
+        if (described) await addCandidate(s.candidate)
         else if (candidates.length < PENDING_CANDIDATES) candidates.push(s.candidate)
         return
       }
@@ -601,6 +632,7 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
       settingAnswer = s.kind === 'answer'
       await pc.setRemoteDescription({ type: s.kind, sdp: s.sdp })
       settingAnswer = false
+      described = true
       if (s.kind === 'offer') {
         await pc.setLocalDescription()
         sendDescription()
@@ -631,12 +663,10 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
         dcs[index]!.send(data as string)
         lastSent = Date.now()
       },
-      bye: () => sendControl({ t: 'bye' }),
-      close(bye) {
+      bye: () => void sendControl({ t: 'bye' }),
+      close(farewell) {
         clearTimeout(connectTimer)
-        if (released) return
-        if (bye) sendControl({ t: 'bye' })
-        release()
+        if (!released) release(farewell)
       },
     }
   }
@@ -757,6 +787,10 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
       }
     }
     await o.claim
+    while (!dyn.connected && !room.closed) {
+      await reconnected
+      await o.claim
+    }
     if (room.closed || room.members.has(id)) return
     if (room.members.size + 2 > o.maxMembers) accept = false
     const members = accept
@@ -947,6 +981,8 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
         attemptRejoin(room)
       } else startRejoin(room)
     }
+    announce()
+    reconnected = new Promise((resolve) => (announce = resolve))
   })
 
   const onVisibility = () => {
@@ -1029,6 +1065,7 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
       page?.removeEventListener('pagehide', onPageHide)
       for (const p of pending.values()) settle(p, closedError())
       for (const room of rooms.values()) closeRoom(room, 'closed')
+      announce()
     },
   }
 }

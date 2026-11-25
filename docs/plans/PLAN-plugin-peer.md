@@ -157,8 +157,8 @@ inbound validation is off by default).
 - Drop a `peer.signal` unless this client holds the `roomKey` **and** `from.connId` is in that room's
   member set.
 - **Bounded buffer**: while a join for a key is pending or the room is held, hold `peer.signal` and
-  `peer.joined` frames from connection ids not yet in the member set (cap ~32 per sender, ~64 per key,
-  TTL = join timeout). Replay in arrival order when that sender becomes a member; discard on reject or
+  `peer.joined` frames from connection ids not yet in the member set (cap 32 per sender, 33 × 32 per key
+  so a full room cannot overflow it, TTL = join timeout). Replay in arrival order when that sender becomes a member; discard on reject or
   timeout. Cross-node delivery order is not guaranteed, and perfect negotiation never re-sends an offer.
 
 ### Create / join / admit
@@ -195,6 +195,8 @@ inbound validation is off by default).
 - **Connect timeout**: a link not open within 15 s is closed and marked `failed`.
 - **Liveness**: any inbound message on any channel counts as "heard"; send a control ping after 1 s of
   idle; declare the peer gone after 3 s of silence. Send a control `bye` on `leave()` and on `pagehide`.
+  The creator's `leave()` and `p.close()` send `end` instead; a member that hears `end` from the creator
+  closes the room with `'ended'` and does not re-join.
 - Closing a link closes every data channel and then the peer connection (Node hosts hang otherwise).
 
 ### Sending and receiving
@@ -253,8 +255,10 @@ creator's own connect timeout removes a member from the list it sends in admissi
 - A member that calls `leave()` before its links are open cannot send `bye`. Its own state is clean
   (links closed, timers cleared, room gone), but the others see that member go `connecting` → `failed`
   at their connect timeout; the creator drops it from its list at the same point.
-- When the creator leaves or closes, joiners see its link close and re-join until they give up
-  (`'lost'`, about 30 s with the defaults). There is no "room ended" message.
+- When the creator leaves or closes, joiners close at once with `'ended'`. A creator that merely
+  disconnects, crashes or closes its tab without `leave()` sends no `end`: joiners see its link close and
+  re-join until they give up (`'lost'`, about 30 s with the defaults). A joiner already re-joining when
+  the creator leaves never hears the `end` either.
 
 ## Decisions made during implementation
 
@@ -273,6 +277,47 @@ creator's own connect timeout removes a member from the list it sends in admissi
   knows the creator's from `peer.admitted.by`).
 - A returning ticket replaces the old member even while its link still looks open. A ticket therefore
   grants a seat on its own; hosts must redact `ticket` in the inspector along with the other secrets.
+
+### What real WebRTC changed (ticket 4, node-datachannel 0.32.3 / libdatachannel)
+
+- **Closing order.** A link closes its data channels and closes the peer connection only once every
+  channel has reported `close` (or after a 1 s grace). Closing the peer connection straight after
+  `dc.close()` left a native channel half-closed in libdatachannel (the polyfill defers the native
+  channel close to `setImmediate`, which then runs against a closed connection), and that channel kept the
+  Node process alive (2 of 15 probe runs hung, 0 of 23 with the wait). Browsers are unaffected by it.
+- **Farewells are delivered before the close.** `bye` and `end` are sent on the control channel, then the
+  control channel alone is closed; the user channels and the peer connection close after it reports
+  `close`. libdatachannel's peer connection `close()` drops data still in flight, so the old
+  send-then-close lost every `bye` (browser behaviour was not measured; the wait costs one round trip).
+  The receiver gets the farewell strictly before any close on that link, because the control channel is
+  ordered.
+- **Implementations that negotiate on their own.** libdatachannel sets a local offer as soon as the first
+  channel is created and never fires `negotiationneeded`, answers a remote offer inside
+  `setRemoteDescription`, treats a parameterless `setLocalDescription()` as a no-op, and does implicit
+  rollback. The link sends its local offer right after creating the channels when the connection is
+  already in `have-local-offer` (never true in a browser at that point), and the rest of perfect
+  negotiation runs unchanged: every pair collides, the polite side rolls back, and no explicit
+  `{ type: 'rollback' }` is needed.
+- **Candidate buffering keys on the link's own state.** Remote candidates are held until this link has
+  applied a remote description, tracked by the link, not by reading `pc.remoteDescription`
+  (libdatachannel returns an empty description object instead of `null`, so every early candidate was
+  handed to `addIceCandidate` and rejected).
+- **`maxMessageSize` is read live.** The polyfill reports `sctp.maxMessageSize` only while connected
+  (262144 on localhost); the 65536 fallback applies before that. Messages between 64 KB and the live
+  limit are delivered.
+- **An admission waits for the creator's connection.** When the creator's connection drops after its
+  re-claim was awaited but before `peerAdmit` goes out, the admission now waits for the next reconnect
+  and its re-claim, so `peer.admitted.by` and the new link agree on the creator's id. An in-flight
+  `peerAdmit` that fails with `DISCONNECTED` still drops the joiner from the creator's list; if the server
+  had already delivered it, that joiner's link times out to `failed` and it re-joins on the next
+  `visible`.
+- **Tests.** The integration lane runs `test/rtc.integration.test.ts` against the polyfill with no ICE
+  servers (host candidates on localhost). A link takes about 1 s (libdatachannel's first DTLS flight is
+  retransmitted after 999 ms), so link waits have a 10 s ceiling; liveness runs at its 1 s / 3 s
+  defaults. A child Node process built from `test/rtc-exit.ts` must exit on its own after `leave()` and
+  `p.close()`. The fast lane's fake can mimic libdatachannel's negotiation
+  (`createFakeNetwork({ libdatachannel: true })`) and counts peer connections closed before their
+  channels (`net.leaked`), so both regressions show up without the native stack.
 
 ## Tickets
 

@@ -91,6 +91,7 @@
     "@super-line/client": "workspace:^",
     "@super-line/core": "workspace:^",
     "@super-line/server": "workspace:^",
-    "@super-line/transport-loopback": "workspace:*"
+    "@super-line/transport-loopback": "workspace:*",
+    "node-datachannel": "0.32.3"
   }
 }

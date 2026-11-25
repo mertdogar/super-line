@@ -2171,6 +2171,9 @@ importers:
       '@super-line/transport-loopback':
         specifier: workspace:*
         version: link:../transport-loopback
+      node-datachannel:
+        specifier: 0.32.3
+        version: 0.32.3
 
   packages/plugin-queue:
     dependencies:

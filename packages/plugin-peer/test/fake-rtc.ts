@@ -102,6 +102,7 @@ export class FakePeerConnection {
   readonly channels = new Map<number, FakeDataChannel>()
   remote: FakePeerConnection | undefined
   gotCandidate = false
+  rolledBack = false
   closed = false
   private gen = 0
 
@@ -161,6 +162,7 @@ export class FakePeerConnection {
     if (!remote) throw domError('OperationError', 'unknown remote description')
     if (desc.type === 'offer') {
       if (this.signalingState === 'have-local-offer') {
+        this.rolledBack = true
         this.localDescription = null
         this.signalingState = 'stable'
       }

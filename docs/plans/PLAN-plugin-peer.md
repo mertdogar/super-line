@@ -158,7 +158,7 @@ inbound validation is off by default).
   member set.
 - **Bounded buffer**: while a join for a key is pending or the room is held, hold `peer.signal` and
   `peer.joined` frames from connection ids not yet in the member set (cap 32 per sender, 33 × 32 per key
-  so a full room cannot overflow it, TTL = join timeout). Replay in arrival order when that sender becomes a member; discard on reject or
+  so a full room cannot overflow it, and at most 512 KB of frames per key, TTL = join timeout). Replay in arrival order when that sender becomes a member; discard on reject or
   timeout. Cross-node delivery order is not guaranteed, and perfect negotiation never re-sends an offer.
 
 ### Create / join / admit
@@ -181,7 +181,8 @@ inbound validation is off by default).
 
 - One `RTCPeerConnection` per `(roomKey, remote connId)`.
 - MDN **perfect negotiation** on every link, `polite = myConnId > theirConnId`, computed once when the
-  link is created.
+  link is created. Only the impolite side makes the first offer; the polite side answers it (see
+  "What real browsers changed").
 - Whoever learns of the other member creates the link: existing members on `peer.joined`, the newcomer
   for every entry of `peer.admitted.members`, the creator when it sends the admit.
 - Data channels are `negotiated: true` on both sides: id `0` is an internal reliable control channel;
@@ -269,7 +270,8 @@ creator's own connect timeout removes a member from the list it sends in admissi
 - `maxMembers` counts the creator: range 2..33, default 33, so the wire cap of 32 listed members holds.
 - Error codes: `FORBIDDEN` (create or join denied, room cap, creator rejected the join, non-creator
   `kick`, hello mismatch reported to `onError`), `TIMEOUT` (nobody admitted the join), `BAD_REQUEST`
-  (no `RTCPeerConnection`, bad `maxMembers`, joining your own room, a message over the link or channel
+  (no `RTCPeerConnection`, `createRoom` without `crypto.subtle` (a plain-HTTP page on a LAN address;
+  `join` does not need it), bad `maxMembers`, joining your own room, a message over the link or channel
   limit), `NOT_FOUND` (unknown channel or member), `DISCONNECTED` (`to(id)` on a link that is not open,
   peer client closed), `VALIDATION` (an inbound message fails its channel schema; wire input bounds).
 - `members[].role` is filled from the first server-stamped `peer.signal` from that member, so it may be
@@ -277,6 +279,15 @@ creator's own connect timeout removes a member from the list it sends in admissi
   knows the creator's from `peer.admitted.by`).
 - A returning ticket replaces the old member even while its link still looks open. A ticket therefore
   grants a seat on its own; hosts must redact `ticket` in the inspector along with the other secrets.
+- **Early frames have a byte budget.** The held-frame buffer also stops at 512 KB per key, counted as
+  the UTF-8 length of each frame's JSON. The count caps alone let anyone who knows a room key make a
+  joining client hold 33 × 32 frames of up to 64 KB of SDP each (about 70 MB) for the join timeout.
+  Measured with node-datachannel 0.32.3 on a host with seven interfaces, one link's signaling is an
+  offer or answer of about 1.2 KB and about 300 B per candidate (3.2–3.5 KB per sender in total), so a
+  sender at its 32-frame cap with real frames holds about 10.5 KB, and a full room of them about
+  350 KB. Chrome (same host, the example's STUN server) sends a 650 B offer and about 375 B per
+  candidate, about 1.6 KB per sender. Frames past the budget are dropped like frames past the count
+  caps.
 
 ### What real WebRTC changed (ticket 4, node-datachannel 0.32.3 / libdatachannel)
 
@@ -318,6 +329,16 @@ creator's own connect timeout removes a member from the list it sends in admissi
   `p.close()`. The fast lane's fake can mimic libdatachannel's negotiation
   (`createFakeNetwork({ libdatachannel: true })`) and counts peer connections closed before their
   channels (`net.leaked`), so both regressions show up without the native stack.
+
+### What real browsers changed (ticket 5, Chrome, `examples/peer-controller`)
+
+- **Only the impolite side makes the first offer.** In Chrome, a polite joiner whose own first offer
+  collided with the creator's rolled it back (implicit rollback on `setRemoteDescription`), answered,
+  and then the link never connected: in 7 such trials 5 stayed `connecting` until the connect timeout,
+  some with no local candidate ever gathered after the rollback; every trial without a rollback (9 of
+  9) connected. The polite side now skips `negotiationneeded` until it has applied a remote
+  description, so a browser pair never collides on its first offer. libdatachannel still sets a local
+  offer on its own and rolls it back as before. Perfect negotiation stays in place for anything later.
 
 ## Tickets
 

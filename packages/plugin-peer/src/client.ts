@@ -28,6 +28,7 @@ const MAX_ROOM_MEMBERS = 33
 const ADMISSION_QUEUE = 8
 const HELD_PER_SENDER = 32
 const HELD_PER_KEY = MAX_ROOM_MEMBERS * HELD_PER_SENDER
+const HELD_BYTES_PER_KEY = 524_288
 const EARLY_MESSAGES = 64
 const PENDING_CANDIDATES = 64
 const FALLBACK_MAX_MESSAGE = 65_536
@@ -234,6 +235,7 @@ interface Pending<Ch extends PeerChannels> {
 interface Held {
   from: string | null
   at: number
+  bytes: number
   frame: PeerSignal | PeerJoined
 }
 
@@ -314,7 +316,9 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
     held.set(key, list)
     if (list.length >= HELD_PER_KEY) return
     if (list.filter((e) => e.from === from).length >= HELD_PER_SENDER) return
-    list.push({ from, at: now, frame })
+    const bytes = byteLength(JSON.stringify(frame))
+    if (list.reduce((sum, e) => sum + e.bytes, bytes) > HELD_BYTES_PER_KEY) return
+    list.push({ from, at: now, bytes, frame })
   }
 
   function take(key: string, from: string | null): Held['frame'][] {
@@ -593,7 +597,7 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
       })
       pc = peer
       peer.onnegotiationneeded = async () => {
-        if (peer.signalingState !== 'stable') return
+        if (peer.signalingState !== 'stable' || (polite && !described)) return
         try {
           makingOffer = true
           await peer.setLocalDescription()
@@ -1007,6 +1011,9 @@ export function peerClient<C extends Contract, R extends RoleOf<C>, Ch extends P
       if (closed) throw closedError()
       if (!Number.isInteger(maxMembers) || maxMembers < 2 || maxMembers > MAX_ROOM_MEMBERS) {
         throw new SuperLineError('BAD_REQUEST', `maxMembers must be an integer from 2 to ${MAX_ROOM_MEMBERS}`)
+      }
+      if (!globalThis.crypto?.subtle) {
+        throw new SuperLineError('BAD_REQUEST', 'createRoom needs crypto.subtle: serve the page over HTTPS or from localhost')
       }
       const secret = peerSecret()
       const keyHash = await peerHash(await peerHash(secret))

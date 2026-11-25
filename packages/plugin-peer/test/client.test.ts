@@ -40,9 +40,17 @@ function setup(opts: { libdatachannel?: boolean } = {}) {
   const loopback = createLoopbackTransport()
   const conns = new Map<string, Conn>()
   const denied = new Set<string>()
+  const order = new Map<string, string>()
   const srv = createSuperLineServer(contract, {
     transports: [loopback.server],
-    authenticate: (h) => ({ role: (h.query.role ?? 'phone') as Role, ctx: { name: h.query.name ?? 'anon' } }),
+    authenticate: (h) => {
+      const prefix = order.get(h.query.name ?? '')
+      return {
+        role: (h.query.role ?? 'phone') as Role,
+        ctx: { name: h.query.name ?? 'anon' },
+        ...(prefix ? { connectionId: `${prefix}-${globalThis.crypto.randomUUID()}` } : {}),
+      }
+    },
     onConnection: (conn) => void conns.set(conn.id, conn),
     plugins: [
       peer<{ name: string }>({
@@ -82,7 +90,7 @@ function setup(opts: { libdatachannel?: boolean } = {}) {
     cleanups.push(() => p.close())
     return { client, p, errors }
   }
-  return { srv, net, connect, raw, drop, denied }
+  return { srv, net, connect, raw, drop, denied, order }
 }
 
 const ownerRoom = async (room: Room) => `peer-owner:${await peerHash(room.key)}`
@@ -192,6 +200,15 @@ async function mesh(connect: ReturnType<typeof setup>['connect'], opts: PeerClie
 }
 
 describe('create, join and admit', () => {
+  it('lets only the impolite side make the first offer, so a browser never rolls one back', async () => {
+    const { net, connect } = setup()
+    await mesh(connect)
+    const pcs = net.connections()
+    expect(pcs).toHaveLength(6)
+    expect(pcs.filter((pc) => pc.localDescription?.type === 'offer')).toHaveLength(3)
+    expect(pcs.filter((pc) => pc.rolledBack)).toEqual([])
+  })
+
   it('admits a joiner, opens the link and carries typed messages both ways', async () => {
     const { net, connect } = setup()
     const iceServers = [{ urls: 'stun:stun.example.org' }]
@@ -252,6 +269,18 @@ describe('create, join and admit', () => {
     const { connect } = setup()
     const phone = connect('phone', { joinTimeoutMs: 100 })
     await expect(phone.p.join(await peerHash(peerSecret()))).rejects.toMatchObject({ code: 'TIMEOUT' })
+  })
+
+  it('refuses to create a room without crypto.subtle, as on a plain-HTTP LAN page', async () => {
+    const { connect } = setup()
+    const tv = connect('tv')
+    const subtle = vi.spyOn(globalThis.crypto, 'subtle', 'get').mockReturnValue(undefined as never)
+    try {
+      await expect(tv.p.createRoom({ accept: () => true })).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+    } finally {
+      subtle.mockRestore()
+    }
+    await expect(tv.p.createRoom({ accept: () => true })).resolves.toBeDefined()
   })
 
   it('caps the room at maxMembers, counting the creator', async () => {
@@ -403,7 +432,9 @@ describe('receiving', () => {
 
 describe('races', () => {
   it('holds a signal that beats peer.admitted and forms the link once admitted', async () => {
-    const { connect } = setup()
+    const { connect, order } = setup()
+    order.set('tv', 'a')
+    order.set('phone', 'b')
     const tv = connect('tv')
     const held = gate('peer.admitted')
     const phone = connect('phone', {}, held.wrap)
@@ -416,7 +447,9 @@ describe('races', () => {
   })
 
   it('holds a signal that beats peer.joined and forms the link once the member is known', async () => {
-    const { connect } = setup()
+    const { connect, order } = setup()
+    order.set('b', 'a')
+    order.set('a', 'b')
     const tv = connect('tv')
     const held = gate('peer.joined')
     const a = connect('a', {}, held.wrap)
@@ -633,8 +666,10 @@ describe('admission and buffering limits', () => {
     expect(settled.flatMap((r) => (r.status === 'rejected' ? [r.reason.code] : []))).toEqual(['TIMEOUT', 'TIMEOUT'])
   })
 
-  async function earlySignals(fillers = 0) {
-    const { connect, raw } = setup()
+  async function earlySignals(fillers = 0, candidate = (i: number) => `x${i}`) {
+    const { connect, raw, order } = setup()
+    order.set('tv', 'a')
+    order.set('phone', 'b')
     const tv = connect('tv')
     const held = gate('peer.admitted')
     const phone = connect('phone', {}, held.wrap)
@@ -647,7 +682,7 @@ describe('admission and buffering limits', () => {
         await Promise.all(
           outsiders.map(async (outsider) => {
             for (let i = 0; i < 32; i++) {
-              await outsider.peerSignal({ roomKey: host.key, to: joiner.id, kind: 'candidate', candidate: { candidate: `x${i}` } })
+              await outsider.peerSignal({ roomKey: host.key, to: joiner.id, kind: 'candidate', candidate: { candidate: candidate(i) } })
             }
           }),
         )
@@ -658,9 +693,10 @@ describe('admission and buffering limits', () => {
     const joining = phone.p.join(host.key)
     await waitFor(() => held.queued === 1 && held.signalsFrom(host.self.id) >= 3, { label: 'offer and candidates held' })
     const real = held.signalsFrom(host.self.id)
-    const bogus = async (n: number) => {
+    const bogus = async (n: number, size = 0) => {
       for (let i = 0; i < n; i++) {
-        await tv.client.peerSignal({ roomKey: host.key, to: joinerId, kind: 'candidate', candidate: { candidate: `bogus${i}` } })
+        const c = `bogus${i}`.padEnd(size, 'x')
+        await tv.client.peerSignal({ roomKey: host.key, to: joinerId, kind: 'candidate', candidate: { candidate: c } })
       }
       await waitFor(() => held.signalsFrom(host.self.id) === real + n)
     }
@@ -689,6 +725,15 @@ describe('admission and buffering limits', () => {
   it('holds at most 33 senders worth of early frames per key', async () => {
     const { phone, held, joining, bogus } = await earlySignals(33)
     await bogus(5)
+    held.release()
+    await joining
+    await tick(50)
+    expect(foreign(phone.errors)).toBe(0)
+  })
+
+  it('stops holding early frames once a key holds 512 KB of them', async () => {
+    const { phone, held, joining, bogus } = await earlySignals(8, (i) => `${i}`.padEnd(2_048, 'x'))
+    await bogus(5, 2_048)
     held.release()
     await joining
     await tick(50)

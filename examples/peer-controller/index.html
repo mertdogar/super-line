@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>peer-controller · screen</title>
+  </head>
+  <body class="screen">
+    <canvas id="arena"></canvas>
+    <aside id="panel">
+      <h1>Scan to play</h1>
+      <div id="qr" class="qr"></div>
+      <a id="join-link" class="join-link" target="_blank"></a>
+      <p id="room-state" class="muted">creating a room…</p>
+      <h2>Controllers</h2>
+      <ul id="members"></ul>
+      <p class="muted">Input rides a lossy data channel straight from each phone; the server only introduced you.</p>
+    </aside>
+    <script type="module" src="/src/screen.ts"></script>
+  </body>
+</html>

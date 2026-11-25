@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>peer-controller · controller</title>
+  </head>
+  <body class="controller">
+    <form id="gate" hidden>
+      <h1>Join the game</h1>
+      <input id="name" placeholder="your name" maxlength="24" autocomplete="off" />
+      <button type="submit">Join</button>
+    </form>
+
+    <main id="pad-view" hidden>
+      <dl id="status">
+        <dt>room</dt>
+        <dd id="room-state">joining…</dd>
+        <dt>screen link</dt>
+        <dd id="link-state">—</dd>
+        <dt>round trip</dt>
+        <dd id="rtt">—</dd>
+        <dt>wake lock</dt>
+        <dd id="wake">—</dd>
+      </dl>
+      <div id="pad"><div id="knob"></div></div>
+      <button id="button-a" type="button">A</button>
+      <button id="again" type="button" hidden>Join again</button>
+    </main>
+
+    <p id="no-key" hidden>Scan the QR code on the screen to get a join link.</p>
+    <script type="module" src="/src/controller.ts"></script>
+  </body>
+</html>

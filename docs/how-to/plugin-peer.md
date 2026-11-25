@@ -539,6 +539,7 @@ Know these before you design around the plugin.
 
 ## Next steps
 
+- Try the [live demo](https://super-line-peer-controller.dogar.workers.dev/) on a computer and a phone: it is the example below, deployed as a Cloudflare Worker.
 - Run the [`peer-controller`](https://github.com/mertdogar/super-line/tree/main/examples/peer-controller)
   example: phones drive dots on a desktop screen, and stopping the server doesn't stop them.
 - Read [Server-authoritative design](/concepts/server-authoritative) for the model this plugin makes an

@@ -5,6 +5,9 @@ Phones as game controllers for a game running in a desktop browser, with
 relays the WebRTC handshake; after that, stick input and button presses travel **directly** from the
 phone to the screen over WebRTC data channels. The server carries none of it.
 
+**Live demo:** open [super-line-peer-controller.dogar.workers.dev](https://super-line-peer-controller.dogar.workers.dev/) on a computer and scan the QR code with a
+phone. It is this example running as a Cloudflare Worker (see [Deploy to Cloudflare](#deploy-to-cloudflare)).
+
 - **Screen** (`/`, a desktop browser, think "the TV"): creates a room, shows the join link as a QR
   code and as text, lists the controllers with their link state and round-trip time, and draws one
   coloured dot per connected controller.
@@ -90,6 +93,54 @@ that dot after about 3 seconds of silence. When the page is visible again, the c
 the same room by itself (state `rejoining`, then `active`). It gives up after 8 attempts and shows
 **Join again**; it shows the same button when its link to the screen failed to connect at all.
 
+## Deploy to Cloudflare
+
+The same example runs as one Cloudflare Worker: static assets serve the two pages and a **Durable Object** is
+the super-line node ([`src/worker.ts`](src/worker.ts), [`wrangler.jsonc`](wrangler.jsonc)). The Worker is served
+over HTTPS, so phones can scan the QR code from anywhere, the screen can create rooms from any device, and the
+wake lock works.
+
+From the repo root, build the packages once (wrangler bundles their `dist`):
+
+```bash
+pnpm install
+pnpm build
+```
+
+Then, from this directory:
+
+```bash
+pnpm cf:dev                  # vite build && wrangler dev → http://localhost:8787
+pnpm exec wrangler login
+pnpm cf:deploy               # vite build && wrangler deploy
+pnpm cf:tail                 # live logs: one `node constructed` per wake
+```
+
+`wrangler deploy` prints the URL (`https://super-line-peer-controller.<your-subdomain>.workers.dev`). Open it on
+the computer plugged into the TV and scan the QR code with a phone. SQLite-backed Durable Objects are available
+on the Workers Free plan.
+
+What to look for: the Durable Object **hibernates** after about ten idle seconds, while the phones keep driving
+their dots, because stick and button data never touch the Worker. The next join wakes it (`node constructed` in
+`pnpm cf:tail`) and it relays that one handshake.
+
+The phone and the screen are now usually on different networks (cellular and Wi-Fi), and mobile carriers put
+phones behind a NAT that no direct path gets through. A controller that stays on `connecting` and then shows
+`failed` is that. A TURN server fixes it. Cloudflare Realtime has one:
+
+1. In the dashboard, open **Realtime → TURN Server** and create a TURN key. Copy its **Token ID** and **API token**.
+2. Store both as secrets, then deploy again:
+
+```bash
+pnpm exec wrangler secret put TURN_KEY_ID
+pnpm exec wrangler secret put TURN_KEY_API_TOKEN
+pnpm cf:deploy
+```
+
+With both set, `/config.json` hands every page load its own TURN credentials, valid for a day. A relayed link
+goes phone → Cloudflare TURN → screen: still not through the Worker, and only when no direct path exists. To use
+your own TURN server instead, set `ICE_SERVERS` to a JSON array of `RTCIceServer`.
+
 ## Networks, STUN and TURN
 
 WebRTC needs a direct path between the phone and the screen.
@@ -130,3 +181,5 @@ WebRTC needs a direct path between the phone and the screen.
   super-line server with the WebSocket transport and the peer plugin.
 - [`src/screen.ts`](src/screen.ts): room, QR code, member list, the game loop.
 - [`src/controller.ts`](src/controller.ts): join, stick and button, state display, wake lock.
+- [`src/worker.ts`](src/worker.ts), [`wrangler.jsonc`](wrangler.jsonc): the Cloudflare deployment, a Durable
+  Object as the node.

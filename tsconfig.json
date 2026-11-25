@@ -12,6 +12,7 @@
     "packages/collections-crdt-cloudflare",
     "examples/cloudflare/src/worker.ts",
     "examples/cloudflare-remote-rows/src/worker.ts",
+    "examples/peer-controller/src/worker.ts",
     "examples/collections-chat",
     "examples/chat-supervisor",
     "examples/react-chat-transports",
